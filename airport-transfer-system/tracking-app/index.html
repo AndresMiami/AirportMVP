@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LuxeRide Passenger Portal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #2E86AB;
+            --primary-light: #5DA8CC;
+            --secondary: #F18F01;
+            --success: #48A14D;
+            --warning: #E71D36;
+            --dark: #2B2D42;
+            --light: #F8F9FA;
+            --gray: #6B7280;
+            --light-gray: #E5E7EB;
+            --border-radius: 12px;
+            --shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Roboto', sans-serif;
+        }
+        
+        body {
+            background-color: #f5f5f5;
+            color: var(--dark);
+            line-height: 1.6;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .container {
+            max-width: 100%;
+            padding: 15px;
+            padding-bottom: 80px;
+        }
+        
+        header {
+            background-color: var(--primary);
+            color: white;
+            padding: 20px 15px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+        }
+        
+        .header-content {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .booking-card {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 15px;
+            overflow: hidden;
+            transition: transform 0.3s ease;
+        }
+        
+        .booking-card:hover {
+            transform: translateY(-3px);
+        }
+        
+        .booking-header {
+            background-color: var(--dark);
+            color: white;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .ride-status {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .status-scheduled { background: var(--secondary); }
+        .status-assigned { background: #3B82F6; }
+        .status-arriving { background: var(--success); }
+        .status-arrived { background: var(--primary); }
+        .status-delayed { background: var(--warning); }
+        
+        .booking-body {
+            padding: 20px;
+        }
+        
+        .info-row {
+            display: flex;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--light-gray);
+        }
+        
+        .info-label {
+            font-weight: 500;
+            width: 120px;
+            color: var(--gray);
+            font-size: 15px;
+        }
+        
+        .info-value {
+            flex: 1;
+            font-weight: 500;
+            font-size: 16px;
+        }
+        
+        .driver-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .driver-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: var(--light-gray);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: var(--primary);
+            overflow: hidden;
+        }
+        
+        .driver-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .driver-details {
+            flex: 1;
+        }
+        
+        .driver-name {
+            font-weight: 700;
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+        
+        .driver-rating {
+            display: flex;
+            align-items: center;
+            color: var(--secondary);
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        
+        .driver-rating i {
+            margin-right: 3px;
+        }
+        
+        .vehicle-info {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            color: var(--gray);
+        }
+        
+        .vehicle-info i {
+            margin-right: 8px;
+            color: var(--primary);
+        }
+        
+        .tracking-container {
+            position: relative;
+            margin: 20px 0;
+        }
+        
+        .route-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+        
+        .location-point {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .location-label {
+            font-size: 12px;
+            color: var(--gray);
+            margin-bottom: 5px;
+        }
+        
+        .location-value {
+            font-weight: 600;
+            font-size: 16px;
+        }
+        
+        .eta {
+            text-align: right;
+        }
+        
+        .eta-label {
+            font-size: 12px;
+            color: var(--gray);
+            margin-bottom: 5px;
+        }
+        
+        .eta-value {
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--primary);
+        }
+        
+        .progress-container {
+            height: 6px;
+            background-color: var(--light-gray);
+            border-radius: 3px;
+            margin: 15px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            width: 65%;
+            background-color: var(--primary);
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        
+        .map-container {
+            width: 100%;
+            height: 200px;
+            background-color: #E2E8F0;
+            border-radius: var(--border-radius);
+            margin: 15px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .map-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--gray);
+            font-weight: 500;
+        }
+        
+        .driver-marker {
+            position: absolute;
+            top: 40%;
+            left: 25%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            background-color: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 10;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(46, 134, 171, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(46, 134, 171, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(46, 134, 171, 0); }
+        }
+        
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+            margin: 20px 0;
+        }
+        
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--light-gray);
+        }
+        
+        .timeline-step {
+            position: relative;
+            margin-bottom: 25px;
+        }
+        
+        .timeline-step::before {
+            content: '';
+            position: absolute;
+            left: -30px;
+            top: 3px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            border: 3px solid var(--light-gray);
+            z-index: 2;
+        }
+        
+        .timeline-step.active::before {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+        
+        .timeline-step.completed::before {
+            background: var(--success);
+            border-color: var(--success);
+        }
+        
+        .timeline-label {
+            font-weight: 600;
+            margin-bottom: 5px;
+            font-size: 16px;
+        }
+        
+        .timeline-time {
+            font-size: 14px;
+            color: var(--gray);
+        }
+        
+        .timeline-note {
+            font-size: 14px;
+            color: var(--gray);
+            margin-top: 5px;
+        }
+        
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        
+        button {
+            border: none;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 16px;
+        }
+        
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--primary-light);
+        }
+        
+        .btn-secondary {
+            background-color: var(--secondary);
+            color: white;
+        }
+        
+        .btn-outline {
+            background: white;
+            border: 2px solid var(--light-gray);
+            color: var(--dark);
+        }
+        
+        .btn-outline:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: var(--border-radius);
+            margin: 15px 0;
+            font-size: 14px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        
+        .alert-warning {
+            background-color: rgba(231, 29, 54, 0.08);
+            border-left: 4px solid var(--warning);
+        }
+        
+        .alert-info {
+            background-color: rgba(59, 130, 246, 0.08);
+            border-left: 4px solid var(--primary);
+        }
+        
+        .alert i {
+            font-size: 20px;
+            margin-top: 2px;
+        }
+        
+        .alert-content {
+            flex: 1;
+        }
+        
+        .alert-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .contact-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            padding: 15px;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.08);
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .contact-btn {
+            flex: 1;
+            margin: 0 5px;
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border: 1px solid var(--light-gray);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .contact-btn:hover {
+            background: var(--light);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        
+        .contact-btn i {
+            font-size: 20px;
+            margin-bottom: 5px;
+        }
+        
+        .contact-btn span {
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .upcoming-rides {
+            margin-top: 30px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section-title i {
+            color: var(--primary);
+        }
+        
+        @media (min-width: 768px) {
+            .container {
+                max-width: 500px;
+                margin: 0 auto;
+                padding: 20px;
+                padding-bottom: 100px;
+            }
+            
+            .map-container {
+                height: 250px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>Your LuxeRide</h1>
+            <div style="font-size: 14px; opacity: 0.9;">Miami, FL</div>
+        </div>
+        <div class="ride-status status-arriving">Driver Arriving</div>
+    </header>
+    
+    <div class="container">
+        <div class="booking-card">
+            <div class="booking-header">
+                <div>
+                    <strong>Today's Ride</strong>
+                </div>
+                <div>#TRIP-4892</div>
+            </div>
+            
+            <div class="booking-body">
+                <div class="driver-info">
+                    <div class="driver-avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="driver-details">
+                        <div class="driver-name">Carlos Martinez</div>
+                        <div class="driver-rating">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star-half-alt"></i>
+                            <span>4.7 (128 rides)</span>
+                        </div>
+                        <div class="vehicle-info">
+                            <i class="fas fa-car"></i>
+                            Cadillac Escalade • BLACK • LUX234
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i>
+                    <div class="alert-content">
+                        <div class="alert-title">Driver Message</div>
+                        <div>"I'm 8 minutes away. I'll meet you at the main entrance with your name on a sign."</div>
+                    </div>
+                </div>
+                
+                <div class="tracking-container">
+                    <div class="route-info">
+                        <div class="location-point">
+                            <div class="location-label">PICKUP</div>
+                            <div class="location-value">123 Ocean Dr, Miami</div>
+                        </div>
+                        <div class="eta">
+                            <div class="eta-label">ESTIMATED ARRIVAL</div>
+                            <div class="eta-value">8 min</div>
+                        </div>
+                    </div>
+                    
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    
+                    <div class="map-container">
+                        <div class="map-placeholder">
+                            <i class="fas fa-map-marker-alt"></i> &nbsp; Real-time tracking active
+                        </div>
+                        <div class="driver-marker">
+                            <i class="fas fa-car"></i>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timeline">
+                    <div class="timeline-step completed">
+                        <div class="timeline-label">Ride Requested</div>
+                        <div class="timeline-time">Today, 2:30 PM</div>
+                    </div>
+                    
+                    <div class="timeline-step completed">
+                        <div class="timeline-label">Driver Assigned</div>
+                        <div class="timeline-time">2:32 PM</div>
+                        <div class="timeline-note">Carlos Martinez - 4.7 rating</div>
+                    </div>
+                    
+                    <div class="timeline-step active">
+                        <div class="timeline-label">Driver En Route</div>
+                        <div class="timeline-time">2:40 PM</div>
+                        <div class="timeline-note">ETA: 8 minutes</div>
+                    </div>
+                    
+                    <div class="timeline-step">
+                        <div class="timeline-label">Pickup</div>
+                        <div class="timeline-time">Estimated: 2:48 PM</div>
+                    </div>
+                    
+                    <div class="timeline-step">
+                        <div class="timeline-label">Arrival at Destination</div>
+                        <div class="timeline-time">Miami International Airport</div>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button class="btn-primary">
+                        <i class="fas fa-phone-alt"></i> Call Driver
+                    </button>
+                    <button class="btn-outline">
+                        <i class="fas fa-edit"></i> Change Request
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="upcoming-rides">
+            <div class="section-title">
+                <i class="fas fa-calendar-alt"></i>
+                <span>Upcoming Rides</span>
+            </div>
+            
+            <div class="booking-card">
+                <div class="booking-header">
+                    <div>
+                        <strong>Tomorrow, 10:00 AM</strong>
+                    </div>
+                    <div>#TRIP-4897</div>
+                </div>
+                
+                <div class="booking-body">
+                    <div class="info-row">
+                        <div class="info-label">From</div>
+                        <div class="info-value">Miami International Airport</div>
+                    </div>
+                    
+                    <div class="info-row">
+                        <div class="info-label">To</div>
+                        <div class="info-value">Fontainebleau Hotel</div>
+                    </div>
+                    
+                    <div class="info-row" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">
+                        <div class="info-label">Vehicle</div>
+                        <div class="info-value">Tesla Model Y</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="contact-bar">
+        <div class="contact-btn">
+            <i class="fas fa-phone-alt"></i>
+            <span>Call</span>
+        </div>
+        <div class="contact-btn">
+            <i class="fas fa-comment-alt"></i>
+            <span>Message</span>
+        </div>
+        <div class="contact-btn">
+            <i class="fas fa-map-marker-alt"></i>
+            <span>Location</span>
+        </div>
+        <div class="contact-btn">
+            <i class="fas fa-headset"></i>
+            <span>Support</span>
+        </div>
+    </div>
+    
+    <script>
+        // Simple status updates and animations
+        document.addEventListener('DOMContentLoaded', function() {
+            const progressBar = document.getElementById('progressBar');
+            let progress = 65;
+            
+            // Simulate progress
+            const simulateProgress = () => {
+                if (progress < 95) {
+                    progress += 2;
+                    progressBar.style.width = progress + '%';
+                    setTimeout(simulateProgress, 3000);
+                }
+            };
+            
+            setTimeout(simulateProgress, 2000);
+            
+            // Button interactions
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const action = this.textContent.trim();
+                    alert(`Action: ${action}`);
+                });
+            });
+            
+            // Contact buttons
+            const contactBtns = document.querySelectorAll('.contact-btn');
+            contactBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const action = this.querySelector('span').textContent;
+                    alert(`Contact action: ${action}`);
+                });
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "airport-mvp",
+  "version": "1.0.0",
+  "description": "LuxeRide Airport Transfer Booking MVP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "airport",
+    "transfer",
+    "booking",
+    "mvp"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

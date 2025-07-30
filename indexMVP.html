@@ -1,0 +1,2741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Airport Transfer Booking - Mobile Optimized MVP</title>
+    
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="maps-autocomplete.css">
+    <script type="module" src="pricing.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Start Search Button -->
+        <button class="start-search-btn" id="startSearchBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+            </svg>
+            <span>Book Airport Transfer</span>
+        </button>
+        
+        <!-- Main Booking Container -->
+        <div class="booking-container" id="bookingContainer">
+            <!-- Progress Bar -->
+            <div class="progress-bar">
+                <div class="progress-step active" data-step="where">
+                    <span class="step-number">1</span>
+                    <span class="step-label">Where</span>
+                </div>
+                <div class="progress-line" id="progressLine"></div>
+                <div class="progress-step" data-step="when">
+                    <span class="step-number">2</span>
+                    <span class="step-label">When</span>
+                </div>
+            </div>
+            
+            <!-- Summary Bar -->
+            <div class="summary-bar" id="summaryBar">
+                <div class="summary-content">
+                    <div class="summary-item">
+                        <span class="summary-label">Route:</span>
+                        <span class="summary-value" id="routeSummaryText"></span>
+                    </div>
+                    <button class="edit-btn" id="editRouteBtn" type="button" aria-label="Edit route">Edit</button>
+                </div>
+            </div>
+            
+            <!-- Panels Container -->
+            <div class="panels-wrapper" id="panelsWrapper">
+                <!-- WHERE Panel -->
+                <div class="panel active" id="wherePanel">
+                    <div class="panel-content">
+                        <h2>Select Your Route</h2>
+                        
+                        <!-- Mode Selector -->
+                        <div class="mode-selector">
+                            <button class="mode-btn active" data-mode="dropoff">
+                                <span class="mode-icon">🛫</span>
+                                <span class="mode-text">Going to Airport</span>
+                            </button>
+                            <button class="mode-btn" data-mode="pickup">
+                                <span class="mode-icon">🛬</span>
+                                <span class="mode-text">Arriving at Airport</span>
+                            </button>
+                        </div>
+
+                        <!-- Dynamic Steps Container -->
+                        <div class="steps-container" id="stepsContainer">
+                            <!-- Step 1: Address -->
+                            <div class="step-section" id="addressStep">
+                                <div class="step-header">
+                                    <span class="step-badge" id="addressBadge">
+                                        <span class="step-badge-number">1</span>
+                                        <span id="addressTitle">Pickup Location</span>
+                                    </span>
+                                </div>
+                                <div class="input-wrapper">
+                                    <input type="text" 
+                                           id="addressInput" 
+                                           class="address-input"
+                                           placeholder="Enter address, hotel, or landmark..."
+                                           autocomplete="off">
+                                    <div class="input-loading" id="addressLoading">
+                                        <div class="spinner"></div>
+                                    </div>
+                                    <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+                                </div>
+                                <div class="error-message" id="addressError">Please select a valid address from the suggestions.</div>
+                            </div>
+
+                            <!-- Flow Connector -->
+                            <div class="flow-connector" id="flowConnector">
+                                <div class="connector-line"></div>
+                                <div class="connector-icon">↓</div>
+                            </div>
+
+                            <!-- Step 2: Airport -->
+                            <div class="step-section" id="airportStep">
+                                <div class="step-header">
+                                    <span class="step-badge" id="airportBadge">
+                                        <span class="step-badge-number">2</span>
+                                        <span id="airportTitle">Select Airport</span>
+                                    </span>
+                                </div>
+                                <div class="airport-grid">
+                                    <button class="airport-option" data-airport="MIA">
+                                        <div class="airport-code">MIA</div>
+                                        <div class="airport-name">Miami International</div>
+                                    </button>
+                                    <button class="airport-option" data-airport="FLL">
+                                        <div class="airport-code">FLL</div>
+                                        <div class="airport-name">Fort Lauderdale</div>
+                                    </button>
+                                    <button class="airport-option" data-airport="PBI">
+                                        <div class="airport-code">PBI</div>
+                                        <div class="airport-name">Palm Beach</div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="panel-actions">
+                        <button class="continue-btn" id="continueBtn" disabled>
+                            Continue to Date & Time
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 18l6-6-6-6"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- WHEN Panel -->
+                <div class="panel" id="whenPanel">
+                    <button class="back-btn" id="backBtn">
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 14L7 10L13 6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>Back</span>
+                    </button>
+                    
+                    <div class="panel-content" style="padding-top: 70px;">
+                        <h2>Schedule your ride</h2>
+                        
+                        <!-- Date Selection -->
+                        <div class="date-section">
+                            <h3>Date</h3>
+                            <div class="date-selection">
+                                <button type="button" class="date-btn active" id="todayBtn">
+                                    <span class="date-label">Today</span>
+                                    <span class="date-value" id="todayDate">Jul 9</span>
+                                </button>
+                                <button type="button" class="date-btn" id="tomorrowBtn">
+                                    <span class="date-label">Tomorrow</span>
+                                    <span class="date-value" id="tomorrowDate">Jul 10</span>
+                                </button>
+                                <button type="button" class="date-btn" id="otherDatesBtn">
+                                    <span class="date-label">Other dates</span>
+                                    <span class="date-value">📅</span>
+                                </button>
+                            </div>
+                            
+                            <!-- Calendar Container -->
+                            <div class="calendar-container" id="calendarContainer">
+                                <div class="calendar-header">
+                                    <button class="calendar-nav" id="prevMonthBtn">◀</button>
+                                    <h4 id="calendarMonthYear">July 2025</h4>
+                                    <button class="calendar-nav" id="nextMonthBtn">▶</button>
+                                </div>
+                                <div class="calendar-grid" id="calendarGrid"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Time Selection -->
+                        <div class="time-section">
+                            <h3>Time</h3>
+                            <div class="time-selector">
+                                <div class="time-input-group">
+                                    <select id="hourSelect" class="time-select"></select>
+                                    <span class="time-separator">:</span>
+                                    <select id="minuteSelect" class="time-select"></select>
+                                    <select id="ampmSelect" class="time-select">
+                                        <option value="AM">AM</option>
+                                        <option value="PM" selected>PM</option>
+                                    </select>
+                                </div>
+                                <div class="time-note" id="timeNote"></div>
+                            </div>
+                        </div>
+
+                        <!-- Flight Number Input -->
+                        <div class="flight-section" id="flightSection">
+                            <h3>Flight Information <span style="color: var(--text-secondary); font-weight: 400; font-size: 14px;">(Optional)</span></h3>
+                            <input type="text" 
+                                   id="flightInput" 
+                                   class="flight-input"
+                                   placeholder="Enter flight number (e.g., AA123)"
+                                   autocomplete="off">
+                        </div>
+                    </div>
+                    
+                    <div class="panel-actions">
+                        <div class="arrival-info">
+                            <div class="arrival-icon">📍</div>
+                            <div class="arrival-details">
+                                <div class="arrival-title" id="arrivalTitle">Drop-off at airport approx. --</div>
+                                <div class="trip-duration" id="tripDuration">Estimated ride duration of -- min</div>
+                            </div>
+                        </div>
+                        <button class="continue-btn" id="vehicleSelectionBtn">
+                            Continue to Vehicle Selection
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 18l6-6-6-6"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VEHICLE Panel - Mobile Optimized -->
+                <div class="panel" id="vehiclePanel">
+                    <div class="map-section">
+                        <div id="vehicleMap"></div>
+                        
+                        <button class="back-btn" id="vehicleBackBtn">←</button>
+                        
+                        <div class="map-time-badge arrival-time">
+                            <span>📍</span>
+                            <span id="mapArrivalTime">4:30</span>
+                        </div>
+                        <div class="map-time-badge pickup-time">
+                            <span id="mapPickupTime">5:59</span>
+                            <span class="time-period">PM</span>
+                        </div>
+                        <div class="map-time-badge dropoff-label">
+                            <span class="label-text">Drop-off</span>
+                            <span class="location-text" id="mapLocationText">Miami International...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="content-section">
+                        <h2>Choose Your Ride</h2>
+                        
+                        <!-- Passenger and Notes Controls -->
+                        <div class="controls-row">
+                            <button class="control-button passenger-select" onclick="openPassengerSelector()">
+                                <span class="control-icon">👤</span>
+                                <span class="control-text">For myself</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <button class="control-button add-notes" onclick="addPickupNotes()">
+                                <span class="control-icon">➕</span>
+                                <span class="control-text">Add pickup notes</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Vehicle Display Mobile -->
+                        <div class="vehicle-display-mobile">
+                            <div class="carousel-container">
+                                <div class="carousel-wrapper">
+                                    <div class="carousel-track" id="carouselTrack">
+                                        <!-- Tesla Model Y -->
+                                        <div class="vehicle-card active" data-vehicle="tesla" data-base-price="132">
+                                            <div class="vehicle-image-section">
+                                                <img src="./images/luxury-sedan.jpg" 
+                                                     alt="Tesla Model Y" 
+                                                     class="vehicle-image"
+                                                     loading="lazy"
+                                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                <div class="vehicle-image-fallback">
+                                                    <div class="fallback-icon">🚗</div>
+                                                    <div>Tesla Model Y</div>
+                                                </div>
+                                                <div class="selection-badge"></div>
+                                            </div>
+                                            
+                                            <div class="vehicle-info">
+                                                <div class="vehicle-header">
+                                                    <div class="vehicle-details">
+                                                        <h3 class="vehicle-name">Electric Sedan</h3>
+                                                        <div class="vehicle-specs">
+                                                            <div class="spec-item">
+                                                                <span class="spec-icon">👤</span>
+                                                                <span class="spec-value">3</span>
+                                                            </div>
+                                                            <div class="spec-item">
+                                                                <span class="spec-icon">🧳</span>
+                                                                <span class="spec-value">2</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="vehicle-price" id="tesla-price">$132.96</div>
+                                                </div>
+                                                <p class="vehicle-subtitle">Mercedes EQS or similar</p>
+                                            </div>
+                                        </div>
+
+                                        <!-- Cadillac Escalade -->
+                                        <div class="vehicle-card" data-vehicle="escalade" data-base-price="165">
+                                            <div class="vehicle-image-section">
+                                                <img src="./images/premium-suv-escalade.jpg" 
+                                                     alt="Cadillac Escalade" 
+                                                     class="vehicle-image"
+                                                     loading="lazy"
+                                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                <div class="vehicle-image-fallback">
+                                                    <div class="fallback-icon">🚙</div>
+                                                    <div>Cadillac Escalade</div>
+                                                </div>
+                                                <div class="popular-badge">Most Popular</div>
+                                                <div class="selection-badge"></div>
+                                            </div>
+                                            
+                                            <div class="vehicle-info">
+                                                <div class="vehicle-header">
+                                                    <div class="vehicle-details">
+                                                        <h3 class="vehicle-name">Premium SUV</h3>
+                                                        <div class="vehicle-specs">
+                                                            <div class="spec-item">
+                                                                <span class="spec-icon">👤</span>
+                                                                <span class="spec-value">7</span>
+                                                            </div>
+                                                            <div class="spec-item">
+                                                                <span class="spec-icon">🧳</span>
+                                                                <span class="spec-value">8</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="vehicle-price" id="escalade-price">$165.50</div>
+                                                </div>
+                                                <p class="vehicle-subtitle">Cadillac Escalade or similar</p>
+                                            </div>
+                                        </div>
+
+                                        <!-- Mercedes Sprinter -->
+                                        <div class="vehicle-card" data-vehicle="sprinter" data-base-price="220">
+                                            <div class="vehicle-image-section">
+                                                <img src="./images/vip-sprinter.jpg" 
+                                                     alt="Mercedes Sprinter Van" 
+                                                     class="vehicle-image"
+                                                     loading="lazy"
+                                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                <div class="vehicle-image-fallback">
+                                                    <div class="fallback-icon">🚐</div>
+                                                    <div>Mercedes Sprinter</div>
+                                                </div>
+                                                <div class="selection-badge"></div>
+                                            </div>
+                                            
+                                            <div class="vehicle-info">
+                                                <div class="vehicle-header">
+                                                    <div class="vehicle-details">
+                                                        <h3 class="vehicle-name">Premium Van</h3>
+                                                        <div class="vehicle-specs">
+                                                            <div class="spec-item">
+                                                                <span class="spec-icon">👤</span>
+                                                                <span class="spec-value">14</span>
+                                                            </div>
+                                                            <div class="spec-item">
+                                                                <span class="spec-icon">🧳</span>
+                                                                <span class="spec-value">12</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="vehicle-price" id="sprinter-price">$220.00</div>
+                                                </div>
+                                                <p class="vehicle-subtitle">Mercedes Sprinter or similar</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button class="carousel-nav prev" id="prevBtn">‹</button>
+                                <button class="carousel-nav next" id="nextBtn">›</button>
+
+                                <div class="swipe-hint">
+                                    <span>←</span>
+                                    <span>Swipe to browse</span>
+                                    <span>→</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Payment Row -->
+                        <!-- Payment Row moved to panel-actions below -->
+                        <div class="payment-row-mobile">
+                            <button class="payment-method-mobile" onclick="selectPaymentMethod()">
+                                <div class="card-icon">VISA</div>
+                                <span class="payment-details">Visa, •••• 1187</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <button class="promo-button-mobile" onclick="addPromotion()">
+                                <span class="control-icon">🎫</span>
+                                <span>Add promotion</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="panel-actions">
+                        <div class="schedule-section">
+                            <button class="book-btn" id="bookBtn" disabled>
+                                <span class="btn-main-text">Schedule ride</span>
+                                <span class="btn-sub-text">Wed, Jul 23, 2025 · 9:32 PM</span>
+                            </button>
+                            <button class="calendar-button-mobile" onclick="modifyDateTime()">📅</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Passenger/Guest Selection Modal -->
+    <div id="passengerSelectionModal" class="full-modal" style="display: none;">
+        <div class="modal-panel">
+            <div class="modal-map-section">
+                <!-- Map placeholder or actual map -->
+                <div id="passengerModalMap" class="modal-map"></div>
+                
+                <!-- Map badges -->
+                <div class="map-time-badge arrival-time">
+                    <span>📍</span>
+                    <span id="modalArrivalTime">3:22</span>
+                </div>
+                <div class="map-time-badge pickup-time">
+                    <span id="modalPickupTime">4:52</span>
+                    <span class="time-period">PM</span>
+                </div>
+                <div class="map-time-badge dropoff-label">
+                    <span class="label-text">Drop-off</span>
+                    <span class="location-text" id="modalLocationText">Miami International...</span>
+                </div>
+            </div>
+            
+            <div class="modal-content-section">
+                <div class="booking-option-card">
+                    <div class="option-icon">
+                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FF5733' stroke-width='2'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E" alt="Person icon">
+                    </div>
+                    <div class="option-content">
+                        <h3>Booking a ride for someone else?</h3>
+                        <p>Arrange their ride in a few taps, and we'll keep them informed every step of the way.</p>
+                        <a href="#" class="learn-more-link" onclick="event.preventDefault()">Learn more</a>
+                    </div>
+                </div>
+                
+                <div class="booking-options">
+                    <button class="booking-option-btn active" onclick="selectBookingType('myself')">
+                        <span class="option-radio">●</span>
+                        <span class="option-text">Book for myself</span>
+                    </button>
+                    
+                    <button class="booking-option-btn" onclick="openAddGuestModal()">
+                        <span class="option-icon-plus">+</span>
+                        <span class="option-text">Add guest</span>
+                        <span class="option-arrow">›</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Guest Modal -->
+    <div id="addGuestModal" class="full-modal" style="display: none;">
+        <div class="modal-panel">
+            <div class="modal-header">
+                <h2>Add guest</h2>
+                <button class="modal-back-btn" onclick="backToPassengerSelection()">✕</button>
+            </div>
+            
+            <div class="modal-scrollable-content">
+                <form id="guestForm" onsubmit="saveGuest(event)">
+                    <div class="form-group">
+                        <label for="guestTitle">Title</label>
+                        <select id="guestTitle" class="form-select">
+                            <option value="Mx.">Mx.</option>
+                            <option value="Mr.">Mr.</option>
+                            <option value="Ms.">Ms.</option>
+                            <option value="Mrs.">Mrs.</option>
+                            <option value="Dr.">Dr.</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="guestFirstName">First name</label>
+                        <input type="text" id="guestFirstName" class="form-input" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="guestLastName">Last name</label>
+                        <input type="text" id="guestLastName" class="form-input" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="guestEmail">Guest email</label>
+                        <input type="email" id="guestEmail" class="form-input" placeholder="email@example.com">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 0 0 120px;">
+                            <label for="countryCode">Country Code</label>
+                            <select id="countryCode" class="form-select">
+                                <option value="+1">US +1</option>
+                                <option value="+44">UK +44</option>
+                                <option value="+33">FR +33</option>
+                                <option value="+49">DE +49</option>
+                                <option value="+34">ES +34</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="guestPhone">Mobile number</label>
+                            <input type="tel" id="guestPhone" class="form-input" placeholder="(305) 555-0123" required>
+                        </div>
+                    </div>
+                    
+                    <div class="info-notes">
+                        <div class="info-note">
+                            <span class="info-icon">ℹ️</span>
+                            <p>The contact info entered will receive ride updates and booking confirmation.</p>
+                        </div>
+                        <div class="info-note">
+                            <span class="info-icon">ℹ️</span>
+                            <p>Invoices are sent only to the booker, not the guest.</p>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="modal-action-btn">Add guest</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pickup Notes Modal -->
+    <div id="pickupNotesModal" class="full-modal" style="display: none;">
+        <div class="modal-panel">
+            <div class="modal-header">
+                <h2>Pickup notes</h2>
+                <button class="modal-back-btn" onclick="closePickupNotes()">✕</button>
+            </div>
+            
+            <div class="modal-scrollable-content">
+                <p class="modal-subtitle">Provide additional info to customize your pickup and ensure a smooth experience.</p>
+                
+                <form id="notesForm" onsubmit="savePickupNotes(event)">
+                    <div class="form-group">
+                        <label for="chauffeurNotes">Notes for the chauffeur</label>
+                        <textarea 
+                            id="chauffeurNotes" 
+                            class="form-textarea" 
+                            rows="4"
+                            placeholder="Add special requests (please do not include confidential information)"
+                        ></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pickupSign">Pickup sign</label>
+                        <input 
+                            type="text" 
+                            id="pickupSign" 
+                            class="form-input" 
+                            placeholder="Name or text on the pickup sign"
+                        >
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="referenceCode">Reference code or cost center</label>
+                        <input 
+                            type="text" 
+                            id="referenceCode" 
+                            class="form-input" 
+                            placeholder="This reference appears on your invoice"
+                        >
+                    </div>
+                    
+                    <button type="submit" class="modal-action-btn">Save notes</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <style>
+    /* Full Screen Modal Styles */
+    .full-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: flex-end;
+    }
+
+    .modal-panel {
+        width: 100%;
+        max-width: 576px;
+        height: 100vh;
+        background: #ffffff;
+        display: flex;
+        flex-direction: column;
+        animation: slideUp 0.3s ease-out;
+        border-radius: 20px 20px 0 0;
+    }
+
+    @keyframes slideUp {
+        from { transform: translateY(100%); }
+        to { transform: translateY(0); }
+    }
+
+    /* Modal Header */
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px;
+        border-bottom: 1px solid #f0f0f0;
+        background: #ffffff;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-radius: 20px 20px 0 0;
+    }
+
+    .modal-back-btn {
+        width: 40px;
+        height: 40px;
+        border: none;
+        background: none;
+        font-size: 28px;
+        color: #333;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: background 0.2s;
+    }
+
+    .modal-back-btn:hover {
+        background: #f0f0f0;
+    }
+
+    .modal-header h2 {
+        font-size: 28px;
+        font-weight: 700;
+        color: #1a1a1a;
+        margin: 0;
+        flex: 1;
+        text-align: center;
+    }
+
+    /* Modal Map Section (for passenger selection) */
+    .modal-map-section {
+        height: 30vh;
+        max-height: 250px;
+        position: relative;
+        background: #e8f5e9;
+        flex-shrink: 0;
+    }
+
+    .modal-map {
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #E8F5E9 0%, #B8E6B8 100%);
+    }
+
+    /* Modal Content */
+    .modal-content-section {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        background: #ffffff;
+    }
+
+    .modal-scrollable-content {
+        flex: 1;
+        padding: 24px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .modal-subtitle {
+        color: #666;
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 32px;
+    }
+
+    /* Booking Option Card */
+    .booking-option-card {
+        display: flex;
+        gap: 16px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 12px;
+        margin-bottom: 24px;
+    }
+
+    .option-icon {
+        flex-shrink: 0;
+        width: 48px;
+        height: 48px;
+        background: #fff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .option-icon img {
+        width: 24px;
+        height: 24px;
+    }
+
+    .option-content h3 {
+        font-size: 18px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin: 0 0 8px 0;
+    }
+
+    .option-content p {
+        font-size: 14px;
+        color: #666;
+        line-height: 1.5;
+        margin: 0 0 8px 0;
+    }
+
+    .learn-more-link {
+        color: #666;
+        font-size: 14px;
+        text-decoration: underline;
+    }
+
+    /* Booking Options */
+    .booking-options {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .booking-option-btn {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+        background: #ffffff;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 500;
+        color: #1a1a1a;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: left;
+    }
+
+    .booking-option-btn:hover {
+        border-color: #FF5733;
+        background: #fff5f3;
+    }
+
+    .booking-option-btn.active {
+        border-color: #FF5733;
+        background: #fff5f3;
+    }
+
+    .option-radio {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: 2px solid #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: transparent;
+    }
+
+    .booking-option-btn.active .option-radio {
+        border-color: #FF5733;
+        color: #FF5733;
+    }
+
+    .option-icon-plus {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #333;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+    }
+
+    .option-arrow {
+        margin-left: auto;
+        color: #999;
+        font-size: 20px;
+    }
+
+    /* Form Styles */
+    .form-group {
+        margin-bottom: 24px;
+    }
+
+    .form-group label {
+        display: block;
+        font-size: 16px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 8px;
+    }
+
+    .form-input,
+    .form-select,
+    .form-textarea {
+        width: 100%;
+        padding: 14px 16px;
+        background: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        color: #1a1a1a;
+        transition: all 0.2s;
+    }
+
+    .form-input::placeholder,
+    .form-textarea::placeholder {
+        color: #999;
+    }
+
+    .form-input:focus,
+    .form-select:focus,
+    .form-textarea:focus {
+        outline: none;
+        border-color: #FF5733;
+        background: #ffffff;
+    }
+
+    .form-textarea {
+        resize: vertical;
+        min-height: 100px;
+    }
+
+    .form-row {
+        display: flex;
+        gap: 12px;
+    }
+
+    /* Info Notes */
+    .info-notes {
+        margin: 24px 0;
+    }
+
+    .info-note {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .info-icon {
+        flex-shrink: 0;
+        font-size: 16px;
+    }
+
+    .info-note p {
+        font-size: 14px;
+        color: #666;
+        line-height: 1.5;
+        margin: 0;
+    }
+
+    /* Modal Action Button */
+    .modal-action-btn {
+        width: 100%;
+        padding: 18px;
+        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-size: 18px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        margin-top: 32px;
+    }
+
+    .modal-action-btn:hover {
+        background: linear-gradient(to right, #FF5733, #FF9933);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(255, 87, 51, 0.3);
+    }
+
+    .modal-action-btn:active {
+        transform: scale(0.98);
+    }
+
+    /* Update control button styles */
+    .control-button {
+        position: relative;
+    }
+
+    .control-button.guest-selected {
+        background: #fff5f3;
+        border-color: #FF5733;
+    }
+
+    .control-button .guest-info {
+        font-size: 14px;
+        color: #FF5733;
+        font-weight: 600;
+    }
+
+    .control-button.notes-added {
+        background: #fff5f3;
+        border-color: #FF5733;
+    }
+
+    .control-button.notes-added .control-icon {
+        color: #FF5733;
+    }
+
+    .control-button.notes-added .control-text {
+        color: #FF5733;
+        font-weight: 600;
+    }
+
+    /* Mobile optimizations */
+    @media (max-width: 480px) {
+        .modal-panel {
+            border-radius: 0;
+        }
+        
+        .modal-header {
+            padding: 12px;
+        }
+        
+        .modal-scrollable-content,
+        .modal-content-section {
+            padding: 16px;
+        }
+        
+        .booking-option-card {
+            padding: 16px;
+        }
+    }
+    </style>
+
+    <script>
+        // Google Maps Autocomplete Class
+        class CustomAutocomplete {
+            constructor(inputId, suggestionsId, onSelect) {
+                this.input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
+                this.suggestionsContainer = typeof suggestionsId === 'string' ? document.getElementById(suggestionsId) : suggestionsId;
+                this.onSelect = onSelect;
+                this.sessionToken = null;
+                this.predictions = [];
+                this.selectedIndex = -1;
+                this.debounceTimer = null;
+                this.selectedPlace = null;
+                this.isValidated = false;
+                
+                this.init();
+            }
+
+            init() {
+                this.input.addEventListener('input', (e) => this.handleInput(e));
+                this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
+                this.input.addEventListener('blur', () => this.handleBlur());
+            }
+
+            async handleInput(e) {
+                const value = e.target.value.trim();
+                
+                if (this.isValidated) {
+                    this.clearValidation();
+                    this.input.dispatchEvent(new CustomEvent('validation-cleared'));
+                }
+                
+                if (this.debounceTimer) {
+                    clearTimeout(this.debounceTimer);
+                }
+                
+                if (value.length < 3) {
+                    this.hideSuggestions();
+                    return;
+                }
+                
+                this.debounceTimer = setTimeout(() => {
+                    this.fetchSuggestions(value);
+                }, 300);
+            }
+
+            async fetchSuggestions(input) {
+                try {
+                    this.showLoading();
+                    
+                    if (!this.sessionToken) {
+                        this.sessionToken = new google.maps.places.AutocompleteSessionToken();
+                    }
+                    
+                    const response = await google.maps.places.AutocompleteSuggestion
+                        .fetchAutocompleteSuggestions({
+                            input: input,
+                            sessionToken: this.sessionToken,
+                            locationBias: {
+                                center: { lat: 25.7617, lng: -80.1918 },
+                                radius: 30000
+                            }
+                        });
+
+                    this.predictions = response.suggestions || [];
+                    this.renderSuggestions(this.predictions);
+                    
+                } catch (error) {
+                    this.showError();
+                }
+            }
+
+            renderSuggestions(suggestions) {
+                if (!suggestions || suggestions.length === 0) {
+                    this.suggestionsContainer.innerHTML = '<div class="no-results">No results found</div>';
+                    this.showSuggestions();
+                    return;
+                }
+                
+                const html = suggestions.map((suggestion, index) => {
+                    const prediction = suggestion.placePrediction || suggestion;
+                    
+                    let mainText = '';
+                    if (prediction.text && prediction.text.text) {
+                        mainText = prediction.text.text;
+                    } else if (prediction.text) {
+                        mainText = prediction.text;
+                    } else if (prediction.formattedSuggestion && prediction.formattedSuggestion.mainText) {
+                        mainText = prediction.formattedSuggestion.mainText;
+                    } else if (prediction.description) {
+                        mainText = prediction.description;
+                    }
+                    
+                    let secondaryText = '';
+                    if (prediction.secondaryText && prediction.secondaryText.text) {
+                        secondaryText = prediction.secondaryText.text;
+                    } else if (prediction.secondaryText) {
+                        secondaryText = prediction.secondaryText;
+                    } else if (prediction.formattedSuggestion && prediction.formattedSuggestion.secondaryText) {
+                        secondaryText = prediction.formattedSuggestion.secondaryText;
+                    }
+                    
+                    return `
+                        <div class="suggestion-item" data-index="${index}">
+                            <div class="suggestion-icon">📍</div>
+                            <div class="suggestion-text">
+                                <div class="suggestion-main">${this.escapeHtml(mainText)}</div>
+                                ${secondaryText ? `<div class="suggestion-secondary">${this.escapeHtml(secondaryText)}</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                this.suggestionsContainer.innerHTML = html;
+                this.showSuggestions();
+                
+                this.suggestionsContainer.querySelectorAll('.suggestion-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const index = parseInt(item.dataset.index);
+                        this.selectSuggestion(index);
+                    });
+                });
+            }
+
+            async selectSuggestion(index) {
+                const suggestion = this.predictions[index];
+                if (!suggestion) return;
+                
+                try {
+                    const prediction = suggestion.placePrediction || suggestion;
+                    let place;
+                    
+                    try {
+                        place = prediction.toPlace();
+                        await place.fetchFields({
+                            fields: ['displayName', 'formattedAddress', 'location']
+                        });
+                    } catch (placeError) {
+                        place = {
+                            id: prediction.placeId || prediction.place_id,
+                            formattedAddress: prediction.description || prediction.text?.text,
+                            displayName: { text: prediction.description || prediction.text?.text },
+                            location: { lat: 0, lng: 0 }
+                        };
+                    }
+                    
+                    const address = place.formattedAddress || place.displayName?.text || '';
+                    this.input.value = address;
+                    
+                    this.selectedPlace = {
+                        place_id: place.id,
+                        description: address
+                    };
+                    this.isValidated = true;
+                    this.input.classList.add('validated');
+                    this.input.classList.remove('error');
+                    
+                    if (document.getElementById('addressError')) {
+                        document.getElementById('addressError').classList.remove('visible');
+                    }
+                    
+                    if (this.onSelect) {
+                        this.onSelect({
+                            address: address,
+                            coordinates: place.location ? {
+                                lat: typeof place.location.lat === 'function' ? place.location.lat() : place.location.lat,
+                                lng: typeof place.location.lng === 'function' ? place.location.lng() : place.location.lng
+                            } : null,
+                            place: place
+                        });
+                    }
+                    
+                    this.input.dispatchEvent(new CustomEvent('place-selected', { 
+                        detail: { 
+                            placeId: place.id, 
+                            description: address
+                        } 
+                    }));
+                    
+                    this.input.dispatchEvent(new CustomEvent('place-coordinates', {
+                        detail: {
+                            lat: typeof place.location.lat === 'function' ? place.location.lat() : place.location.lat,
+                            lng: typeof place.location.lng === 'function' ? place.location.lng() : place.location.lng,
+                            address: address
+                        }
+                    }));
+                    
+                    this.sessionToken = null;
+                    this.hideSuggestions();
+                    this.selectedIndex = -1;
+                    
+                } catch (error) {
+                    // Silent error handling
+                }
+            }
+
+            handleKeydown(e) {
+                const items = this.suggestionsContainer.querySelectorAll('.suggestion-item');
+                
+                switch(e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        this.selectedIndex = Math.min(this.selectedIndex + 1, items.length - 1);
+                        this.highlightItem();
+                        break;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
+                        this.highlightItem();
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        if (this.selectedIndex >= 0) {
+                            this.selectSuggestion(this.selectedIndex);
+                        }
+                        break;
+                    case 'Escape':
+                        this.hideSuggestions();
+                        break;
+                }
+            }
+
+            highlightItem() {
+                const items = this.suggestionsContainer.querySelectorAll('.suggestion-item');
+                items.forEach((item, index) => {
+                    if (index === this.selectedIndex) {
+                        item.classList.add('highlighted');
+                    } else {
+                        item.classList.remove('highlighted');
+                    }
+                });
+            }
+
+            handleBlur() {
+                setTimeout(() => {
+                    this.hideSuggestions();
+                }, 200);
+            }
+
+            showSuggestions() {
+                this.suggestionsContainer.classList.add('visible');
+            }
+
+            hideSuggestions() {
+                this.suggestionsContainer.classList.remove('visible');
+            }
+
+            showLoading() {
+                this.suggestionsContainer.innerHTML = '<div class="loading-results">Loading...</div>';
+                this.showSuggestions();
+            }
+            
+            clearValidation() {
+                this.isValidated = false;
+                this.selectedPlace = null;
+                this.input.classList.remove('validated');
+                this.input.classList.remove('error');
+                if (document.getElementById('addressError')) {
+                    document.getElementById('addressError').classList.remove('visible');
+                }
+            }
+
+            showError() {
+                this.suggestionsContainer.innerHTML = '<div class="no-results">Error loading suggestions</div>';
+                this.showSuggestions();
+                if (document.getElementById('addressError')) {
+                    document.getElementById('addressError').classList.add('visible');
+                }
+                this.input.classList.add('error');
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        }
+
+        // Main Application Class
+        class AirportBookingApp {
+            constructor() {
+                this.state = {
+                    mode: 'dropoff',
+                    locations: {
+                        address: null,
+                        airport: null
+                    },
+                    route: {
+                        distance: null,
+                        duration: null,
+                        price: null
+                    },
+                    dateTime: {
+                        date: new Date(),
+                        time: null
+                    },
+                    flight: '',
+                    vehicle: {
+                        selected: null,
+                        pricing: null
+                    },
+                    passengers: 1,
+                    guestData: null,
+                    pickupNotes: null,
+                    paymentMethod: 'visa-1187',
+                    promoCode: null,
+                    ui: {
+                        currentPanel: 'where'
+                    }
+                };
+                
+                this.els = {};
+                this.autocomplete = null;
+                this.vehicleMap = null;
+                this.directionsRenderer = null;
+                this.pricingService = null;
+                
+                this.init();
+            }
+            
+            init() {
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => this.setup());
+                } else {
+                    this.setup();
+                }
+                
+                this.initializePricingService();
+            }
+            
+            async initializePricingService() {
+                try {
+                    const { pricingService } = await import('./pricing.js');
+                    this.pricingService = pricingService;
+                    this.vehicleConfig = this.pricingService.getAllVehicleConfigs();
+                    console.log('✅ Pricing service loaded:', this.vehicleConfig);
+                } catch (error) {
+                    console.error('❌ Failed to load pricing service:', error);
+                    // Fallback pricing
+                    this.vehicleConfig = {
+                        tesla: { basePrice: 132, capacity: { passengers: 4, bags: 4 } },
+                        escalade: { basePrice: 165, capacity: { passengers: 7, bags: 8 } },
+                        sprinter: { basePrice: 220, capacity: { passengers: 14, bags: 12 } }
+                    };
+                }
+            }
+            
+            setup() {
+                this.cacheElements();
+                this.bindEvents();
+                this.initializeDateTime();
+                this.initializeAutocomplete();
+            }
+            
+            cacheElements() {
+                const elementIds = [
+                    'startSearchBtn', 'bookingContainer', 'panelsWrapper', 'progressLine',
+                    'summaryBar', 'addressInput', 'addressLoading', 'autocompleteDropdown',
+                    'addressStep', 'addressBadge', 'addressTitle', 'airportStep', 
+                    'airportBadge', 'airportTitle', 'flowConnector',
+                    'routeDistance', 'routeTime', 'hourSelect',
+                    'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
+                    'backBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
+                    'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration',
+                    'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
+                    'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
+                    'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap',
+                    'mapArrivalTime', 'mapPickupTime', 'mapLocationText'
+                ];
+                
+                elementIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) this.els[id] = el;
+                });
+                
+                this.els.modeBtns = document.querySelectorAll('.mode-btn');
+                this.els.airportOptions = document.querySelectorAll('.airport-option');
+                this.els.progressSteps = document.querySelectorAll('.progress-step');
+                this.els.dateBtns = document.querySelectorAll('.date-btn');
+                this.els.vehicleCards = document.querySelectorAll('.vehicle-card');
+            }
+            
+            initializeAutocomplete() {
+                google.maps.importLibrary("places").then(() => {
+                    this.autocomplete = new CustomAutocomplete(
+                        this.els.addressInput, 
+                        this.els.autocompleteDropdown,
+                        (locationData) => {
+                            this.handleAddressSelected({
+                                placeId: locationData.place?.id || 'unknown',
+                                description: locationData.address
+                            });
+                            
+                            const coords = locationData.coordinates || { lat: 25.7617, lng: -80.1918 };
+                            this.handleAddressCoordinates({
+                                lat: coords.lat,
+                                lng: coords.lng,
+                                address: locationData.address
+                            });
+                        }
+                    );
+                    
+                    this.els.addressInput.addEventListener('place-selected', (e) => {
+                        this.handleAddressSelected(e.detail);
+                    });
+                    
+                    this.els.addressInput.addEventListener('place-coordinates', (e) => {
+                        this.handleAddressCoordinates(e.detail);
+                    });
+                    
+                    this.els.addressInput.addEventListener('validation-cleared', () => {
+                        this.handleAddressValidationCleared();
+                    });
+                });
+            }
+            
+            bindEvents() {
+                this.els.startSearchBtn?.addEventListener('click', () => this.startBooking());
+                
+                this.els.modeBtns.forEach(btn => {
+                    btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
+                });
+                
+                this.els.airportOptions.forEach(option => {
+                    option.addEventListener('click', () => this.selectAirport(option.dataset.airport));
+                });
+                
+                this.els.continueBtn?.addEventListener('click', () => this.navigateToPanel('when'));
+                this.els.backBtn?.addEventListener('click', () => this.navigateToPanel('where'));
+                this.els.vehicleSelectionBtn?.addEventListener('click', () => this.navigateToPanel('vehicle'));
+                this.els.vehicleBackBtn?.addEventListener('click', () => this.navigateToPanel('when'));
+                this.els.bookBtn?.addEventListener('click', () => this.confirmBooking());
+                this.els.editRouteBtn?.addEventListener('click', () => this.navigateToPanel('where'));
+                
+                this.els.vehicleCards?.forEach(card => {
+                    card.addEventListener('click', () => this.selectVehicle(card.dataset.vehicle));
+                });
+                
+                this.els.flightInput?.addEventListener('input', (e) => {
+                    this.state.flight = e.target.value;
+                });
+            }
+            
+            startBooking() {
+                this.els.startSearchBtn.style.display = 'none';
+                this.els.bookingContainer.classList.add('active');
+                
+                setTimeout(() => {
+                    if (this.state.mode === 'dropoff') {
+                        this.els.addressInput?.focus();
+                    }
+                }, 300);
+            }
+            
+            setMode(mode) {
+                this.state.mode = mode;
+                
+                this.els.modeBtns.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.mode === mode);
+                });
+                
+                this.updateStepOrder(mode === 'dropoff');
+                this.resetSelections();
+            }
+            
+            updateStepOrder(isDropoff) {
+                this.els.addressStep.style.order = isDropoff ? '1' : '3';
+                this.els.flowConnector.style.order = '2';
+                this.els.airportStep.style.order = isDropoff ? '3' : '1';
+                
+                this.els.addressBadge.querySelector('.step-badge-number').textContent = isDropoff ? '1' : '2';
+                this.els.airportBadge.querySelector('.step-badge-number').textContent = isDropoff ? '2' : '1';
+                this.els.addressTitle.textContent = isDropoff ? 'Pickup Location' : 'Destination Address';
+                this.els.airportTitle.textContent = isDropoff ? 'Destination Airport' : 'Pickup Airport';
+                
+                if (isDropoff) {
+                    this.els.addressInput.disabled = false;
+                    this.els.addressStep.classList.remove('disabled');
+                } else {
+                    const shouldDisableAddress = !this.state.locations.airport;
+                    this.els.addressInput.disabled = shouldDisableAddress;
+                    this.els.addressStep.classList.toggle('disabled', shouldDisableAddress);
+                }
+                
+                this.updateAirportStepState();
+                
+                this.els.flightSection.style.display = this.state.mode === 'pickup' ? 'block' : 'none';
+            }
+            
+            updateAirportStepState() {
+                const shouldDisableAirport = this.state.mode === 'dropoff' && !this.state.locations.address;
+                this.els.airportStep.classList.toggle('disabled', shouldDisableAirport);
+                
+                this.els.airportOptions.forEach(option => {
+                    option.disabled = shouldDisableAirport;
+                });
+            }
+            
+            resetSelections() {
+                this.state.locations = { address: null, airport: null };
+                this.state.route = { distance: null, duration: null, price: null };
+                
+                this.els.addressInput.value = '';
+                if (this.autocomplete) {
+                    this.autocomplete.clearValidation();
+                }
+                
+                this.els.airportOptions.forEach(opt => opt.classList.remove('selected'));
+                this.els.addressBadge.classList.remove('completed');
+                this.els.airportBadge.classList.remove('completed', 'active');
+                this.els.flowConnector.classList.remove('active');
+                
+                this.updateStepOrder(this.state.mode === 'dropoff');
+                
+                this.updateContinueButton();
+            }
+            
+            handleAddressSelected(detail) {
+                this.updateAddressStepState();
+                this.updateAirportStepState();
+                this.updateContinueButton();
+            }
+            
+            handleAddressCoordinates(detail) {
+                this.state.locations.address = {
+                    address: detail.address,
+                    coordinates: { lat: detail.lat, lng: detail.lng }
+                };
+                
+                this.updateAddressStepState();
+                this.calculateRoute();
+            }
+            
+            handleAddressValidationCleared() {
+                this.state.locations.address = null;
+                this.updateAddressStepState();
+                this.updateAirportStepState();
+                this.updateContinueButton();
+            }
+            
+            updateAddressStepState() {
+                const isValidated = this.autocomplete?.isValidated && this.state.locations.address;
+                this.els.addressBadge.classList.toggle('completed', isValidated);
+                
+                this.els.airportBadge.classList.toggle('active', isValidated);
+                
+                if (isValidated) {
+                    this.els.flowConnector.classList.add('active');
+                } else {
+                    this.els.flowConnector.classList.remove('active');
+                    this.els.airportBadge.classList.remove('active');
+                }
+            }
+            
+            selectAirport(airportCode) {
+                if (this.state.mode === 'dropoff' && !this.state.locations.address) {
+                    return;
+                }
+                
+                this.state.locations.airport = {
+                    code: airportCode,
+                    name: this.getAirportName(airportCode)
+                };
+                
+                this.els.airportOptions.forEach(opt => {
+                    opt.classList.toggle('selected', opt.dataset.airport === airportCode);
+                });
+                
+                this.els.airportBadge.classList.remove('active');
+                this.els.airportBadge.classList.add('completed');
+                
+                if (this.state.mode === 'pickup') {
+                    this.els.addressInput.disabled = false;
+                    this.els.addressStep.classList.remove('disabled');
+                    setTimeout(() => {
+                        this.els.addressInput?.focus();
+                    }, 100);
+                }
+                
+                this.updateContinueButton();
+                this.calculateRoute();
+            }
+            
+            getAirportName(code) {
+                const names = {
+                    'MIA': 'Miami International',
+                    'FLL': 'Fort Lauderdale',
+                    'PBI': 'Palm Beach'
+                };
+                return names[code] || code;
+            }
+            
+            async calculateRoute() {
+                if (!this.state.locations.address || !this.state.locations.airport) return;
+                
+                try {
+                    const routeData = await this.getRouteData(
+                        this.state.locations.address.coordinates,
+                        this.state.locations.airport.code
+                    );
+                    
+                    if (routeData) {
+                        this.state.route = routeData;
+                    }
+                    
+                    this.updateRouteDisplay();
+                    
+                } catch (error) {
+                    console.error('Route calculation error:', error);
+                }
+            }
+            
+            async getRouteData(addressCoords, airportCode) {
+                try {
+                    if (!this.directionsService) {
+                        this.directionsService = new google.maps.DirectionsService();
+                    }
+                    
+                    const airportCoords = this.getAirportCoordinates(airportCode);
+                    if (!airportCoords) {
+                        return null;
+                    }
+                    
+                    const addressString = this.state.locations.address?.address;
+                    if (!addressString) {
+                        return null;
+                    }
+                    
+                    let origin, destination;
+                    
+                    if (this.state.mode === 'dropoff') {
+                        origin = addressString;
+                        destination = new google.maps.LatLng(airportCoords.lat, airportCoords.lng);
+                    } else {
+                        origin = new google.maps.LatLng(airportCoords.lat, airportCoords.lng);
+                        destination = addressString;
+                    }
+                    
+                    const request = {
+                        origin: origin,
+                        destination: destination,
+                        travelMode: google.maps.TravelMode.DRIVING,
+                        unitSystem: google.maps.UnitSystem.IMPERIAL,
+                        avoidHighways: false,
+                        avoidTolls: false,
+                        drivingOptions: {
+                            departureTime: new Date(),
+                            trafficModel: google.maps.TrafficModel.BEST_GUESS
+                        }
+                    };
+                    
+                    const result = await new Promise((resolve, reject) => {
+                        this.directionsService.route(request, (result, status) => {
+                            if (status === google.maps.DirectionsStatus.OK) {
+                                resolve(result);
+                            } else {
+                                reject(new Error(`Directions service failed: ${status}`));
+                            }
+                        });
+                    });
+                    
+                    const route = result.routes[0];
+                    const leg = route.legs[0];
+                    
+                    const distanceInMiles = leg.distance.value * 0.000621371;
+                    
+                    let durationInMinutes;
+                    if (leg.duration_in_traffic) {
+                        durationInMinutes = Math.round(leg.duration_in_traffic.value / 60);
+                    } else {
+                        durationInMinutes = Math.round(leg.duration.value / 60);
+                    }
+                    
+                    return {
+                        distance: Math.round(distanceInMiles * 10) / 10,
+                        duration: durationInMinutes,
+                        price: null,
+                        realData: true
+                    };
+                    
+                } catch (error) {
+                    console.error('Error getting route data:', error);
+                    return null;
+                }
+            }
+            
+            getAirportCoordinates(airportCode) {
+                const airportCoords = {
+                    'MIA': { lat: 25.7931, lng: -80.2906 },
+                    'FLL': { lat: 26.0742, lng: -80.1506 },
+                    'PBI': { lat: 26.6832, lng: -80.0956 }
+                };
+                return airportCoords[airportCode];
+            }
+            
+            formatDuration(minutes) {
+                if (minutes < 60) {
+                    return `${minutes} min`;
+                } else {
+                    const hours = Math.floor(minutes / 60);
+                    const remainingMinutes = minutes % 60;
+                    if (remainingMinutes === 0) {
+                        return `${hours} hr`;
+                    } else {
+                        return `${hours} hr ${remainingMinutes} min`;
+                    }
+                }
+            }
+            
+            updateRouteDisplay() {
+                const now = new Date();
+                const arrivalTime = new Date(now.getTime() + this.state.route.duration * 60 * 1000);
+                const formattedArrivalTime = arrivalTime.toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                });
+                
+                const formattedDuration = this.formatDuration(this.state.route.duration);
+                
+                const actionText = this.state.mode === 'dropoff' ? 'Drop-off' : 'Drop off';
+                const locationText = this.state.mode === 'dropoff' ? 'airport' : 'destination';
+                
+                this.els.arrivalTitle.textContent = `${actionText} at ${locationText} approx. ${formattedArrivalTime}`;
+                this.els.tripDuration.textContent = `Estimated ride duration of ${formattedDuration}`;
+                
+                if (this.state.route.realData) {
+                    this.els.tripDuration.textContent += ' (live data)';
+                } else {
+                    this.els.tripDuration.textContent += ' (estimated)';
+                }
+            }
+            
+            canContinue() {
+                return this.state.locations.address && this.state.locations.airport;
+            }
+            
+            updateContinueButton() {
+                const enabled = this.canContinue();
+                this.els.continueBtn.disabled = !enabled;
+            }
+            
+            navigateToPanel(panel) {
+                if (panel === 'when' && !this.canContinue()) return;
+                if (panel === 'vehicle' && !this.canContinue()) return;
+                
+                this.els.panelsWrapper.classList.remove('show-when', 'show-vehicle');
+                this.els.progressLine.classList.remove('active');
+                this.els.summaryBar.classList.remove('visible');
+                
+                if (panel === 'when') {
+                    this.els.panelsWrapper.classList.add('show-when');
+                    this.els.progressLine.classList.add('active');
+                    this.els.summaryBar.classList.add('visible');
+                    this.updateProgressSteps('when');
+                    this.updateSummary();
+                } else if (panel === 'vehicle') {
+                    this.els.panelsWrapper.classList.add('show-vehicle');
+                    this.els.progressLine.classList.add('active');
+                    this.els.summaryBar.classList.add('visible');
+                    this.updateVehiclePrices();
+                    this.updateProgressSteps('vehicle');
+                    this.updateSummary();
+                    this.updateVehicleMap();
+                    this.updateMapBadges();
+                    this.preloadVehicleImages();
+                } else {
+                    this.updateProgressSteps('where');
+                }
+                
+                this.state.ui.currentPanel = panel;
+            }
+            
+            updateProgressSteps(activeStep) {
+                this.els.progressSteps.forEach(step => {
+                    const stepName = step.dataset.step;
+                    step.classList.toggle('active', stepName === activeStep);
+                    step.classList.toggle('completed', 
+                        (activeStep === 'when' && stepName === 'where'));
+                });
+            }
+            
+            updateSummary() {
+                if (this.state.locations.address && this.state.locations.airport) {
+                    const from = this.state.mode === 'dropoff' 
+                        ? this.truncateText(this.state.locations.address.address) 
+                        : this.state.locations.airport.code;
+                    const to = this.state.mode === 'dropoff' 
+                        ? this.state.locations.airport.code 
+                        : this.state.locations.address.address;
+                    
+                    this.els.routeSummaryText.textContent = `${from} → ${to}`;
+                }
+            }
+            
+            updateMapBadges() {
+                if (this.state.dateTime.time) {
+                    const pickupTime = new Date(this.state.dateTime.time);
+                    const arrivalTime = new Date(pickupTime.getTime() + (this.state.route.duration || 45) * 60 * 1000);
+                    
+                    const formatTime = (date) => {
+                        const hours = date.getHours();
+                        const minutes = date.getMinutes();
+                        const isPM = hours >= 12;
+                        const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
+                        return `${displayHours}:${minutes.toString().padStart(2, '0')}`;
+                    };
+                    
+                    this.els.mapPickupTime.textContent = formatTime(pickupTime);
+                    this.els.mapArrivalTime.textContent = formatTime(arrivalTime);
+                }
+                
+                if (this.state.locations.airport) {
+                    const airportName = this.getAirportName(this.state.locations.airport.code);
+                    this.els.mapLocationText.textContent = airportName + '...';
+                }
+            }
+            
+            truncateText(text, maxLength = 25) {
+                const firstPart = text.split(',')[0];
+                return firstPart.length > maxLength 
+                    ? firstPart.substring(0, maxLength) + '...' 
+                    : firstPart;
+            }
+            
+            initializeDateTime() {
+                this.initializeDateSelection();
+                this.populateTimeOptions();
+                this.setDefaultDateTime();
+            }
+            
+            initializeDateSelection() {
+                const today = new Date();
+                const tomorrow = new Date(today);
+                tomorrow.setDate(today.getDate() + 1);
+                
+                document.getElementById('todayDate').textContent = this.formatDateShort(today);
+                document.getElementById('tomorrowDate').textContent = this.formatDateShort(tomorrow);
+                
+                document.getElementById('todayBtn').dataset.date = today.toISOString();
+                document.getElementById('tomorrowBtn').dataset.date = tomorrow.toISOString();
+                
+                document.getElementById('todayBtn').addEventListener('click', () => this.selectDateByType('today'));
+                document.getElementById('tomorrowBtn').addEventListener('click', () => this.selectDateByType('tomorrow'));
+                document.getElementById('otherDatesBtn').addEventListener('click', () => this.selectDateByType('other'));
+            }
+            
+            formatDateShort(date) {
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return `${months[date.getMonth()]} ${date.getDate()}`;
+            }
+            
+            populateTimeOptions() {
+                for (let i = 1; i <= 12; i++) {
+                    this.els.hourSelect.innerHTML += `<option value="${i}">${i}</option>`;
+                }
+                
+                for (let i = 0; i < 60; i += 15) {
+                    this.els.minuteSelect.innerHTML += `<option value="${i}">${i.toString().padStart(2, '0')}</option>`;
+                }
+                
+                ['hourSelect', 'minuteSelect', 'ampmSelect'].forEach(id => {
+                    this.els[id]?.addEventListener('change', () => this.updateDateTime());
+                });
+            }
+            
+            setDefaultDateTime() {
+                const now = new Date();
+                let hours = now.getHours();
+                let minutes = Math.ceil(now.getMinutes() / 15) * 15;
+                
+                if (minutes === 60) {
+                    minutes = 0;
+                    hours += 1;
+                }
+                
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                let displayHours = hours;
+                
+                if (hours > 12) displayHours -= 12;
+                if (hours === 0) displayHours = 12;
+                
+                this.els.hourSelect.value = displayHours;
+                this.els.minuteSelect.value = minutes;
+                this.els.ampmSelect.value = ampm;
+                
+                this.state.dateTime.date = now;
+                this.updateDateTime();
+            }
+            
+            selectDateByType(type) {
+                document.querySelectorAll('.date-btn').forEach(btn => btn.classList.remove('active'));
+                
+                this.els.calendarContainer.classList.remove('visible');
+                
+                if (type === 'today') {
+                    const todayBtn = document.getElementById('todayBtn');
+                    todayBtn.classList.add('active');
+                    this.state.dateTime.date = new Date(todayBtn.dataset.date);
+                    this.updateDateTime();
+                } else if (type === 'tomorrow') {
+                    const tomorrowBtn = document.getElementById('tomorrowBtn');
+                    tomorrowBtn.classList.add('active');
+                    this.state.dateTime.date = new Date(tomorrowBtn.dataset.date);
+                    this.updateDateTime();
+                } else if (type === 'other') {
+                    document.getElementById('otherDatesBtn').classList.add('active');
+                    this.els.calendarContainer.classList.add('visible');
+                    this.initializeCalendar();
+                    return;
+                }
+            }
+            
+            initializeCalendar() {
+                this.calendarState = {
+                    viewMonth: this.state.dateTime.date.getMonth(),
+                    viewYear: this.state.dateTime.date.getFullYear(),
+                    selectedDate: this.state.dateTime.date
+                };
+                
+                this.renderCalendar();
+                
+                this.els.prevMonthBtn.addEventListener('click', () => this.navigateMonth(-1));
+                this.els.nextMonthBtn.addEventListener('click', () => this.navigateMonth(1));
+            }
+            
+            navigateMonth(delta) {
+                this.calendarState.viewMonth += delta;
+                
+                if (this.calendarState.viewMonth > 11) {
+                    this.calendarState.viewMonth = 0;
+                    this.calendarState.viewYear++;
+                } else if (this.calendarState.viewMonth < 0) {
+                    this.calendarState.viewMonth = 11;
+                    this.calendarState.viewYear--;
+                }
+                
+                this.renderCalendar();
+            }
+            
+            renderCalendar() {
+                const { viewMonth, viewYear, selectedDate } = this.calendarState;
+                
+                const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                              'July', 'August', 'September', 'October', 'November', 'December'];
+                this.els.calendarMonthYear.textContent = `${months[viewMonth]} ${viewYear}`;
+                
+                const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+                const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+                
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                
+                let calendarHTML = '';
+                
+                const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+                days.forEach(day => {
+                    calendarHTML += `<div class="calendar-day-header">${day}</div>`;
+                });
+                
+                for (let i = 0; i < firstDay; i++) {
+                    calendarHTML += '<div></div>';
+                }
+                
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(viewYear, viewMonth, day);
+                    date.setHours(0, 0, 0, 0);
+                    
+                    const isPast = date < today;
+                    const isToday = date.getTime() === today.getTime();
+                    const isSelected = date.getDate() === selectedDate.getDate() && 
+                           date.getMonth() === selectedDate.getMonth() && 
+                           date.getFullYear() === selectedDate.getFullYear();
+        
+                    const classes = [
+                        'calendar-day',
+                        isPast ? 'disabled' : '',
+                        isToday ? 'today' : '',
+                        isSelected ? 'selected' : ''
+                    ].filter(Boolean).join(' ');
+                    
+                    calendarHTML += `
+                        <button 
+                            class="${classes}" 
+                            data-date="${date.toISOString()}"
+                            ${isPast ? 'disabled' : ''}
+                        >${day}</button>
+                    `;
+                }
+                
+                this.els.calendarGrid.innerHTML = calendarHTML;
+                
+                this.els.calendarGrid.querySelectorAll('.calendar-day:not(.disabled)').forEach(dayEl => {
+                    dayEl.addEventListener('click', () => this.selectCalendarDate(dayEl));
+                });
+            }
+            
+            selectCalendarDate(dayEl) {
+                const selectedDate = new Date(dayEl.dataset.date);
+                this.calendarState.selectedDate = selectedDate;
+                
+                this.state.dateTime.date = selectedDate;
+                
+                this.els.calendarContainer.classList.remove('visible');
+                
+                document.querySelectorAll('.date-btn').forEach(btn => btn.classList.remove('active'));
+                this.els.otherDatesBtn.classList.add('active');
+                
+                const dateValue = this.els.otherDatesBtn.querySelector('.date-value');
+                dateValue.textContent = this.formatDateShort(selectedDate);
+                
+                this.els.otherDatesBtn.dataset.date = selectedDate.toISOString();
+                
+                this.updateDateTime();
+            }
+            
+            updateDateTime() {
+                const hours = parseInt(this.els.hourSelect.value);
+                const minutes = parseInt(this.els.minuteSelect.value);
+                const ampm = this.els.ampmSelect.value;
+                
+                const date = new Date(this.state.dateTime.date);
+                let hour24 = hours;
+                
+                if (ampm === 'PM' && hours !== 12) hour24 += 12;
+                if (ampm === 'AM' && hours === 12) hour24 = 0;
+                
+                date.setHours(hour24, minutes, 0, 0);
+                
+                const now = new Date();
+                const isToday = date.toDateString() === now.toDateString();
+                
+                if (isToday && date < now) {
+                    this.showTimeWarning();
+                    
+                    const minTime = new Date(now.getTime() + 30 * 60000);
+                    const roundedMinutes = Math.ceil(minTime.getMinutes() / 15) * 15;
+                    minTime.setMinutes(roundedMinutes);
+                    
+                    let minHours = minTime.getHours();
+                    const minAmPm = minHours >= 12 ? 'PM' : 'AM';
+                    if (minHours > 12) minHours -= 12;
+                    if (minHours === 0) minHours = 12;
+                    
+                    this.els.hourSelect.value = minHours;
+                    this.els.minuteSelect.value = minTime.getMinutes();
+                    this.els.ampmSelect.value = minAmPm;
+                    
+                    date.setHours(minTime.getHours(), minTime.getMinutes(), 0, 0);
+                } else {
+                    this.hideTimeWarning();
+                }
+                
+                this.state.dateTime.time = date;
+                this.updateTimeNote();
+                this.updateBookButton();
+            }
+
+            showTimeWarning() {
+                let warning = document.getElementById('timeWarning');
+                if (!warning) {
+                    warning = document.createElement('div');
+                    warning.id = 'timeWarning';
+                    warning.className = 'time-warning';
+                    warning.innerHTML = `
+                        <span class="warning-icon">⚠️</span>
+                        <span>Please select a time at least 30 minutes from now</span>
+                    `;
+                    this.els.timeNote.parentElement.insertBefore(warning, this.els.timeNote);
+                }
+                warning.classList.add('visible');
+            }
+
+            hideTimeWarning() {
+                const warning = document.getElementById('timeWarning');
+                if (warning) {
+                    warning.classList.remove('visible');
+                }
+            }
+
+            updateBookButton() {
+                if (this.state.dateTime.time && this.els.bookBtn) {
+                    const dateStr = this.state.dateTime.time.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                    });
+                    const timeStr = this.state.dateTime.time.toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true
+                    });
+                    
+                    const bookBtnSubText = this.els.bookBtn.querySelector('.btn-sub-text');
+                    if (bookBtnSubText) {
+                        bookBtnSubText.textContent = `${dateStr} · ${timeStr}`;
+                    }
+                }
+            }
+            
+            updateTimeNote() {
+                if (!this.state.dateTime.time || !this.state.route.duration) return;
+                
+                const pickupTime = new Date(this.state.dateTime.time);
+                const arrivalTime = new Date(pickupTime.getTime() + this.state.route.duration * 60 * 1000);
+                
+                const formatTime = (date) => date.toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                });
+                
+                if (this.state.mode === 'dropoff') {
+                    this.els.timeNote.innerHTML = `
+                        <span>Pickup: <strong>${formatTime(pickupTime)}</strong></span>
+                        <span>→</span>
+                        <span>Airport arrival: <strong>${formatTime(arrivalTime)}</strong></span>
+                    `;
+                } else {
+                    this.els.timeNote.innerHTML = `
+                        <span>Airport pickup: <strong>${formatTime(pickupTime)}</strong></span>
+                        <span>→</span>
+                        <span>Destination arrival: <strong>${formatTime(arrivalTime)}</strong></span>
+                    `;
+                }
+            }
+            
+            selectVehicle(vehicleType) {
+                document.querySelectorAll('.vehicle-card').forEach(card => {
+                    card.classList.remove('selected');
+                });
+                
+                const selectedCard = document.querySelector(`[data-vehicle="${vehicleType}"]`);
+                if (selectedCard) {
+                    selectedCard.classList.add('selected');
+                }
+                
+                this.state.vehicle = {
+                    selected: vehicleType,
+                    name: selectedCard?.querySelector('.vehicle-name').textContent
+                };
+                
+                if (this.state.route.distance && this.state.route.duration) {
+                    const pricing = this.calculateVehiclePrice(vehicleType, this.state.route.distance, this.state.route.duration);
+                    
+                    if (pricing) {
+                        this.state.vehicle.pricing = pricing;
+                        this.state.route.price = pricing.finalPrice;
+                    }
+                } else {
+                    if (this.pricingService) {
+                        const config = this.pricingService.getVehicleConfig(vehicleType);
+                        this.state.route.price = config ? config.basePrice : 100;
+                    } else {
+                        this.state.route.price = 100;
+                    }
+                }
+                
+                if (this.els.bookBtn) {
+                    this.els.bookBtn.disabled = false;
+                }
+            }
+            
+            calculateVehiclePrice(vehicleType, distance, duration, options = {}) {
+                if (this.pricingService) {
+                    if (this.state.dateTime.date && this.state.dateTime.time) {
+                        const dateTime = new Date(this.state.dateTime.date);
+                        const timeComponents = this.state.dateTime.time.toTimeString().split(':');
+                        dateTime.setHours(parseInt(timeComponents[0]), parseInt(timeComponents[1]));
+                        options.dateTime = dateTime;
+                    }
+                    
+                    options.passengers = this.state.passengers;
+                    
+                    return this.pricingService.calculateVehiclePrice(vehicleType, distance, duration, options);
+                }
+                
+                return {
+                    vehicleType,
+                    vehicleName: 'Unknown',
+                    finalPrice: Math.round(distance * 3 + 50),
+                    protectionApplied: 'fallback',
+                    breakdown: {
+                        perMilePrice: Math.round(distance * 3),
+                        airportFee: 50,
+                        appliedSurcharges: []
+                    }
+                };
+            }
+            
+            updateVehiclePrices() {
+                if (!this.state.route.distance || !this.state.route.duration) {
+                    console.log('No route data available for pricing');
+                    return;
+                }
+                
+                const vehicleTypes = this.pricingService ? 
+                    this.pricingService.getAllVehicles() : 
+                    ['tesla', 'escalade', 'sprinter'];
+                
+                console.log('Updating prices for route:', this.state.route);
+                
+                vehicleTypes.forEach(vehicleType => {
+                    const pricing = this.calculateVehiclePrice(
+                        vehicleType, 
+                        this.state.route.distance, 
+                        this.state.route.duration,
+                        { dateTime: this.state.dateTime.time }
+                    );
+                    
+                    const priceElement = document.getElementById(`${vehicleType}-price`);
+                    if (priceElement && pricing) {
+                        priceElement.classList.add('price-updating');
+                        
+                        const formattedPrice = this.pricingService ? 
+                            this.pricingService.formatPrice(pricing.finalPrice) : 
+                            `$${pricing.finalPrice}`;
+                        priceElement.textContent = formattedPrice;
+                        
+                        console.log(`${vehicleType} price:`, formattedPrice, pricing);
+                        
+                        setTimeout(() => {
+                            priceElement.classList.remove('price-updating');
+                        }, 500);
+                    }
+                });
+            }
+            
+            validateVehicleCapacity() {
+                const passengerCount = this.state.passengers;
+                
+                this.els.vehicleCards.forEach(card => {
+                    const vehicleType = card.dataset.vehicle;
+                    
+                    if (this.pricingService) {
+                        const canAccommodate = this.pricingService.checkCapacity(vehicleType, passengerCount);
+                        if (!canAccommodate) {
+                            card.style.opacity = '0.5';
+                            card.style.pointerEvents = 'none';
+                        } else {
+                            card.style.opacity = '1';
+                            card.style.pointerEvents = 'auto';
+                        }
+                    }
+                });
+            }
+            
+            async updateVehicleMap() {
+                if (!this.els.vehicleMap) return;
+                
+                try {
+                    if (!this.vehicleMap) {
+                        await google.maps.importLibrary("maps");
+                        
+                        const mapOptions = {
+                            center: { lat: 25.7617, lng: -80.1918 },
+                            zoom: 11,
+                            disableDefaultUI: true,
+                            zoomControl: false,
+                            mapTypeControl: false,
+                            scaleControl: false,
+                            streetViewControl: false,
+                            rotateControl: false,
+                            fullscreenControl: false,
+                            styles: [
+                                {
+                                    featureType: "poi",
+                                    elementType: "labels",
+                                    stylers: [{ visibility: "off" }]
+                                }
+                            ]
+                        };
+                        
+                        this.vehicleMap = new google.maps.Map(
+                            this.els.vehicleMap,
+                            mapOptions
+                        );
+                        
+                        this.directionsRenderer = new google.maps.DirectionsRenderer({
+                            map: this.vehicleMap,
+                            suppressMarkers: false,
+                            polylineOptions: {
+                                strokeColor: '#FF6B35',
+                                strokeOpacity: 0.8,
+                                strokeWeight: 4
+                            }
+                        });
+                    }
+                    
+                    if (this.state.locations.address && this.state.locations.airport) {
+                        const airportCoords = this.getAirportCoordinates(this.state.locations.airport.code);
+                        
+                        let origin, destination;
+                        if (this.state.mode === 'dropoff') {
+                            origin = this.state.locations.address.address;
+                            destination = new google.maps.LatLng(airportCoords.lat, airportCoords.lng);
+                        } else {
+                            origin = new google.maps.LatLng(airportCoords.lat, airportCoords.lng);
+                            destination = this.state.locations.address.address;
+                        }
+                        
+                        const request = {
+                            origin: origin,
+                            destination: destination,
+                            travelMode: google.maps.TravelMode.DRIVING
+                        };
+                        
+                        this.directionsService.route(request, (result, status) => {
+                            if (status === google.maps.DirectionsStatus.OK) {
+                                this.directionsRenderer.setDirections(result);
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.error('Map update error:', error);
+                }
+            }
+            
+            confirmBooking() {
+                const tripId = this.generateTripId();
+                const bookingData = {
+                    tripId: tripId,
+                    passenger: {
+                        name: this.state.guestData ? `${this.state.guestData.firstName} ${this.state.guestData.lastName}` : "Self",
+                        guestData: this.state.guestData,
+                        count: this.state.passengers,
+                        phone: this.state.guestData?.phone || "+1 (555) 123-4567",
+                        notes: this.state.pickupNotes
+                    },
+                    driver: {
+                        name: "Carlos Martinez",
+                        rating: 4.7,
+                        vehicle: this.state.vehicle.name
+                    },
+                    route: {
+                        from: this.state.mode === 'dropoff' 
+                            ? this.state.locations.address.address 
+                            : this.state.locations.airport.name,
+                        to: this.state.mode === 'dropoff' 
+                            ? this.state.locations.airport.name 
+                            : this.state.locations.address.address
+                    },
+                    vehicle: this.state.vehicle,
+                    dateTime: this.state.dateTime,
+                    payment: {
+                        method: this.state.paymentMethod,
+                        promo: this.state.promoCode
+                    },
+                    status: 'confirmed',
+                    createdAt: new Date().toISOString()
+                };
+                
+                localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
+                
+                this.showBookingConfirmation(tripId, bookingData);
+            }
+
+            generateTripId() {
+                return 'TRIP-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+            }
+            
+            showBookingConfirmation(tripId, bookingData) {
+                const confirmationElement = document.createElement('div');
+                confirmationElement.className = 'booking-confirmation';
+                confirmationElement.innerHTML = `
+                    <div class="confirmation-content">
+                        <div class="confirmation-header">
+                            <h2>Booking Confirmed!</h2>
+                            <p class="confirmation-trip-id">Trip ID: ${tripId}</p>
+                        </div>
+                        <div class="confirmation-details">
+                            <div class="confirmation-item">
+                                <span class="label">Pickup:</span>
+                                <span class="value">${this.truncateText(bookingData.route.from, 35)}</span>
+                            </div>
+                            <div class="confirmation-item">
+                                <span class="label">Destination:</span>
+                                <span class="value">${this.truncateText(bookingData.route.to, 35)}</span>
+                            </div>
+                            <div class="confirmation-item">
+                                <span class="label">Vehicle:</span>
+                                <span class="value">${bookingData.vehicle.name}</span>
+                            </div>
+                            <div class="confirmation-item">
+                                <span class="label">Time:</span>
+                                <span class="value">${new Date(bookingData.dateTime.time).toLocaleString()}</span>
+                            </div>
+                        </div>
+                        <button class="primary-btn" id="confirmationDoneBtn">Done</button>
+                    </div>
+                `;
+                
+                document.body.appendChild(confirmationElement);
+                
+                const doneBtn = document.getElementById('confirmationDoneBtn');
+                doneBtn.addEventListener('click', () => {
+                    confirmationElement.remove();
+                    window.location.reload();
+                });
+            }
+            
+            preloadVehicleImages() {
+                const vehicleImages = document.querySelectorAll('.vehicle-image[data-loaded="false"], .vehicle-image:not([data-loaded])');
+                
+                vehicleImages.forEach((img, index) => {
+                    if (!img.hasAttribute('data-loading')) {
+                        img.setAttribute('data-loading', 'true');
+                        
+                        const preloadImg = new Image();
+                        preloadImg.onload = () => {
+                            img.setAttribute('data-loaded', 'true');
+                            
+                            const loadingIndicator = img.parentElement?.querySelector('.vehicle-image-loading');
+                            if (loadingIndicator) {
+                                loadingIndicator.classList.add('hidden');
+                            }
+                        };
+                        
+                        preloadImg.onerror = () => {
+                            console.error('Failed to load image:', img.src);
+                        };
+                        
+                        preloadImg.src = img.src;
+                    }
+                });
+            }
+        }
+
+        // Vehicle Carousel Class
+        class VehicleCarousel {
+            constructor(app) {
+                this.app = app;
+                this.currentIndex = 0;
+                this.totalSlides = 3;
+                this.isAnimating = false;
+                this.touchStartX = 0;
+                this.touchEndX = 0;
+                this.isDragging = false;
+                this.currentTransform = 0;
+                this.selectedVehicle = 'tesla';
+                
+                this.vehicles = [
+                    { id: 'tesla', name: 'Tesla Model Y' },
+                    { id: 'escalade', name: 'Cadillac Escalade' },
+                    { id: 'sprinter', name: 'Mercedes Sprinter' }
+                ];
+                
+                this.init();
+            }
+            
+            init() {
+                this.cacheElements();
+                this.bindEvents();
+                this.updateCarousel();
+            }
+            
+            cacheElements() {
+                this.track = document.getElementById('carouselTrack');
+                this.prevBtn = document.getElementById('prevBtn');
+                this.nextBtn = document.getElementById('nextBtn');
+                this.cards = document.querySelectorAll('.vehicle-card');
+            }
+            
+            bindEvents() {
+                if (!this.track) return;
+                
+                this.prevBtn?.addEventListener('click', () => this.goToPrevious());
+                this.nextBtn?.addEventListener('click', () => this.goToNext());
+                
+                this.cards.forEach((card, index) => {
+                    card.addEventListener('click', () => this.goToSlide(index));
+                });
+                
+                this.track.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+                this.track.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+                this.track.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+            }
+            
+            goToSlide(index) {
+                if (this.isAnimating || index === this.currentIndex) return;
+                
+                this.isAnimating = true;
+                this.currentIndex = index;
+                
+                this.updateCarousel();
+                
+                setTimeout(() => {
+                    this.isAnimating = false;
+                }, 600);
+            }
+            
+            goToNext() {
+                const nextIndex = (this.currentIndex + 1) % this.totalSlides;
+                this.goToSlide(nextIndex);
+            }
+            
+            goToPrevious() {
+                const prevIndex = (this.currentIndex - 1 + this.totalSlides) % this.totalSlides;
+                this.goToSlide(prevIndex);
+            }
+            
+            updateCarousel() {
+                if (!this.track) return;
+                
+                const translateX = -this.currentIndex * (85 + 3.2);
+                this.track.style.transform = `translateX(${translateX}%)`;
+                
+                this.cards.forEach((card, index) => {
+                    card.classList.remove('active', 'prev', 'next');
+                    
+                    if (index === this.currentIndex) {
+                        card.classList.add('active');
+                    } else if (index === this.currentIndex - 1 || (this.currentIndex === 0 && index === this.totalSlides - 1)) {
+                        card.classList.add('prev');
+                    } else if (index === this.currentIndex + 1 || (this.currentIndex === this.totalSlides - 1 && index === 0)) {
+                        card.classList.add('next');
+                    }
+                });
+                
+                this.selectedVehicle = this.vehicles[this.currentIndex].id;
+                
+                if (this.app && this.app.updateVehiclePrices) {
+                    this.app.updateVehiclePrices();
+                }
+            }
+            
+            handleTouchStart(e) {
+                this.touchStartX = e.touches[0].clientX;
+                this.isDragging = true;
+                this.track.style.transition = 'none';
+                this.currentTransform = -this.currentIndex * (85 + 3.2);
+            }
+            
+            handleTouchMove(e) {
+                if (!this.isDragging) return;
+                
+                const currentX = e.touches[0].clientX;
+                const deltaX = currentX - this.touchStartX;
+                
+                if (Math.abs(deltaX) > 10) {
+                    e.preventDefault();
+                    
+                    const dragOffset = (deltaX / window.innerWidth) * 100;
+                    const newTransform = this.currentTransform + dragOffset;
+                    this.track.style.transform = `translateX(${newTransform}%)`;
+                }
+            }
+            
+            handleTouchEnd(e) {
+                if (!this.isDragging) return;
+                
+                this.isDragging = false;
+                this.touchEndX = e.changedTouches[0].clientX;
+                
+                this.track.style.transition = 'transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                
+                const deltaX = this.touchStartX - this.touchEndX;
+                const swipeThreshold = 50;
+                
+                if (Math.abs(deltaX) > swipeThreshold) {
+                    if (deltaX > 0) {
+                        this.goToNext();
+                    } else {
+                        this.goToPrevious();
+                    }
+                } else {
+                    this.updateCarousel();
+                }
+            }
+        }
+
+        // Store guest and notes data
+        let guestData = null;
+        let notesData = null;
+
+        // Update the existing passenger selector function
+        window.openPassengerSelector = function() {
+            event.stopPropagation();
+            const modal = document.getElementById('passengerSelectionModal');
+            modal.style.display = 'flex';
+            
+            // Copy map time badges from vehicle panel
+            const arrivalTime = document.getElementById('mapArrivalTime')?.textContent || '4:30';
+            const pickupTime = document.getElementById('mapPickupTime')?.textContent || '5:59';
+            const locationText = document.getElementById('mapLocationText')?.textContent || 'Miami International...';
+            
+            document.getElementById('modalArrivalTime').textContent = arrivalTime;
+            document.getElementById('modalPickupTime').textContent = pickupTime;
+            document.getElementById('modalLocationText').textContent = locationText;
+        }
+
+        // Select booking type
+        window.selectBookingType = function(type) {
+            if (type === 'myself') {
+                // Reset to booking for myself
+                guestData = null;
+                updatePassengerButton();
+                closePassengerModal();
+            }
+        }
+
+        // Open add guest modal
+        window.openAddGuestModal = function() {
+            document.getElementById('passengerSelectionModal').style.display = 'none';
+            document.getElementById('addGuestModal').style.display = 'flex';
+            
+            // If guest data exists, populate the form
+            if (guestData) {
+                document.getElementById('guestTitle').value = guestData.title || 'Mx.';
+                document.getElementById('guestFirstName').value = guestData.firstName || '';
+                document.getElementById('guestLastName').value = guestData.lastName || '';
+                document.getElementById('guestEmail').value = guestData.email || '';
+                document.getElementById('countryCode').value = guestData.countryCode || '+1';
+                document.getElementById('guestPhone').value = guestData.phone || '';
+            }
+        }
+
+        // Back to passenger selection
+        window.backToPassengerSelection = function() {
+            document.getElementById('addGuestModal').style.display = 'none';
+            document.getElementById('passengerSelectionModal').style.display = 'flex';
+        }
+
+        // Save guest
+        window.saveGuest = function(event) {
+            event.preventDefault();
+            
+            guestData = {
+                title: document.getElementById('guestTitle').value,
+                firstName: document.getElementById('guestFirstName').value,
+                lastName: document.getElementById('guestLastName').value,
+                email: document.getElementById('guestEmail').value,
+                countryCode: document.getElementById('countryCode').value,
+                phone: document.getElementById('guestPhone').value
+            };
+            
+            // Update the passenger button
+            updatePassengerButton();
+            
+            // Close modals
+            document.getElementById('addGuestModal').style.display = 'none';
+            document.getElementById('passengerSelectionModal').style.display = 'none';
+            
+            // Update app state
+            if (window.airportApp) {
+                window.airportApp.state.guestData = guestData;
+            }
+        }
+
+        // Update passenger button display
+        function updatePassengerButton() {
+            const btn = document.querySelector('.passenger-select');
+            const iconSpan = btn.querySelector('.control-icon');
+            const textSpan = btn.querySelector('.control-text');
+            
+            if (guestData) {
+                btn.classList.add('guest-selected');
+                iconSpan.textContent = '👥';
+                textSpan.textContent = `${guestData.firstName} ${guestData.lastName}`;
+            } else {
+                btn.classList.remove('guest-selected');
+                iconSpan.textContent = '👤';
+                textSpan.textContent = 'For myself';
+            }
+        }
+
+        // Close passenger modal
+        function closePassengerModal() {
+            document.getElementById('passengerSelectionModal').style.display = 'none';
+        }
+
+        // Add pickup notes
+        window.addPickupNotes = function() {
+            const modal = document.getElementById('pickupNotesModal');
+            modal.style.display = 'flex';
+            
+            // If notes data exists, populate the form
+            if (notesData) {
+                document.getElementById('chauffeurNotes').value = notesData.chauffeurNotes || '';
+                document.getElementById('pickupSign').value = notesData.pickupSign || '';
+                document.getElementById('referenceCode').value = notesData.referenceCode || '';
+            }
+        }
+
+        // Close pickup notes
+        window.closePickupNotes = function() {
+            document.getElementById('pickupNotesModal').style.display = 'none';
+        }
+
+        // Save pickup notes
+        window.savePickupNotes = function(event) {
+            event.preventDefault();
+            
+            notesData = {
+                chauffeurNotes: document.getElementById('chauffeurNotes').value,
+                pickupSign: document.getElementById('pickupSign').value,
+                referenceCode: document.getElementById('referenceCode').value
+            };
+            
+            // Update the notes button
+            const notesBtn = document.querySelector('.add-notes');
+            if (notesData.chauffeurNotes || notesData.pickupSign || notesData.referenceCode) {
+                notesBtn.classList.add('notes-added');
+                notesBtn.querySelector('.control-icon').textContent = '📝';
+                notesBtn.querySelector('.control-text').textContent = 'Edit notes';
+            } else {
+                notesBtn.classList.remove('notes-added');
+                notesBtn.querySelector('.control-icon').textContent = '➕';
+                notesBtn.querySelector('.control-text').textContent = 'Add pickup notes';
+            }
+            
+            // Close modal
+            document.getElementById('pickupNotesModal').style.display = 'none';
+            
+            // Update app state
+            if (window.airportApp) {
+                window.airportApp.state.pickupNotes = notesData;
+            }
+        }
+
+        // Close modals when clicking outside
+        document.querySelectorAll('.full-modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.style.display = 'none';
+                }
+            });
+        });
+
+        // Update the existing updatePassengerCount function to do nothing
+        window.updatePassengerCount = function(selectElement) {
+            // This function is now deprecated - passenger selection is handled by modal
+            return;
+        }
+        
+        // Other mobile-specific functions remain the same
+        window.selectPaymentMethod = function() {
+            const paymentBtn = document.querySelector('.payment-method-mobile');
+            paymentBtn.style.background = 'linear-gradient(to right, #FF9933, #FF5733)';
+            paymentBtn.style.color = 'white';
+            
+            setTimeout(() => {
+                paymentBtn.style.background = '';
+                paymentBtn.style.color = '';
+            }, 300);
+        };
+        
+        window.addPromotion = function() {
+            const app = window.airportApp;
+            const promo = prompt("Enter promotion code:");
+            if (promo && app) {
+                app.state.promoCode = promo;
+                const promoBtn = document.querySelector('.promo-button-mobile');
+                promoBtn.innerHTML = '<span class="control-icon">✅</span><span>' + promo + '</span>';
+                promoBtn.style.background = 'linear-gradient(to right, #FF9933, #FF5733)';
+                promoBtn.style.color = 'white';
+            }
+        };
+        
+        window.modifyDateTime = function() {
+            const calBtn = document.querySelector('.calendar-button-mobile');
+            calBtn.style.backgroundColor = '#f0f0f0';
+            setTimeout(() => {
+                calBtn.style.backgroundColor = '';
+            }, 200);
+            
+            const app = window.airportApp;
+            if (app) {
+                app.navigateToPanel('when');
+            }
+        };
+
+        // Google Maps API Loader
+        (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+            key: "AIzaSyAd_O4s_73E_A8rq7TGCHKVEBFHzNecAHM",
+            v: "weekly"
+        });
+
+        // Initialize Application
+        window.airportApp = new AirportBookingApp();
+
+        let vehicleCarousel;
+        document.addEventListener('DOMContentLoaded', () => {
+            vehicleCarousel = new VehicleCarousel(window.airportApp);
+        });
+    </script>
+</body>
+</html>
