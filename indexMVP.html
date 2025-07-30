@@ -1000,20 +1000,24 @@
                     this.showLoading();
                     
                     if (!this.sessionToken) {
-                        this.sessionToken = new google.maps.places.AutocompleteSessionToken();
+                        this.sessionToken = 'sess_' + Math.random().toString(36).substr(2, 9);
                     }
                     
-                    const response = await google.maps.places.AutocompleteSuggestion
-                        .fetchAutocompleteSuggestions({
-                            input: input,
-                            sessionToken: this.sessionToken,
-                            locationBias: {
-                                center: { lat: 25.7617, lng: -80.1918 },
-                                radius: 30000
-                            }
-                        });
+                    const params = new URLSearchParams({
+                        input: input,
+                        sessiontoken: this.sessionToken,
+                        location: `${25.7617},${-80.1918}`,
+                        radius: '30000'
+                    });
+                    
+                    const response = await fetch(`http://localhost:3001/api/places/autocomplete?${params}`);
 
-                    this.predictions = response.suggestions || [];
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch suggestions');
+                    }
+
+                    const data = await response.json();
+                    this.predictions = data.predictions || [];
                     this.renderSuggestions(this.predictions);
                     
                 } catch (error) {
@@ -1029,26 +1033,18 @@
                 }
                 
                 const html = suggestions.map((suggestion, index) => {
-                    const prediction = suggestion.placePrediction || suggestion;
+                    const prediction = suggestion;
                     
                     let mainText = '';
-                    if (prediction.text && prediction.text.text) {
-                        mainText = prediction.text.text;
-                    } else if (prediction.text) {
-                        mainText = prediction.text;
-                    } else if (prediction.formattedSuggestion && prediction.formattedSuggestion.mainText) {
-                        mainText = prediction.formattedSuggestion.mainText;
+                    if (prediction.structured_formatting && prediction.structured_formatting.main_text) {
+                        mainText = prediction.structured_formatting.main_text;
                     } else if (prediction.description) {
                         mainText = prediction.description;
                     }
                     
                     let secondaryText = '';
-                    if (prediction.secondaryText && prediction.secondaryText.text) {
-                        secondaryText = prediction.secondaryText.text;
-                    } else if (prediction.secondaryText) {
-                        secondaryText = prediction.secondaryText;
-                    } else if (prediction.formattedSuggestion && prediction.formattedSuggestion.secondaryText) {
-                        secondaryText = prediction.formattedSuggestion.secondaryText;
+                    if (prediction.structured_formatting && prediction.structured_formatting.secondary_text) {
+                        secondaryText = prediction.structured_formatting.secondary_text;
                     }
                     
                     return `
@@ -1078,19 +1074,38 @@
                 if (!suggestion) return;
                 
                 try {
-                    const prediction = suggestion.placePrediction || suggestion;
+                    const prediction = suggestion;
                     let place;
                     
                     try {
-                        place = prediction.toPlace();
-                        await place.fetchFields({
-                            fields: ['displayName', 'formattedAddress', 'location']
+                        // Use proxy endpoint for place details
+                        const params = new URLSearchParams({
+                            place_id: prediction.place_id,
+                            fields: 'name,formatted_address,geometry',
+                            sessiontoken: this.sessionToken
                         });
+                        
+                        const response = await fetch(`http://localhost:3001/api/places/details?${params}`);
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            place = {
+                                id: prediction.place_id,
+                                formattedAddress: data.result.formatted_address,
+                                displayName: { text: data.result.name || data.result.formatted_address },
+                                location: {
+                                    lat: data.result.geometry.location.lat,
+                                    lng: data.result.geometry.location.lng
+                                }
+                            };
+                        } else {
+                            throw new Error('Failed to fetch place details');
+                        }
                     } catch (placeError) {
                         place = {
-                            id: prediction.placeId || prediction.place_id,
-                            formattedAddress: prediction.description || prediction.text?.text,
-                            displayName: { text: prediction.description || prediction.text?.text },
+                            id: prediction.place_id,
+                            formattedAddress: prediction.description,
+                            displayName: { text: prediction.description },
                             location: { lat: 0, lng: 0 }
                         };
                     }
@@ -1300,7 +1315,6 @@
                 this.cacheElements();
                 this.bindEvents();
                 this.initializeDateTime();
-                this.initializeAutocomplete();
             }
             
             cacheElements() {
@@ -1332,37 +1346,39 @@
             }
             
             initializeAutocomplete() {
-                google.maps.importLibrary("places").then(() => {
-                    this.autocomplete = new CustomAutocomplete(
-                        this.els.addressInput, 
-                        this.els.autocompleteDropdown,
-                        (locationData) => {
-                            this.handleAddressSelected({
-                                placeId: locationData.place?.id || 'unknown',
-                                description: locationData.address
-                            });
-                            
-                            const coords = locationData.coordinates || { lat: 25.7617, lng: -80.1918 };
-                            this.handleAddressCoordinates({
-                                lat: coords.lat,
-                                lng: coords.lng,
-                                address: locationData.address
-                            });
-                        }
-                    );
-                    
-                    this.els.addressInput.addEventListener('place-selected', (e) => {
-                        this.handleAddressSelected(e.detail);
+                if (google && google.maps) {
+                    google.maps.importLibrary("places").then(() => {
+                        this.autocomplete = new CustomAutocomplete(
+                            this.els.addressInput, 
+                            this.els.autocompleteDropdown,
+                            (locationData) => {
+                                this.handleAddressSelected({
+                                    placeId: locationData.place?.id || 'unknown',
+                                    description: locationData.address
+                                });
+                                
+                                const coords = locationData.coordinates || { lat: 25.7617, lng: -80.1918 };
+                                this.handleAddressCoordinates({
+                                    lat: coords.lat,
+                                    lng: coords.lng,
+                                    address: locationData.address
+                                });
+                            }
+                        );
+                        
+                        this.els.addressInput.addEventListener('place-selected', (e) => {
+                            this.handleAddressSelected(e.detail);
+                        });
+                        
+                        this.els.addressInput.addEventListener('place-coordinates', (e) => {
+                            this.handleAddressCoordinates(e.detail);
+                        });
+                        
+                        this.els.addressInput.addEventListener('validation-cleared', () => {
+                            this.handleAddressValidationCleared();
+                        });
                     });
-                    
-                    this.els.addressInput.addEventListener('place-coordinates', (e) => {
-                        this.handleAddressCoordinates(e.detail);
-                    });
-                    
-                    this.els.addressInput.addEventListener('validation-cleared', () => {
-                        this.handleAddressValidationCleared();
-                    });
-                });
+                }
             }
             
             bindEvents() {
@@ -1563,10 +1579,6 @@
             
             async getRouteData(addressCoords, airportCode) {
                 try {
-                    if (!this.directionsService) {
-                        this.directionsService = new google.maps.DirectionsService();
-                    }
-                    
                     const airportCoords = this.getAirportCoordinates(airportCode);
                     if (!airportCoords) {
                         return null;
@@ -1581,45 +1593,47 @@
                     
                     if (this.state.mode === 'dropoff') {
                         origin = addressString;
-                        destination = new google.maps.LatLng(airportCoords.lat, airportCoords.lng);
+                        destination = `${airportCoords.lat},${airportCoords.lng}`;
                     } else {
-                        origin = new google.maps.LatLng(airportCoords.lat, airportCoords.lng);
+                        origin = `${airportCoords.lat},${airportCoords.lng}`;
                         destination = addressString;
                     }
                     
-                    const request = {
-                        origin: origin,
-                        destination: destination,
-                        travelMode: google.maps.TravelMode.DRIVING,
-                        unitSystem: google.maps.UnitSystem.IMPERIAL,
-                        avoidHighways: false,
-                        avoidTolls: false,
-                        drivingOptions: {
-                            departureTime: new Date(),
-                            trafficModel: google.maps.TrafficModel.BEST_GUESS
-                        }
-                    };
-                    
-                    const result = await new Promise((resolve, reject) => {
-                        this.directionsService.route(request, (result, status) => {
-                            if (status === google.maps.DirectionsStatus.OK) {
-                                resolve(result);
-                            } else {
-                                reject(new Error(`Directions service failed: ${status}`));
-                            }
-                        });
+                    // Use proxy endpoint for directions
+                    const response = await fetch('http://localhost:3001/api/directions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            origin: origin,
+                            destination: destination,
+                            mode: 'driving',
+                            units: 'imperial',
+                            departure_time: 'now',
+                            traffic_model: 'best_guess'
+                        })
                     });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch directions');
+                    }
+
+                    const result = await response.json();
                     
-                    const route = result.routes[0];
-                    const leg = route.legs[0];
+                    if (result.status !== 'OK' || !result.route) {
+                        throw new Error(`Directions service failed: ${result.status}`);
+                    }
                     
-                    const distanceInMiles = leg.distance.value * 0.000621371;
+                    const route = result.route;
+                    
+                    const distanceInMiles = route.distance.value * 0.000621371;
                     
                     let durationInMinutes;
-                    if (leg.duration_in_traffic) {
-                        durationInMinutes = Math.round(leg.duration_in_traffic.value / 60);
+                    if (route.duration_in_traffic) {
+                        durationInMinutes = Math.round(route.duration_in_traffic.value / 60);
                     } else {
-                        durationInMinutes = Math.round(leg.duration.value / 60);
+                        durationInMinutes = Math.round(route.duration.value / 60);
                     }
                     
                     return {
@@ -2238,6 +2252,9 @@
                                 strokeWeight: 4
                             }
                         });
+                        
+                        // Initialize DirectionsService for map display
+                        this.directionsService = new google.maps.DirectionsService();
                     }
                     
                     if (this.state.locations.address && this.state.locations.airport) {
@@ -2723,11 +2740,41 @@
             }
         };
 
-        // Google Maps API Loader
-        (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
-            key: "AIzaSyAd_O4s_73E_A8rq7TGCHKVEBFHzNecAHM",
-            v: "weekly"
-        });
+        // Google Maps initialization
+        window.initGoogleMaps = function() {
+            console.log('Google Maps callback triggered');
+            // Google Maps is now loaded, initialize the app
+            if (window.airportApp) {
+                console.log('Initializing autocomplete...');
+                window.airportApp.initializeAutocomplete();
+            } else {
+                console.warn('AirportApp not yet initialized');
+            }
+        };
+
+        // Load Google Maps script from proxy
+        const script = document.createElement('script');
+        
+        // Determine the correct API URL based on current location
+        const isProxyServer = window.location.port === '3001';
+        const apiUrl = isProxyServer ? '/api/maps-script' : 'http://localhost:3001/api/maps-script';
+        
+        console.log('Loading Google Maps from:', apiUrl);
+        script.src = apiUrl;
+        script.defer = true;
+        
+        // Add success handling
+        script.onload = function() {
+            console.log('Google Maps script loaded successfully from proxy');
+        };
+        
+        // Add error handling for script loading
+        script.onerror = function() {
+            console.error('Failed to load Google Maps from proxy. Please ensure the server is running on port 3001.');
+            // Note: No fallback with exposed API key - proxy is required for security
+        };
+        
+        document.head.appendChild(script);
 
         // Initialize Application
         window.airportApp = new AirportBookingApp();

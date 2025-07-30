@@ -1,11 +1,11 @@
 {
   "name": "airport-mvp",
   "version": "1.0.0",
-  "description": "LuxeRide Airport Transfer Booking MVP",
-  "main": "server.js",
+  "description": "LuxeRide Airport Transfer Booking MVP with Secure Maps Proxy",
+  "main": "airport-booking-api-proxy/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "cd airport-booking-api-proxy && node server.js",
+    "dev": "cd airport-booking-api-proxy && nodemon server.js"
   },
   "keywords": [
     "airport",
