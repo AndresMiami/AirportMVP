@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing Refactor Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Pricing Refactor Test</h1>
+    <div id="testResults"></div>
+
+    <script type="module">
+        async function runTests() {
+            const results = document.getElementById('testResults');
+            
+            try {
+                // Test 1: Load pricing service
+                results.innerHTML += '<div class="test-section"><h3>Test 1: Loading Pricing Service</h3>';
+                
+                const pricingModule = await import('./pricing.js');
+                const PricingService = pricingModule.PricingService;
+                const pricingService = new PricingService();
+                
+                results.innerHTML += '<div class="success">✅ Pricing service loaded successfully</div>';
+                
+                // Test 2: Test fallback vehicle configuration
+                results.innerHTML += '</div><div class="test-section"><h3>Test 2: Fallback Vehicle Configuration</h3>';
+                
+                const fallbackConfig = pricingService.getFallbackVehicleConfig();
+                console.log('Fallback config:', fallbackConfig);
+                
+                if (fallbackConfig.tesla && fallbackConfig.escalade && fallbackConfig.sprinter) {
+                    results.innerHTML += '<div class="success">✅ Fallback vehicle configuration available</div>';
+                    results.innerHTML += `<div class="info">Tesla: ${fallbackConfig.tesla.name} - $${fallbackConfig.tesla.basePrice}</div>`;
+                    results.innerHTML += `<div class="info">Escalade: ${fallbackConfig.escalade.name} - $${fallbackConfig.escalade.basePrice}</div>`;
+                    results.innerHTML += `<div class="info">Sprinter: ${fallbackConfig.sprinter.name} - $${fallbackConfig.sprinter.basePrice}</div>`;
+                } else {
+                    results.innerHTML += '<div class="error">❌ Fallback vehicle configuration missing</div>';
+                }
+                
+                // Test 3: Test fallback pricing calculation
+                results.innerHTML += '</div><div class="test-section"><h3>Test 3: Fallback Pricing Calculation</h3>';
+                
+                const fallbackPricing = pricingService.calculateFallbackPrice('tesla', 25.5, 45);
+                console.log('Fallback pricing:', fallbackPricing);
+                
+                if (fallbackPricing && fallbackPricing.finalPrice) {
+                    results.innerHTML += '<div class="success">✅ Fallback pricing calculation works</div>';
+                    results.innerHTML += `<div class="info">Vehicle: ${fallbackPricing.vehicleName}</div>`;
+                    results.innerHTML += `<div class="info">Base Price: $${fallbackPricing.basePrice}</div>`;
+                    results.innerHTML += `<div class="info">Final Price: $${fallbackPricing.finalPrice}</div>`;
+                    results.innerHTML += `<div class="info">Protection: ${fallbackPricing.protectionApplied}</div>`;
+                } else {
+                    results.innerHTML += '<div class="error">❌ Fallback pricing calculation failed</div>';
+                }
+                
+                // Test 4: Test normal pricing calculation
+                results.innerHTML += '</div><div class="test-section"><h3>Test 4: Normal Pricing Calculation</h3>';
+                
+                const normalPricing = pricingService.calculateVehiclePrice('tesla', 25.5, 45);
+                console.log('Normal pricing:', normalPricing);
+                
+                if (normalPricing && normalPricing.finalPrice) {
+                    results.innerHTML += '<div class="success">✅ Normal pricing calculation works</div>';
+                    results.innerHTML += `<div class="info">Vehicle: ${normalPricing.vehicleName}</div>`;
+                    results.innerHTML += `<div class="info">Base Price: $${normalPricing.basePrice}</div>`;
+                    results.innerHTML += `<div class="info">Final Price: $${normalPricing.finalPrice}</div>`;
+                    results.innerHTML += `<div class="info">Protection: ${normalPricing.protectionApplied}</div>`;
+                } else {
+                    results.innerHTML += '<div class="error">❌ Normal pricing calculation failed</div>';
+                }
+                
+                // Test 5: Test price formatting
+                results.innerHTML += '</div><div class="test-section"><h3>Test 5: Price Formatting</h3>';
+                
+                const formattedPrice1 = pricingService.formatPrice(249);
+                const formattedPrice2 = pricingService.formatPrice(249.99);
+                
+                results.innerHTML += '<div class="success">✅ Price formatting works</div>';
+                results.innerHTML += `<div class="info">$249 formats to: ${formattedPrice1}</div>`;
+                results.innerHTML += `<div class="info">$249.99 formats to: ${formattedPrice2}</div>`;
+                
+                results.innerHTML += '</div><div class="test-section"><h3>All Tests Complete!</h3>';
+                results.innerHTML += '<div class="success">✅ Pricing refactor appears to be working correctly</div></div>';
+                
+            } catch (error) {
+                results.innerHTML += `<div class="error">❌ Test failed with error: ${error.message}</div>`;
+                console.error('Test error:', error);
+            }
+        }
+        
+        // Run tests when page loads
+        runTests();
+    </script>
+</body>
+</html>

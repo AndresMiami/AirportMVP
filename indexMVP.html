@@ -577,862 +577,8 @@
         </div>
     </div>
 
-    <style>
-    /* Full Screen Modal Styles */
-    .full-modal {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 9999;
-        display: flex;
-        justify-content: center;
-        align-items: flex-end;
-    }
-
-    .modal-panel {
-        width: 100%;
-        max-width: 576px;
-        height: 100vh;
-        background: #ffffff;
-        display: flex;
-        flex-direction: column;
-        animation: slideUp 0.3s ease-out;
-        border-radius: 20px 20px 0 0;
-    }
-
-    @keyframes slideUp {
-        from { transform: translateY(100%); }
-        to { transform: translateY(0); }
-    }
-
-    /* Modal Header */
-    .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 20px;
-        border-bottom: 1px solid #f0f0f0;
-        background: #ffffff;
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        border-radius: 20px 20px 0 0;
-    }
-
-    .modal-back-btn {
-        width: 40px;
-        height: 40px;
-        border: none;
-        background: none;
-        font-size: 28px;
-        color: #333;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        transition: background 0.2s;
-    }
-
-    .modal-back-btn:hover {
-        background: #f0f0f0;
-    }
-
-    .modal-header h2 {
-        font-size: 28px;
-        font-weight: 700;
-        color: #1a1a1a;
-        margin: 0;
-        flex: 1;
-        text-align: center;
-    }
-
-    /* Modal Map Section (for passenger selection) */
-    .modal-map-section {
-        height: 30vh;
-        max-height: 250px;
-        position: relative;
-        background: #e8f5e9;
-        flex-shrink: 0;
-    }
-
-    .modal-map {
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(135deg, #E8F5E9 0%, #B8E6B8 100%);
-    }
-
-    /* Modal Content */
-    .modal-content-section {
-        flex: 1;
-        padding: 20px;
-        overflow-y: auto;
-        background: #ffffff;
-    }
-
-    .modal-scrollable-content {
-        flex: 1;
-        padding: 24px;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    .modal-subtitle {
-        color: #666;
-        font-size: 16px;
-        line-height: 1.6;
-        margin-bottom: 32px;
-    }
-
-    /* Booking Option Card */
-    .booking-option-card {
-        display: flex;
-        gap: 16px;
-        padding: 20px;
-        background: #f8f9fa;
-        border-radius: 12px;
-        margin-bottom: 24px;
-    }
-
-    .option-icon {
-        flex-shrink: 0;
-        width: 48px;
-        height: 48px;
-        background: #fff;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .option-icon img {
-        width: 24px;
-        height: 24px;
-    }
-
-    .option-content h3 {
-        font-size: 18px;
-        font-weight: 600;
-        color: #1a1a1a;
-        margin: 0 0 8px 0;
-    }
-
-    .option-content p {
-        font-size: 14px;
-        color: #666;
-        line-height: 1.5;
-        margin: 0 0 8px 0;
-    }
-
-    .learn-more-link {
-        color: #666;
-        font-size: 14px;
-        text-decoration: underline;
-    }
-
-    /* Booking Options */
-    .booking-options {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-
-    .booking-option-btn {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 16px;
-        background: #ffffff;
-        border: 2px solid #e0e0e0;
-        border-radius: 8px;
-        font-size: 16px;
-        font-weight: 500;
-        color: #1a1a1a;
-        cursor: pointer;
-        transition: all 0.2s;
-        text-align: left;
-    }
-
-    .booking-option-btn:hover {
-        border-color: #FF5733;
-        background: #fff5f3;
-    }
-
-    .booking-option-btn.active {
-        border-color: #FF5733;
-        background: #fff5f3;
-    }
-
-    .option-radio {
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        border: 2px solid #e0e0e0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: transparent;
-    }
-
-    .booking-option-btn.active .option-radio {
-        border-color: #FF5733;
-        color: #FF5733;
-    }
-
-    .option-icon-plus {
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: #333;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 18px;
-    }
-
-    .option-arrow {
-        margin-left: auto;
-        color: #999;
-        font-size: 20px;
-    }
-
-    /* Form Styles */
-    .form-group {
-        margin-bottom: 24px;
-    }
-
-    .form-group label {
-        display: block;
-        font-size: 16px;
-        font-weight: 600;
-        color: #1a1a1a;
-        margin-bottom: 8px;
-    }
-
-    .form-input,
-    .form-select,
-    .form-textarea {
-        width: 100%;
-        padding: 14px 16px;
-        background: #f8f9fa;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        font-size: 16px;
-        color: #1a1a1a;
-        transition: all 0.2s;
-    }
-
-    .form-input::placeholder,
-    .form-textarea::placeholder {
-        color: #999;
-    }
-
-    .form-input:focus,
-    .form-select:focus,
-    .form-textarea:focus {
-        outline: none;
-        border-color: #FF5733;
-        background: #ffffff;
-    }
-
-    .form-textarea {
-        resize: vertical;
-        min-height: 100px;
-    }
-
-    .form-row {
-        display: flex;
-        gap: 12px;
-    }
-
-    /* Info Notes */
-    .info-notes {
-        margin: 24px 0;
-    }
-
-    .info-note {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 12px;
-    }
-
-    .info-icon {
-        flex-shrink: 0;
-        font-size: 16px;
-    }
-
-    .info-note p {
-        font-size: 14px;
-        color: #666;
-        line-height: 1.5;
-        margin: 0;
-    }
-
-    /* Modal Action Button */
-    .modal-action-btn {
-        width: 100%;
-        padding: 18px;
-        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
-        color: white;
-        border: none;
-        border-radius: 12px;
-        font-size: 18px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s;
-        margin-top: 32px;
-    }
-
-    .modal-action-btn:hover {
-        background: linear-gradient(to right, #FF5733, #FF9933);
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(255, 87, 51, 0.3);
-    }
-
-    .modal-action-btn:active {
-        transform: scale(0.98);
-    }
-
-    /* Update control button styles */
-    .control-button {
-        position: relative;
-    }
-
-    .control-button.guest-selected {
-        background: #fff5f3;
-        border-color: #FF5733;
-    }
-
-    .control-button .guest-info {
-        font-size: 14px;
-        color: #FF5733;
-        font-weight: 600;
-    }
-
-    .control-button.notes-added {
-        background: #fff5f3;
-        border-color: #FF5733;
-    }
-
-    .control-button.notes-added .control-icon {
-        color: #FF5733;
-    }
-
-    .control-button.notes-added .control-text {
-        color: #FF5733;
-        font-weight: 600;
-    }
-
-    /* Mobile optimizations */
-    @media (max-width: 480px) {
-        .modal-panel {
-            border-radius: 0;
-        }
-        
-        .modal-header {
-            padding: 12px;
-        }
-        
-        .modal-scrollable-content,
-        .modal-content-section {
-            padding: 16px;
-        }
-        
-        .booking-option-card {
-            padding: 16px;
-        }
-    }
-    </style>
-
+    <script type="module" src="./autocomplete.js"></script>
     <script>
-        // Google Maps Autocomplete Class - Optimized Version
-        class CustomAutocomplete {
-            constructor(inputId, suggestionsId, onSelect) {
-                this.input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
-                this.suggestionsContainer = typeof suggestionsId === 'string' ? document.getElementById(suggestionsId) : suggestionsId;
-                this.onSelect = onSelect;
-                
-                // Validate required elements exist
-                if (!this.input) {
-                    console.warn('CustomAutocomplete: Input element not found:', inputId);
-                    return;
-                }
-                if (!this.suggestionsContainer) {
-                    console.warn('CustomAutocomplete: Suggestions container not found:', suggestionsId);
-                    return;
-                }
-                
-                // Session management
-                this.sessionToken = null;
-                this.sessionStartTime = null;
-                this.sessionRequestCount = 0;
-                this.maxSessionRequests = 10;
-                this.sessionDuration = 3 * 60 * 1000; // 3 minutes
-                
-                // Caching
-                this.suggestionCache = new Map();
-                this.cacheTTL = 5 * 60 * 1000; // 5 minutes
-                
-                // State
-                this.predictions = [];
-                this.selectedIndex = -1;
-                this.debounceTimer = null;
-                this.selectedPlace = null;
-                this.isValidated = false;
-                this.lastInput = '';
-                
-                this.init();
-            }
-
-            init() {
-                if (!this.input) {
-                    console.warn('CustomAutocomplete: Cannot initialize - input element missing');
-                    return;
-                }
-                console.log('✅ CustomAutocomplete initialized successfully');
-                this.input.addEventListener('input', (e) => this.handleInput(e));
-                this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
-                this.input.addEventListener('blur', () => this.handleBlur());
-            }
-
-            // Session token management
-            generateSessionToken() {
-                this.sessionToken = 'sess_' + Math.random().toString(36).substr(2, 9);
-                this.sessionStartTime = Date.now();
-                this.sessionRequestCount = 0;
-                console.log('Generated new session token:', this.sessionToken);
-            }
-
-            shouldGenerateNewSession() {
-                if (!this.sessionToken || !this.sessionStartTime) return true;
-                
-                const elapsed = Date.now() - this.sessionStartTime;
-                const sessionExpired = elapsed > this.sessionDuration;
-                const maxRequestsReached = this.sessionRequestCount >= this.maxSessionRequests;
-                
-                return sessionExpired || maxRequestsReached;
-            }
-
-            clearSession() {
-                console.log('Clearing session token:', this.sessionToken);
-                this.sessionToken = null;
-                this.sessionStartTime = null;
-                this.sessionRequestCount = 0;
-            }
-
-            // Cache management
-            getCacheKey(input) {
-                return `autocomplete_${input.toLowerCase()}`;
-            }
-
-            getCachedSuggestions(input) {
-                const cacheKey = this.getCacheKey(input);
-                const cached = this.suggestionCache.get(cacheKey);
-                
-                if (cached && (Date.now() - cached.timestamp) < this.cacheTTL) {
-                    console.log('Cache hit for:', input);
-                    return cached.data;
-                }
-                
-                if (cached) {
-                    this.suggestionCache.delete(cacheKey);
-                }
-                return null;
-            }
-
-            setCachedSuggestions(input, data) {
-                const cacheKey = this.getCacheKey(input);
-                this.suggestionCache.set(cacheKey, {
-                    data: data,
-                    timestamp: Date.now()
-                });
-                
-                // Cleanup old cache entries
-                if (this.suggestionCache.size > 50) {
-                    const oldestKey = this.suggestionCache.keys().next().value;
-                    this.suggestionCache.delete(oldestKey);
-                }
-            }
-
-            // Check if input change is minor (for local filtering)
-            isMinorChange(newInput, oldInput) {
-                if (!oldInput || oldInput.length === 0) return false;
-                if (newInput.length < oldInput.length) return false; // User is deleting
-                
-                const similarity = this.calculateSimilarity(newInput.toLowerCase(), oldInput.toLowerCase());
-                return similarity > 0.8 && newInput.toLowerCase().startsWith(oldInput.toLowerCase());
-            }
-
-            calculateSimilarity(str1, str2) {
-                const longer = str1.length > str2.length ? str1 : str2;
-                const shorter = str1.length > str2.length ? str2 : str1;
-                
-                if (longer.length === 0) return 1.0;
-                
-                const distance = this.levenshteinDistance(longer, shorter);
-                return (longer.length - distance) / longer.length;
-            }
-
-            levenshteinDistance(str1, str2) {
-                const matrix = [];
-                for (let i = 0; i <= str2.length; i++) {
-                    matrix[i] = [i];
-                }
-                for (let j = 0; j <= str1.length; j++) {
-                    matrix[0][j] = j;
-                }
-                for (let i = 1; i <= str2.length; i++) {
-                    for (let j = 1; j <= str1.length; j++) {
-                        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-                            matrix[i][j] = matrix[i - 1][j - 1];
-                        } else {
-                            matrix[i][j] = Math.min(
-                                matrix[i - 1][j - 1] + 1,
-                                matrix[i][j - 1] + 1,
-                                matrix[i - 1][j] + 1
-                            );
-                        }
-                    }
-                }
-                return matrix[str2.length][str1.length];
-            }
-
-            // Filter existing predictions for minor changes
-            filterPredictions(input, predictions) {
-                if (!predictions || predictions.length === 0) return [];
-                
-                const lowerInput = input.toLowerCase();
-                return predictions.filter(prediction => {
-                    const description = prediction.description || '';
-                    const mainText = prediction.structured_formatting?.main_text || '';
-                    const secondaryText = prediction.structured_formatting?.secondary_text || '';
-                    
-                    return description.toLowerCase().includes(lowerInput) ||
-                           mainText.toLowerCase().includes(lowerInput) ||
-                           secondaryText.toLowerCase().includes(lowerInput);
-                });
-            }
-
-            async handleInput(e) {
-                const value = e.target.value.trim();
-                
-                if (this.isValidated) {
-                    this.clearValidation();
-                    this.input.dispatchEvent(new CustomEvent('validation-cleared'));
-                }
-                
-                if (this.debounceTimer) {
-                    clearTimeout(this.debounceTimer);
-                }
-                
-                // Minimum 3 characters
-                if (value.length < 3) {
-                    this.hideSuggestions();
-                    this.lastInput = value;
-                    return;
-                }
-                
-                // Increased debounce to 500ms for cost optimization
-                this.debounceTimer = setTimeout(() => {
-                    this.fetchSuggestions(value);
-                }, 500);
-            }
-
-            async fetchSuggestions(input) {
-                try {
-                    // Check cache first
-                    const cached = this.getCachedSuggestions(input);
-                    if (cached) {
-                        this.predictions = cached;
-                        this.renderSuggestions(this.predictions);
-                        this.lastInput = input;
-                        return;
-                    }
-                    
-                    // Check if this is a minor change and we can filter existing results
-                    if (this.isMinorChange(input, this.lastInput) && this.predictions.length > 0) {
-                        console.log('Filtering existing predictions for minor change');
-                        const filtered = this.filterPredictions(input, this.predictions);
-                        if (filtered.length > 0) {
-                            this.predictions = filtered;
-                            this.renderSuggestions(this.predictions);
-                            this.lastInput = input;
-                            return;
-                        }
-                    }
-                    
-                    this.showLoading();
-                    
-                    // Session management
-                    if (this.shouldGenerateNewSession()) {
-                        this.generateSessionToken();
-                    }
-                    
-                    this.sessionRequestCount++;
-                    
-                    const params = new URLSearchParams({
-                        input: input,
-                        sessiontoken: this.sessionToken,
-                        location: `${25.7617},${-80.1918}`,
-                        radius: '30000'
-                    });
-                    
-                    console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
-                    
-                    const response = await fetch(`http://localhost:3001/api/places/autocomplete?${params}`);
-
-                    if (!response.ok) {
-                        throw new Error('Failed to fetch suggestions');
-                    }
-
-                    const data = await response.json();
-                    this.predictions = data.predictions || [];
-                    
-                    // Cache the results
-                    this.setCachedSuggestions(input, this.predictions);
-                    
-                    this.renderSuggestions(this.predictions);
-                    this.lastInput = input;
-                    
-                } catch (error) {
-                    console.error('Autocomplete error:', error);
-                    this.showError();
-                }
-            }
-
-            renderSuggestions(suggestions) {
-                if (!suggestions || suggestions.length === 0) {
-                    this.suggestionsContainer.innerHTML = '<div class="no-results">No results found</div>';
-                    this.showSuggestions();
-                    return;
-                }
-                
-                const html = suggestions.map((suggestion, index) => {
-                    const prediction = suggestion;
-                    
-                    let mainText = '';
-                    if (prediction.structured_formatting && prediction.structured_formatting.main_text) {
-                        mainText = prediction.structured_formatting.main_text;
-                    } else if (prediction.description) {
-                        mainText = prediction.description;
-                    }
-                    
-                    let secondaryText = '';
-                    if (prediction.structured_formatting && prediction.structured_formatting.secondary_text) {
-                        secondaryText = prediction.structured_formatting.secondary_text;
-                    }
-                    
-                    return `
-                        <div class="suggestion-item" data-index="${index}">
-                            <div class="suggestion-icon">📍</div>
-                            <div class="suggestion-text">
-                                <div class="suggestion-main">${this.escapeHtml(mainText)}</div>
-                                ${secondaryText ? `<div class="suggestion-secondary">${this.escapeHtml(secondaryText)}</div>` : ''}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                
-                this.suggestionsContainer.innerHTML = html;
-                this.showSuggestions();
-                
-                this.suggestionsContainer.querySelectorAll('.suggestion-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const index = parseInt(item.dataset.index);
-                        this.selectSuggestion(index);
-                    });
-                });
-            }
-
-            async selectSuggestion(index) {
-                const suggestion = this.predictions[index];
-                if (!suggestion) return;
-                
-                try {
-                    const prediction = suggestion;
-                    let place;
-                    
-                    try {
-                        // Ensure we have a session token for place details
-                        if (!this.sessionToken) {
-                            this.generateSessionToken();
-                        }
-                        
-                        this.sessionRequestCount++;
-                        
-                        // Use proxy endpoint for place details
-                        const params = new URLSearchParams({
-                            place_id: prediction.place_id,
-                            fields: 'name,formatted_address,geometry',
-                            sessiontoken: this.sessionToken
-                        });
-                        
-                        console.log('Fetching place details with session:', this.sessionToken);
-                        
-                        const response = await fetch(`http://localhost:3001/api/places/details?${params}`);
-
-                        if (response.ok) {
-                            const data = await response.json();
-                            place = {
-                                id: prediction.place_id,
-                                formattedAddress: data.result.formatted_address,
-                                displayName: { text: data.result.name || data.result.formatted_address },
-                                location: {
-                                    lat: data.result.geometry.location.lat,
-                                    lng: data.result.geometry.location.lng
-                                }
-                            };
-                        } else {
-                            throw new Error('Failed to fetch place details');
-                        }
-                    } catch (placeError) {
-                        console.error('Place details error:', placeError);
-                        place = {
-                            id: prediction.place_id,
-                            formattedAddress: prediction.description,
-                            displayName: { text: prediction.description },
-                            location: { lat: 0, lng: 0 }
-                        };
-                    }
-                    
-                    const address = place.formattedAddress || place.displayName?.text || '';
-                    this.input.value = address;
-                    
-                    this.selectedPlace = {
-                        place_id: place.id,
-                        description: address
-                    };
-                    this.isValidated = true;
-                    this.input.classList.add('validated');
-                    this.input.classList.remove('error');
-                    
-                    if (document.getElementById('addressError')) {
-                        document.getElementById('addressError').classList.remove('visible');
-                    }
-                    
-                    if (this.onSelect) {
-                        this.onSelect({
-                            address: address,
-                            coordinates: place.location ? {
-                                lat: typeof place.location.lat === 'function' ? place.location.lat() : place.location.lat,
-                                lng: typeof place.location.lng === 'function' ? place.location.lng() : place.location.lng
-                            } : null,
-                            place: place
-                        });
-                    }
-                    
-                    this.input.dispatchEvent(new CustomEvent('place-selected', { 
-                        detail: { 
-                            placeId: place.id, 
-                            description: address
-                        } 
-                    }));
-                    
-                    this.input.dispatchEvent(new CustomEvent('place-coordinates', {
-                        detail: {
-                            lat: typeof place.location.lat === 'function' ? place.location.lat() : place.location.lat,
-                            lng: typeof place.location.lng === 'function' ? place.location.lng() : place.location.lng,
-                            address: address
-                        }
-                    }));
-                    
-                    // Clear session after successful place selection
-                    this.clearSession();
-                    this.hideSuggestions();
-                    this.selectedIndex = -1;
-                    
-                } catch (error) {
-                    console.error('Selection error:', error);
-                }
-            }
-
-            handleKeydown(e) {
-                const items = this.suggestionsContainer.querySelectorAll('.suggestion-item');
-                
-                switch(e.key) {
-                    case 'ArrowDown':
-                        e.preventDefault();
-                        this.selectedIndex = Math.min(this.selectedIndex + 1, items.length - 1);
-                        this.highlightItem();
-                        break;
-                    case 'ArrowUp':
-                        e.preventDefault();
-                        this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
-                        this.highlightItem();
-                        break;
-                    case 'Enter':
-                        e.preventDefault();
-                        if (this.selectedIndex >= 0) {
-                            this.selectSuggestion(this.selectedIndex);
-                        }
-                        break;
-                    case 'Escape':
-                        this.hideSuggestions();
-                        break;
-                }
-            }
-
-            highlightItem() {
-                const items = this.suggestionsContainer.querySelectorAll('.suggestion-item');
-                items.forEach((item, index) => {
-                    if (index === this.selectedIndex) {
-                        item.classList.add('highlighted');
-                    } else {
-                        item.classList.remove('highlighted');
-                    }
-                });
-            }
-
-            handleBlur() {
-                setTimeout(() => {
-                    this.hideSuggestions();
-                }, 200);
-            }
-
-            showSuggestions() {
-                this.suggestionsContainer.classList.add('visible');
-            }
-
-            hideSuggestions() {
-                this.suggestionsContainer.classList.remove('visible');
-            }
-
-            showLoading() {
-                this.suggestionsContainer.innerHTML = '<div class="loading-results">Loading...</div>';
-                this.showSuggestions();
-            }
-            
-            clearValidation() {
-                this.isValidated = false;
-                this.selectedPlace = null;
-                this.input.classList.remove('validated');
-                this.input.classList.remove('error');
-                if (document.getElementById('addressError')) {
-                    document.getElementById('addressError').classList.remove('visible');
-                }
-            }
-
-            showError() {
-                this.suggestionsContainer.innerHTML = '<div class="no-results">Error loading suggestions</div>';
-                this.showSuggestions();
-                if (document.getElementById('addressError')) {
-                    document.getElementById('addressError').classList.add('visible');
-                }
-                this.input.classList.add('error');
-            }
-
-            escapeHtml(text) {
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
-            }
-        }
-
         // Main Application Class
         class AirportBookingApp {
             constructor() {
@@ -1511,28 +657,35 @@
                     
                 } catch (error) {
                     console.error('❌ Failed to load pricing service:', error);
-                    console.log('🔄 Using fallback pricing configuration');
+                    console.log('🔄 Using default vehicle configuration');
                     
-                    // Enhanced fallback pricing with psychological pricing simulation
-                    this.vehicleConfig = {
-                        tesla: { 
-                            name: 'Tesla Model Y',
-                            basePrice: 125, // Ends in 5
-                            capacity: { passengers: 4, bags: 4 } 
-                        },
-                        escalade: { 
-                            name: 'Cadillac Escalade',
-                            basePrice: 169, // Ends in 9
-                            capacity: { passengers: 7, bags: 8 } 
-                        },
-                        sprinter: { 
-                            name: 'Mercedes Sprinter',
-                            basePrice: 219, // Ends in 9
-                            capacity: { passengers: 12, bags: 15 } 
-                        }
-                    };
+                    // Import default configuration from config.js
+                    try {
+                        const configModule = await import('./config.js');
+                        this.vehicleConfig = configModule.DEFAULT_VEHICLE_CONFIG;
+                        console.log('✅ Default vehicle configuration loaded');
+                    } catch (configError) {
+                        console.error('❌ Failed to load config file, using hardcoded fallback');
+                        // Ultimate fallback if config.js can't be loaded
+                        this.vehicleConfig = {
+                            tesla: { 
+                                name: 'Tesla Model Y',
+                                basePrice: 125,
+                                capacity: { passengers: 4, bags: 4 } 
+                            },
+                            escalade: { 
+                                name: 'Cadillac Escalade',
+                                basePrice: 169,
+                                capacity: { passengers: 7, bags: 8 } 
+                            },
+                            sprinter: { 
+                                name: 'Mercedes Sprinter',
+                                basePrice: 219,
+                                capacity: { passengers: 12, bags: 15 } 
+                            }
+                        };
+                    }
                     
-                    // Create a basic fallback service
                     this.pricingService = null;
                 }
             }
@@ -1594,7 +747,12 @@
                 }
                 
                 if (google && google.maps) {
-                    google.maps.importLibrary("places").then(() => {
+                    Promise.all([
+                        google.maps.importLibrary("places"),
+                        import('./autocomplete.js')
+                    ]).then(([placesLib, autocompleteModule]) => {
+                        const { CustomAutocomplete } = autocompleteModule;
+                        
                         this.autocomplete = new CustomAutocomplete(
                             this.els.addressInput, 
                             this.els.autocompleteDropdown,
@@ -1628,9 +786,9 @@
                             });
                         }
                         
-                        console.log('✅ Autocomplete initialized successfully');
+                        console.log('✅ Autocomplete initialized successfully with external module');
                     }).catch((error) => {
-                        console.error('Failed to load Google Maps Places library:', error);
+                        console.error('Failed to load Google Maps Places library or autocomplete module:', error);
                     });
                 } else {
                     console.warn('Google Maps not available for autocomplete initialization');
@@ -2370,17 +1528,15 @@
                 if (this.state.route.distance && this.state.route.duration) {
                     const pricing = this.calculateVehiclePrice(vehicleType, this.state.route.distance, this.state.route.duration);
                     
-                    if (pricing) {
+                    if (pricing && !pricing.error) {
                         this.state.vehicle.pricing = pricing;
                         this.state.route.price = pricing.finalPrice;
+                    } else {
+                        this.state.route.price = null;
                     }
                 } else {
-                    if (this.pricingService) {
-                        const config = this.pricingService.getVehicleConfig(vehicleType);
-                        this.state.route.price = config ? config.basePrice : 100;
-                    } else {
-                        this.state.route.price = 100;
-                    }
+                    // No pricing calculation without route data
+                    this.state.route.price = null;
                 }
                 
                 if (this.els.bookBtn) {
@@ -2425,43 +1581,9 @@
                     }
                     
                     return pricing;
-                }
-                
-                // Enhanced fallback with psychological pricing simulation
-                console.log('⚠️ Using fallback pricing for', vehicleType);
-                const basePrice = distance * 2.5 + 45; // Basic calculation
-                const psychologicalPrice = this.applyFallbackPsychologicalPricing(basePrice);
-                
-                return {
-                    vehicleType,
-                    vehicleName: this.vehicleConfig[vehicleType]?.name || 'Unknown Vehicle',
-                    basePrice: Math.round(basePrice * 100) / 100,
-                    finalPrice: psychologicalPrice,
-                    protectionApplied: 'fallback',
-                    breakdown: {
-                        perMilePrice: Math.round(distance * 2.5 * 100) / 100,
-                        airportFee: 45,
-                        appliedSurcharges: []
-                    }
-                };
-            }
-            
-            // Fallback psychological pricing method
-            applyFallbackPsychologicalPricing(price) {
-                if (price < 50) {
-                    return Math.floor(price) + 0.99; // End in 99 cents for bargain perception
-                } else if (price < 150) {
-                    const rounded = Math.round(price);
-                    return rounded % 10 === 0 ? rounded - 1 : rounded; // Avoid round numbers
                 } else {
-                    const rounded = Math.round(price);
-                    const lastDigit = rounded % 10;
-                    if (lastDigit === 0 || lastDigit === 1) {
-                        return rounded - 1; // Make it end in 9
-                    } else if (lastDigit > 5 && lastDigit < 9) {
-                        return rounded + (9 - lastDigit); // Make it end in 9
-                    }
-                    return rounded;
+                    console.warn('⚠️ Pricing service unavailable for', vehicleType);
+                    return { error: 'Pricing service unavailable' };
                 }
             }
             
@@ -2490,41 +1612,41 @@
                     );
                     
                     const priceElement = document.getElementById(`${vehicleType}-price`);
-                    if (priceElement && pricing) {
+                    if (priceElement) {
                         // Add visual feedback for price updates
                         priceElement.classList.add('price-updating');
                         
-                        // Format price with proper psychological pricing
-                        let formattedPrice;
-                        if (this.pricingService) {
-                            formattedPrice = '$' + this.pricingService.formatPrice(pricing.finalPrice);
-                        } else {
-                            // Fallback formatting that maintains psychological pricing
-                            const price = pricing.finalPrice;
-                            if (price % 1 === 0) {
-                                formattedPrice = '$' + price; // $249
+                        if (pricing && !pricing.error) {
+                            // Format price using pricing service
+                            let formattedPrice;
+                            if (this.pricingService && this.pricingService.formatPrice) {
+                                formattedPrice = '$' + this.pricingService.formatPrice(pricing.finalPrice);
                             } else {
-                                formattedPrice = '$' + price.toFixed(2); // $249.99
+                                formattedPrice = '$' + pricing.finalPrice;
                             }
+                            
+                            priceElement.textContent = formattedPrice;
+                            
+                            // Log detailed pricing information
+                            console.log(`💰 ${vehicleType.toUpperCase()}: ${formattedPrice}`, {
+                                basePrice: '$' + pricing.basePrice,
+                                finalPrice: '$' + pricing.finalPrice,
+                                surcharges: pricing.breakdown.appliedSurcharges.length > 0 ? 
+                                    pricing.breakdown.appliedSurcharges.map(s => s.description).join(', ') : 'None',
+                                protectionModel: pricing.protectionApplied
+                            });
+                        } else {
+                            // Show price unavailable when pricing service is not available
+                            priceElement.textContent = 'Price unavailable';
+                            console.warn(`❌ Could not calculate price for ${vehicleType} - pricing service unavailable`);
                         }
-                        
-                        priceElement.textContent = formattedPrice;
-                        
-                        // Log detailed pricing information
-                        console.log(`💰 ${vehicleType.toUpperCase()}: ${formattedPrice}`, {
-                            basePrice: '$' + pricing.basePrice,
-                            finalPrice: '$' + pricing.finalPrice,
-                            surcharges: pricing.breakdown.appliedSurcharges.length > 0 ? 
-                                pricing.breakdown.appliedSurcharges.map(s => s.description).join(', ') : 'None',
-                            protectionModel: pricing.protectionApplied
-                        });
                         
                         // Remove visual feedback after animation
                         setTimeout(() => {
                             priceElement.classList.remove('price-updating');
                         }, 500);
                     } else {
-                        console.warn(`❌ Could not update price for ${vehicleType} - element or pricing missing`);
+                        console.warn(`❌ Price element not found for ${vehicleType}`);
                     }
                 });
                 
@@ -2548,15 +1670,22 @@
                 this.els.vehicleCards.forEach(card => {
                     const vehicleType = card.dataset.vehicle;
                     
-                    if (this.pricingService) {
-                        const canAccommodate = this.pricingService.checkCapacity(vehicleType, passengerCount);
-                        if (!canAccommodate) {
-                            card.style.opacity = '0.5';
-                            card.style.pointerEvents = 'none';
-                        } else {
-                            card.style.opacity = '1';
-                            card.style.pointerEvents = 'auto';
-                        }
+                    let canAccommodate = true;
+                    
+                    if (this.pricingService && this.pricingService.checkCapacity) {
+                        canAccommodate = this.pricingService.checkCapacity(vehicleType, passengerCount);
+                    } else if (this.vehicleConfig && this.vehicleConfig[vehicleType]) {
+                        // Use fallback capacity check
+                        const capacity = this.vehicleConfig[vehicleType].capacity;
+                        canAccommodate = capacity && capacity.passengers >= passengerCount;
+                    }
+                    
+                    if (!canAccommodate) {
+                        card.style.opacity = '0.5';
+                        card.style.pointerEvents = 'none';
+                    } else {
+                        card.style.opacity = '1';
+                        card.style.pointerEvents = 'auto';
                     }
                 });
             }
