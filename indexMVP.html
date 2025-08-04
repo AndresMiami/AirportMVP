@@ -7,7 +7,6 @@
     
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="maps-autocomplete.css">
-    <script type="module" src="pricing.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -951,26 +950,172 @@
     </style>
 
     <script>
-        // Google Maps Autocomplete Class
+        // Google Maps Autocomplete Class - Optimized Version
         class CustomAutocomplete {
             constructor(inputId, suggestionsId, onSelect) {
                 this.input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
                 this.suggestionsContainer = typeof suggestionsId === 'string' ? document.getElementById(suggestionsId) : suggestionsId;
                 this.onSelect = onSelect;
+                
+                // Validate required elements exist
+                if (!this.input) {
+                    console.warn('CustomAutocomplete: Input element not found:', inputId);
+                    return;
+                }
+                if (!this.suggestionsContainer) {
+                    console.warn('CustomAutocomplete: Suggestions container not found:', suggestionsId);
+                    return;
+                }
+                
+                // Session management
                 this.sessionToken = null;
+                this.sessionStartTime = null;
+                this.sessionRequestCount = 0;
+                this.maxSessionRequests = 10;
+                this.sessionDuration = 3 * 60 * 1000; // 3 minutes
+                
+                // Caching
+                this.suggestionCache = new Map();
+                this.cacheTTL = 5 * 60 * 1000; // 5 minutes
+                
+                // State
                 this.predictions = [];
                 this.selectedIndex = -1;
                 this.debounceTimer = null;
                 this.selectedPlace = null;
                 this.isValidated = false;
+                this.lastInput = '';
                 
                 this.init();
             }
 
             init() {
+                if (!this.input) {
+                    console.warn('CustomAutocomplete: Cannot initialize - input element missing');
+                    return;
+                }
+                console.log('✅ CustomAutocomplete initialized successfully');
                 this.input.addEventListener('input', (e) => this.handleInput(e));
                 this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
                 this.input.addEventListener('blur', () => this.handleBlur());
+            }
+
+            // Session token management
+            generateSessionToken() {
+                this.sessionToken = 'sess_' + Math.random().toString(36).substr(2, 9);
+                this.sessionStartTime = Date.now();
+                this.sessionRequestCount = 0;
+                console.log('Generated new session token:', this.sessionToken);
+            }
+
+            shouldGenerateNewSession() {
+                if (!this.sessionToken || !this.sessionStartTime) return true;
+                
+                const elapsed = Date.now() - this.sessionStartTime;
+                const sessionExpired = elapsed > this.sessionDuration;
+                const maxRequestsReached = this.sessionRequestCount >= this.maxSessionRequests;
+                
+                return sessionExpired || maxRequestsReached;
+            }
+
+            clearSession() {
+                console.log('Clearing session token:', this.sessionToken);
+                this.sessionToken = null;
+                this.sessionStartTime = null;
+                this.sessionRequestCount = 0;
+            }
+
+            // Cache management
+            getCacheKey(input) {
+                return `autocomplete_${input.toLowerCase()}`;
+            }
+
+            getCachedSuggestions(input) {
+                const cacheKey = this.getCacheKey(input);
+                const cached = this.suggestionCache.get(cacheKey);
+                
+                if (cached && (Date.now() - cached.timestamp) < this.cacheTTL) {
+                    console.log('Cache hit for:', input);
+                    return cached.data;
+                }
+                
+                if (cached) {
+                    this.suggestionCache.delete(cacheKey);
+                }
+                return null;
+            }
+
+            setCachedSuggestions(input, data) {
+                const cacheKey = this.getCacheKey(input);
+                this.suggestionCache.set(cacheKey, {
+                    data: data,
+                    timestamp: Date.now()
+                });
+                
+                // Cleanup old cache entries
+                if (this.suggestionCache.size > 50) {
+                    const oldestKey = this.suggestionCache.keys().next().value;
+                    this.suggestionCache.delete(oldestKey);
+                }
+            }
+
+            // Check if input change is minor (for local filtering)
+            isMinorChange(newInput, oldInput) {
+                if (!oldInput || oldInput.length === 0) return false;
+                if (newInput.length < oldInput.length) return false; // User is deleting
+                
+                const similarity = this.calculateSimilarity(newInput.toLowerCase(), oldInput.toLowerCase());
+                return similarity > 0.8 && newInput.toLowerCase().startsWith(oldInput.toLowerCase());
+            }
+
+            calculateSimilarity(str1, str2) {
+                const longer = str1.length > str2.length ? str1 : str2;
+                const shorter = str1.length > str2.length ? str2 : str1;
+                
+                if (longer.length === 0) return 1.0;
+                
+                const distance = this.levenshteinDistance(longer, shorter);
+                return (longer.length - distance) / longer.length;
+            }
+
+            levenshteinDistance(str1, str2) {
+                const matrix = [];
+                for (let i = 0; i <= str2.length; i++) {
+                    matrix[i] = [i];
+                }
+                for (let j = 0; j <= str1.length; j++) {
+                    matrix[0][j] = j;
+                }
+                for (let i = 1; i <= str2.length; i++) {
+                    for (let j = 1; j <= str1.length; j++) {
+                        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                            matrix[i][j] = matrix[i - 1][j - 1];
+                        } else {
+                            matrix[i][j] = Math.min(
+                                matrix[i - 1][j - 1] + 1,
+                                matrix[i][j - 1] + 1,
+                                matrix[i - 1][j] + 1
+                            );
+                        }
+                    }
+                }
+                return matrix[str2.length][str1.length];
+            }
+
+            // Filter existing predictions for minor changes
+            filterPredictions(input, predictions) {
+                if (!predictions || predictions.length === 0) return [];
+                
+                const lowerInput = input.toLowerCase();
+                return predictions.filter(prediction => {
+                    const description = prediction.description || '';
+                    const mainText = prediction.structured_formatting?.main_text || '';
+                    const secondaryText = prediction.structured_formatting?.secondary_text || '';
+                    
+                    return description.toLowerCase().includes(lowerInput) ||
+                           mainText.toLowerCase().includes(lowerInput) ||
+                           secondaryText.toLowerCase().includes(lowerInput);
+                });
             }
 
             async handleInput(e) {
@@ -985,23 +1130,50 @@
                     clearTimeout(this.debounceTimer);
                 }
                 
+                // Minimum 3 characters
                 if (value.length < 3) {
                     this.hideSuggestions();
+                    this.lastInput = value;
                     return;
                 }
                 
+                // Increased debounce to 500ms for cost optimization
                 this.debounceTimer = setTimeout(() => {
                     this.fetchSuggestions(value);
-                }, 300);
+                }, 500);
             }
 
             async fetchSuggestions(input) {
                 try {
+                    // Check cache first
+                    const cached = this.getCachedSuggestions(input);
+                    if (cached) {
+                        this.predictions = cached;
+                        this.renderSuggestions(this.predictions);
+                        this.lastInput = input;
+                        return;
+                    }
+                    
+                    // Check if this is a minor change and we can filter existing results
+                    if (this.isMinorChange(input, this.lastInput) && this.predictions.length > 0) {
+                        console.log('Filtering existing predictions for minor change');
+                        const filtered = this.filterPredictions(input, this.predictions);
+                        if (filtered.length > 0) {
+                            this.predictions = filtered;
+                            this.renderSuggestions(this.predictions);
+                            this.lastInput = input;
+                            return;
+                        }
+                    }
+                    
                     this.showLoading();
                     
-                    if (!this.sessionToken) {
-                        this.sessionToken = 'sess_' + Math.random().toString(36).substr(2, 9);
+                    // Session management
+                    if (this.shouldGenerateNewSession()) {
+                        this.generateSessionToken();
                     }
+                    
+                    this.sessionRequestCount++;
                     
                     const params = new URLSearchParams({
                         input: input,
@@ -1009,6 +1181,8 @@
                         location: `${25.7617},${-80.1918}`,
                         radius: '30000'
                     });
+                    
+                    console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
                     
                     const response = await fetch(`http://localhost:3001/api/places/autocomplete?${params}`);
 
@@ -1018,9 +1192,15 @@
 
                     const data = await response.json();
                     this.predictions = data.predictions || [];
+                    
+                    // Cache the results
+                    this.setCachedSuggestions(input, this.predictions);
+                    
                     this.renderSuggestions(this.predictions);
+                    this.lastInput = input;
                     
                 } catch (error) {
+                    console.error('Autocomplete error:', error);
                     this.showError();
                 }
             }
@@ -1078,12 +1258,21 @@
                     let place;
                     
                     try {
+                        // Ensure we have a session token for place details
+                        if (!this.sessionToken) {
+                            this.generateSessionToken();
+                        }
+                        
+                        this.sessionRequestCount++;
+                        
                         // Use proxy endpoint for place details
                         const params = new URLSearchParams({
                             place_id: prediction.place_id,
                             fields: 'name,formatted_address,geometry',
                             sessiontoken: this.sessionToken
                         });
+                        
+                        console.log('Fetching place details with session:', this.sessionToken);
                         
                         const response = await fetch(`http://localhost:3001/api/places/details?${params}`);
 
@@ -1102,6 +1291,7 @@
                             throw new Error('Failed to fetch place details');
                         }
                     } catch (placeError) {
+                        console.error('Place details error:', placeError);
                         place = {
                             id: prediction.place_id,
                             formattedAddress: prediction.description,
@@ -1151,12 +1341,13 @@
                         }
                     }));
                     
-                    this.sessionToken = null;
+                    // Clear session after successful place selection
+                    this.clearSession();
                     this.hideSuggestions();
                     this.selectedIndex = -1;
                     
                 } catch (error) {
-                    // Silent error handling
+                    console.error('Selection error:', error);
                 }
             }
 
@@ -1296,25 +1487,62 @@
             
             async initializePricingService() {
                 try {
-                    const { pricingService } = await import('./pricing.js');
-                    this.pricingService = pricingService;
+                    console.log('🔄 Loading pricing service...');
+                    const pricingModule = await import('./pricing.js');
+                    this.pricingService = pricingModule.pricingService;
+                    
+                    if (!this.pricingService) {
+                        throw new Error('pricingService not found in module exports');
+                    }
+                    
                     this.vehicleConfig = this.pricingService.getAllVehicleConfigs();
-                    console.log('✅ Pricing service loaded:', this.vehicleConfig);
+                    console.log('✅ Pricing service loaded successfully');
+                    console.log('📊 Vehicle configurations:', this.vehicleConfig);
+                    
+                    // Test psychological pricing to verify it's working
+                    const testPrice = this.pricingService.applyPsychologicalPricing(234.67);
+                    console.log('💰 Psychological pricing test: $234.67 → $' + testPrice);
+                    
+                    // Validate configuration
+                    const validation = this.pricingService.validateConfiguration();
+                    if (!validation.valid) {
+                        console.warn('⚠️ Pricing configuration issues:', validation.issues);
+                    }
+                    
                 } catch (error) {
                     console.error('❌ Failed to load pricing service:', error);
-                    // Fallback pricing
+                    console.log('🔄 Using fallback pricing configuration');
+                    
+                    // Enhanced fallback pricing with psychological pricing simulation
                     this.vehicleConfig = {
-                        tesla: { basePrice: 132, capacity: { passengers: 4, bags: 4 } },
-                        escalade: { basePrice: 165, capacity: { passengers: 7, bags: 8 } },
-                        sprinter: { basePrice: 220, capacity: { passengers: 14, bags: 12 } }
+                        tesla: { 
+                            name: 'Tesla Model Y',
+                            basePrice: 125, // Ends in 5
+                            capacity: { passengers: 4, bags: 4 } 
+                        },
+                        escalade: { 
+                            name: 'Cadillac Escalade',
+                            basePrice: 169, // Ends in 9
+                            capacity: { passengers: 7, bags: 8 } 
+                        },
+                        sprinter: { 
+                            name: 'Mercedes Sprinter',
+                            basePrice: 219, // Ends in 9
+                            capacity: { passengers: 12, bags: 15 } 
+                        }
                     };
+                    
+                    // Create a basic fallback service
+                    this.pricingService = null;
                 }
             }
             
             setup() {
+                console.log('🔄 Setting up AirportBookingApp...');
                 this.cacheElements();
                 this.bindEvents();
                 this.initializeDateTime();
+                console.log('✅ AirportBookingApp setup complete');
             }
             
             cacheElements() {
@@ -1333,9 +1561,15 @@
                     'mapArrivalTime', 'mapPickupTime', 'mapLocationText'
                 ];
                 
+                let foundElements = 0;
                 elementIds.forEach(id => {
                     const el = document.getElementById(id);
-                    if (el) this.els[id] = el;
+                    if (el) {
+                        this.els[id] = el;
+                        foundElements++;
+                    } else {
+                        console.warn(`Element not found: ${id}`);
+                    }
                 });
                 
                 this.els.modeBtns = document.querySelectorAll('.mode-btn');
@@ -1343,9 +1577,22 @@
                 this.els.progressSteps = document.querySelectorAll('.progress-step');
                 this.els.dateBtns = document.querySelectorAll('.date-btn');
                 this.els.vehicleCards = document.querySelectorAll('.vehicle-card');
+                
+                console.log(`📋 Cached ${foundElements}/${elementIds.length} elements`);
+                console.log(`📋 Found ${this.els.modeBtns.length} mode buttons, ${this.els.airportOptions.length} airport options`);
             }
             
             initializeAutocomplete() {
+                // Check if required elements exist
+                if (!this.els.addressInput) {
+                    console.warn('Cannot initialize autocomplete: addressInput element not found');
+                    return;
+                }
+                if (!this.els.autocompleteDropdown) {
+                    console.warn('Cannot initialize autocomplete: autocompleteDropdown element not found');
+                    return;
+                }
+                
                 if (google && google.maps) {
                     google.maps.importLibrary("places").then(() => {
                         this.autocomplete = new CustomAutocomplete(
@@ -1366,18 +1613,27 @@
                             }
                         );
                         
-                        this.els.addressInput.addEventListener('place-selected', (e) => {
-                            this.handleAddressSelected(e.detail);
-                        });
+                        // Add event listeners with safety checks
+                        if (this.els.addressInput) {
+                            this.els.addressInput.addEventListener('place-selected', (e) => {
+                                this.handleAddressSelected(e.detail);
+                            });
+                            
+                            this.els.addressInput.addEventListener('place-coordinates', (e) => {
+                                this.handleAddressCoordinates(e.detail);
+                            });
+                            
+                            this.els.addressInput.addEventListener('validation-cleared', () => {
+                                this.handleAddressValidationCleared();
+                            });
+                        }
                         
-                        this.els.addressInput.addEventListener('place-coordinates', (e) => {
-                            this.handleAddressCoordinates(e.detail);
-                        });
-                        
-                        this.els.addressInput.addEventListener('validation-cleared', () => {
-                            this.handleAddressValidationCleared();
-                        });
+                        console.log('✅ Autocomplete initialized successfully');
+                    }).catch((error) => {
+                        console.error('Failed to load Google Maps Places library:', error);
                     });
+                } else {
+                    console.warn('Google Maps not available for autocomplete initialization');
                 }
             }
             
@@ -1568,6 +1824,10 @@
                     
                     if (routeData) {
                         this.state.route = routeData;
+                        
+                        // Update vehicle prices once route data is available
+                        console.log('📍 Route calculated, updating vehicle prices...');
+                        this.updateVehiclePrices();
                     }
                     
                     this.updateRouteDisplay();
@@ -2130,34 +2390,84 @@
             
             calculateVehiclePrice(vehicleType, distance, duration, options = {}) {
                 if (this.pricingService) {
-                    if (this.state.dateTime.date && this.state.dateTime.time) {
-                        const dateTime = new Date(this.state.dateTime.date);
-                        const timeComponents = this.state.dateTime.time.toTimeString().split(':');
-                        dateTime.setHours(parseInt(timeComponents[0]), parseInt(timeComponents[1]));
-                        options.dateTime = dateTime;
-                    }
-                    
+                    // Prepare options with all necessary data for accurate pricing
                     options.passengers = this.state.passengers;
                     
-                    return this.pricingService.calculateVehiclePrice(vehicleType, distance, duration, options);
+                    // Add dateTime for surge pricing calculations
+                    if (this.state.dateTime.time) {
+                        options.dateTime = new Date(this.state.dateTime.time);
+                    }
+                    
+                    // Add origin/destination for popular route detection
+                    if (this.state.locations.airport && this.state.locations.address) {
+                        options.origin = this.state.locations.airport.code;
+                        options.destination = this.state.locations.address.place_id || 'CUSTOM';
+                    }
+                    
+                    console.log(`💵 Calculating price for ${vehicleType}:`, {
+                        distance: distance + ' mi',
+                        duration: Math.round(duration) + ' min', 
+                        passengers: options.passengers,
+                        dateTime: options.dateTime?.toLocaleString(),
+                        origin: options.origin
+                    });
+                    
+                    const pricing = this.pricingService.calculateVehiclePrice(vehicleType, distance, duration, options);
+                    
+                    if (pricing) {
+                        console.log(`✅ ${vehicleType.toUpperCase()} pricing:`, {
+                            basePrice: '$' + pricing.basePrice,
+                            finalPrice: '$' + pricing.finalPrice,
+                            protectionType: pricing.protectionApplied,
+                            surcharges: pricing.breakdown.appliedSurcharges.length,
+                            psychologicalPricing: pricing.finalPrice % 1 !== 0 ? 'Applied' : 'Rounded'
+                        });
+                    }
+                    
+                    return pricing;
                 }
+                
+                // Enhanced fallback with psychological pricing simulation
+                console.log('⚠️ Using fallback pricing for', vehicleType);
+                const basePrice = distance * 2.5 + 45; // Basic calculation
+                const psychologicalPrice = this.applyFallbackPsychologicalPricing(basePrice);
                 
                 return {
                     vehicleType,
-                    vehicleName: 'Unknown',
-                    finalPrice: Math.round(distance * 3 + 50),
+                    vehicleName: this.vehicleConfig[vehicleType]?.name || 'Unknown Vehicle',
+                    basePrice: Math.round(basePrice * 100) / 100,
+                    finalPrice: psychologicalPrice,
                     protectionApplied: 'fallback',
                     breakdown: {
-                        perMilePrice: Math.round(distance * 3),
-                        airportFee: 50,
+                        perMilePrice: Math.round(distance * 2.5 * 100) / 100,
+                        airportFee: 45,
                         appliedSurcharges: []
                     }
                 };
             }
             
+            // Fallback psychological pricing method
+            applyFallbackPsychologicalPricing(price) {
+                if (price < 50) {
+                    return Math.floor(price) + 0.99; // End in 99 cents for bargain perception
+                } else if (price < 150) {
+                    const rounded = Math.round(price);
+                    return rounded % 10 === 0 ? rounded - 1 : rounded; // Avoid round numbers
+                } else {
+                    const rounded = Math.round(price);
+                    const lastDigit = rounded % 10;
+                    if (lastDigit === 0 || lastDigit === 1) {
+                        return rounded - 1; // Make it end in 9
+                    } else if (lastDigit > 5 && lastDigit < 9) {
+                        return rounded + (9 - lastDigit); // Make it end in 9
+                    }
+                    return rounded;
+                }
+            }
+            
             updateVehiclePrices() {
                 if (!this.state.route.distance || !this.state.route.duration) {
-                    console.log('No route data available for pricing');
+                    console.log('⏳ No route data available for pricing');
                     return;
                 }
                 
@@ -2165,32 +2475,71 @@
                     this.pricingService.getAllVehicles() : 
                     ['tesla', 'escalade', 'sprinter'];
                 
-                console.log('Updating prices for route:', this.state.route);
+                console.log('🔄 Updating prices for route:', {
+                    distance: this.state.route.distance + ' miles',
+                    duration: Math.round(this.state.route.duration) + ' minutes',
+                    from: this.state.locations.address?.description || 'Custom address',
+                    to: this.state.locations.airport?.name || 'Airport'
+                });
                 
                 vehicleTypes.forEach(vehicleType => {
                     const pricing = this.calculateVehiclePrice(
                         vehicleType, 
                         this.state.route.distance, 
-                        this.state.route.duration,
-                        { dateTime: this.state.dateTime.time }
+                        this.state.route.duration
                     );
                     
                     const priceElement = document.getElementById(`${vehicleType}-price`);
                     if (priceElement && pricing) {
+                        // Add visual feedback for price updates
                         priceElement.classList.add('price-updating');
                         
-                        const formattedPrice = this.pricingService ? 
-                            this.pricingService.formatPrice(pricing.finalPrice) : 
-                            `$${pricing.finalPrice}`;
+                        // Format price with proper psychological pricing
+                        let formattedPrice;
+                        if (this.pricingService) {
+                            formattedPrice = '$' + this.pricingService.formatPrice(pricing.finalPrice);
+                        } else {
+                            // Fallback formatting that maintains psychological pricing
+                            const price = pricing.finalPrice;
+                            if (price % 1 === 0) {
+                                formattedPrice = '$' + price; // $249
+                            } else {
+                                formattedPrice = '$' + price.toFixed(2); // $249.99
+                            }
+                        }
+                        
                         priceElement.textContent = formattedPrice;
                         
-                        console.log(`${vehicleType} price:`, formattedPrice, pricing);
+                        // Log detailed pricing information
+                        console.log(`💰 ${vehicleType.toUpperCase()}: ${formattedPrice}`, {
+                            basePrice: '$' + pricing.basePrice,
+                            finalPrice: '$' + pricing.finalPrice,
+                            surcharges: pricing.breakdown.appliedSurcharges.length > 0 ? 
+                                pricing.breakdown.appliedSurcharges.map(s => s.description).join(', ') : 'None',
+                            protectionModel: pricing.protectionApplied
+                        });
                         
+                        // Remove visual feedback after animation
                         setTimeout(() => {
                             priceElement.classList.remove('price-updating');
                         }, 500);
+                    } else {
+                        console.warn(`❌ Could not update price for ${vehicleType} - element or pricing missing`);
                     }
                 });
+                
+                // Log surge pricing information if applicable
+                if (this.pricingService && this.state.dateTime.time) {
+                    const surgeInfo = this.pricingService.checkSurgePeriod(new Date(this.state.dateTime.time));
+                    if (surgeInfo.hasSurge) {
+                        console.log('⚡ Surge pricing active:', {
+                            surges: surgeInfo.surges.map(s => s.description).join(', '),
+                            totalMultiplier: surgeInfo.totalMultiplier + 'x'
+                        });
+                    } else {
+                        console.log('✅ No surge pricing applied');
+                    }
+                }
             }
             
             validateVehicleCapacity() {
@@ -2742,14 +3091,32 @@
 
         // Google Maps initialization
         window.initGoogleMaps = function() {
-            console.log('Google Maps callback triggered');
-            // Google Maps is now loaded, initialize the app
-            if (window.airportApp) {
-                console.log('Initializing autocomplete...');
-                window.airportApp.initializeAutocomplete();
-            } else {
-                console.warn('AirportApp not yet initialized');
-            }
+            console.log('🗺️ Google Maps callback triggered');
+            
+            // Wait a moment to ensure the app is fully initialized
+            setTimeout(() => {
+                if (window.airportApp) {
+                    console.log('🔄 Initializing autocomplete...');
+                    
+                    // Ensure elements are cached before initializing autocomplete
+                    if (!window.airportApp.els.addressInput) {
+                        console.log('🔄 Re-caching elements for autocomplete...');
+                        window.airportApp.cacheElements();
+                    }
+                    
+                    window.airportApp.initializeAutocomplete();
+                } else {
+                    console.warn('⚠️ AirportApp not yet initialized, retrying...');
+                    // Retry after a short delay
+                    setTimeout(() => {
+                        if (window.airportApp) {
+                            window.airportApp.initializeAutocomplete();
+                        } else {
+                            console.error('❌ AirportApp still not available after retry');
+                        }
+                    }, 500);
+                }
+            }, 100);
         };
 
         // Load Google Maps script from proxy
@@ -2776,13 +3143,33 @@
         
         document.head.appendChild(script);
 
-        // Initialize Application
-        window.airportApp = new AirportBookingApp();
-
+        // Initialize Application with proper timing
         let vehicleCarousel;
-        document.addEventListener('DOMContentLoaded', () => {
-            vehicleCarousel = new VehicleCarousel(window.airportApp);
-        });
+        
+        // Initialize app immediately if DOM is ready, otherwise wait
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+            // DOM is already loaded
+            setTimeout(initializeApp, 10);
+        }
+        
+        function initializeApp() {
+            console.log('🚀 Initializing Airport Booking App...');
+            
+            // Initialize main app
+            if (!window.airportApp) {
+                window.airportApp = new AirportBookingApp();
+            }
+            
+            // Initialize vehicle carousel
+            if (window.airportApp && !vehicleCarousel) {
+                vehicleCarousel = new VehicleCarousel(window.airportApp);
+                console.log('🎠 Vehicle carousel initialized');
+            }
+            
+            console.log('🎉 Application initialization complete');
+        }
     </script>
 </body>
 </html>
