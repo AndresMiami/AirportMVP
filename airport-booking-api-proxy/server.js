@@ -10,28 +10,140 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ============================================
+// CACHING IMPLEMENTATION
+// ============================================
+
+// Simple in-memory cache (use Redis in production)
+const routeCache = new Map();
+const placeCache = new Map();
+const ROUTE_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours for routes
+const PLACE_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days for places
+const MAX_CACHE_SIZE = 1000; // Prevent memory issues
+
+// Popular places cache (airports, hotels, landmarks)
+const popularPlaces = new Map([
+  // Pre-cache airport data
+  ['ChIJQ2DP_4u02YgRPNlKgMr9gBE', { // MIA
+    formatted_address: 'Miami International Airport (MIA), 2100 NW 42nd Ave, Miami, FL 33142',
+    geometry: { location: { lat: 25.7931, lng: -80.2906 } },
+    name: 'Miami International Airport'
+  }],
+  ['ChIJ9frI5Hq42YgR4bCqA7w1_Ww', { // FLL
+    formatted_address: 'Fort Lauderdale-Hollywood International Airport (FLL), 100 Terminal Dr, Fort Lauderdale, FL 33315',
+    geometry: { location: { lat: 26.0742, lng: -80.1506 } },
+    name: 'Fort Lauderdale-Hollywood International Airport'
+  }],
+  ['ChIJd_cFKRUu2YgR6Me7ie5YMO0', { // PBI
+    formatted_address: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33415',
+    geometry: { location: { lat: 26.6832, lng: -80.0956 } },
+    name: 'Palm Beach International Airport'
+  }]
+]);
+
+// Cache helper functions
+function getCacheKey(origin, destination) {
+  return `route:${origin}:${destination}`.toLowerCase().replace(/\s+/g, '');
+}
+
+function cleanCache(cache, maxSize = MAX_CACHE_SIZE) {
+  if (cache.size > maxSize) {
+    const entriesToRemove = cache.size - maxSize + 100;
+    const keys = Array.from(cache.keys()).slice(0, entriesToRemove);
+    keys.forEach(key => cache.delete(key));
+  }
+}
+
+// ============================================
+// API USAGE TRACKING
+// ============================================
+
+const apiUsageStats = {
+  autocomplete: { count: 0, cached: 0 },
+  placeDetails: { count: 0, cached: 0 },
+  directions: { count: 0, cached: 0 },
+  geocoding: { count: 0, cached: 0 }
+};
+
+// Reset stats daily
+setInterval(() => {
+  const date = new Date().toISOString().split('T')[0];
+  console.log(`📊 API Usage for ${date}:`, apiUsageStats);
+  
+  // Reset counters
+  Object.keys(apiUsageStats).forEach(key => {
+    apiUsageStats[key] = { count: 0, cached: 0 };
+  });
+}, 24 * 60 * 60 * 1000);
+
+// Usage tracking middleware
+const trackApiUsage = (apiType) => {
+  return (req, res, next) => {
+    apiUsageStats[apiType].count++;
+    
+    // Add tracking header to response
+    res.on('finish', () => {
+      const cacheHit = res.getHeader('X-Cache-Hit') === 'true';
+      if (cacheHit) {
+        apiUsageStats[apiType].cached++;
+      }
+    });
+    
+    next();
+  };
+};
+
+// Middleware for caching directions
+const directionsCache = (req, res, next) => {
+  const { origin, destination } = req.body;
+  const cacheKey = getCacheKey(origin, destination);
+  
+  const cached = routeCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < ROUTE_CACHE_DURATION) {
+    console.log('🎯 Cache hit for route:', cacheKey);
+    res.setHeader('X-Cache-Hit', 'true');
+    return res.json(cached.data);
+  }
+  
+  // Store original json method
+  const originalJson = res.json;
+  res.json = function(data) {
+    // Only cache successful responses
+    if (data.status === 'OK') {
+      routeCache.set(cacheKey, {
+        data: data,
+        timestamp: Date.now()
+      });
+      cleanCache(routeCache);
+      console.log('💾 Cached route:', cacheKey);
+    }
+    return originalJson.call(this, data);
+  };
+  
+  next();
+};
+
+// ============================================
+// MIDDLEWARE SETUP
+// ============================================
+
 // Security middleware
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable CSP to allow external scripts
-  crossOriginResourcePolicy: false // Disable CORP to allow cross-origin resources
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: false
 }));
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
-    // Allow any localhost origin
     if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
       return callback(null, true);
     }
-    
-    // Allow specific origins if defined
     const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    
-    return callback(null, true); // Allow all origins for development
+    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -40,8 +152,8 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: {
     error: 'Too many requests from this IP, please try again later.'
   }
@@ -55,21 +167,27 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from the main project directory
+// Serve static files
 app.use(express.static(path.join(__dirname, '..')));
-
-// Serve specific app directories
 app.use('/passenger-app', express.static(path.join(__dirname, '../passenger-app')));
 app.use('/driver-app', express.static(path.join(__dirname, '../driver-app')));
 app.use('/tracking-app', express.static(path.join(__dirname, '../tracking-app')));
 app.use('/shared', express.static(path.join(__dirname, '../shared')));
+
+// ============================================
+// ROUTES
+// ============================================
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    service: 'Airport Booking Server with Google Maps Proxy'
+    service: 'Airport Booking Server with Google Maps Proxy',
+    cacheStats: {
+      routes: routeCache.size,
+      places: placeCache.size
+    }
   });
 });
 
@@ -90,14 +208,64 @@ app.get('/tracking/:tripId?', (req, res) => {
   res.sendFile(path.join(__dirname, '../tracking-app/index.html'));
 });
 
-// Google Maps API Proxy Routes
+// Serve monitoring dashboard
+app.get('/dashboard.html', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dashboard.html'));
+});
+
+// API Usage Stats Endpoint
+app.get('/api/usage-stats', (req, res) => {
+  const totalRequests = Object.values(apiUsageStats)
+    .reduce((sum, stat) => sum + stat.count, 0);
+  
+  const totalCached = Object.values(apiUsageStats)
+    .reduce((sum, stat) => sum + stat.cached, 0);
+  
+  const cacheHitRate = totalRequests > 0 
+    ? ((totalCached / totalRequests) * 100).toFixed(2) 
+    : 0;
+  
+  res.json({
+    stats: apiUsageStats,
+    summary: {
+      totalRequests,
+      totalCached,
+      cacheHitRate: `${cacheHitRate}%`,
+      estimatedMonthlyCost: calculateEstimatedCost(apiUsageStats)
+    }
+  });
+});
+
+function calculateEstimatedCost(stats) {
+  const dailyMultiplier = 30;
+  
+  const costs = {
+    autocomplete: (stats.autocomplete.count - stats.autocomplete.cached) * dailyMultiplier * 0.00283,
+    placeDetails: (stats.placeDetails.count - stats.placeDetails.cached) * dailyMultiplier * 0.017,
+    directions: (stats.directions.count - stats.directions.cached) * dailyMultiplier * 0.005,
+    geocoding: (stats.geocoding.count - stats.geocoding.cached) * dailyMultiplier * 0.005
+  };
+  
+  const total = Object.values(costs).reduce((sum, cost) => sum + cost, 0);
+  const afterCredit = Math.max(0, total - 200);
+  
+  return {
+    breakdown: costs,
+    totalBeforeCredit: total.toFixed(2),
+    monthlyCredit: 200,
+    estimatedCharge: afterCredit.toFixed(2)
+  };
+}
+
+// ============================================
+// GOOGLE MAPS API PROXY ROUTES
+// ============================================
 
 // Google Places Autocomplete
-app.get('/api/places/autocomplete', async (req, res) => {
+app.get('/api/places/autocomplete', trackApiUsage('autocomplete'), async (req, res) => {
   try {
     const { input, types, location, radius, components, sessiontoken } = req.query;
     
-    // Trim input and validate
     const trimmedInput = input?.trim();
     
     if (!trimmedInput) {
@@ -107,7 +275,6 @@ app.get('/api/places/autocomplete', async (req, res) => {
       });
     }
 
-    // Validate input length
     if (trimmedInput.length > 100) {
       return res.status(400).json({ 
         error: 'Input too long',
@@ -117,14 +284,13 @@ app.get('/api/places/autocomplete', async (req, res) => {
 
     const params = {
       input: trimmedInput,
-      key: process.env.GOOGLE_MAPS_API_KEY
+      key: process.env.GOOGLE_MAPS_API_KEY,
+      components: 'country:us' // Restrict to US for airport app
     };
 
-    // Add optional parameters if provided
     if (types) params.types = types.trim();
     if (location) params.location = location.trim();
     if (radius) params.radius = radius;
-    if (components) params.components = components.trim();
     if (sessiontoken) params.sessiontoken = sessiontoken.trim();
 
     const response = await axios.get(
@@ -132,7 +298,6 @@ app.get('/api/places/autocomplete', async (req, res) => {
       { params }
     );
 
-    // Filter response to only return essential fields
     const filteredResponse = {
       status: response.data.status,
       predictions: response.data.predictions?.map(prediction => ({
@@ -153,28 +318,44 @@ app.get('/api/places/autocomplete', async (req, res) => {
   }
 });
 
-// Place Details
-app.get('/api/places/details', async (req, res) => {
+// Place Details with Caching
+app.get('/api/places/details', trackApiUsage('placeDetails'), async (req, res) => {
   try {
     const { place_id, fields, sessiontoken } = req.query;
     
-    // Trim and validate place_id
-    const trimmedPlaceId = place_id?.trim();
-    
-    if (!trimmedPlaceId) {
+    if (!place_id?.trim()) {
       return res.status(400).json({ 
         error: 'Bad Request',
         status: 'ERROR'
       });
     }
 
+    // Check popular places first (instant, no API call)
+    const popularPlace = popularPlaces.get(place_id);
+    if (popularPlace) {
+      console.log('⭐ Popular place cache hit:', place_id);
+      res.setHeader('X-Cache-Hit', 'true');
+      return res.json({
+        status: 'OK',
+        result: popularPlace
+      });
+    }
+
+    // Check regular cache
+    const cached = placeCache.get(place_id);
+    if (cached && Date.now() - cached.timestamp < PLACE_CACHE_DURATION) {
+      console.log('🎯 Place cache hit:', place_id);
+      res.setHeader('X-Cache-Hit', 'true');
+      return res.json(cached.data);
+    }
+
+    // Make API call
     const params = {
-      place_id: trimmedPlaceId,
+      place_id: place_id.trim(),
       key: process.env.GOOGLE_MAPS_API_KEY,
       fields: fields?.trim() || 'geometry,formatted_address,name'
     };
 
-    // Add sessiontoken if provided
     if (sessiontoken) params.sessiontoken = sessiontoken.trim();
 
     const response = await axios.get(
@@ -182,7 +363,6 @@ app.get('/api/places/details', async (req, res) => {
       { params }
     );
 
-    // Filter response to only return essential fields
     const filteredResponse = {
       status: response.data.status,
       result: response.data.result ? {
@@ -191,6 +371,15 @@ app.get('/api/places/details', async (req, res) => {
         name: response.data.result.name
       } : null
     };
+
+    // Cache successful responses
+    if (response.data.status === 'OK') {
+      placeCache.set(place_id, {
+        data: filteredResponse,
+        timestamp: Date.now()
+      });
+      cleanCache(placeCache, 5000);
+    }
 
     res.json(filteredResponse);
   } catch (error) {
@@ -202,12 +391,11 @@ app.get('/api/places/details', async (req, res) => {
   }
 });
 
-// Directions API
-app.post('/api/directions', async (req, res) => {
+// Directions API with Caching
+app.post('/api/directions', trackApiUsage('directions'), directionsCache, async (req, res) => {
   try {
     const { origin, destination, mode, waypoints, alternatives, avoid } = req.body;
     
-    // Trim and validate required parameters
     const trimmedOrigin = origin?.trim();
     const trimmedDestination = destination?.trim();
     
@@ -227,7 +415,6 @@ app.post('/api/directions', async (req, res) => {
       traffic_model: 'best_guess'
     };
 
-    // Add optional parameters with trimming
     if (waypoints) params.waypoints = waypoints.trim();
     if (alternatives) params.alternatives = alternatives;
     if (avoid) params.avoid = avoid.trim();
@@ -237,7 +424,6 @@ app.post('/api/directions', async (req, res) => {
       { params }
     );
 
-    // Filter response to only return essential fields
     const filteredResponse = {
       status: response.data.status
     };
@@ -265,12 +451,11 @@ app.post('/api/directions', async (req, res) => {
   }
 });
 
-// Geocoding API (bonus endpoint for address to coordinates)
-app.get('/api/geocoding', async (req, res) => {
+// Geocoding API
+app.get('/api/geocoding', trackApiUsage('geocoding'), async (req, res) => {
   try {
     const { address, latlng, components } = req.query;
     
-    // Trim inputs
     const trimmedAddress = address?.trim();
     const trimmedLatlng = latlng?.trim();
     
@@ -329,7 +514,6 @@ app.get('/api/maps-script', async (req, res) => {
       responseType: 'text'
     });
     
-    // Set comprehensive headers for script loading
     res.set({
       'Content-Type': 'application/javascript; charset=utf-8',
       'Cache-Control': 'public, max-age=3600',
@@ -372,12 +556,14 @@ app.use('*', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Airport Booking Server with Maps Proxy running on port ${PORT}`);
-  console.log(`� Main App: http://localhost:${PORT}/`);
+  console.log(`🏠 Main App: http://localhost:${PORT}/`);
   console.log(`🎫 Passenger App: http://localhost:${PORT}/passenger`);
-  console.log(`� Driver App: http://localhost:${PORT}/driver`);
+  console.log(`🚗 Driver App: http://localhost:${PORT}/driver`);
   console.log(`📍 Tracking App: http://localhost:${PORT}/tracking`);
+  console.log(`📊 Cost Monitor: http://localhost:${PORT}/dashboard.html`);
   console.log(`🔍 Health check: http://localhost:${PORT}/health`);
   console.log(`🗺️  Maps API: http://localhost:${PORT}/api/places/autocomplete`);
+  console.log(`📈 Usage Stats: http://localhost:${PORT}/api/usage-stats`);
   console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

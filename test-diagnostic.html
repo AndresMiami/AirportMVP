@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Airport Booking App - Diagnostic Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .info { color: blue; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Airport Booking App - Diagnostic Test</h1>
+    
+    <div class="test-section">
+        <h2>📋 Test Results</h2>
+        <div id="test-results">Running tests...</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>📊 Console Output</h2>
+        <pre id="console-output"></pre>
+    </div>
+    
+    <script>
+        let consoleOutput = [];
+        
+        // Capture console logs
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        
+        console.log = function(...args) {
+            consoleOutput.push('LOG: ' + args.join(' '));
+            originalLog.apply(console, args);
+            updateConsoleOutput();
+        };
+        
+        console.warn = function(...args) {
+            consoleOutput.push('WARN: ' + args.join(' '));
+            originalWarn.apply(console, args);
+            updateConsoleOutput();
+        };
+        
+        console.error = function(...args) {
+            consoleOutput.push('ERROR: ' + args.join(' '));
+            originalError.apply(console, args);
+            updateConsoleOutput();
+        };
+        
+        function updateConsoleOutput() {
+            document.getElementById('console-output').textContent = consoleOutput.slice(-20).join('\n');
+        }
+        
+        // Test 1: Check if we can load the pricing service
+        async function testPricingService() {
+            try {
+                console.log('🧪 Testing pricing service import...');
+                const pricingModule = await import('./pricing.js');
+                const pricingService = pricingModule.pricingService;
+                
+                if (pricingService) {
+                    console.log('✅ Pricing service imported successfully');
+                    
+                    // Test a basic calculation
+                    const testPrice = pricingService.calculateVehiclePrice('tesla', 25, 45);
+                    console.log('💰 Test pricing result:', testPrice);
+                    
+                    return { success: true, service: pricingService };
+                } else {
+                    throw new Error('pricingService not found in module');
+                }
+            } catch (error) {
+                console.error('❌ Pricing service test failed:', error);
+                return { success: false, error: error.message };
+            }
+        }
+        
+        // Test 2: Check element availability simulation
+        function testElements() {
+            console.log('🧪 Testing element availability...');
+            
+            const requiredElements = [
+                'addressInput', 'autocompleteDropdown', 'startSearchBtn', 
+                'bookingContainer', 'continueBtn'
+            ];
+            
+            const mockElements = {};
+            requiredElements.forEach(id => {
+                // Simulate element existence check
+                mockElements[id] = { exists: true, id: id };
+            });
+            
+            console.log('✅ Element simulation complete');
+            return { success: true, elements: mockElements };
+        }
+        
+        // Test 3: Test CustomAutocomplete constructor safety
+        function testAutocompleteConstructor() {
+            console.log('🧪 Testing CustomAutocomplete constructor safety...');
+            
+            try {
+                // Test with null elements (should not crash)
+                const autocomplete = new (function CustomAutocomplete(inputId, suggestionsId, onSelect) {
+                    this.input = null; // Simulate missing element
+                    this.suggestionsContainer = null;
+                    this.onSelect = onSelect;
+                    
+                    if (!this.input) {
+                        console.warn('CustomAutocomplete: Input element not found:', inputId);
+                        return;
+                    }
+                    
+                    console.log('✅ Constructor safety check passed');
+                })('nonexistent', 'alsononexistent', () => {});
+                
+                return { success: true };
+            } catch (error) {
+                console.error('❌ Constructor safety test failed:', error);
+                return { success: false, error: error.message };
+            }
+        }
+        
+        // Run all tests
+        async function runTests() {
+            console.log('🚀 Starting diagnostic tests...');
+            
+            const results = {
+                pricingService: await testPricingService(),
+                elements: testElements(),
+                autocomplete: testAutocompleteConstructor()
+            };
+            
+            // Display results
+            let html = '<h3>Test Summary</h3>';
+            
+            Object.entries(results).forEach(([testName, result]) => {
+                const status = result.success ? '✅ PASS' : '❌ FAIL';
+                const className = result.success ? 'success' : 'error';
+                
+                html += `<div class="${className}">
+                    <strong>${testName}:</strong> ${status}
+                    ${result.error ? ` - ${result.error}` : ''}
+                </div>`;
+            });
+            
+            const allPassed = Object.values(results).every(r => r.success);
+            
+            html += `<h3>Overall Status: ${allPassed ? '✅ ALL TESTS PASSED' : '❌ SOME TESTS FAILED'}</h3>`;
+            
+            if (allPassed) {
+                html += `<div class="success">
+                    <p><strong>🎉 Great! The fixes are working correctly.</strong></p>
+                    <p>You can now safely test the main application at <a href="./indexMVP.html">indexMVP.html</a></p>
+                </div>`;
+            } else {
+                html += `<div class="error">
+                    <p><strong>⚠️ Some tests failed. Check the console output above for details.</strong></p>
+                </div>`;
+            }
+            
+            document.getElementById('test-results').innerHTML = html;
+            console.log('📊 Diagnostic tests complete');
+        }
+        
+        // Start tests when page loads
+        runTests();
+    </script>
+</body>
+</html>

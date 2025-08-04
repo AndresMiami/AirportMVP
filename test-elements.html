@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Element Existence Test</title>
+</head>
+<body>
+    <h1>Testing Element Availability</h1>
+    <div id="test-results"></div>
+    
+    <script>
+        // Test if the key elements exist in the main HTML
+        const elementsToTest = [
+            'startSearchBtn', 'bookingContainer', 'panelsWrapper', 'progressLine',
+            'summaryBar', 'addressInput', 'addressLoading', 'autocompleteDropdown',
+            'addressStep', 'addressBadge', 'addressTitle', 'airportStep', 
+            'airportBadge', 'airportTitle', 'flowConnector'
+        ];
+        
+        const results = [];
+        
+        // Load the main HTML content for testing
+        fetch('./indexMVP.html')
+            .then(response => response.text())
+            .then(html => {
+                elementsToTest.forEach(id => {
+                    const exists = html.includes(`id="${id}"`);
+                    results.push({
+                        id: id,
+                        exists: exists,
+                        status: exists ? '✅' : '❌'
+                    });
+                });
+                
+                const resultsDiv = document.getElementById('test-results');
+                resultsDiv.innerHTML = `
+                    <h2>Element Existence Test Results</h2>
+                    <table border="1" cellpadding="8">
+                        <tr><th>Element ID</th><th>Exists</th><th>Status</th></tr>
+                        ${results.map(r => `
+                            <tr>
+                                <td>${r.id}</td>
+                                <td>${r.exists}</td>
+                                <td>${r.status}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p><strong>Summary:</strong> ${results.filter(r => r.exists).length}/${results.length} elements found</p>
+                `;
+            })
+            .catch(error => {
+                document.getElementById('test-results').innerHTML = `
+                    <h2>❌ Test Failed</h2>
+                    <p>Error: ${error.message}</p>
+                `;
+            });
+    </script>
+</body>
+</html>
