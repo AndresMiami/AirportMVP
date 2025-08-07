@@ -1016,8 +1016,10 @@
                         destination = addressString;
                     }
                     
-                    // Use proxy endpoint for directions
-                    const response = await fetch('/api/directions', {
+                    // Use Railway proxy for directions
+                    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                    const directionsUrl = isLocal ? 'http://localhost:3001/api/directions' : 'https://reliable-warmth-production-d382.up.railway.app/api/directions';
+                    const response = await fetch(directionsUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -2281,8 +2283,9 @@
         // Load Google Maps script from proxy
         const script = document.createElement('script');
         
-        // Always use relative path when served from the proxy server
-        const apiUrl = '/api/maps-script';
+        // Use Railway proxy for Google Maps script
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const apiUrl = isLocal ? 'http://localhost:3001/api/maps-script' : 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
         
         console.log('Loading Google Maps from:', apiUrl);
         script.src = apiUrl;

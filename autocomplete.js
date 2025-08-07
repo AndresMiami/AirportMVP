@@ -245,8 +245,10 @@ export class CustomAutocomplete {
             
             console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
             
-            // Use relative path when served from the same origin
-            const response = await fetch(`/api/places/autocomplete?${params}`);
+            // Use Railway proxy for autocomplete
+            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const apiBase = isLocal ? 'http://localhost:3001' : 'https://reliable-warmth-production-d382.up.railway.app';
+            const response = await fetch(`${apiBase}/api/places/autocomplete?${params}`);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch suggestions');
