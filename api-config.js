@@ -15,8 +15,8 @@ export const API_CONFIG = {
   getMapsProxyUrl() {
     // Production: Your deployed proxy server
     if (this.isProduction) {
-      // Update this when you deploy your proxy to Railway/Render/Heroku
-      return 'https://your-proxy-server.railway.app';
+      // Railway proxy server URL
+      return 'https://reliable-warmth-production-d382.up.railway.app';
     }
     // Local development
     return 'http://localhost:3001';
