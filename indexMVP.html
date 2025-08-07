@@ -704,8 +704,7 @@
                     'summaryBar', 'addressInput', 'addressLoading', 'autocompleteDropdown',
                     'addressStep', 'addressBadge', 'addressTitle', 'airportStep', 
                     'airportBadge', 'airportTitle', 'flowConnector',
-                    'routeDistance', 'routeTime', 'hourSelect',
-                    'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
+                    'hourSelect', 'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
                     'backBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
                     'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
@@ -1018,7 +1017,7 @@
                     }
                     
                     // Use proxy endpoint for directions
-                    const response = await fetch('http://localhost:3001/api/directions', {
+                    const response = await fetch('/api/directions', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -2248,12 +2247,42 @@
             }, 100);
         };
 
+        // Global callback function for Google Maps
+        window.initGoogleMaps = function() {
+            console.log('✅ Google Maps initialized successfully');
+            
+            // Initialize autocomplete when Google Maps is ready
+            // Wait a bit to ensure the app is fully initialized
+            setTimeout(() => {
+                if (window.airportApp) {
+                    try {
+                        window.airportApp.initializeAutocomplete();
+                        console.log('✅ Autocomplete initialized from Google Maps callback');
+                    } catch (error) {
+                        console.error('❌ Failed to initialize autocomplete:', error);
+                    }
+                } else {
+                    console.warn('⚠️ AirportApp not yet initialized when Google Maps loaded');
+                    // Try again in a moment
+                    setTimeout(() => {
+                        if (window.airportApp) {
+                            try {
+                                window.airportApp.initializeAutocomplete();
+                                console.log('✅ Autocomplete initialized (delayed)');
+                            } catch (error) {
+                                console.error('❌ Failed to initialize autocomplete (delayed):', error);
+                            }
+                        }
+                    }, 500);
+                }
+            }, 100);
+        };
+
         // Load Google Maps script from proxy
         const script = document.createElement('script');
         
-        // Determine the correct API URL based on current location
-        const isProxyServer = window.location.port === '3001';
-        const apiUrl = isProxyServer ? '/api/maps-script' : 'http://localhost:3001/api/maps-script';
+        // Always use relative path when served from the proxy server
+        const apiUrl = '/api/maps-script';
         
         console.log('Loading Google Maps from:', apiUrl);
         script.src = apiUrl;

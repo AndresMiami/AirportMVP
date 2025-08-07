@@ -135,19 +135,27 @@ app.use(helmet({
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
+    
+    // Allow localhost for development
     if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
       return callback(null, true);
     }
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-    if (allowedOrigins.includes(origin)) {
+    
+    // Check against allowed origins from environment
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [];
+    if (allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed))) {
       return callback(null, true);
     }
-    return callback(null, true);
+    
+    // Reject all other origins to prevent infinite loops
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 }));
 
 // Rate limiting
@@ -173,6 +181,11 @@ app.use('/passenger-app', express.static(path.join(__dirname, '../passenger-app'
 app.use('/driver-app', express.static(path.join(__dirname, '../driver-app')));
 app.use('/tracking-app', express.static(path.join(__dirname, '../tracking-app')));
 app.use('/shared', express.static(path.join(__dirname, '../shared')));
+
+// Main app route - serve indexMVP.html at root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'indexMVP.html'));
+});
 
 // ============================================
 // ROUTES
@@ -490,16 +503,7 @@ app.get('/api/geocoding', trackApiUsage('geocoding'), async (req, res) => {
 });
 
 // Google Maps Script Proxy
-app.options('/api/maps-script', (req, res) => {
-  res.set({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Max-Age': '86400'
-  });
-  res.sendStatus(200);
-});
-
+// Note: CORS is handled by the global middleware above
 app.get('/api/maps-script', async (req, res) => {
   try {
     const mapsUrl = 'https://maps.googleapis.com/maps/api/js';

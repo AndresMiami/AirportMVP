@@ -245,7 +245,8 @@ export class CustomAutocomplete {
             
             console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
             
-            const response = await fetch(`http://localhost:3001/api/places/autocomplete?${params}`);
+            // Use relative path when served from the same origin
+            const response = await fetch(`/api/places/autocomplete?${params}`);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch suggestions');

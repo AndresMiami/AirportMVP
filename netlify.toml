@@ -1,0 +1,68 @@
+# Netlify Configuration
+# This file configures how Netlify builds and serves your site
+
+[build]
+  # Directory with serverless functions
+  functions = "netlify/functions"
+  # Directory to publish (your site root)
+  publish = "."
+
+[dev]
+  # Local development port
+  port = 3001
+  # Auto-open browser
+  autoLaunch = false
+  # Directory to serve
+  publish = "."
+
+# Redirect API calls to functions (excluding maps which use proxy)
+[[redirects]]
+  from = "/api/calculate-price"
+  to = "/.netlify/functions/calculate-price"
+  status = 200
+
+[[redirects]]
+  from = "/api/create-booking"
+  to = "/.netlify/functions/create-booking"
+  status = 200
+
+[[redirects]]
+  from = "/api/create-payment-intent"
+  to = "/.netlify/functions/create-payment-intent"
+  status = 200
+
+[[redirects]]
+  from = "/api/confirm-payment"
+  to = "/.netlify/functions/confirm-payment"
+  status = 200
+
+[[redirects]]
+  from = "/api/track-flight"
+  to = "/.netlify/functions/track-flight"
+  status = 200
+
+# SPA redirect for client-side routing (if needed)
+[[redirects]]
+  from = "/*"
+  to = "/indexMVP.html"
+  status = 200
+
+# Headers for security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Environment variables (template - actual values in Netlify dashboard)
+[build.environment]
+  NODE_VERSION = "18"
+
+# Function configuration
+[functions]
+  # Directory for functions
+  directory = "netlify/functions"
+  # Node bundler for functions
+  node_bundler = "esbuild"
