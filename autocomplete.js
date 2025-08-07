@@ -338,7 +338,10 @@ export class CustomAutocomplete {
                 
                 console.log('Fetching place details with session:', this.sessionToken);
                 
-                const response = await fetch(`http://localhost:3001/api/places/details?${params}`);
+                // Use Railway proxy for place details
+                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                const apiBase = isLocal ? 'http://localhost:3001' : 'https://reliable-warmth-production-d382.up.railway.app';
+                const response = await fetch(`${apiBase}/api/places/details?${params}`);
 
                 if (response.ok) {
                     const data = await response.json();
