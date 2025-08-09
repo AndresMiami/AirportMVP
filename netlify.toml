@@ -41,12 +41,33 @@
   to = "/.netlify/functions/track-flight"
   status = 200
 
-# SPA redirect for client-side routing (only for HTML pages, not assets)
-# Disabled to allow CSS and JS files to load properly
-# [[redirects]]
-#   from = "/*"
-#   to = "/indexMVP.html"
-#   status = 200
+# Redirect root to indexMVP.html
+[[redirects]]
+  from = "/"
+  to = "/indexMVP.html"
+  status = 200
+
+# Allow all static assets to be served directly
+[[redirects]]
+  from = "/css/*"
+  to = "/css/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/images/*"
+  to = "/images/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*.js"
+  to = "/:splat.js"
+  status = 200
+
+# Catch-all redirect for SPA (only for paths without extensions)
+[[redirects]]
+  from = "/*"
+  to = "/indexMVP.html"
+  status = 200
 
 # Headers for security
 [[headers]]
