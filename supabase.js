@@ -3,9 +3,16 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-// Replace these with your actual Supabase project details
-const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co'
-const SUPABASE_ANON_KEY = 'your-anon-key-here'
+// Supabase configuration from environment or window variables
+// In production, these should be injected by your build process or backend
+const SUPABASE_URL = window.SUPABASE_URL || 'https://YOUR_PROJECT_ID.supabase.co'
+const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'your-anon-key-here'
+
+// Check if credentials are configured
+if (SUPABASE_URL.includes('YOUR_PROJECT_ID') || SUPABASE_ANON_KEY === 'your-anon-key-here') {
+    console.warn('⚠️ Supabase credentials not configured. Database features will not work.')
+    console.warn('Please set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.')
+}
 
 // Create a single supabase client for interacting with your database
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
