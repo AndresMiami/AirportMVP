@@ -16,6 +16,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "stripe": "^18.4.0",
+    "twilio": "^5.8.0"
   }
 }
