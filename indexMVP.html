@@ -580,11 +580,12 @@
         </div>
     </div>
 
-    <!-- Debug Utility - Load First -->
+    <!-- Core Utilities - Load First -->
     <script src="./debug.js"></script>
+    <script src="./error-handler.js"></script>
     
     <!-- Main Application Scripts -->
-    <script type="module" src="./autocomplete.js"></script>
+    <!-- Autocomplete will be loaded lazily when needed -->
     <script>
         // Main Application Class
         class AirportBookingApp {
@@ -737,29 +738,40 @@
                 this.els.dateBtns = document.querySelectorAll('.date-btn');
                 this.els.vehicleCards = document.querySelectorAll('.vehicle-card');
                 
-                console.log(`📋 Cached ${foundElements}/${elementIds.length} elements`);
-                console.log(`📋 Found ${this.els.modeBtns.length} mode buttons, ${this.els.airportOptions.length} airport options`);
+                debug.info(`Cached ${foundElements}/${elementIds.length} elements`);
+                debug.info(`Found ${this.els.modeBtns.length} mode buttons, ${this.els.airportOptions.length} airport options`);
             }
             
-            initializeAutocomplete() {
-                // Check if required elements exist
-                if (!this.els.addressInput) {
-                    console.warn('Cannot initialize autocomplete: addressInput element not found');
-                    return;
-                }
-                if (!this.els.autocompleteDropdown) {
-                    console.warn('Cannot initialize autocomplete: autocompleteDropdown element not found');
-                    return;
-                }
+            async initializeAutocomplete() {
+                try {
+                    // Check if required elements exist
+                    if (!this.els.addressInput) {
+                        debug.warn('Cannot initialize autocomplete: addressInput element not found');
+                        return;
+                    }
+                    if (!this.els.autocompleteDropdown) {
+                        debug.warn('Cannot initialize autocomplete: autocompleteDropdown element not found');
+                        return;
+                    }
                 
-                if (google && google.maps) {
-                    Promise.all([
+                    
+                    if (!google || !google.maps) {
+                        throw new Error('Google Maps not loaded');
+                    }
+                    
+                    // Show loading state
+                    if (this.els.addressInput) {
+                        this.els.addressInput.placeholder = 'Loading address search...';
+                    }
+                    
+                    const [placesLib, autocompleteModule] = await Promise.all([
                         google.maps.importLibrary("places"),
                         import('./autocomplete.js')
-                    ]).then(([placesLib, autocompleteModule]) => {
-                        const { CustomAutocomplete } = autocompleteModule;
-                        
-                        this.autocomplete = new CustomAutocomplete(
+                    ]);
+                    
+                    const { CustomAutocomplete } = autocompleteModule;
+                    
+                    this.autocomplete = new CustomAutocomplete(
                             this.els.addressInput, 
                             this.els.autocompleteDropdown,
                             (locationData) => {
@@ -792,16 +804,39 @@
                             });
                         }
                         
-                        console.log('✅ Autocomplete initialized successfully with external module');
-                    }).catch((error) => {
-                        console.error('Failed to load Google Maps Places library or autocomplete module:', error);
+                    
+                    // Restore placeholder
+                    if (this.els.addressInput) {
+                        this.els.addressInput.placeholder = 'Enter pickup address...';
+                    }
+                    
+                    debug.success('Autocomplete initialized with lazy loading');
+                    
+                } catch (error) {
+                    errorHandler.handleError({
+                        message: 'Failed to initialize address search',
+                        error,
+                        context: 'autocomplete',
+                        userMessage: 'Address search is temporarily unavailable. You can still type your address manually.'
                     });
-                } else {
-                    console.warn('Google Maps not available for autocomplete initialization');
+                    
+                    // Restore placeholder
+                    if (this.els.addressInput) {
+                        this.els.addressInput.placeholder = 'Type your address manually...';
+                    }
                 }
             }
             
             bindEvents() {
+                // Lazy load autocomplete on first interaction
+                let autocompleteLoaded = false;
+                this.els.addressInput?.addEventListener('focus', async () => {
+                    if (!autocompleteLoaded && !this.autocomplete) {
+                        autocompleteLoaded = true;
+                        await this.initializeAutocomplete();
+                    }
+                }, { once: true });
+                
                 this.els.startSearchBtn?.addEventListener('click', () => this.startBooking());
                 
                 this.els.modeBtns.forEach(btn => {
@@ -829,14 +864,30 @@
             }
             
             startBooking() {
-                this.els.startSearchBtn.style.display = 'none';
-                this.els.bookingContainer.classList.add('active');
-                
-                setTimeout(() => {
-                    if (this.state.mode === 'dropoff') {
-                        this.els.addressInput?.focus();
+                try {
+                    debug.log('Starting booking flow');
+                    
+                    if (!this.els.startSearchBtn) {
+                        console.error('Start button not found');
+                        return;
                     }
-                }, 300);
+                    
+                    if (!this.els.bookingContainer) {
+                        console.error('Booking container not found');
+                        return;
+                    }
+                    
+                    this.els.startSearchBtn.style.display = 'none';
+                    this.els.bookingContainer.classList.add('active');
+                    
+                    setTimeout(() => {
+                        if (this.state.mode === 'dropoff') {
+                            this.els.addressInput?.focus();
+                        }
+                    }, 300);
+                } catch (error) {
+                    console.error('Error starting booking:', error);
+                }
             }
             
             setMode(mode) {
@@ -2241,13 +2292,15 @@
                         window.airportApp.cacheElements();
                     }
                     
-                    window.airportApp.initializeAutocomplete();
+                    // Autocomplete now loads lazily on first focus
+                    // window.airportApp.initializeAutocomplete();
                 } else {
                     console.warn('⚠️ AirportApp not yet initialized, retrying...');
                     // Retry after a short delay
                     setTimeout(() => {
                         if (window.airportApp) {
-                            window.airportApp.initializeAutocomplete();
+                            // Autocomplete now loads lazily on first focus
+                    // window.airportApp.initializeAutocomplete();
                         } else {
                             console.error('❌ AirportApp still not available after retry');
                         }
@@ -2265,7 +2318,8 @@
             setTimeout(() => {
                 if (window.airportApp) {
                     try {
-                        window.airportApp.initializeAutocomplete();
+                        // Autocomplete now loads lazily on first focus
+                    // window.airportApp.initializeAutocomplete();
                         console.log('✅ Autocomplete initialized from Google Maps callback');
                     } catch (error) {
                         console.error('❌ Failed to initialize autocomplete:', error);
@@ -2276,7 +2330,8 @@
                     setTimeout(() => {
                         if (window.airportApp) {
                             try {
-                                window.airportApp.initializeAutocomplete();
+                                // Autocomplete now loads lazily on first focus
+                    // window.airportApp.initializeAutocomplete();
                                 console.log('✅ Autocomplete initialized (delayed)');
                             } catch (error) {
                                 console.error('❌ Failed to initialize autocomplete (delayed):', error);

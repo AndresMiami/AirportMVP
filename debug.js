@@ -250,8 +250,10 @@ class DebugManager {
 // Create global debug instance
 const debug = new DebugManager();
 
-// Export for module usage
-export default debug;
+// Export for module usage if needed
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = debug;
+}
 
 // Also attach to window for global access
 window.debug = debug;
