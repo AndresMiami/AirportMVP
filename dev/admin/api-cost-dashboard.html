@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Maps API Cost Dashboard - Airport Booking</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .dashboard {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #1a1a1a;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+        }
+        
+        .refresh-controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .refresh-btn {
+            background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+        }
+        
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 53, 0.4);
+        }
+        
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .auto-refresh-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .quick-stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+        
+        .quick-stat {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .quick-stat-label {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .quick-stat-value {
+            font-size: 16px;
+            color: #1a1a1a;
+            font-weight: 700;
+        }
+
+        /* Rate Limiting Visual Enhancements */
+        .rate-limit-meters {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            margin-bottom: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .rate-limit-meters h3 {
+            color: #1a1a1a;
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .rate-meter {
+            margin-bottom: 20px;
+        }
+
+        .rate-meter:last-child {
+            margin-bottom: 0;
+        }
+
+        .rate-meter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .rate-meter-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .rate-meter-value {
+            font-size: 14px;
+            font-weight: 700;
+            color: #666;
+        }
+
+        .rate-meter-bar {
+            height: 8px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .rate-meter-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10B981 0%, #34D399 50%, #F59E0B 80%, #EF4444 100%);
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        /* Dynamic color based on usage */
+        .rate-meter-fill.low { 
+            background: linear-gradient(90deg, #10B981, #34D399); 
+        }
+        .rate-meter-fill.medium { 
+            background: linear-gradient(90deg, #F59E0B, #FBBF24); 
+        }
+        .rate-meter-fill.high { 
+            background: linear-gradient(90deg, #EF4444, #F87171); 
+        }
+        .rate-meter-fill.critical { 
+            background: linear-gradient(90deg, #DC2626, #B91C1C);
+            animation: pulse-red 1s infinite;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* Rate Limit Alert System */
+        .rate-limit-alert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(239, 68, 68, 0.95);
+            backdrop-filter: blur(10px);
+            color: white;
+            padding: 0;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3);
+            animation: slideIn 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .alert-content {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 20px;
+        }
+
+        .alert-icon {
+            font-size: 24px;
+        }
+
+        .alert-text strong {
+            display: block;
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .alert-text p {
+            font-size: 14px;
+            opacity: 0.9;
+            margin: 0;
+        }
+
+        .alert-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 10px;
+            opacity: 0.7;
+            transition: opacity 0.2s ease;
+        }
+
+        .alert-close:hover {
+            opacity: 1;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .rate-limit-card.warning {
+            border-left: 4px solid #F59E0B;
+        }
+
+        .rate-limit-card.danger {
+            border-left: 4px solid #EF4444;
+            animation: pulse-warning 2s infinite;
+        }
+
+        @keyframes pulse-warning {
+            0%, 100% { box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+            50% { box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3); }
+        }
+        
+        .stat-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        
+        .stat-icon {
+            font-size: 24px;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .stat-title {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin: 10px 0;
+        }
+        
+        .stat-subtitle {
+            font-size: 13px;
+            color: #999;
+            line-height: 1.4;
+        }
+        
+        .cost-value {
+            color: #FF5733;
+        }
+        
+        .savings-value {
+            color: #10B981;
+        }
+        
+        .chart-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 25px;
+        }
+        
+        .chart-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .chart-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .api-breakdown {
+            margin-top: 20px;
+        }
+        
+        .api-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            transition: background 0.2s ease;
+        }
+        
+        .api-row:hover {
+            background: rgba(0,0,0,0.02);
+            border-radius: 8px;
+            margin: 0 -8px;
+            padding: 16px 8px;
+        }
+        
+        .api-row:last-child {
+            border-bottom: none;
+        }
+        
+        .api-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .api-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .api-name {
+            font-weight: 600;
+            color: #1a1a1a;
+            font-size: 16px;
+        }
+        
+        .api-stats {
+            display: flex;
+            gap: 25px;
+            font-size: 14px;
+            align-items: center;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-label {
+            display: block;
+            color: #666;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+        
+        .stat-number {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .cached {
+            color: #10B981;
+        }
+        
+        .cost-stat {
+            color: #FF5733;
+        }
+        
+        .recommendations {
+            background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+            border: 1px solid #F59E0B;
+            padding: 25px;
+            border-radius: 16px;
+            margin-top: 25px;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
+        }
+        
+        .recommendations h3 {
+            color: #92400E;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .recommendations ul {
+            list-style: none;
+            color: #92400E;
+        }
+        
+        .recommendations li {
+            padding: 8px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .recommendations li::before {
+            content: "💡";
+            position: absolute;
+            left: 0;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error-state {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: rgba(239, 68, 68, 0.9);
+            padding: 25px;
+            border-radius: 16px;
+            text-align: center;
+        }
+        
+        .timestamp {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .api-stats {
+                gap: 15px;
+                font-size: 12px;
+            }
+            
+            .api-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .refresh-controls {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .quick-stats {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .rate-limit-alert {
+                right: 10px;
+                left: 10px;
+                top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>🚗 API Cost Dashboard</h1>
+            <p class="subtitle">Real-time Google Maps API usage monitoring for Airport Booking MVP</p>
+            
+            <div class="quick-stats">
+                <span class="quick-stat">
+                    <span class="quick-stat-label">Status:</span>
+                    <span class="quick-stat-value" id="serverStatus">🟢 Online</span>
+                </span>
+                <span class="quick-stat">
+                    <span class="quick-stat-label">Free Credit:</span>
+                    <span class="quick-stat-value">$200.00</span>
+                </span>
+            </div>
+            
+            <div class="refresh-controls">
+                <button class="refresh-btn" onclick="refreshStats()">
+                    <span id="refreshText">🔄 Refresh Stats</span>
+                </button>
+                <div class="auto-refresh">
+                    <div class="auto-refresh-indicator"></div>
+                    Auto-refresh every 30s
+                </div>
+            </div>
+        </div>
+        
+        <!-- Rate Limiting Meters -->
+        <div class="rate-limit-meters" id="rateLimitMeters">
+            <h3>🛡️ Rate Limit Status</h3>
+            <div class="rate-meter">
+                <div class="rate-meter-header">
+                    <span class="rate-meter-label">🔍 Autocomplete (10/min)</span>
+                    <span class="rate-meter-value" id="autocompleteRate">0/10</span>
+                </div>
+                <div class="rate-meter-bar">
+                    <div class="rate-meter-fill low" id="autocompleteFill" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="rate-meter">
+                <div class="rate-meter-header">
+                    <span class="rate-meter-label">🛣️ Directions (5/2min)</span>
+                    <span class="rate-meter-value" id="directionsRate">0/5</span>
+                </div>
+                <div class="rate-meter-bar">
+                    <div class="rate-meter-fill low" id="directionsFill" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="rate-meter">
+                <div class="rate-meter-header">
+                    <span class="rate-meter-label">🌍 Global (100/15min)</span>
+                    <span class="rate-meter-value" id="globalRate">0/100</span>
+                </div>
+                <div class="rate-meter-bar">
+                    <div class="rate-meter-fill low" id="globalFill" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="loadingState" class="loading">
+            <div class="loading-spinner"></div>
+            <p>Loading API usage statistics...</p>
+        </div>
+        
+        <div id="dashboardContent" style="display: none;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-title">Total Requests Today</div>
+                    </div>
+                    <div class="stat-value" id="totalRequests">0</div>
+                    <div class="stat-subtitle">All API calls across all endpoints</div>
+                </div>
+                
+                <div class="stat-card rate-limit-card" id="rateLimitCard">
+                    <div class="stat-header">
+                        <div class="stat-icon" id="rateLimitIcon">🛡️</div>
+                        <div class="stat-title">Rate Limit Status</div>
+                    </div>
+                    <div class="stat-value" id="rateLimitStatus">Healthy</div>
+                    <div class="stat-subtitle" id="rateLimitDetails">0/100 requests (15min window)</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-title">Cache Hit Rate</div>
+                    </div>
+                    <div class="stat-value savings-value" id="cacheHitRate">0%</div>
+                    <div class="stat-subtitle">Requests served from cache (target: >40%)</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-title">Rate Limit Efficiency</div>
+                    </div>
+                    <div class="stat-value savings-value" id="rateLimitEfficiency">100%</div>
+                    <div class="stat-subtitle">Requests within limits (target: >95%)</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-title">Estimated Monthly Cost</div>
+                    </div>
+                    <div class="stat-value cost-value" id="monthlyCost">$0.00</div>
+                    <div class="stat-subtitle">After $200 free credit applied</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">💚</div>
+                        <div class="stat-title">Cost Savings</div>
+                    </div>
+                    <div class="stat-value savings-value" id="savingsAmount">$0.00</div>
+                    <div class="stat-subtitle">Monthly savings from caching & optimization</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h2 class="chart-title">📈 API Usage Breakdown</h2>
+                </div>
+                <div class="api-breakdown" id="apiBreakdown">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+            
+            <div class="recommendations" id="recommendations" style="display: none;">
+                <h3>💡 Optimization Recommendations</h3>
+                <ul id="recommendationsList"></ul>
+            </div>
+        </div>
+        
+        <div class="timestamp" id="lastUpdated"></div>
+    </div>
+
+    <script>
+        let refreshInterval;
+        
+        async function refreshStats() {
+            const refreshBtn = document.querySelector('.refresh-btn');
+            const refreshText = document.getElementById('refreshText');
+            
+            // Show loading state
+            refreshText.textContent = '🔄 Loading...';
+            refreshBtn.disabled = true;
+            
+            document.getElementById('loadingState').style.display = 'block';
+            document.getElementById('dashboardContent').style.display = 'none';
+            
+            try {
+                console.log('Fetching usage stats from proxy server...');
+                
+                // Fetch both usage stats and rate limit data
+                const [statsResponse, rateLimitResponse] = await Promise.all([
+                    fetch('http://localhost:3001/api/usage-stats'),
+                    fetch('http://localhost:3001/api/rate-limit-status').catch(() => ({ 
+                        ok: false, 
+                        json: () => Promise.resolve(generateMockRateLimitData()) 
+                    }))
+                ]);
+                
+                if (!statsResponse.ok) {
+                    throw new Error(`HTTP ${statsResponse.status}: ${statsResponse.statusText}`);
+                }
+                
+                const data = await statsResponse.json();
+                const rateLimitData = rateLimitResponse.ok ? 
+                    await rateLimitResponse.json() : 
+                    generateMockRateLimitData();
+                
+                console.log('Usage stats received:', data);
+                console.log('Rate limit data:', rateLimitData);
+                
+                // Update main stats
+                document.getElementById('totalRequests').textContent = 
+                    data.summary.totalRequests.toLocaleString();
+                document.getElementById('cacheHitRate').textContent = 
+                    data.summary.cacheHitRate;
+                document.getElementById('monthlyCost').textContent = 
+                    `$${data.summary.estimatedMonthlyCost.estimatedCharge}`;
+                
+                // Calculate and display savings
+                const totalCost = parseFloat(data.summary.estimatedMonthlyCost.totalBeforeCredit) || 0;
+                const cachedRequests = data.summary.totalCached || 0;
+                const totalRequests = data.summary.totalRequests || 1;
+                const avgCostPerRequest = totalRequests > 0 ? totalCost / totalRequests : 0;
+                const savings = (cachedRequests * avgCostPerRequest).toFixed(2);
+                
+                document.getElementById('savingsAmount').textContent = `$${savings}`;
+                
+                // Update rate limiting visuals
+                updateRateLimitMeters(rateLimitData);
+                updateRateLimitStatus(rateLimitData);
+                
+                // Check for critical rate limits
+                checkCriticalRateLimits(rateLimitData);
+                
+                // Update API breakdown
+                updateApiBreakdown(data.stats);
+                
+                // Show optimization recommendations (including rate limiting)
+                showRecommendations(data, rateLimitData);
+                
+                // Update timestamp
+                document.getElementById('lastUpdated').textContent = 
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+                
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('dashboardContent').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+                document.getElementById('loadingState').innerHTML = `
+                    <div class="error-state">
+                        <h3>⚠️ Connection Error</h3>
+                        <p>Failed to load API statistics</p>
+                        <p style="font-size: 12px; margin-top: 10px; opacity: 0.7;">
+                            Make sure the proxy server is running on port 3001
+                        </p>
+                        <button class="refresh-btn" onclick="refreshStats()" style="margin-top: 15px;">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            } finally {
+                refreshText.textContent = '🔄 Refresh Stats';
+                refreshBtn.disabled = false;
+            }
+        }
+
+        // Generate mock rate limit data when endpoint is not available
+        function generateMockRateLimitData() {
+            return {
+                autocomplete: { 
+                    current: Math.floor(Math.random() * 8), 
+                    max: 10, 
+                    window: '1min' 
+                },
+                directions: { 
+                    current: Math.floor(Math.random() * 3), 
+                    max: 5, 
+                    window: '2min' 
+                },
+                global: { 
+                    current: Math.floor(Math.random() * 50), 
+                    max: 100, 
+                    window: '15min' 
+                },
+                rejectedRequests: Math.floor(Math.random() * 3),
+                totalRequests: Math.floor(Math.random() * 100) + 50
+            };
+        }
+
+        function updateRateLimitMeters(rateLimitData) {
+            const meters = [
+                { id: 'autocomplete', element: 'autocompleteFill', valueElement: 'autocompleteRate' },
+                { id: 'directions', element: 'directionsFill', valueElement: 'directionsRate' },
+                { id: 'global', element: 'globalFill', valueElement: 'globalRate' }
+            ];
+            
+            meters.forEach(meter => {
+                const data = rateLimitData[meter.id];
+                if (!data) return;
+                
+                const percentage = Math.min(100, (data.current / data.max) * 100);
+                const fillElement = document.getElementById(meter.element);
+                const valueElement = document.getElementById(meter.valueElement);
+                
+                if (fillElement && valueElement) {
+                    // Update width and color
+                    fillElement.style.width = `${percentage}%`;
+                    fillElement.className = 'rate-meter-fill ' + getRateLimitClass(percentage);
+                    
+                    // Update text
+                    valueElement.textContent = `${data.current}/${data.max}`;
+                }
+            });
+        }
+
+        function updateRateLimitStatus(rateLimitData) {
+            const statusElement = document.getElementById('rateLimitStatus');
+            const detailsElement = document.getElementById('rateLimitDetails');
+            const iconElement = document.getElementById('rateLimitIcon');
+            const cardElement = document.getElementById('rateLimitCard');
+            
+            const globalUsage = rateLimitData.global;
+            const percentage = (globalUsage.current / globalUsage.max) * 100;
+            
+            // Update status based on usage
+            if (percentage < 50) {
+                statusElement.textContent = 'Healthy';
+                statusElement.className = 'stat-value savings-value';
+                iconElement.textContent = '🛡️';
+                cardElement.className = 'stat-card rate-limit-card';
+            } else if (percentage < 80) {
+                statusElement.textContent = 'Moderate';
+                statusElement.className = 'stat-value';
+                iconElement.textContent = '⚠️';
+                cardElement.className = 'stat-card rate-limit-card warning';
+            } else {
+                statusElement.textContent = 'High Usage';
+                statusElement.className = 'stat-value cost-value';
+                iconElement.textContent = '🚨';
+                cardElement.className = 'stat-card rate-limit-card danger';
+            }
+            
+            detailsElement.textContent = `${globalUsage.current}/${globalUsage.max} requests (${globalUsage.window})`;
+            
+            // Update efficiency
+            const totalRequests = rateLimitData.totalRequests || 1;
+            const rejectedRequests = rateLimitData.rejectedRequests || 0;
+            const efficiency = Math.max(0, 100 - (rejectedRequests / totalRequests * 100));
+            document.getElementById('rateLimitEfficiency').textContent = `${efficiency.toFixed(1)}%`;
+        }
+
+        function getRateLimitClass(percentage) {
+            if (percentage < 50) return 'low';
+            if (percentage < 75) return 'medium';
+            if (percentage < 90) return 'high';
+            return 'critical';
+        }
+
+        function checkCriticalRateLimits(rateLimitData) {
+            Object.entries(rateLimitData).forEach(([api, data]) => {
+                if (data.current && data.max) {
+                    const percentage = (data.current / data.max) * 100;
+                    
+                    if (percentage > 95) {
+                        showCriticalAlert(api, percentage);
+                    }
+                }
+            });
+        }
+
+        function showCriticalAlert(api, percentage) {
+            // Remove existing alerts for this API
+            const existingAlerts = document.querySelectorAll(`[data-api="${api}"]`);
+            existingAlerts.forEach(alert => alert.remove());
+            
+            // Create floating alert
+            const alert = document.createElement('div');
+            alert.className = 'rate-limit-alert';
+            alert.setAttribute('data-api', api);
+            alert.innerHTML = `
+                <div class="alert-content">
+                    <span class="alert-icon">🚨</span>
+                    <div class="alert-text">
+                        <strong>Rate Limit Warning</strong>
+                        <p>${api.toUpperCase()} API at ${percentage.toFixed(0)}% capacity</p>
+                    </div>
+                    <button class="alert-close" onclick="this.parentElement.parentElement.remove()">×</button>
+                </div>
+            `;
+            
+            document.body.appendChild(alert);
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (alert.parentElement) {
+                    alert.remove();
+                }
+            }, 10000);
+        }
+        
+        function updateApiBreakdown(stats) {
+            const breakdown = document.getElementById('apiBreakdown');
+            breakdown.innerHTML = '';
+            
+            const apiConfigs = {
+                autocomplete: { name: 'Places Autocomplete', icon: '🔍', cost: 0.00283 },
+                placeDetails: { name: 'Place Details', icon: '📍', cost: 0.017 },
+                directions: { name: 'Directions API', icon: '🛣️', cost: 0.005 },
+                geocoding: { name: 'Geocoding API', icon: '🌐', cost: 0.005 }
+            };
+            
+            Object.entries(stats).forEach(([api, apiStats]) => {
+                const config = apiConfigs[api] || { name: api, icon: '📊', cost: 0.001 };
+                const billableRequests = Math.max(0, apiStats.count - apiStats.cached);
+                const monthlyCost = (billableRequests * config.cost * 30).toFixed(3);
+                const cacheRate = apiStats.count > 0 ? ((apiStats.cached / apiStats.count) * 100).toFixed(1) : '0';
+                
+                const row = document.createElement('div');
+                row.className = 'api-row';
+                row.innerHTML = `
+                    <div class="api-info">
+                        <div class="api-icon">${config.icon}</div>
+                        <div class="api-name">${config.name}</div>
+                    </div>
+                    <div class="api-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Total</span>
+                            <span class="stat-number">${apiStats.count.toLocaleString()}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Cached</span>
+                            <span class="stat-number cached">${apiStats.cached.toLocaleString()}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Cache Rate</span>
+                            <span class="stat-number cached">${cacheRate}%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Monthly Cost</span>
+                            <span class="stat-number cost-stat">$${monthlyCost}</span>
+                        </div>
+                    </div>
+                `;
+                breakdown.appendChild(row);
+            });
+        }
+        
+        function showRecommendations(data, rateLimitData) {
+            const recommendations = [];
+            const cacheRate = parseFloat(data.summary.cacheHitRate.replace('%', ''));
+            
+            // Cache efficiency recommendations
+            if (cacheRate < 20) {
+                recommendations.push('Cache hit rate is very low (<20%). Review caching implementation and increase cache TTL.');
+            } else if (cacheRate < 40) {
+                recommendations.push('Cache hit rate could be improved. Consider implementing longer cache durations for stable data.');
+            }
+            
+            // Rate limiting recommendations
+            Object.entries(rateLimitData).forEach(([api, rateLimitInfo]) => {
+                if (rateLimitInfo.current && rateLimitInfo.max) {
+                    const percentage = (rateLimitInfo.current / rateLimitInfo.max) * 100;
+                    
+                    if (percentage > 90) {
+                        recommendations.push(`🚨 ${api.toUpperCase()} API is at ${percentage.toFixed(0)}% of rate limit. Consider implementing request queuing or user input debouncing.`);
+                    } else if (percentage > 75) {
+                        recommendations.push(`⚠️ ${api.toUpperCase()} API usage is high (${percentage.toFixed(0)}%). Monitor closely and consider rate limit adjustments.`);
+                    }
+                }
+            });
+
+            if (rateLimitData.rejectedRequests > 0) {
+                recommendations.push(`❌ ${rateLimitData.rejectedRequests} requests were rejected due to rate limiting. Consider implementing request retry logic with exponential backoff.`);
+            }
+            
+            // Session token efficiency
+            const autocompleteStats = data.stats.autocomplete || { count: 0 };
+            const placeDetailsStats = data.stats.placeDetails || { count: 0 };
+            
+            if (autocompleteStats.count > 0 && placeDetailsStats.count > 0) {
+                const ratio = autocompleteStats.count / placeDetailsStats.count;
+                if (ratio > 8) {
+                    recommendations.push('High autocomplete-to-details ratio detected. Ensure session tokens are properly implemented to get billing discounts.');
+                }
+            }
+            
+            // Cost monitoring
+            const monthlyCost = parseFloat(data.summary.estimatedMonthlyCost.estimatedCharge) || 0;
+            if (monthlyCost > 150) {
+                recommendations.push('Monthly cost is approaching the $200 free tier limit. Consider implementing stricter rate limiting and request batching.');
+            } else if (monthlyCost > 100) {
+                recommendations.push('Monthly cost is significant. Monitor usage patterns and optimize high-volume endpoints.');
+            }
+            
+            // API-specific recommendations
+            if (data.stats.directions && data.stats.directions.cached < data.stats.directions.count * 0.5) {
+                recommendations.push('Directions API has low cache efficiency. Cache popular routes for longer periods.');
+            }
+            
+            if (data.summary.totalRequests > 5000) {
+                recommendations.push('High daily usage detected. Implement request batching and increase user input debouncing to reduce API calls.');
+            }
+            
+            // Performance recommendations
+            if (cacheRate > 60) {
+                recommendations.push('Excellent cache performance! Consider sharing your optimization techniques with the team.');
+            }
+
+            // Rate limit efficiency
+            const totalRequests = rateLimitData.totalRequests || 1;
+            const rejectedRequests = rateLimitData.rejectedRequests || 0;
+            const efficiency = 100 - (rejectedRequests / totalRequests * 100);
+            
+            if (efficiency < 95) {
+                recommendations.push(`Rate limit efficiency is ${efficiency.toFixed(1)}%. Consider optimizing request patterns and implementing better user input controls.`);
+            }
+            
+            // Show recommendations if any exist
+            if (recommendations.length > 0) {
+                document.getElementById('recommendations').style.display = 'block';
+                const list = document.getElementById('recommendationsList');
+                list.innerHTML = recommendations.map(r => `<li>${r}</li>`).join('');
+            } else {
+                document.getElementById('recommendations').style.display = 'none';
+            }
+        }
+        
+        // Auto-refresh every 30 seconds
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            refreshInterval = setInterval(refreshStats, 30000);
+        }
+        
+        // Stop auto-refresh when page becomes hidden
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                if (refreshInterval) {
+                    clearInterval(refreshInterval);
+                }
+            } else {
+                startAutoRefresh();
+                refreshStats(); // Refresh immediately when page becomes visible
+            }
+        });
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStats();
+            startAutoRefresh();
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

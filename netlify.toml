@@ -3,7 +3,7 @@
 
 [build]
   # Directory with serverless functions
-  functions = "netlify/functions"
+  functions = "backend/functions"
   # Directory to publish (your site root)
   publish = "."
 

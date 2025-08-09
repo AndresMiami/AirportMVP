@@ -5,8 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Airport Transfer Booking - Mobile Optimized MVP</title>
     
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="maps-autocomplete.css">
+    <!-- CSS Modular Architecture -->
+    <link rel="stylesheet" href="css/style.css"> <!-- Core Styles with Variables -->
+    <link rel="stylesheet" href="css/vehicle-carousel.css"> <!-- Vehicle Selection -->
+    <link rel="stylesheet" href="css/modals.css" media="print" onload="this.media='all'; this.onload=null;"> <!-- Lazy Load Modals -->
+    <link rel="stylesheet" href="css/maps-autocomplete.css"> <!-- Maps Integration -->
 </head>
 <body>
     <div class="app-container">
