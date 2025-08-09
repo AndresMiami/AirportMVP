@@ -20,11 +20,11 @@ export class CustomAutocomplete {
         
         // Validate required elements exist
         if (!this.input) {
-            console.warn('CustomAutocomplete: Input element not found:', inputId);
+            debug.warn('CustomAutocomplete: Input element not found:', inputId);
             return;
         }
         if (!this.suggestionsContainer) {
-            console.warn('CustomAutocomplete: Suggestions container not found:', suggestionsId);
+            debug.warn('CustomAutocomplete: Suggestions container not found:', suggestionsId);
             return;
         }
         
@@ -52,10 +52,10 @@ export class CustomAutocomplete {
 
     init() {
         if (!this.input) {
-            console.warn('CustomAutocomplete: Cannot initialize - input element missing');
+            debug.warn('CustomAutocomplete: Cannot initialize - input element missing');
             return;
         }
-        console.log('✅ CustomAutocomplete initialized successfully');
+        debug.success('CustomAutocomplete initialized');
         this.input.addEventListener('input', (e) => this.handleInput(e));
         this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
         this.input.addEventListener('blur', () => this.handleBlur());

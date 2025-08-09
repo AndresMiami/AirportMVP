@@ -219,13 +219,13 @@ export class PricingService {
     calculateVehiclePrice(vehicleType, distance, duration, options = {}) {
         const vehicle = this.vehicleConfig[vehicleType];
         if (!vehicle) {
-            console.warn(`Invalid vehicle type: ${vehicleType}`);
+            debug.warn(`Invalid vehicle type: ${vehicleType}`);
             return null;
         }
 
         // Check if distance exceeds service area (280 miles max)
         if (distance > 280) {
-            console.warn(`Distance ${distance} miles exceeds service area (max 280 miles)`);
+            debug.warn(`Distance ${distance} miles exceeds service area (max 280 miles)`);
             return {
                 error: true,
                 message: 'Trip exceeds service area. Maximum distance is 280 miles.',
@@ -492,7 +492,7 @@ export class PricingService {
      */
     updateVehicleConfig(vehicleType, updates) {
         if (!this.vehicleConfig[vehicleType]) {
-            console.warn(`Vehicle type ${vehicleType} not found`);
+            debug.warn(`Vehicle type ${vehicleType} not found`);
             return false;
         }
 
@@ -501,7 +501,7 @@ export class PricingService {
             ...updates
         };
 
-        console.log(`✅ Updated ${vehicleType} configuration:`, updates);
+        debug.group('pricing', `Updated ${vehicleType} configuration:`, updates);
         return true;
     }
 
@@ -511,7 +511,7 @@ export class PricingService {
     addHoliday(dateString) {
         if (!this.holidays.includes(dateString)) {
             this.holidays.push(dateString);
-            console.log(`➕ Added holiday: ${dateString}`);
+            debug.info(`Added holiday: ${dateString}`);
         }
     }
 

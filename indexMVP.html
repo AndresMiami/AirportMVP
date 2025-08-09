@@ -580,6 +580,10 @@
         </div>
     </div>
 
+    <!-- Debug Utility - Load First -->
+    <script src="./debug.js"></script>
+    
+    <!-- Main Application Scripts -->
     <script type="module" src="./autocomplete.js"></script>
     <script>
         // Main Application Class
@@ -2290,18 +2294,18 @@
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const apiUrl = isLocal ? 'http://localhost:3001/api/maps-script' : 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
         
-        console.log('Loading Google Maps from:', apiUrl);
+        debug.network('GET', apiUrl, { source: 'Google Maps Script' });
         script.src = apiUrl;
         script.defer = true;
         
         // Add success handling
         script.onload = function() {
-            console.log('Google Maps script loaded successfully from proxy');
+            debug.success('Google Maps script loaded from proxy');
         };
         
         // Add error handling for script loading
         script.onerror = function() {
-            console.error('Failed to load Google Maps from proxy. Please ensure the server is running on port 3001.');
+            debug.error('Failed to load Google Maps from proxy. Please ensure the server is running on port 3001.');
             // Note: No fallback with exposed API key - proxy is required for security
         };
         
