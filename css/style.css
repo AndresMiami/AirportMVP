@@ -847,7 +847,7 @@ button {
     transform: none;
 }
 
-.back-btn {
+button.back-btn {
     position: absolute;
     top: var(--space-lg);
     left: var(--space-lg);
@@ -861,7 +861,7 @@ button {
     font-weight: var(--font-bold);
     font-family: inherit;
     transition: all var(--transition-base);
-    background: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.95) !important;
     border: 1px solid var(--border-light);
     border-radius: 50%;
     box-shadow: var(--shadow-sm);
@@ -869,13 +869,13 @@ button {
     cursor: pointer;
 }
 
-.back-btn:hover {
-    background: var(--white);
+button.back-btn:hover {
+    background: var(--white) !important;
     box-shadow: var(--shadow-md);
     transform: scale(1.05);
 }
 
-.back-btn:active { transform: scale(0.95); }
+button.back-btn:active { transform: scale(0.95); }
 
 .back-btn svg,
 .continue-btn svg,

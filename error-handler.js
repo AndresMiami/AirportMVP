@@ -71,6 +71,28 @@ class ErrorHandler {
             return;
         }
         
+        // Suppress Apple Pay errors in development environment
+        const isApplePayError = errorInfo.message && (
+            errorInfo.message.includes('Apple Pay') ||
+            errorInfo.message.includes('insecure document') ||
+            errorInfo.message.includes('InvalidAccessError')
+        );
+        
+        const isDevelopment = window.location.hostname === 'localhost' || 
+                            window.location.hostname === '127.0.0.1' ||
+                            window.location.protocol !== 'https:';
+        
+        if (isApplePayError && isDevelopment) {
+            // Don't log Apple Pay errors in development
+            return;
+        }
+        
+        // Suppress other expected errors in development
+        if (this.shouldSuppressError(errorInfo)) {
+            console.warn('🚫 Payment feature unavailable in development:', errorInfo.message);
+            return;
+        }
+        
         // Log to debug system
         if (window.debug) {
             debug.error(errorInfo.message || 'Unknown error', errorInfo.error);
@@ -89,6 +111,37 @@ class ErrorHandler {
         
         // Track error for analytics
         this.trackError(errorInfo, category);
+    }
+    
+    /**
+     * Check if error should be suppressed in development environment
+     */
+    shouldSuppressError(errorInfo) {
+        const isDevelopment = window.location.hostname === 'localhost' || 
+                             window.location.hostname === '127.0.0.1';
+        
+        if (isDevelopment) {
+            const message = (errorInfo.message || '').toLowerCase();
+            const errorName = errorInfo.error?.name;
+            
+            // Suppress Apple Pay errors in development
+            if (message.includes('apple pay') || message.includes('applepaysession')) {
+                return true;
+            }
+            
+            // Suppress secure context errors (like Apple Pay trying to start from insecure document)
+            if (errorName === 'InvalidAccessError' && 
+                message.includes('insecure document')) {
+                return true;
+            }
+            
+            // Suppress other payment-related secure context errors
+            if (message.includes('secure context') && message.includes('payment')) {
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     /**

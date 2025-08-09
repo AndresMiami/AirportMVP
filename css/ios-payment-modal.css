@@ -1,0 +1,300 @@
+/**
+ * iOS-Style Payment Modal
+ * Matches the native iOS payment selector design
+ */
+
+.ios-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.ios-modal.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.ios-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.ios-modal-sheet {
+    position: relative;
+    background: #ffffff;
+    width: 100%;
+    max-width: 500px;
+    border-radius: 12px 12px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.ios-modal.show .ios-modal-sheet {
+    transform: translateY(0);
+}
+
+/* Modal Header */
+.ios-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 0.5px solid #e5e5e7;
+    position: relative;
+}
+
+.ios-modal-title {
+    flex: 1;
+    text-align: center;
+    font-size: 17px;
+    font-weight: 600;
+    color: #000000;
+    margin: 0;
+    letter-spacing: -0.4px;
+}
+
+.ios-modal-close,
+.ios-modal-add {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    padding: 8px;
+    cursor: pointer;
+    color: #007AFF;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s;
+}
+
+.ios-modal-close {
+    left: 12px;
+}
+
+.ios-modal-add {
+    right: 12px;
+}
+
+.ios-modal-close:active,
+.ios-modal-add:active {
+    opacity: 0.5;
+}
+
+/* Modal Body */
+.ios-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+.payment-section-title {
+    font-size: 13px;
+    font-weight: 400;
+    color: #8e8e93;
+    text-transform: uppercase;
+    letter-spacing: -0.08px;
+    padding: 0 20px;
+    margin-bottom: 8px;
+}
+
+.payment-methods-list {
+    background: #ffffff;
+}
+
+.payment-method-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+    position: relative;
+}
+
+.payment-method-item:active {
+    background-color: #f2f2f7;
+}
+
+.payment-method-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 72px;
+    right: 0;
+    height: 0.5px;
+    background: #e5e5e7;
+}
+
+.payment-method-icon {
+    width: 40px;
+    height: 26px;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card-brand-icon {
+    width: 40px;
+    height: 26px;
+    border: 1px solid #e5e5e7;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    background: #ffffff;
+}
+
+.card-brand-icon.visa {
+    background: linear-gradient(180deg, #1A1F71 0%, #004B94 100%);
+    color: white;
+}
+
+.card-brand-icon.mastercard {
+    background: linear-gradient(135deg, #EB001B 0%, #F79E1B 100%);
+    color: white;
+}
+
+.payment-method-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.payment-method-name {
+    font-size: 17px;
+    color: #000000;
+    letter-spacing: -0.4px;
+}
+
+.payment-method-check {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.payment-method-check.selected {
+    opacity: 1;
+}
+
+.payment-method-check svg {
+    stroke: #007AFF;
+}
+
+/* Modal Footer */
+.ios-modal-footer {
+    padding: 12px 20px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    border-top: 0.5px solid #e5e5e7;
+}
+
+.ios-continue-btn {
+    width: 100%;
+    padding: 14px;
+    background: #f2f2f7;
+    border: none;
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: 600;
+    color: #8e8e93;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: -0.4px;
+}
+
+.ios-continue-btn:active {
+    transform: scale(0.98);
+    background: #e5e5ea;
+}
+
+/* When payment is selected */
+.payment-method-check.selected ~ .ios-continue-btn {
+    background: #007AFF;
+    color: #ffffff;
+}
+
+/* Apple Pay specific styling */
+.payment-method-item[data-method="apple-pay"] .payment-method-icon img {
+    width: 40px;
+    height: 26px;
+    border-radius: 4px;
+}
+
+/* Animation classes */
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+    .ios-modal {
+        align-items: center;
+        padding: 20px;
+    }
+    
+    .ios-modal-sheet {
+        border-radius: 12px;
+        max-width: 400px;
+        max-height: 600px;
+    }
+}
+
+/* Safe area adjustments for iPhone X+ */
+@supports (padding: max(0px)) {
+    .ios-modal-sheet {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+
+/* Smooth scrolling */
+.ios-modal-body::-webkit-scrollbar {
+    width: 0px;
+    background: transparent;
+}
+
+/* Prevent body scroll when modal is open */
+body.modal-open {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+}

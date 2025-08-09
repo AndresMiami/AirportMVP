@@ -29,6 +29,7 @@
     <link rel="stylesheet" href="css/vehicle-carousel.css"> <!-- Vehicle Selection -->
     <link rel="stylesheet" href="css/modals.css" media="print" onload="this.media='all'; this.onload=null;"> <!-- Lazy Load Modals -->
     <link rel="stylesheet" href="css/maps-autocomplete.css"> <!-- Maps Integration -->
+    <link rel="stylesheet" href="css/payment-modal-enhanced.css"> <!-- Enhanced Payment Modal -->
 </head>
 <body>
     <div class="app-container">
@@ -405,7 +406,7 @@
                         <!-- Payment Row -->
                         <!-- Payment Row moved to panel-actions below -->
                         <div class="payment-row-mobile">
-                            <button class="payment-method-mobile" onclick="selectPaymentMethod()">
+                            <button class="payment-method-mobile" onclick="PaymentModalEnhanced.getInstance().open()">
                                 <div class="card-icon">VISA</div>
                                 <span class="payment-details">Visa, •••• 1187</span>
                                 <span class="dropdown-arrow">▼</span>
@@ -1842,7 +1843,7 @@
                 }
             }
             
-            confirmBooking() {
+            async confirmBooking() {
                 const tripId = this.generateTripId();
                 const bookingData = {
                     tripId: tripId,
@@ -1872,13 +1873,57 @@
                         method: this.state.paymentMethod,
                         promo: this.state.promoCode
                     },
-                    status: 'confirmed',
+                    status: 'pending',
                     createdAt: new Date().toISOString()
                 };
                 
-                localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
+                // Calculate total amount
+                const amount = this.state.vehicle.price || 100; // Use vehicle price or default
                 
-                this.showBookingConfirmation(tripId, bookingData);
+                try {
+                    // Show loading state
+                    const bookBtn = document.getElementById('bookBtn');
+                    const originalText = bookBtn.innerHTML;
+                    bookBtn.innerHTML = '<span class="btn-main-text">Processing payment...</span>';
+                    bookBtn.disabled = true;
+                    
+                    // Get payment controller
+                    const paymentController = PaymentModalEnhanced.getInstance();
+                    const selectedPayment = paymentController.getSelectedPayment();
+                    
+                    if (!selectedPayment) {
+                        alert('Please select a payment method first');
+                        bookBtn.innerHTML = originalText;
+                        bookBtn.disabled = false;
+                        return;
+                    }
+                    
+                    // For now, simulate payment success (replace with actual Stripe processing)
+                    const paymentResult = {
+                        success: true,
+                        paymentIntentId: 'pi_demo_' + Date.now()
+                    };
+                    
+                    // Payment successful
+                    bookingData.status = 'confirmed';
+                    bookingData.payment.transactionId = paymentResult.paymentIntentId;
+                    
+                    localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
+                    
+                    // Show confirmation
+                    this.showBookingConfirmation(tripId, bookingData);
+                    
+                } catch (error) {
+                    console.error('Payment failed:', error);
+                    
+                    // Restore button
+                    const bookBtn = document.getElementById('bookBtn');
+                    bookBtn.innerHTML = originalText;
+                    bookBtn.disabled = false;
+                    
+                    // Show error message
+                    alert('Payment failed. Please try again.');
+                }
             }
 
             generateTripId() {
@@ -2538,6 +2583,15 @@
         window.addEventListener('online', updateOnlineStatus);
         window.addEventListener('offline', updateOnlineStatus);
         updateOnlineStatus();
+    </script>
+    
+    <!-- Enhanced Payment Modal -->
+    <script src="payment-modal-enhanced.js?v=3"></script>
+    <script>
+        // Initialize payment modal on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            PaymentModalEnhanced.getInstance().init();
+        });
     </script>
 </body>
 </html>

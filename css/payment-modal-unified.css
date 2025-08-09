@@ -1,0 +1,375 @@
+/**
+ * Payment Modal Styles
+ * Matches passenger modal design for consistency
+ */
+
+/* Payment Modal Panel - extends modal-panel */
+.payment-modal-panel {
+    max-width: 440px;
+    margin: 0 auto;
+}
+
+/* Modal Header Section */
+.modal-header-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 0.5px solid #e5e5e7;
+    background: #ffffff;
+    position: relative;
+}
+
+.modal-title {
+    flex: 1;
+    text-align: center;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.4px;
+    color: #000000;
+    margin: 0;
+}
+
+.modal-back-btn,
+.modal-add-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: #007AFF;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.modal-back-btn {
+    left: 8px;
+}
+
+.modal-add-btn {
+    right: 8px;
+}
+
+.modal-back-btn:active,
+.modal-add-btn:active {
+    opacity: 0.3;
+}
+
+/* Payment Section */
+.payment-section-label {
+    font-size: 13px;
+    font-weight: 400;
+    color: #8e8e93;
+    text-transform: uppercase;
+    letter-spacing: -0.08px;
+    padding: 20px 20px 8px;
+}
+
+/* Payment Methods List */
+.payment-methods-list {
+    background: #ffffff;
+}
+
+.payment-method-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    min-height: 58px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+    position: relative;
+}
+
+.payment-method-row:active {
+    background-color: #f2f2f7;
+}
+
+.payment-method-row:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 72px;
+    right: 0;
+    height: 0.5px;
+    background: #e5e5e7;
+}
+
+/* Payment Method Icon */
+.payment-method-icon {
+    width: 40px;
+    height: 26px;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Card Brand Icons */
+.card-brand-visa,
+.card-brand-mc,
+.card-brand-amex,
+.card-brand-discover,
+.card-brand-generic {
+    width: 40px;
+    height: 26px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid #e5e5e7;
+}
+
+.card-brand-visa {
+    background: linear-gradient(to bottom, #1A1F71 0%, #1A1F71 35%, white 35%, white 65%, #F7B600 65%, #F7B600 100%);
+    color: #1A1F71;
+}
+
+.card-brand-mc {
+    background: white;
+    position: relative;
+    overflow: hidden;
+}
+
+.card-brand-mc::before,
+.card-brand-mc::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.card-brand-mc::before {
+    background: #EB001B;
+    left: 8px;
+}
+
+.card-brand-mc::after {
+    background: #F79E1B;
+    right: 8px;
+}
+
+.card-brand-amex {
+    background: #006FCF;
+    color: white;
+}
+
+.card-brand-discover {
+    background: white;
+    color: #FF6600;
+}
+
+.card-brand-generic {
+    background: #f2f2f7;
+    color: #8e8e93;
+}
+
+.apple-pay-icon {
+    background: #000000;
+    color: white;
+    width: 40px;
+    height: 26px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Payment Method Info */
+.payment-method-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.payment-method-name {
+    font-size: 17px;
+    letter-spacing: -0.4px;
+    color: #000000;
+}
+
+.payment-method-expiry {
+    font-size: 13px;
+    color: #8e8e93;
+    letter-spacing: -0.08px;
+}
+
+/* Checkmark */
+.payment-method-check {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.payment-method-check.selected {
+    opacity: 1;
+}
+
+/* Modal Action Section */
+.modal-action-section {
+    padding: 20px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+.primary-action-btn {
+    width: 100%;
+    padding: 14px;
+    background: #e5e5ea;
+    border: none;
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: 600;
+    color: #8e8e93;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: -0.4px;
+}
+
+.primary-action-btn.active {
+    background: #000000;
+    color: #ffffff;
+}
+
+.primary-action-btn:not(:disabled):active {
+    transform: scale(0.98);
+}
+
+.primary-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Add Card Form Styles */
+.card-input-panel {
+    max-width: 440px;
+    margin: 0 auto;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #8e8e93;
+    text-transform: uppercase;
+    letter-spacing: -0.08px;
+    margin-bottom: 8px;
+}
+
+.form-input {
+    width: 100%;
+    padding: 16px;
+    border: 1px solid #e5e5e7;
+    border-radius: 10px;
+    font-size: 17px;
+    letter-spacing: -0.4px;
+    background: #ffffff;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #007AFF;
+}
+
+.form-input.error {
+    border-color: #FF3B30;
+}
+
+.form-input::placeholder {
+    color: #C7C7CC;
+}
+
+.input-with-icon {
+    position: relative;
+}
+
+.card-type-indicator {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.form-row {
+    display: flex;
+    gap: 12px;
+}
+
+.form-group.half {
+    flex: 1;
+}
+
+.input-error {
+    font-size: 12px;
+    color: #FF3B30;
+    margin-top: 4px;
+    min-height: 16px;
+}
+
+.card-security-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: #f2f2f7;
+    border-radius: 8px;
+    margin: 20px 0;
+    font-size: 13px;
+    color: #8e8e93;
+    line-height: 1.4;
+}
+
+/* Animation matching passenger modal */
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+/* Mobile specific adjustments */
+@media (max-width: 768px) {
+    .modal-panel.payment-modal-panel,
+    .modal-panel.card-input-panel {
+        border-radius: 12px 12px 0 0;
+    }
+}
+
+/* Ensure modal content is scrollable */
+.modal-content-section {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Match existing modal backdrop blur */
+.full-modal {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
