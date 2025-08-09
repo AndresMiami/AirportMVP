@@ -1,0 +1,370 @@
+/* ============================================
+   VEHICLE CAROUSEL SYSTEM
+   ============================================ */
+
+.carousel-container {
+    position: relative;
+    padding: var(--space-lg) 0;
+    overflow: hidden;
+}
+
+.carousel-wrapper {
+    position: relative;
+    width: 100%;
+    height: 320px;
+    flex-shrink: 0;
+}
+
+.carousel-track {
+    display: flex;
+    transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    height: 100%;
+    align-items: center;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+}
+
+.carousel-wrapper::-webkit-scrollbar { display: none; }
+
+/* Vehicle Cards */
+.vehicle-card {
+    flex: 0 0 85%;
+    margin: 0 var(--space-md);
+    cursor: pointer;
+    transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    border: 2px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: white;
+    box-shadow: var(--shadow-sm);
+    transform: scale(0.9);
+    opacity: 0.7;
+    position: relative;
+}
+
+.vehicle-card.active {
+    transform: scale(1);
+    opacity: 1;
+    border-color: #ff9933;
+    box-shadow: 0 0 0 4px rgba(255, 153, 51, 0.1), var(--shadow-md);
+    z-index: 2;
+}
+
+.vehicle-card.selected {
+    border-color: var(--primary-gradient-start);
+    border-width: 2px;
+    box-shadow: 0 6px 16px rgba(255, 153, 51, 0.25);
+}
+
+.vehicle-card.prev,
+.vehicle-card.next {
+    transform: scale(0.85);
+    opacity: 0.5;
+}
+
+/* Vehicle Images */
+.vehicle-image-section {
+    position: relative;
+    height: 200px;
+    background: linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 100%);
+    overflow: hidden;
+}
+
+.vehicle-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    transition: transform 0.4s ease;
+    background: var(--surface);
+}
+
+.vehicle-card:hover .vehicle-image,
+.vehicle-card.active .vehicle-image {
+    transform: scale(1.05);
+}
+
+.vehicle-image[data-loaded="false"] {
+    background: var(--surface);
+    opacity: 0.5;
+}
+
+.vehicle-image[data-loaded="true"] {
+    opacity: 1;
+}
+
+.vehicle-image-fallback {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    color: white;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    font-size: var(--font-sm);
+    font-weight: var(--font-medium);
+    text-align: center;
+    backdrop-filter: blur(10px);
+}
+
+.fallback-icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+}
+
+/* Vehicle Info */
+.vehicle-info {
+    padding: 16px;
+    background: white;
+}
+
+.vehicle-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.vehicle-details {
+    flex: 1;
+}
+
+.vehicle-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    line-height: 1.2;
+}
+
+/* Vehicle Specs */
+.vehicle-specs {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.spec-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.spec-icon {
+    font-size: 16px;
+    opacity: 0.6;
+}
+
+.spec-value {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+/* Vehicle Price */
+.vehicle-price {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-left: 16px;
+}
+
+/* Vehicle Subtitle */
+.vehicle-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0;
+    font-weight: 400;
+}
+
+/* Vehicle Badges */
+.selection-badge {
+    position: absolute;
+    top: var(--space-md);
+    right: var(--space-md);
+    width: 36px;
+    height: 36px;
+    border: 3px solid white;
+    border-radius: var(--radius-full);
+    background: var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-slow);
+    box-shadow: var(--shadow-md);
+    z-index: 3;
+}
+
+.vehicle-card.active .selection-badge {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+    transform: scale(1.1);
+}
+
+.selection-badge::after {
+    content: '';
+    transition: all var(--transition-slow);
+}
+
+.vehicle-card.active .selection-badge::after {
+    content: '✓';
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.popular-badge {
+    position: absolute;
+    top: var(--space-md);
+    left: var(--space-md);
+    background: #FF6B35;
+    color: white;
+    padding: 6px 12px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    z-index: 3;
+}
+
+/* Carousel indicators removed */
+.carousel-indicators,
+.indicator {
+    display: none !important;
+}
+
+/* Carousel Navigation */
+.carousel-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-light);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-sm);
+    z-index: var(--z-sticky);
+    font-size: var(--font-xl);
+    color: var(--text-secondary);
+}
+
+.carousel-nav:hover {
+    background: var(--white);
+    border-color: var(--primary);
+    color: var(--primary);
+    transform: translateY(-50%) scale(1.05);
+    box-shadow: var(--shadow-md);
+}
+
+.carousel-nav:active { transform: translateY(-50%) scale(0.95); }
+.carousel-nav.prev { left: var(--space-md); }
+.carousel-nav.next { right: var(--space-md); }
+
+/* Price Animation */
+.vehicle-price.price-updating {
+    animation: priceUpdate 0.5s ease;
+}
+
+/* Swipe Hint */
+.swipe-hint {
+    position: absolute;
+    bottom: var(--space-md);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: var(--font-sm);
+    color: var(--text-light);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    opacity: 0.7;
+    animation: fadeInOut 3s infinite;
+}
+
+/* Mobile Responsive */
+@media (max-width: 480px) {
+    .carousel-wrapper { height: 300px; }
+    .vehicle-card { flex: 0 0 90%; }
+    .vehicle-image-section { height: 180px; }
+
+    .vehicle-name { font-size: 16px; }
+    .vehicle-price { font-size: 20px; }
+    .spec-icon, .spec-value { font-size: 14px; }
+    .vehicle-subtitle { font-size: 13px; }
+
+    .carousel-nav {
+        width: 36px;
+        height: 36px;
+        font-size: var(--font-base);
+    }
+
+    .carousel-nav.prev { left: var(--space-sm); }
+    .carousel-nav.next { right: var(--space-sm); }
+}
+
+@media (max-height: 700px) {
+    .carousel-wrapper { height: 280px; }
+    .vehicle-image-section { height: 160px; }
+    .vehicle-info { padding: 12px; }
+}
+
+@media (min-height: 800px) {
+    .carousel-wrapper { height: 360px; }
+    .vehicle-image-section { height: 220px; }
+}
+
+@media (max-width: 768px) {
+    #vehiclePanel .carousel-container {
+        padding: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #vehiclePanel .carousel-wrapper {
+        flex: 1;
+        height: auto;
+        min-height: 0;
+    }
+
+    #vehiclePanel .carousel-track {
+        height: 100%;
+    }
+
+    #vehiclePanel .vehicle-card {
+        margin: 0 4px;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #vehiclePanel .vehicle-image-section {
+        height: 60%;
+        min-height: 160px;
+    }
+
+    #vehiclePanel .vehicle-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    #vehiclePanel .carousel-nav {
+        width: 36px;
+        height: 36px;
+        font-size: 18px;
+    }
+
+    #vehiclePanel .carousel-nav.prev { left: 8px; }
+    #vehiclePanel .carousel-nav.next { right: 8px; }
+    #vehiclePanel .swipe-hint { display: none; }
+}
