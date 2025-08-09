@@ -30,11 +30,12 @@ export class PricingService {
                     { minMiles: 0, maxMiles: 15, rate: 3.25 },
                     { minMiles: 16, maxMiles: 50, rate: 2.85 },
                     { minMiles: 51, maxMiles: 100, rate: 2.45 },
-                    { minMiles: 101, maxMiles: Infinity, rate: 2.15 }
+                    { minMiles: 101, maxMiles: 280, rate: 2.15 }  // Service limit at 280 miles
                 ],
                 airportFee: 10,
                 hourlyProtection: 100,
-                capacity: { passengers: 4, bags: 4 }
+                capacity: { passengers: 4, bags: 4 },
+                maxDistance: 280  // Service area limit
             },
             escalade: {
                 name: 'Cadillac Escalade',
@@ -42,11 +43,12 @@ export class PricingService {
                     { minMiles: 0, maxMiles: 15, rate: 4.50 },
                     { minMiles: 16, maxMiles: 50, rate: 3.95 },
                     { minMiles: 51, maxMiles: 100, rate: 3.45 },
-                    { minMiles: 101, maxMiles: Infinity, rate: 2.95 }
+                    { minMiles: 101, maxMiles: 280, rate: 2.95 }  // Service limit at 280 miles
                 ],
                 airportFee: 15,
                 hourlyProtection: 125,
-                capacity: { passengers: 7, bags: 8 }
+                capacity: { passengers: 7, bags: 8 },
+                maxDistance: 280  // Service area limit
             },
             sprinter: {
                 name: 'Mercedes Sprinter',
@@ -54,11 +56,12 @@ export class PricingService {
                     { minMiles: 0, maxMiles: 15, rate: 6.25 },
                     { minMiles: 16, maxMiles: 50, rate: 5.50 },
                     { minMiles: 51, maxMiles: 100, rate: 4.85 },
-                    { minMiles: 101, maxMiles: Infinity, rate: 4.25 }
+                    { minMiles: 101, maxMiles: 280, rate: 4.25 }  // Service limit at 280 miles
                 ],
                 airportFee: 25,
                 hourlyProtection: 150,
-                capacity: { passengers: 12, bags: 15 }
+                capacity: { passengers: 12, bags: 15 },
+                maxDistance: 280  // Service area limit
             }
         };
 
@@ -78,7 +81,7 @@ export class PricingService {
             weekendSurcharge: { days: [0, 6], rate: 1.10, description: 'Weekend service' },
             holidaySurcharge: { rate: 1.25, description: 'Holiday service' },
             peakHours: { start: 7, end: 9, rate: 1.20, description: 'Peak hours (7am-9am)' },
-            cancellationFee: 25
+            cancellationFee: 15
         };
 
         // Holiday dates
@@ -218,6 +221,16 @@ export class PricingService {
         if (!vehicle) {
             console.warn(`Invalid vehicle type: ${vehicleType}`);
             return null;
+        }
+
+        // Check if distance exceeds service area (280 miles max)
+        if (distance > 280) {
+            console.warn(`Distance ${distance} miles exceeds service area (max 280 miles)`);
+            return {
+                error: true,
+                message: 'Trip exceeds service area. Maximum distance is 280 miles.',
+                maxDistance: 280
+            };
         }
 
         // Check for popular route flat rates
@@ -680,6 +693,95 @@ export class PricingService {
                 capacity: { passengers: 12, bags: 15 } 
             }
         };
+    }
+
+    /**
+     * Calculate estimated savings (for internal analytics)
+     * Compares tiered pricing vs old linear pricing
+     */
+    calculateSavings(vehicleType, distance, duration) {
+        const vehicle = this.vehicleConfig[vehicleType];
+        if (!vehicle) return null;
+
+        const tieredResult = this.calculateTieredPrice(vehicleType, distance);
+        const dynamicFee = this.calculateDynamicAirportFee(vehicleType, distance);
+        const tieredTotal = tieredResult.total + dynamicFee;
+        
+        // Calculate with old linear system (for internal comparison)
+        const oldRate = vehicle.priceTiers[0].rate;
+        const oldTotal = (distance * oldRate) + vehicle.airportFee;
+        
+        // Calculate hourly protection
+        const hourlyTotal = (duration / 60) * vehicle.hourlyProtection;
+        
+        return {
+            vehicleType,
+            newTieredTotal: this.roundToTwoDec(tieredTotal),
+            oldLinearTotal: this.roundToTwoDec(oldTotal),
+            hourlyTotal: this.roundToTwoDec(hourlyTotal),
+            chosenModel: hourlyTotal > tieredTotal ? 'hourly' : 'tiered',
+            savingsVsOld: this.roundToTwoDec(oldTotal - tieredTotal),
+            savingsPercent: Math.round((oldTotal - tieredTotal) / oldTotal * 100)
+        };
+    }
+
+    /**
+     * Compare prices with and without psychological pricing
+     * Useful for understanding the psychological pricing impact
+     */
+    comparePsychologicalImpact(vehicleType, distance, duration) {
+        // Calculate with psychological pricing
+        const originalEnabled = this.psychologicalPricing.enabled;
+        this.psychologicalPricing.enabled = true;
+        const withPsych = this.calculateVehiclePrice(vehicleType, distance, duration);
+        
+        // Calculate without psychological pricing
+        this.psychologicalPricing.enabled = false;
+        const withoutPsych = this.calculateVehiclePrice(vehicleType, distance, duration);
+        
+        // Restore original setting
+        this.psychologicalPricing.enabled = originalEnabled;
+        
+        if (!withPsych || !withoutPsych || withPsych.error || withoutPsych.error) {
+            return null;
+        }
+        
+        return {
+            originalPrice: withoutPsych.finalPrice,
+            psychologicalPrice: withPsych.finalPrice,
+            difference: Math.abs(withPsych.finalPrice - withoutPsych.finalPrice),
+            perceivedSavings: withoutPsych.finalPrice > withPsych.finalPrice ? 
+                `Customer feels they saved $${(withoutPsych.finalPrice - withPsych.finalPrice).toFixed(2)}` :
+                `Price increased by $${(withPsych.finalPrice - withoutPsych.finalPrice).toFixed(2)} for better perception`,
+            recommendation: withPsych.finalPrice < 50 ? 
+                'Price ends in 9 - creates bargain perception' :
+                withPsych.finalPrice < 150 ? 
+                'Price ends in 5 - professional feel' :
+                'Price ends in 9 - maximizes perceived value'
+        };
+    }
+
+    /**
+     * Test psychological pricing with various examples
+     */
+    testPsychologicalPricing() {
+        console.log('🧠 Testing Psychological Pricing\n');
+        console.log('Strategy: AUTO (smart selection based on price range)\n');
+        
+        const testPrices = [23, 47, 73, 127, 247, 523, 1250];
+        
+        console.log('Original -> Optimized:');
+        testPrices.forEach(price => {
+            const optimized = this.applyPsychologicalPricing(price);
+            const savings = price - optimized;
+            console.log(`$${price} -> $${optimized} (${savings > 0 ? 'saves' : 'adds'} $${Math.abs(savings.toFixed(2))})`);
+        });
+        
+        console.log('\n📊 Impact Analysis:');
+        console.log('• Prices under $50: End in 9 (bargain perception)');
+        console.log('• Prices $50-150: End in 5 (professional)');
+        console.log('• Prices $150-500: End in 9 (maximize perceived savings)');
+        console.log('• Prices $500+: End in 45/95 (premium positioning)');
     }
 }
 
