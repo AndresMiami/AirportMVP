@@ -41,11 +41,12 @@
   to = "/.netlify/functions/track-flight"
   status = 200
 
-# SPA redirect for client-side routing (if needed)
-[[redirects]]
-  from = "/*"
-  to = "/indexMVP.html"
-  status = 200
+# SPA redirect for client-side routing (only for HTML pages, not assets)
+# Disabled to allow CSS and JS files to load properly
+# [[redirects]]
+#   from = "/*"
+#   to = "/indexMVP.html"
+#   status = 200
 
 # Headers for security
 [[headers]]
@@ -62,7 +63,7 @@
 
 # Function configuration
 [functions]
-  # Directory for functions
-  directory = "netlify/functions"
+  # Directory for functions (using backend/functions as defined in build section)
+  # directory = "backend/functions"  # Commented out as it's already defined in [build]
   # Node bundler for functions
   node_bundler = "esbuild"
