@@ -1,0 +1,114 @@
+{
+  "name": "LuxeRide Airport Transfer",
+  "short_name": "LuxeRide",
+  "description": "Premium airport transfer booking service for Miami",
+  "start_url": "/indexMVP.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "scope": "/",
+  "categories": ["travel", "transportation", "business"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/images/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/images/screenshot-1.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Book your luxury airport transfer"
+    },
+    {
+      "src": "/images/screenshot-2.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Choose from premium vehicles"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Book Transfer",
+      "short_name": "Book",
+      "description": "Book a new airport transfer",
+      "url": "/indexMVP.html?action=book",
+      "icons": [
+        {
+          "src": "/images/book-icon.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Track Ride",
+      "short_name": "Track",
+      "description": "Track your current ride",
+      "url": "/indexMVP.html?action=track",
+      "icons": [
+        {
+          "src": "/images/track-icon.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "/indexMVP.html",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

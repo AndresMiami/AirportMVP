@@ -3,7 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Airport Transfer Booking - Mobile Optimized MVP</title>
+    <title>LuxeRide - Premium Airport Transfer Booking</title>
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#000000">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="LuxeRide">
+    
+    <!-- iOS Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="LuxeRide">
+    <link rel="apple-touch-icon" href="/images/icon-152x152.png">
+    
+    <!-- SEO & Social -->
+    <meta name="description" content="Premium airport transfer service in Miami. Book luxury vehicles for comfortable airport transportation.">
+    <meta property="og:title" content="LuxeRide - Premium Airport Transfer">
+    <meta property="og:description" content="Book luxury airport transfers in Miami">
+    <meta property="og:image" content="/images/social-preview.png">
+    <meta property="og:type" content="website">
     
     <!-- CSS Modular Architecture -->
     <link rel="stylesheet" href="css/style.css"> <!-- Core Styles with Variables -->
@@ -2393,6 +2412,132 @@
             
             console.log('🎉 Application initialization complete');
         }
+        
+        // PWA Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then((registration) => {
+                        debug.success('Service Worker registered', registration.scope);
+                        
+                        // Check for updates periodically
+                        setInterval(() => {
+                            registration.update();
+                        }, 60000); // Check every minute
+                        
+                        // Handle updates
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // New version available
+                                    if (confirm('A new version is available! Reload to update?')) {
+                                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                        window.location.reload();
+                                    }
+                                }
+                            });
+                        });
+                    })
+                    .catch((error) => {
+                        debug.error('Service Worker registration failed', error);
+                    });
+            });
+        }
+        
+        // PWA Install Prompt
+        let deferredPrompt;
+        const installButton = document.createElement('button');
+        installButton.id = 'installPWA';
+        installButton.innerHTML = '📱 Install App';
+        installButton.style.cssText = `
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #000;
+            color: #fff;
+            border: 2px solid #fff;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            z-index: 9999;
+            transition: all 0.3s ease;
+        `;
+        document.body.appendChild(installButton);
+        
+        window.addEventListener('beforeinstallprompt', (e) => {
+            // Prevent the mini-infobar from appearing
+            e.preventDefault();
+            // Stash the event so it can be triggered later
+            deferredPrompt = e;
+            // Show install button
+            installButton.style.display = 'block';
+            
+            debug.log('PWA install prompt available');
+        });
+        
+        installButton.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            
+            // Show the install prompt
+            deferredPrompt.prompt();
+            
+            // Wait for the user to respond
+            const { outcome } = await deferredPrompt.userChoice;
+            
+            if (outcome === 'accepted') {
+                debug.success('PWA installed');
+                installButton.style.display = 'none';
+            } else {
+                debug.log('PWA install declined');
+            }
+            
+            deferredPrompt = null;
+        });
+        
+        // Hide install button if already installed
+        window.addEventListener('appinstalled', () => {
+            installButton.style.display = 'none';
+            debug.success('PWA is installed');
+        });
+        
+        // Check if app is installed (for iOS)
+        if (window.navigator.standalone) {
+            debug.log('App is running in standalone mode (iOS)');
+        }
+        
+        // Network status indicator
+        function updateOnlineStatus() {
+            const isOnline = navigator.onLine;
+            if (!isOnline) {
+                const offlineIndicator = document.createElement('div');
+                offlineIndicator.id = 'offlineIndicator';
+                offlineIndicator.innerHTML = '📵 Offline Mode';
+                offlineIndicator.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    background: #ff4444;
+                    color: white;
+                    padding: 8px;
+                    text-align: center;
+                    font-size: 14px;
+                    z-index: 10000;
+                `;
+                document.body.appendChild(offlineIndicator);
+            } else {
+                const indicator = document.getElementById('offlineIndicator');
+                if (indicator) indicator.remove();
+            }
+        }
+        
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        updateOnlineStatus();
     </script>
 </body>
 </html>
