@@ -1,0 +1,180 @@
+/**
+ * Booking Confirmation Modal Styles
+ * Dark theme styles for the booking confirmation dialog
+ */
+
+/* Main Confirmation Modal */
+.booking-confirmation {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from { 
+        opacity: 0; 
+    }
+    to { 
+        opacity: 1; 
+    }
+}
+
+/* Confirmation Content Container */
+.confirmation-content {
+    background-color: #2C2C2E;
+    border-radius: 16px;
+    padding: 2rem;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    text-align: center;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from { 
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to { 
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Header Section */
+.confirmation-header {
+    margin-bottom: 1.5rem;
+}
+
+.confirmation-header h2 {
+    color: #FF9500;
+    margin: 0 0 0.5rem 0;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.confirmation-trip-id {
+    font-size: 14px;
+    color: #8E8E93;
+    margin: 0;
+}
+
+/* Details Section */
+.confirmation-details {
+    margin-bottom: 2rem;
+}
+
+.confirmation-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #3A3A3C;
+}
+
+.confirmation-item:last-child {
+    border-bottom: none;
+}
+
+.confirmation-item .label {
+    font-weight: 600;
+    color: #8E8E93;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.confirmation-item .value {
+    color: #FFFFFF;
+    font-size: 16px;
+    text-align: right;
+    max-width: 60%;
+    word-wrap: break-word;
+}
+
+/* Primary Button */
+.confirmation-content .primary-btn {
+    background: linear-gradient(to right, #FF9933, #FF5733);
+    color: #FFFFFF;
+    padding: 16px 32px;
+    border-radius: 12px;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    width: 100%;
+    max-width: 200px;
+}
+
+.confirmation-content .primary-btn:hover {
+    background: linear-gradient(to right, #FF5733, #FF9933);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 87, 51, 0.3);
+}
+
+.confirmation-content .primary-btn:active {
+    transform: scale(0.98);
+}
+
+/* Success Icon (optional) */
+.confirmation-icon {
+    font-size: 48px;
+    margin-bottom: 1rem;
+}
+
+.confirmation-icon.success {
+    color: #32D74B;
+}
+
+/* Mobile Optimizations */
+@media (max-width: 480px) {
+    .confirmation-content {
+        width: 95%;
+        padding: 1.5rem;
+        border-radius: 12px;
+    }
+    
+    .confirmation-header h2 {
+        font-size: 20px;
+    }
+    
+    .confirmation-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .confirmation-item .value {
+        max-width: 100%;
+        text-align: left;
+    }
+    
+    .confirmation-content .primary-btn {
+        width: 100%;
+        max-width: none;
+    }
+}
+
+/* Animation for success */
+@keyframes checkmark {
+    0% {
+        transform: scale(0) rotate(45deg);
+    }
+    50% {
+        transform: scale(1.2) rotate(45deg);
+    }
+    100% {
+        transform: scale(1) rotate(45deg);
+    }
+}

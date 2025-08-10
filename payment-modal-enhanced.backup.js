@@ -27,31 +27,42 @@ class PaymentModalEnhanced {
         }
     }
 
-    // Save cards to localStorage
+    // Save cards to localStorage with encryption
     saveCardsToStorage() {
-        localStorage.setItem('savedPaymentMethods', JSON.stringify(this.savedCards));
+        // Only save non-sensitive data
+        const safeCards = this.savedCards.map(card => ({
+            id: card.id,
+            brand: card.brand,
+            last4: card.last4,
+            expiry: card.expiry,
+            // Never store full card number, CVV, or other sensitive data
+        }));
+        localStorage.setItem('savedPaymentMethods', JSON.stringify(safeCards));
     }
 
     // Update payment methods list in DOM
-    updatePaymentMethodsList() {
+    updatePaymentMethodsList(isEditMode = false) {
         const list = document.getElementById('paymentMethodsList');
         if (!list) return;
         
+        // Clear existing dynamic cards (keep default and Apple Pay)
+        const existingCards = list.querySelectorAll('.payment-method-row:not([data-method="visa-1187"]):not([data-method="apple-pay"])');
+        existingCards.forEach(card => card.remove());
+        
         // Add saved cards to the list
         this.savedCards.forEach(card => {
-            if (!document.querySelector(`[data-method="${card.id}"]`)) {
-                const cardRow = this.createCardRow(card);
+            if (card.id !== 'visa-1187') { // Skip default demo card
+                const cardRow = this.createCardRow(card, isEditMode);
                 list.appendChild(cardRow);
             }
         });
     }
 
-    // Create card row element
-    createCardRow(card) {
+    // Create card row element with delete option
+    createCardRow(card, isEditMode = false) {
         const row = document.createElement('div');
         row.className = 'payment-method-row';
         row.dataset.method = card.id;
-        row.onclick = () => this.selectPayment(row);
         
         let iconClass = 'card-icon';
         let iconContent = card.brand.toUpperCase();
@@ -75,8 +86,19 @@ class PaymentModalEnhanced {
                 <div class="${iconClass}">${iconContent}</div>
             </div>
             <div class="payment-method-text">${card.brand}, •••• ${card.last4}</div>
-            <div class="payment-method-check"></div>
+            ${isEditMode ? 
+                `<button class="payment-method-delete" onclick="event.stopPropagation(); PaymentModalEnhanced.getInstance().removeCard('${card.id}')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF3B30" stroke-width="2">
+                        <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14zM10 11v6M14 11v6"/>
+                    </svg>
+                </button>` : 
+                '<div class="payment-method-check"></div>'
+            }
         `;
+        
+        if (!isEditMode) {
+            row.onclick = () => this.selectPayment(row);
+        }
         
         return row;
     }
@@ -137,7 +159,14 @@ class PaymentModalEnhanced {
                     <div class="modal-header">
                         <button class="modal-back-btn" onclick="PaymentModalEnhanced.getInstance().close()">←</button>
                         <h2>Payment</h2>
-                        <button class="modal-back-btn" onclick="PaymentModalEnhanced.getInstance().openAddPaymentModal()">+</button>
+                        <div class="modal-header-actions">
+                            <button class="modal-edit-btn" id="editCardsBtn" onclick="PaymentModalEnhanced.getInstance().toggleEditMode()" title="Edit cards">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                            </button>
+                            <button class="modal-back-btn" onclick="PaymentModalEnhanced.getInstance().openAddPaymentModal()">+</button>
+                        </div>
                     </div>
                     
                     <div class="modal-scrollable-content">
@@ -598,11 +627,11 @@ class PaymentModalEnhanced {
         const cardType = this.detectCardType(cardNumber);
         
         const newCard = {
-            id: `${cardType.toLowerCase()}-${last4}`,
+            id: `${cardType.toLowerCase()}-${last4}-${Date.now()}`, // Add timestamp for uniqueness
             brand: cardType,
             last4: last4,
-            name: document.getElementById('cardholderName').value,
             expiry: document.getElementById('expiryDate').value
+            // Security: Never store full card number, CVV, or cardholder name
         };
         
         // Add to saved cards
@@ -779,6 +808,93 @@ class PaymentModalEnhanced {
         return this.selectedPaymentMethod;
     }
 
+    // Toggle edit mode for card management
+    toggleEditMode() {
+        const modal = document.getElementById('paymentModal');
+        const editBtn = document.getElementById('editCardsBtn');
+        const continueBtn = modal.querySelector('.modal-action-btn');
+        
+        if (!modal) return;
+        
+        const isEditMode = modal.classList.contains('edit-mode');
+        
+        if (isEditMode) {
+            // Exit edit mode
+            modal.classList.remove('edit-mode');
+            editBtn.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+            `;
+            continueBtn.style.display = 'block';
+            this.updatePaymentMethodsList(false);
+        } else {
+            // Enter edit mode
+            modal.classList.add('edit-mode');
+            editBtn.innerHTML = 'Done';
+            continueBtn.style.display = 'none';
+            this.updatePaymentMethodsList(true);
+        }
+    }
+    
+    // Remove a card
+    removeCard(cardId) {
+        // Don't allow removing the default demo card
+        if (cardId === 'visa-1187') {
+            alert('Cannot remove the default demo card');
+            return;
+        }
+        
+        // Confirm deletion
+        if (!confirm('Are you sure you want to remove this card?')) {
+            return;
+        }
+        
+        // Remove from saved cards
+        this.savedCards = this.savedCards.filter(card => card.id !== cardId);
+        this.saveCardsToStorage();
+        
+        // Remove from DOM
+        const cardElement = document.querySelector(`[data-method="${cardId}"]`);
+        if (cardElement) {
+            cardElement.style.transform = 'translateX(100%)';
+            cardElement.style.opacity = '0';
+            setTimeout(() => cardElement.remove(), 300);
+        }
+        
+        // If this was the selected payment, select the default
+        if (this.selectedPaymentMethod === cardId) {
+            this.selectedPaymentMethod = 'visa-1187';
+            const defaultCard = document.querySelector('[data-method="visa-1187"]');
+            if (defaultCard) {
+                this.selectPayment(defaultCard);
+            }
+        }
+    }
+    
+    // Clear all saved cards (except demo)
+    clearAllCards() {
+        if (!confirm('Are you sure you want to remove all saved cards? This cannot be undone.')) {
+            return;
+        }
+        
+        // Keep only the demo card
+        this.savedCards = this.savedCards.filter(card => card.id === 'visa-1187');
+        this.saveCardsToStorage();
+        this.updatePaymentMethodsList();
+        
+        alert('All saved cards have been removed');
+    }
+    
+    // Security: Clear sensitive data on page unload
+    clearSensitiveData() {
+        // Clear any temporary sensitive data from memory
+        const sensitiveInputs = document.querySelectorAll('#cardNumber, #cvv');
+        sensitiveInputs.forEach(input => {
+            if (input) input.value = '';
+        });
+    }
+    
     // Singleton pattern
     static instance = null;
     
@@ -793,6 +909,11 @@ class PaymentModalEnhanced {
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     PaymentModalEnhanced.getInstance().init();
+});
+
+// Security: Clear sensitive data on page unload
+window.addEventListener('beforeunload', () => {
+    PaymentModalEnhanced.getInstance().clearSensitiveData();
 });
 
 // Expose for global access

@@ -27,9 +27,8 @@
     <!-- CSS Modular Architecture -->
     <link rel="stylesheet" href="css/style.css"> <!-- Core Styles with Variables -->
     <link rel="stylesheet" href="css/vehicle-carousel.css"> <!-- Vehicle Selection -->
-    <link rel="stylesheet" href="css/modals.css" media="print" onload="this.media='all'; this.onload=null;"> <!-- Lazy Load Modals -->
+    <link rel="stylesheet" href="css/booking-confirmation.css" media="print" onload="this.media='all'; this.onload=null;"> <!-- Booking Confirmation Modal -->
     <link rel="stylesheet" href="css/maps-autocomplete.css"> <!-- Maps Integration -->
-    <link rel="stylesheet" href="css/payment-modal-enhanced.css"> <!-- Enhanced Payment Modal -->
 </head>
 <body>
     <div class="app-container">
@@ -265,12 +264,12 @@
                         
                         <!-- Passenger and Notes Controls -->
                         <div class="controls-row">
-                            <button class="control-button passenger-select" onclick="openPassengerSelector()">
+                            <button class="control-button passenger-select" onclick="PassengerModal.getInstance().open()">
                                 <span class="control-icon">👤</span>
                                 <span class="control-text">For myself</span>
                                 <span class="dropdown-arrow">▼</span>
                             </button>
-                            <button class="control-button add-notes" onclick="addPickupNotes()">
+                            <button class="control-button add-notes" onclick="PickupNoteModal.getInstance().open()">
                                 <span class="control-icon">➕</span>
                                 <span class="control-text">Add pickup notes</span>
                             </button>
@@ -406,12 +405,12 @@
                         <!-- Payment Row -->
                         <!-- Payment Row moved to panel-actions below -->
                         <div class="payment-row-mobile">
-                            <button class="payment-method-mobile" onclick="PaymentModalEnhanced.getInstance().open()">
+                            <button class="payment-method-mobile" onclick="PaymentModal.getInstance().open()">
                                 <div class="card-icon">VISA</div>
                                 <span class="payment-details">Visa, •••• 1187</span>
                                 <span class="dropdown-arrow">▼</span>
                             </button>
-                            <button class="promo-button-mobile" onclick="addPromotion()">
+                            <button class="promo-button-mobile" onclick="PromotionModal.getInstance().open()">
                                 <span class="control-icon">🎫</span>
                                 <span>Add promotion</span>
                             </button>
@@ -432,177 +431,17 @@
         </div>
     </div>
 
-    <!-- Passenger/Guest Selection Modal -->
-    <div id="passengerSelectionModal" class="full-modal" style="display: none;">
-        <div class="modal-panel">
-            <div class="modal-map-section">
-                <!-- Map placeholder or actual map -->
-                <div id="passengerModalMap" class="modal-map"></div>
-                
-                <!-- Map badges -->
-                <div class="map-time-badge arrival-time">
-                    <span>📍</span>
-                    <span id="modalArrivalTime">3:22</span>
-                </div>
-                <div class="map-time-badge pickup-time">
-                    <span id="modalPickupTime">4:52</span>
-                    <span class="time-period">PM</span>
-                </div>
-                <div class="map-time-badge dropoff-label">
-                    <span class="label-text">Drop-off</span>
-                    <span class="location-text" id="modalLocationText">Miami International...</span>
-                </div>
-            </div>
-            
-            <div class="modal-content-section">
-                <div class="booking-option-card">
-                    <div class="option-icon">
-                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FF5733' stroke-width='2'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E" alt="Person icon">
-                    </div>
-                    <div class="option-content">
-                        <h3>Booking a ride for someone else?</h3>
-                        <p>Arrange their ride in a few taps, and we'll keep them informed every step of the way.</p>
-                        <a href="#" class="learn-more-link" onclick="event.preventDefault()">Learn more</a>
-                    </div>
-                </div>
-                
-                <div class="booking-options">
-                    <button class="booking-option-btn active" onclick="selectBookingType('myself')">
-                        <span class="option-radio">●</span>
-                        <span class="option-text">Book for myself</span>
-                    </button>
-                    
-                    <button class="booking-option-btn" onclick="openAddGuestModal()">
-                        <span class="option-icon-plus">+</span>
-                        <span class="option-text">Add guest</span>
-                        <span class="option-arrow">›</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Add Guest Modal -->
-    <div id="addGuestModal" class="full-modal" style="display: none;">
-        <div class="modal-panel">
-            <div class="modal-header">
-                <h2>Add guest</h2>
-                <button class="modal-back-btn" onclick="backToPassengerSelection()">✕</button>
-            </div>
-            
-            <div class="modal-scrollable-content">
-                <form id="guestForm" onsubmit="saveGuest(event)">
-                    <div class="form-group">
-                        <label for="guestTitle">Title</label>
-                        <select id="guestTitle" class="form-select">
-                            <option value="Mx.">Mx.</option>
-                            <option value="Mr.">Mr.</option>
-                            <option value="Ms.">Ms.</option>
-                            <option value="Mrs.">Mrs.</option>
-                            <option value="Dr.">Dr.</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="guestFirstName">First name</label>
-                        <input type="text" id="guestFirstName" class="form-input" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="guestLastName">Last name</label>
-                        <input type="text" id="guestLastName" class="form-input" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="guestEmail">Guest email</label>
-                        <input type="email" id="guestEmail" class="form-input" placeholder="email@example.com">
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group" style="flex: 0 0 120px;">
-                            <label for="countryCode">Country Code</label>
-                            <select id="countryCode" class="form-select">
-                                <option value="+1">US +1</option>
-                                <option value="+44">UK +44</option>
-                                <option value="+33">FR +33</option>
-                                <option value="+49">DE +49</option>
-                                <option value="+34">ES +34</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="flex: 1;">
-                            <label for="guestPhone">Mobile number</label>
-                            <input type="tel" id="guestPhone" class="form-input" placeholder="(305) 555-0123" required>
-                        </div>
-                    </div>
-                    
-                    <div class="info-notes">
-                        <div class="info-note">
-                            <span class="info-icon">ℹ️</span>
-                            <p>The contact info entered will receive ride updates and booking confirmation.</p>
-                        </div>
-                        <div class="info-note">
-                            <span class="info-icon">ℹ️</span>
-                            <p>Invoices are sent only to the booker, not the guest.</p>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" class="modal-action-btn">Add guest</button>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Pickup Notes Modal -->
-    <div id="pickupNotesModal" class="full-modal" style="display: none;">
-        <div class="modal-panel">
-            <div class="modal-header">
-                <h2>Pickup notes</h2>
-                <button class="modal-back-btn" onclick="closePickupNotes()">✕</button>
-            </div>
-            
-            <div class="modal-scrollable-content">
-                <p class="modal-subtitle">Provide additional info to customize your pickup and ensure a smooth experience.</p>
-                
-                <form id="notesForm" onsubmit="savePickupNotes(event)">
-                    <div class="form-group">
-                        <label for="chauffeurNotes">Notes for the chauffeur</label>
-                        <textarea 
-                            id="chauffeurNotes" 
-                            class="form-textarea" 
-                            rows="4"
-                            placeholder="Add special requests (please do not include confidential information)"
-                        ></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="pickupSign">Pickup sign</label>
-                        <input 
-                            type="text" 
-                            id="pickupSign" 
-                            class="form-input" 
-                            placeholder="Name or text on the pickup sign"
-                        >
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="referenceCode">Reference code or cost center</label>
-                        <input 
-                            type="text" 
-                            id="referenceCode" 
-                            class="form-input" 
-                            placeholder="This reference appears on your invoice"
-                        >
-                    </div>
-                    
-                    <button type="submit" class="modal-action-btn">Save notes</button>
-                </form>
-            </div>
-        </div>
-    </div>
 
     <!-- Core Utilities - Load First -->
     <script src="./debug.js"></script>
     <script src="./error-handler.js"></script>
+    
+    <!-- Modal Controllers -->
+    <script src="./js/passenger-modal.js?v=3"></script>
+    <script src="./js/pickup-note-modal.js?v=1"></script>
+    <script src="./js/promotion-modal.js?v=1"></script>
+    <script src="./js/payment-modal.js?v=1"></script>
     
     <!-- Main Application Scripts -->
     <!-- Autocomplete will be loaded lazily when needed -->
@@ -1888,7 +1727,7 @@
                     bookBtn.disabled = true;
                     
                     // Get payment controller
-                    const paymentController = PaymentModalEnhanced.getInstance();
+                    const paymentController = PaymentModal.getInstance();
                     const selectedPayment = paymentController.getSelectedPayment();
                     
                     if (!selectedPayment) {
@@ -2144,165 +1983,31 @@
         let guestData = null;
         let notesData = null;
 
-        // Update the existing passenger selector function
-        window.openPassengerSelector = function() {
-            event.stopPropagation();
-            const modal = document.getElementById('passengerSelectionModal');
-            modal.style.display = 'flex';
-            
-            // Copy map time badges from vehicle panel
-            const arrivalTime = document.getElementById('mapArrivalTime')?.textContent || '4:30';
-            const pickupTime = document.getElementById('mapPickupTime')?.textContent || '5:59';
-            const locationText = document.getElementById('mapLocationText')?.textContent || 'Miami International...';
-            
-            document.getElementById('modalArrivalTime').textContent = arrivalTime;
-            document.getElementById('modalPickupTime').textContent = pickupTime;
-            document.getElementById('modalLocationText').textContent = locationText;
-        }
-
-        // Select booking type
-        window.selectBookingType = function(type) {
-            if (type === 'myself') {
-                // Reset to booking for myself
-                guestData = null;
-                updatePassengerButton();
-                closePassengerModal();
-            }
-        }
-
-        // Open add guest modal
-        window.openAddGuestModal = function() {
-            document.getElementById('passengerSelectionModal').style.display = 'none';
-            document.getElementById('addGuestModal').style.display = 'flex';
-            
-            // If guest data exists, populate the form
-            if (guestData) {
-                document.getElementById('guestTitle').value = guestData.title || 'Mx.';
-                document.getElementById('guestFirstName').value = guestData.firstName || '';
-                document.getElementById('guestLastName').value = guestData.lastName || '';
-                document.getElementById('guestEmail').value = guestData.email || '';
-                document.getElementById('countryCode').value = guestData.countryCode || '+1';
-                document.getElementById('guestPhone').value = guestData.phone || '';
-            }
-        }
-
-        // Back to passenger selection
-        window.backToPassengerSelection = function() {
-            document.getElementById('addGuestModal').style.display = 'none';
-            document.getElementById('passengerSelectionModal').style.display = 'flex';
-        }
-
-        // Save guest
-        window.saveGuest = function(event) {
-            event.preventDefault();
-            
-            guestData = {
-                title: document.getElementById('guestTitle').value,
-                firstName: document.getElementById('guestFirstName').value,
-                lastName: document.getElementById('guestLastName').value,
-                email: document.getElementById('guestEmail').value,
-                countryCode: document.getElementById('countryCode').value,
-                phone: document.getElementById('guestPhone').value
-            };
-            
-            // Update the passenger button
-            updatePassengerButton();
-            
-            // Close modals
-            document.getElementById('addGuestModal').style.display = 'none';
-            document.getElementById('passengerSelectionModal').style.display = 'none';
-            
-            // Update app state
+        // Integration with new modal controllers
+        
+        // Update passenger button when modal data changes
+        window.addEventListener('passengerDataChanged', function(e) {
+            const passengerData = PassengerModal.getInstance().getPassengerData();
             if (window.airportApp) {
-                window.airportApp.state.guestData = guestData;
+                window.airportApp.state.guestData = passengerData?.type === 'guest' ? passengerData.data : null;
             }
-        }
-
-        // Update passenger button display
-        function updatePassengerButton() {
-            const btn = document.querySelector('.passenger-select');
-            const iconSpan = btn.querySelector('.control-icon');
-            const textSpan = btn.querySelector('.control-text');
-            
-            if (guestData) {
-                btn.classList.add('guest-selected');
-                iconSpan.textContent = '👥';
-                textSpan.textContent = `${guestData.firstName} ${guestData.lastName}`;
-            } else {
-                btn.classList.remove('guest-selected');
-                iconSpan.textContent = '👤';
-                textSpan.textContent = 'For myself';
-            }
-        }
-
-        // Close passenger modal
-        function closePassengerModal() {
-            document.getElementById('passengerSelectionModal').style.display = 'none';
-        }
-
-        // Add pickup notes
-        window.addPickupNotes = function() {
-            const modal = document.getElementById('pickupNotesModal');
-            modal.style.display = 'flex';
-            
-            // If notes data exists, populate the form
-            if (notesData) {
-                document.getElementById('chauffeurNotes').value = notesData.chauffeurNotes || '';
-                document.getElementById('pickupSign').value = notesData.pickupSign || '';
-                document.getElementById('referenceCode').value = notesData.referenceCode || '';
-            }
-        }
-
-        // Close pickup notes
-        window.closePickupNotes = function() {
-            document.getElementById('pickupNotesModal').style.display = 'none';
-        }
-
-        // Save pickup notes
-        window.savePickupNotes = function(event) {
-            event.preventDefault();
-            
-            notesData = {
-                chauffeurNotes: document.getElementById('chauffeurNotes').value,
-                pickupSign: document.getElementById('pickupSign').value,
-                referenceCode: document.getElementById('referenceCode').value
-            };
-            
-            // Update the notes button
-            const notesBtn = document.querySelector('.add-notes');
-            if (notesData.chauffeurNotes || notesData.pickupSign || notesData.referenceCode) {
-                notesBtn.classList.add('notes-added');
-                notesBtn.querySelector('.control-icon').textContent = '📝';
-                notesBtn.querySelector('.control-text').textContent = 'Edit notes';
-            } else {
-                notesBtn.classList.remove('notes-added');
-                notesBtn.querySelector('.control-icon').textContent = '➕';
-                notesBtn.querySelector('.control-text').textContent = 'Add pickup notes';
-            }
-            
-            // Close modal
-            document.getElementById('pickupNotesModal').style.display = 'none';
-            
-            // Update app state
+        });
+        
+        // Update pickup notes when modal data changes
+        window.addEventListener('pickupNotesChanged', function(e) {
+            const notesData = PickupNoteModal.getInstance().getPickupNotesData();
             if (window.airportApp) {
                 window.airportApp.state.pickupNotes = notesData;
             }
-        }
-
-        // Close modals when clicking outside
-        document.querySelectorAll('.full-modal').forEach(modal => {
-            modal.addEventListener('click', function(e) {
-                if (e.target === this) {
-                    this.style.display = 'none';
-                }
-            });
         });
-
-        // Update the existing updatePassengerCount function to do nothing
-        window.updatePassengerCount = function(selectElement) {
-            // This function is now deprecated - passenger selection is handled by modal
-            return;
-        }
+        
+        // Update promotion when modal data changes
+        window.addEventListener('promotionChanged', function(e) {
+            const promoData = PromotionModal.getInstance().getPromoData();
+            if (window.airportApp) {
+                window.airportApp.state.promoCode = promoData?.code || null;
+            }
+        });
         
         // Other mobile-specific functions remain the same
         window.selectPaymentMethod = function() {
@@ -2314,18 +2019,6 @@
                 paymentBtn.style.background = '';
                 paymentBtn.style.color = '';
             }, 300);
-        };
-        
-        window.addPromotion = function() {
-            const app = window.airportApp;
-            const promo = prompt("Enter promotion code:");
-            if (promo && app) {
-                app.state.promoCode = promo;
-                const promoBtn = document.querySelector('.promo-button-mobile');
-                promoBtn.innerHTML = '<span class="control-icon">✅</span><span>' + promo + '</span>';
-                promoBtn.style.background = 'linear-gradient(to right, #FF9933, #FF5733)';
-                promoBtn.style.color = 'white';
-            }
         };
         
         window.modifyDateTime = function() {
@@ -2585,13 +2278,5 @@
         updateOnlineStatus();
     </script>
     
-    <!-- Enhanced Payment Modal -->
-    <script src="payment-modal-enhanced.js?v=3"></script>
-    <script>
-        // Initialize payment modal on page load
-        document.addEventListener('DOMContentLoaded', () => {
-            PaymentModalEnhanced.getInstance().init();
-        });
-    </script>
 </body>
 </html>
