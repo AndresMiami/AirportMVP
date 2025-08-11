@@ -1718,12 +1718,18 @@
                         method: this.state.paymentMethod,
                         promo: this.state.promoCode
                     },
+                    pricing: {
+                        base: this.state.vehicle.price || 55,
+                        surge: 0,
+                        discount: 0,
+                        total: this.state.vehicle.price || 55
+                    },
                     status: 'pending',
                     createdAt: new Date().toISOString()
                 };
                 
                 // Calculate total amount
-                const amount = this.state.vehicle.price || 100; // Use vehicle price or default
+                const amount = bookingData.pricing.total;
                 
                 try {
                     // Show loading state
