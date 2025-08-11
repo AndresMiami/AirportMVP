@@ -437,11 +437,17 @@
     <script src="./debug.js"></script>
     <script src="./error-handler.js"></script>
     
+    <!-- Stripe SDK - Load before payment modules -->
+    <script src="https://js.stripe.com/v3/"></script>
+    
     <!-- Modal Controllers -->
     <script src="./js/passenger-modal.js?v=3"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=1"></script>
     <script src="./js/payment-modal.js?v=1"></script>
+    
+    <!-- Stripe Payment Integration -->
+    <script src="./js/stripe-payment.js?v=1"></script>
     
     <!-- Main Application Scripts -->
     <!-- Autocomplete will be loaded lazily when needed -->
@@ -1737,11 +1743,15 @@
                         return;
                     }
                     
-                    // For now, simulate payment success (replace with actual Stripe processing)
-                    const paymentResult = {
-                        success: true,
-                        paymentIntentId: 'pi_demo_' + Date.now()
-                    };
+                    // Process payment with Stripe
+                    const paymentResult = await window.StripePayment.processPayment(
+                        bookingData,
+                        selectedPayment
+                    );
+                    
+                    if (!paymentResult.success) {
+                        throw new Error(paymentResult.error || 'Payment failed');
+                    }
                     
                     // Payment successful
                     bookingData.status = 'confirmed';
@@ -1757,11 +1767,12 @@
                     
                     // Restore button
                     const bookBtn = document.getElementById('bookBtn');
-                    bookBtn.innerHTML = originalText;
+                    bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
                     bookBtn.disabled = false;
                     
-                    // Show error message
-                    alert('Payment failed. Please try again.');
+                    // Show more detailed error message
+                    const errorMessage = error.message || 'Payment failed. Please try again.';
+                    this.showPaymentError(errorMessage);
                 }
             }
 
@@ -1769,6 +1780,80 @@
                 return 'TRIP-' + Math.random().toString(36).substr(2, 9).toUpperCase();
             }
             
+            showPaymentError(message) {
+                // Create error modal
+                const errorModal = document.createElement('div');
+                errorModal.className = 'payment-error-modal';
+                errorModal.innerHTML = `
+                    <div class="payment-error-content">
+                        <div class="payment-error-icon">❌</div>
+                        <h3>Payment Failed</h3>
+                        <p>${message}</p>
+                        <button onclick="this.closest('.payment-error-modal').remove()" class="payment-error-btn">OK</button>
+                    </div>
+                `;
+                
+                // Add styles
+                const style = document.createElement('style');
+                style.textContent = `
+                    .payment-error-modal {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.8);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 10000;
+                        animation: fadeIn 0.3s ease;
+                    }
+                    .payment-error-content {
+                        background: #2C2C2E;
+                        border-radius: 16px;
+                        padding: 30px;
+                        max-width: 400px;
+                        text-align: center;
+                        color: white;
+                    }
+                    .payment-error-icon {
+                        font-size: 48px;
+                        margin-bottom: 16px;
+                    }
+                    .payment-error-content h3 {
+                        margin: 0 0 12px 0;
+                        font-size: 24px;
+                        color: #FF453A;
+                    }
+                    .payment-error-content p {
+                        margin: 0 0 24px 0;
+                        color: #8E8E93;
+                        font-size: 16px;
+                    }
+                    .payment-error-btn {
+                        background: #FF453A;
+                        color: white;
+                        border: none;
+                        padding: 12px 32px;
+                        border-radius: 10px;
+                        font-size: 16px;
+                        font-weight: 600;
+                        cursor: pointer;
+                    }
+                    .payment-error-btn:hover {
+                        background: #FF5449;
+                    }
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+                `;
+                
+                document.head.appendChild(style);
+                document.body.appendChild(errorModal);
+            }
+
             showBookingConfirmation(tripId, bookingData) {
                 const confirmationElement = document.createElement('div');
                 confirmationElement.className = 'booking-confirmation';
