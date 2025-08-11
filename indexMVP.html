@@ -1444,9 +1444,16 @@
                     selectedCard.classList.add('selected');
                 }
                 
+                // Get the price from the selected card
+                const priceElement = selectedCard?.querySelector('.vehicle-price');
+                const priceText = priceElement?.textContent || '$55';
+                const price = parseFloat(priceText.replace(/[$,]/g, ''));
+                
                 this.state.vehicle = {
                     selected: vehicleType,
-                    name: selectedCard?.querySelector('.vehicle-name').textContent
+                    type: vehicleType,
+                    name: selectedCard?.querySelector('.vehicle-name').textContent,
+                    price: price || 55
                 };
                 
                 if (this.state.route.distance && this.state.route.duration) {
