@@ -100,20 +100,21 @@ class StripePayment {
     }
 
     /**
-     * Create a payment intent on the backend
-     * FIXED: Handles flexible booking data structure
+     * Create a payment intent on the backend WITH RETRY LOGIC
+     * Automatically retries on network failures for better reliability
      */
-    async createPaymentIntent(bookingData) {
+    async createPaymentIntent(bookingData, retryCount = 0) {
+        const maxRetries = 3;
+        const retryDelay = (attempt) => Math.min(1000 * Math.pow(2, attempt), 5000); // Exponential backoff
+        
         try {
-            // FIXED: Extract data from different possible structures
+            // Extract data from different possible structures
             const pickup = this.extractLocationData(bookingData, 'pickup');
             const dropoff = this.extractLocationData(bookingData, 'dropoff');
             const amount = this.extractAmount(bookingData);
             const customer = this.extractCustomerData(bookingData);
             
-            console.log('Creating payment intent with data:', {
-                pickup, dropoff, amount, customer
-            });
+            console.log(`Creating payment intent (attempt ${retryCount + 1}/${maxRetries})...`);
 
             const response = await fetch('/.netlify/functions/create-payment-intent', {
                 method: 'POST',
@@ -138,6 +139,16 @@ class StripePayment {
 
             if (!response.ok) {
                 const error = await response.json();
+                
+                // Don't retry on client errors (400-499)
+                if (response.status >= 400 && response.status < 500) {
+                    throw new Error(this.getUserFriendlyError({
+                        code: 'client_error',
+                        message: error.message
+                    }));
+                }
+                
+                // Retry on server errors (500+)
                 throw new Error(error.message || 'Failed to create payment intent');
             }
 
@@ -146,8 +157,22 @@ class StripePayment {
             return result;
             
         } catch (error) {
-            console.error('❌ Failed to create payment intent:', error);
-            throw error;
+            // Network error or server error - retry if attempts remaining
+            if (retryCount < maxRetries - 1 && 
+                (error.name === 'TypeError' || error.message.includes('fetch') || 
+                 error.message.includes('network') || error.message.includes('Failed to create'))) {
+                
+                console.warn(`⚠️ Payment attempt ${retryCount + 1} failed, retrying in ${retryDelay(retryCount)}ms...`);
+                
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, retryDelay(retryCount)));
+                
+                // Recursive retry
+                return this.createPaymentIntent(bookingData, retryCount + 1);
+            }
+            
+            console.error('❌ Failed to create payment intent after all retries:', error);
+            throw new Error(this.getUserFriendlyError(error));
         }
     }
 
@@ -259,9 +284,23 @@ class StripePayment {
             
         } catch (error) {
             console.error('❌ Payment failed:', error);
+            
+            // Get user-friendly error message
+            const userMessage = this.getUserFriendlyError(error);
+            
+            // Log detailed error for debugging
+            console.error('Payment error details:', {
+                message: error.message,
+                code: error.code,
+                type: error.type,
+                stack: error.stack
+            });
+            
             return {
                 success: false,
-                error: error.message || 'Payment processing failed'
+                error: userMessage,
+                errorCode: error.code,
+                errorDetails: error.message // Keep original for debugging
             };
         }
     }
@@ -354,6 +393,76 @@ class StripePayment {
         
         // For now, use test payment
         return await this.processTestPayment(paymentIntent);
+    }
+
+    /**
+     * Convert technical errors to user-friendly messages
+     */
+    getUserFriendlyError(error) {
+        // Common Stripe error codes
+        const stripeErrorMap = {
+            'card_declined': '❌ Your card was declined. Please try another payment method.',
+            'insufficient_funds': '💳 Insufficient funds. Please try another card.',
+            'lost_card': '🚫 This card has been reported lost. Please use a different card.',
+            'stolen_card': '🚫 This card has been reported stolen. Please use a different card.',
+            'expired_card': '📅 Your card has expired. Please use a different card.',
+            'incorrect_cvc': '🔒 Invalid security code. Please check your CVC and try again.',
+            'incorrect_number': '💳 Invalid card number. Please check and try again.',
+            'postal_code_invalid': '📍 Invalid ZIP/postal code. Please check and try again.',
+            'processing_error': '⚙️ Payment processing error. Please try again.',
+            'rate_limit': '⏱️ Too many attempts. Please wait a moment and try again.',
+            'authentication_required': '🔐 Additional authentication required. Please follow the prompts.'
+        };
+        
+        // Network and system errors
+        const systemErrorMap = {
+            'network': '📡 Network connection issue. Please check your internet and try again.',
+            'timeout': '⏰ Request timed out. Please try again.',
+            'fetch': '🌐 Connection failed. Please check your internet and try again.',
+            'server': '🖥️ Server error. Please try again in a moment.',
+            'client_error': '⚠️ Invalid request. Please check your information and try again.'
+        };
+        
+        // Check if it's an error object
+        if (typeof error === 'object' && error !== null) {
+            // Check for Stripe error codes
+            if (error.code && stripeErrorMap[error.code]) {
+                return stripeErrorMap[error.code];
+            }
+            
+            // Check error message for patterns
+            const errorMessage = (error.message || '').toLowerCase();
+            
+            // Check for network errors
+            if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+                return systemErrorMap.network;
+            }
+            if (errorMessage.includes('timeout')) {
+                return systemErrorMap.timeout;
+            }
+            if (errorMessage.includes('server')) {
+                return systemErrorMap.server;
+            }
+            
+            // Check for amount errors
+            if (errorMessage.includes('amount')) {
+                if (errorMessage.includes('too small') || errorMessage.includes('minimum')) {
+                    return '💵 Amount is too small. Minimum charge is $0.50.';
+                }
+                if (errorMessage.includes('too large') || errorMessage.includes('maximum')) {
+                    return '💵 Amount is too large. Please contact support for large transactions.';
+                }
+                return '💵 Invalid amount. Please check the price and try again.';
+            }
+            
+            // Return original message if it seems user-friendly
+            if (error.message && error.message.length < 100 && !error.message.includes('undefined')) {
+                return error.message;
+            }
+        }
+        
+        // Generic fallback
+        return '❌ Payment failed. Please try again or contact support if the problem persists.';
     }
 
     /**
