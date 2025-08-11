@@ -41,3 +41,8 @@ build/
 *secret*
 *api-key*
 config.js
+
+# Temporary payment fix files (consolidated into stripe-payment.js)
+js/stripe-config-fix.js
+js/payment-data-fix.js
+js/payment-system-test.js
