@@ -25,10 +25,10 @@
     <meta property="og:type" content="website">
     
     <!-- CSS Modular Architecture -->
-    <link rel="stylesheet" href="css/style.css"> <!-- Core Styles with Variables -->
-    <link rel="stylesheet" href="css/vehicle-carousel.css"> <!-- Vehicle Selection -->
-    <link rel="stylesheet" href="css/booking-confirmation.css" media="print" onload="this.media='all'; this.onload=null;"> <!-- Booking Confirmation Modal -->
-    <link rel="stylesheet" href="css/maps-autocomplete.css"> <!-- Maps Integration -->
+    <link rel="stylesheet" href="css/style.css?v=refined-dark-theme"> <!-- Core Styles with Variables -->
+    <link rel="stylesheet" href="css/vehicle-carousel.css?v=dark-theme-fix"> <!-- Vehicle Selection -->
+    <link rel="stylesheet" href="css/booking-confirmation.css?v=dark-theme-fix" media="print" onload="this.media='all'; this.onload=null;"> <!-- Booking Confirmation Modal -->
+    <link rel="stylesheet" href="css/maps-autocomplete.css?v=fix-visibility"> <!-- Maps Integration -->
 </head>
 <body>
     <div class="app-container">
@@ -54,15 +54,23 @@
                     <span class="step-number">2</span>
                     <span class="step-label">When</span>
                 </div>
+                <div class="progress-line" id="progressLine2"></div>
+                <div class="progress-step" data-step="vehicle">
+                    <span class="step-number">3</span>
+                    <span class="step-label">Vehicle</span>
+                </div>
             </div>
             
             <!-- Summary Bar -->
             <div class="summary-bar" id="summaryBar">
                 <div class="summary-content">
-                    <div class="summary-item">
-                        <span class="summary-label">Route:</span>
-                        <span class="summary-value" id="routeSummaryText"></span>
-                    </div>
+                    <!-- Back button moved here -->
+                    <button class="back-btn" id="summaryBackBtn" type="button" aria-label="Go back">Back</button>
+                    
+                    <!-- Centered route text -->
+                    <span class="summary-value" id="routeSummaryText"></span>
+                    
+                    <!-- Existing edit button -->
                     <button class="edit-btn" id="editRouteBtn" type="button" aria-label="Edit route">Edit</button>
                 </div>
             </div>
@@ -72,7 +80,7 @@
                 <!-- WHERE Panel -->
                 <div class="panel active" id="wherePanel">
                     <div class="panel-content">
-                        <h2>Select Your Route</h2>
+                        <!-- Route selection header removed for space optimization -->
                         
                         <!-- Mode Selector -->
                         <div class="mode-selector">
@@ -90,17 +98,12 @@
                         <div class="steps-container" id="stepsContainer">
                             <!-- Step 1: Address -->
                             <div class="step-section" id="addressStep">
-                                <div class="step-header">
-                                    <span class="step-badge" id="addressBadge">
-                                        <span class="step-badge-number">1</span>
-                                        <span id="addressTitle">Pickup Location</span>
-                                    </span>
-                                </div>
+                                <!-- Step header removed for space optimization -->
                                 <div class="input-wrapper">
                                     <input type="text" 
                                            id="addressInput" 
                                            class="address-input"
-                                           placeholder="Enter address, hotel, or landmark..."
+                                           placeholder="Enter pickup address, hotel, or landmark..."
                                            autocomplete="off">
                                     <div class="input-loading" id="addressLoading">
                                         <div class="spinner"></div>
@@ -120,7 +123,6 @@
                             <div class="step-section" id="airportStep">
                                 <div class="step-header">
                                     <span class="step-badge" id="airportBadge">
-                                        <span class="step-badge-number">2</span>
                                         <span id="airportTitle">Select Airport</span>
                                     </span>
                                 </div>
@@ -161,12 +163,9 @@
                         <span>Back</span>
                     </button>
                     
-                    <div class="panel-content" style="padding-top: 70px;">
-                        <h2>Schedule your ride</h2>
-                        
-                        <!-- Date Selection -->
+                    <div class="panel-content" style="padding-top: 20px;">
+                        <!-- Date Selection moved up, label removed -->
                         <div class="date-section">
-                            <h3>Date</h3>
                             <div class="date-selection">
                                 <button type="button" class="date-btn active" id="todayBtn">
                                     <span class="date-label">Today</span>
@@ -195,7 +194,7 @@
                         
                         <!-- Time Selection -->
                         <div class="time-section">
-                            <h3>Time</h3>
+                            <h3 class="section-label">Time</h3>
                             <div class="time-selector">
                                 <div class="time-input-group">
                                     <select id="hourSelect" class="time-select"></select>
@@ -212,16 +211,15 @@
 
                         <!-- Flight Number Input -->
                         <div class="flight-section" id="flightSection">
-                            <h3>Flight Information <span style="color: var(--text-secondary); font-weight: 400; font-size: 14px;">(Optional)</span></h3>
+                            <h3 class="section-label">Flight Information <span style="color: var(--text-secondary); font-weight: 400; font-size: 12px;">(Optional)</span></h3>
                             <input type="text" 
                                    id="flightInput" 
                                    class="flight-input"
                                    placeholder="Enter flight number (e.g., AA123)"
                                    autocomplete="off">
                         </div>
-                    </div>
-                    
-                    <div class="panel-actions">
+                        
+                        <!-- Trip Info moved here from panel-actions -->
                         <div class="arrival-info">
                             <div class="arrival-icon">📍</div>
                             <div class="arrival-details">
@@ -229,6 +227,9 @@
                                 <div class="trip-duration" id="tripDuration">Estimated ride duration of -- min</div>
                             </div>
                         </div>
+                    </div>
+                    
+                    <div class="panel-actions">
                         <button class="continue-btn" id="vehicleSelectionBtn">
                             Continue to Vehicle Selection
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -260,8 +261,6 @@
                     </div>
                     
                     <div class="content-section">
-                        <h2>Choose Your Ride</h2>
-                        
                         <!-- Passenger and Notes Controls -->
                         <div class="controls-row">
                             <button class="control-button passenger-select" onclick="PassengerModal.getInstance().open()">
@@ -393,12 +392,6 @@
 
                                 <button class="carousel-nav prev" id="prevBtn">‹</button>
                                 <button class="carousel-nav next" id="nextBtn">›</button>
-
-                                <div class="swipe-hint">
-                                    <span>←</span>
-                                    <span>Swipe to browse</span>
-                                    <span>→</span>
-                                </div>
                             </div>
                         </div>
                         
@@ -419,7 +412,7 @@
                     
                     <div class="panel-actions">
                         <div class="schedule-section">
-                            <button class="book-btn" id="bookBtn" disabled>
+                            <button class="book-btn" id="bookBtn">
                                 <span class="btn-main-text">Schedule ride</span>
                                 <span class="btn-sub-text">Wed, Jul 23, 2025 · 9:32 PM</span>
                             </button>
@@ -433,6 +426,83 @@
 
 
 
+    <!-- Supabase SDK - Load First for Authentication -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="./config.js"></script>
+    <script src="./supabase.js"></script>
+    
+    <!-- Authentication Check - Run IMMEDIATELY -->
+    <script>
+        // Initialize Supabase using centralized config
+        const supabase = window.supabaseClient || window.supabase.createClient(
+            window.APP_CONFIG?.SUPABASE_URL || 'https://hncpybxwblpkyxvskoxd.supabase.co',
+            window.APP_CONFIG?.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA'
+        );
+        
+        // Store user session globally
+        let currentUser = null;
+        
+        // Development mode bypass - set this to true to skip authentication
+        const DEV_MODE = true;  // Change to false for production
+        
+        // Check authentication on page load
+        (async function checkAuth() {
+            // Skip auth check in development mode
+            if (DEV_MODE) {
+                console.log('🔧 Development mode - bypassing authentication');
+                currentUser = {
+                    id: 'dev-user-123',
+                    email: 'dev@example.com',
+                    phone: '+13055551234'
+                };
+                // Add dev mode header
+                addUserHeader(currentUser);
+                // Initialize the app
+                if (window.bookingApp) {
+                    bookingApp.init();
+                }
+                return;
+            }
+            
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                // No session - redirect to login page
+                window.location.href = '/dev/templates/LandingLOGIN.html';
+                return;
+            }
+            // User is authenticated
+            currentUser = session.user;
+            console.log('User authenticated:', session.user.id);
+            
+            // Add user info to header
+            addUserHeader(session.user);
+        })();
+        
+        // Logout function
+        async function logout() {
+            const { error } = await supabase.auth.signOut();
+            if (!error) {
+                window.location.href = '/dev/templates/LandingLOGIN.html';
+            }
+        }
+        
+        // Add user header with logout button
+        function addUserHeader(user) {
+            const userInfo = user.email || user.phone || 'User';
+            const devBadge = DEV_MODE ? '<span style="background: #FF9500; color: white; padding: 4px 8px; border-radius: 4px; margin-right: 10px; font-size: 12px; font-weight: 600;">DEV MODE</span>' : '';
+            const headerHTML = `
+                <div id="userHeader" style="position: fixed; top: 0; right: 0; padding: 15px 20px; background: rgba(44, 44, 46, 0.95); border-radius: 0 0 0 12px; z-index: 1000; display: flex; align-items: center; gap: 15px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 149, 0, 0.2);">
+                    ${devBadge}
+                    <span style="color: white; font-size: 14px;">${userInfo}</span>
+                    <button onclick="logout()" style="background: linear-gradient(135deg, #FF9933, #FF5733); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">
+                        Sign Out
+                    </button>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('afterbegin', headerHTML);
+        }
+    </script>
+    
     <!-- Core Utilities - Load First -->
     <script src="./debug.js"></script>
     <script src="./error-handler.js"></script>
@@ -573,12 +643,12 @@
             
             cacheElements() {
                 const elementIds = [
-                    'startSearchBtn', 'bookingContainer', 'panelsWrapper', 'progressLine',
+                    'startSearchBtn', 'bookingContainer', 'panelsWrapper', 'progressLine', 'progressLine2',
                     'summaryBar', 'addressInput', 'addressLoading', 'autocompleteDropdown',
-                    'addressStep', 'addressBadge', 'addressTitle', 'airportStep', 
+                    'addressStep', 'airportStep', 
                     'airportBadge', 'airportTitle', 'flowConnector',
                     'hourSelect', 'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
-                    'backBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
+                    'backBtn', 'summaryBackBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
                     'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
@@ -672,7 +742,7 @@
                     
                     // Restore placeholder
                     if (this.els.addressInput) {
-                        this.els.addressInput.placeholder = 'Enter pickup address...';
+                        this.els.addressInput.placeholder = 'Enter pickup address, hotel, or landmark...';
                     }
                     
                     debug.success('Autocomplete initialized with lazy loading');
@@ -687,7 +757,7 @@
                     
                     // Restore placeholder
                     if (this.els.addressInput) {
-                        this.els.addressInput.placeholder = 'Type your address manually...';
+                        this.els.addressInput.placeholder = 'Enter pickup address, hotel, or landmark...';
                     }
                 }
             }
@@ -714,6 +784,7 @@
                 
                 this.els.continueBtn?.addEventListener('click', () => this.navigateToPanel('when'));
                 this.els.backBtn?.addEventListener('click', () => this.navigateToPanel('where'));
+                this.els.summaryBackBtn?.addEventListener('click', () => this.goBackFromSummary());
                 this.els.vehicleSelectionBtn?.addEventListener('click', () => this.navigateToPanel('vehicle'));
                 this.els.vehicleBackBtn?.addEventListener('click', () => this.navigateToPanel('when'));
                 this.els.bookBtn?.addEventListener('click', () => this.confirmBooking());
@@ -771,9 +842,11 @@
                 this.els.flowConnector.style.order = '2';
                 this.els.airportStep.style.order = isDropoff ? '3' : '1';
                 
-                this.els.addressBadge.querySelector('.step-badge-number').textContent = isDropoff ? '1' : '2';
-                this.els.airportBadge.querySelector('.step-badge-number').textContent = isDropoff ? '2' : '1';
-                this.els.addressTitle.textContent = isDropoff ? 'Pickup Location' : 'Destination Address';
+                // Badge numbers removed for space optimization
+                // Update airport title only
+                if (this.els.addressTitle) {
+                    this.els.addressTitle.textContent = isDropoff ? 'Pickup Location' : 'Destination Address';
+                }
                 this.els.airportTitle.textContent = isDropoff ? 'Destination Airport' : 'Pickup Airport';
                 
                 if (isDropoff) {
@@ -809,7 +882,7 @@
                 }
                 
                 this.els.airportOptions.forEach(opt => opt.classList.remove('selected'));
-                this.els.addressBadge.classList.remove('completed');
+                // Address badge removed for space optimization
                 this.els.airportBadge.classList.remove('completed', 'active');
                 this.els.flowConnector.classList.remove('active');
                 
@@ -843,7 +916,7 @@
             
             updateAddressStepState() {
                 const isValidated = this.autocomplete?.isValidated && this.state.locations.address;
-                this.els.addressBadge.classList.toggle('completed', isValidated);
+                // Address badge removed for space optimization
                 
                 this.els.airportBadge.classList.toggle('active', isValidated);
                 
@@ -1078,13 +1151,36 @@
                 this.state.ui.currentPanel = panel;
             }
             
+            goBackFromSummary() {
+                // Determine which panel to go back to based on current state
+                if (this.state.ui.currentPanel === 'vehicle') {
+                    this.navigateToPanel('when');
+                } else if (this.state.ui.currentPanel === 'when') {
+                    this.navigateToPanel('where');
+                } else {
+                    // Default fallback
+                    this.navigateToPanel('where');
+                }
+            }
+            
             updateProgressSteps(activeStep) {
                 this.els.progressSteps.forEach(step => {
                     const stepName = step.dataset.step;
                     step.classList.toggle('active', stepName === activeStep);
                     step.classList.toggle('completed', 
-                        (activeStep === 'when' && stepName === 'where'));
+                        (activeStep === 'when' && stepName === 'where') ||
+                        (activeStep === 'vehicle' && (stepName === 'where' || stepName === 'when')));
                 });
+                
+                // Update progress lines
+                if (this.els.progressLine) {
+                    this.els.progressLine.classList.toggle('active', 
+                        activeStep === 'when' || activeStep === 'vehicle');
+                }
+                if (this.els.progressLine2) {
+                    this.els.progressLine2.classList.toggle('active', 
+                        activeStep === 'vehicle');
+                }
             }
             
             updateSummary() {
@@ -1470,9 +1566,10 @@
                     this.state.route.price = null;
                 }
                 
-                if (this.els.bookBtn) {
-                    this.els.bookBtn.disabled = false;
-                }
+                // Button is always enabled - no need to control disabled state
+                // if (this.els.bookBtn) {
+                //     this.els.bookBtn.disabled = false;
+                // }
             }
             
             calculateVehiclePrice(vehicleType, distance, duration, options = {}) {
@@ -2010,7 +2107,13 @@
             updateCarousel() {
                 if (!this.track) return;
                 
-                const translateX = -this.currentIndex * (85 + 3.2);
+                // Calculate centering: center position (50%) minus half of card width (42.5%)
+                const cardWidth = 85; // Card is 85% of container width
+                const gap = 3.2; // Gap between cards
+                const centerOffset = 7.5; // (100 - 85) / 2 = 7.5% to center a card
+                
+                // Position to center the active card
+                const translateX = centerOffset - (this.currentIndex * (cardWidth + gap));
                 this.track.style.transform = `translateX(${translateX}%)`;
                 
                 this.cards.forEach((card, index) => {

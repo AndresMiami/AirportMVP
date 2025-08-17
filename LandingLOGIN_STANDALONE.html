@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>I ❤️ Miami - Elite Concierge & Chauffeur</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Base font and background color */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000;
+            color: #e5e7eb;
+        }
+
+        /* Background image with overlay and filter effects */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url('https://images.unsplash.com/photo-1543333930-79848aa15a5d?q=80&w=2670&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            filter: saturate(0.5) brightness(0.8);
+            z-index: -1;
+            opacity: 0.4;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: -1;
+        }
+
+        /* Brand name styling with gradient */
+        h1.brand-name {
+            font-family: 'Playfair Display', serif;
+            background: linear-gradient(to right, #f97316, #00807A, #ef4444);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        /* Heart icon styling */
+        h1.brand-name .heart-icon {
+            color: #ff0000;
+            -webkit-text-fill-color: #ff0000;
+        }
+
+        /* Text shadow for better readability */
+        .text-shadow {
+            text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Ensure content is above background pseudo-elements */
+        .min-h-screen {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Modal backdrop styling */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.75);
+            z-index: 50;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+        }
+
+        .modal-backdrop.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Modal content styling (mobile-first slide-up) */
+        .modal-content {
+            position: fixed;
+            left: 0; right: 0; bottom: 0;
+            transform: translateY(100%);
+            background-color: #ffffff;
+            border-radius: 24px 24px 0 0;
+            padding: 2rem;
+            width: 100%;
+            max-width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            z-index: 51;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-content.show {
+            transform: translateY(0);
+        }
+
+        /* Desktop: Center modal */
+        @media (min-width: 768px) {
+            .modal-content {
+                left: 50%; right: auto; bottom: auto; top: 50%;
+                transform: translate(-50%, calc(-50% + 100vh));
+                max-width: 500px;
+                border-radius: 24px;
+            }
+            
+            .modal-content.show {
+                transform: translate(-50%, -50%);
+            }
+        }
+
+        /* Input field styling */
+        .styled-input, .otp-box {
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+            color: #111827;
+            transition: all 0.3s ease;
+        }
+
+        .styled-input:focus, .otp-box:focus {
+            background-color: #ffffff;
+            border-color: #f97316;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+        }
+        
+        /* Modal-specific text colors */
+        .modal-content h2, .modal-content h3 { color: #111827; }
+        .modal-content p { color: #6b7280; }
+        .modal-content label { color: #374151; }
+
+        /* Loading spinner animation */
+        .spinner {
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            border-top-color: #f97316;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Success checkmark animation */
+        .checkmark {
+            width: 56px; height: 56px; border-radius: 50%; display: block;
+            stroke-width: 2; stroke: #fff; stroke-miterlimit: 10;
+            box-shadow: inset 0px 0px 0px #10b981;
+            animation: fill .4s ease-in-out .4s forwards, scale .3s ease-in-out .9s both;
+            margin: 0 auto;
+        }
+        .checkmark__circle {
+            stroke-dasharray: 166; stroke-dashoffset: 166; stroke-width: 2;
+            stroke-miterlimit: 10; stroke: #10b981; fill: none;
+            animation: stroke .6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+        }
+        .checkmark__check {
+            transform-origin: 50% 50%; stroke-dasharray: 48; stroke-dashoffset: 48;
+            animation: stroke .3s cubic-bezier(0.65, 0, 0.45, 1) .8s forwards;
+        }
+        @keyframes stroke { 100% { stroke-dashoffset: 0; } }
+        @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.1, 1.1, 1); } }
+        @keyframes fill { 100% { box-shadow: inset 0px 0px 0px 30px #10b981; } }
+
+        /* Demo mode indicator */
+        .demo-badge {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(249, 115, 22, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        /* Progress indicator */
+        .progress-steps {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 2rem;
+            gap: 0.5rem;
+        }
+        .progress-step {
+            width: 40px;
+            height: 4px;
+            background: #e5e7eb;
+            border-radius: 2px;
+            transition: all 0.3s ease;
+        }
+        .progress-step.active {
+            background: #f97316;
+            transform: scaleX(1.1);
+        }
+        .progress-step.completed {
+            background: #10b981;
+        }
+
+        /* Inline error styling */
+        .input-error {
+            border-color: #ef4444 !important;
+            background-color: #fef2f2 !important;
+        }
+        .error-text {
+            color: #ef4444;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+            display: none;
+        }
+        .error-text.show {
+            display: block;
+        }
+
+        /* Resend timer */
+        .resend-container {
+            text-align: center;
+            margin-top: 1rem;
+        }
+        .resend-link {
+            color: #f97316;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .resend-link.disabled {
+            color: #9ca3af;
+            cursor: not-allowed;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Demo Mode Badge -->
+    <div class="demo-badge">DEMO MODE</div>
+
+    <!-- Main landing page content -->
+    <div class="min-h-screen flex flex-col items-center justify-center p-6">
+        <div class="text-center flex-grow flex flex-col items-center justify-center">
+            <h1 class="brand-name text-5xl md:text-7xl font-bold mb-20 tracking-wide text-shadow">
+                I <span class="heart-icon">❤️</span> Miami
+            </h1>
+        </div>
+        <div class="w-full max-w-md pb-10">
+            <button id="getStartedBtn"
+                    class="block w-full px-10 py-5 rounded-lg text-xl text-center font-semibold text-white
+                           bg-gradient-to-r from-red-500 to-orange-500
+                           hover:from-red-600 hover:to-orange-600
+                           focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-orange-500
+                           transition duration-300 shadow-lg">
+                Get started
+            </button>
+        </div>
+    </div>
+
+    <!-- Authentication Modal -->
+    <div id="authModal" class="modal-backdrop" style="display: none;">
+        <div class="modal-content">
+            <!-- Close button -->
+            <button onclick="hideModal()" class="absolute top-5 right-5 text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            
+            <!-- Step 1: Login Options (Single Entry Point) -->
+            <div id="loginOptions">
+                <div class="text-center mb-8">
+                    <div class="inline-flex items-center justify-center w-20 h-20 bg-black rounded-2xl mb-4">
+                        <span class="text-white text-3xl">❤️</span>
+                    </div>
+                    <h2 class="text-2xl font-bold">Get started with I ❤️ Miami</h2>
+                    <p class="text-gray-500 mt-2 text-sm">Enter your details to continue</p>
+                </div>
+                
+                <form id="phoneLoginForm">
+                    <label for="phoneLoginInput" class="block text-sm font-medium mb-3">Mobile number</label>
+                    <div class="flex gap-2 mb-4">
+                        <button type="button" class="px-3 py-3 border border-gray-300 rounded-lg text-gray-700 bg-gray-50 flex items-center gap-2">
+                            <span>🇺🇸</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        <input type="tel" id="phoneLoginInput" placeholder="+1 7865093955" class="styled-input flex-1 px-4 py-3 rounded-lg text-lg font-medium" required>
+                    </div>
+                    <button type="submit" id="sendCodeBtn" class="w-full px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="sendCodeText">Continue</span>
+                        <div id="sendCodeSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                </form>
+                
+                <div class="relative my-6"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-300"></div></div><div class="relative flex justify-center text-sm"><span class="px-4 bg-white text-gray-500">or</span></div></div>
+                
+                <div class="space-y-3">
+                    <button onclick="handleGoogleSignIn()" class="w-full px-6 py-3 rounded-lg text-lg font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 flex items-center justify-center gap-3">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                        Continue with Google
+                    </button>
+                    <button onclick="showEmailLogin()" class="w-full px-6 py-3 rounded-lg text-lg font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 flex items-center justify-center gap-3">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                        Continue with Email
+                    </button>
+                </div>
+
+                <!-- Demo Instructions -->
+                <div class="mt-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p class="text-xs text-blue-700">
+                        <strong>Demo Mode:</strong> Try these to test different flows:<br>
+                        • New user: <code>new@user.com</code> or <code>+1 555 123 4567</code><br>
+                        • Existing user: Any other email/phone<br>
+                        • OTP Code: Enter any 4 digits
+                    </p>
+                </div>
+            </div>
+
+            <!-- Step 2a: Phone OTP Verification -->
+            <div id="phoneOtpStep" style="display: none;">
+                <div class="progress-steps" id="phoneOtpProgress" style="display: none;">
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step active"></div>
+                    <div class="progress-step"></div>
+                    <div class="progress-step"></div>
+                </div>
+                <h2 class="text-2xl font-bold mb-2">Enter the 4-digit code sent to <span id="phoneDisplay" class="font-normal"></span>.</h2>
+                <button type="button" onclick="changePhoneNumber()" class="text-orange-600 hover:underline text-sm mb-8">Change number</button>
+                <form id="phoneOtpForm">
+                    <div class="flex gap-3 justify-center mb-4">
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                    </div>
+                    <div class="resend-container">
+                        <p class="text-sm text-gray-600">
+                            Didn't receive code? 
+                            <span id="phoneResendLink" class="resend-link disabled">Resend in <span id="phoneResendTimer">60</span>s</span>
+                        </p>
+                    </div>
+                    <button type="submit" id="verifyPhoneBtn" style="display: none;" class="w-full mt-6 px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="verifyPhoneText">Verify</span>
+                        <div id="verifyPhoneSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Step 2b: Email Input -->
+            <div id="emailStep" style="display: none;">
+                 <button type="button" onclick="showLoginOptions()" class="absolute top-5 left-5 text-gray-500 hover:text-gray-800 text-2xl">&larr;</button>
+                 <h2 class="text-2xl font-bold text-center mt-8 mb-8">What's your email address?</h2>
+                 <form id="emailForm">
+                    <input type="email" id="emailInput" placeholder="name@example.com" class="styled-input w-full px-4 py-4 rounded-lg text-lg font-medium mb-4" required>
+                    <button type="submit" id="sendEmailBtn" class="w-full px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="sendEmailText">Continue</span>
+                        <div id="sendEmailSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                 </form>
+            </div>
+
+            <!-- Step 2c: Email OTP Verification -->
+            <div id="emailOtpStep" style="display: none;">
+                <div class="progress-steps" id="emailOtpProgress" style="display: none;">
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step active"></div>
+                    <div class="progress-step"></div>
+                    <div class="progress-step"></div>
+                </div>
+                <h2 class="text-2xl font-bold mb-2">Enter the 4-digit code sent to <span id="emailDisplay" class="font-normal block truncate"></span></h2>
+                <button type="button" onclick="showEmailLogin()" class="text-orange-600 hover:underline text-sm mb-8">Change email</button>
+                <form id="emailOtpForm">
+                    <div class="flex gap-3 justify-center mb-4">
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                        <input type="text" maxlength="1" class="otp-box w-16 h-16 text-2xl text-center rounded-lg" />
+                    </div>
+                    <div class="resend-container">
+                        <p class="text-sm text-gray-600">
+                            <span>Didn't receive code? </span>
+                            <span id="emailResendLink" class="resend-link disabled">Resend in <span id="emailResendTimer">60</span>s</span>
+                        </p>
+                    </div>
+                    <button type="submit" id="verifyEmailBtn" style="display: none;" class="w-full mt-6 px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="verifyEmailText">Verify</span>
+                        <div id="verifyEmailSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Step 3: Create Account (for new users only) -->
+            <div id="createAccountStep" style="display: none;">
+                <button type="button" onclick="showLoginOptions()" class="absolute top-5 left-5 text-gray-500 hover:text-gray-800 text-2xl">&larr;</button>
+                <div class="progress-steps" id="createAccountProgress">
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step active"></div>
+                    <div class="progress-step"></div>
+                </div>
+                <h2 class="text-2xl font-bold text-center mb-4">What's your name?</h2>
+                <p class="text-center text-gray-600 mb-8">Let us know how to properly address you.</p>
+                <form id="createAccountForm">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="firstNameInput" class="block text-sm font-medium mb-2">First name</label>
+                            <input type="text" id="firstNameInput" placeholder="Enter first name" class="styled-input w-full px-4 py-3 rounded-lg text-lg" required>
+                            <span class="error-text" id="firstNameError">Please enter your first name</span>
+                        </div>
+                        <div>
+                            <label for="lastNameInput" class="block text-sm font-medium mb-2">Last name</label>
+                            <input type="text" id="lastNameInput" placeholder="Enter last name" class="styled-input w-full px-4 py-3 rounded-lg text-lg" required>
+                            <span class="error-text" id="lastNameError">Please enter your last name</span>
+                        </div>
+                        <div>
+                            <label for="referralCodeInput" class="block text-sm font-medium mb-2">Referral code (optional)</label>
+                            <input type="text" id="referralCodeInput" placeholder="Enter code if you have one" class="styled-input w-full px-4 py-3 rounded-lg text-lg">
+                            <p class="text-xs text-gray-500 mt-1">Got a referral code? Enter it for special benefits!</p>
+                        </div>
+                    </div>
+                    <button type="submit" id="createAccountBtn" class="w-full mt-8 px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="createAccountText">Continue</span>
+                        <div id="createAccountSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Step 3b: Add Phone (for new users coming from email) -->
+            <div id="addPhoneStep" style="display: none;">
+                <button type="button" onclick="showCreateAccount()" class="absolute top-5 left-5 text-gray-500 hover:text-gray-800 text-2xl">&larr;</button>
+                <div class="progress-steps">
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step active"></div>
+                </div>
+                <h2 class="text-2xl font-bold text-center mb-4">Add your phone number</h2>
+                <p class="text-center text-gray-600 mb-8">We'll use this for account security and ride notifications.</p>
+                <form id="addPhoneForm">
+                     <div class="flex gap-2 mb-4">
+                        <button type="button" class="px-3 py-3 border border-gray-300 rounded-lg text-gray-700 bg-gray-50 flex items-center gap-2">
+                            <span>🇺🇸</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        <input type="tel" id="addPhoneInput" placeholder="+1 7865093955" class="styled-input flex-1 px-4 py-3 rounded-lg text-lg font-medium" required>
+                    </div>
+                    <button type="submit" id="addPhoneBtn" class="w-full mt-8 px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="addPhoneText">Verify Phone</span>
+                         <div id="addPhoneSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Step 3c: Add Email (for new users coming from phone) -->
+            <div id="addEmailStep" style="display: none;">
+                <button type="button" onclick="showCreateAccount()" class="absolute top-5 left-5 text-gray-500 hover:text-gray-800 text-2xl">&larr;</button>
+                <div class="progress-steps">
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step completed"></div>
+                    <div class="progress-step active"></div>
+                </div>
+                <h2 class="text-2xl font-bold text-center mb-4">Add your email address</h2>
+                <p class="text-center text-gray-600 mb-8">We'll use this for receipts and account recovery.</p>
+                <form id="addEmailForm">
+                    <input type="email" id="addEmailInput" placeholder="name@example.com" class="styled-input w-full px-4 py-4 rounded-lg text-lg font-medium mb-4" required>
+                    <button type="submit" id="addEmailBtn" class="w-full px-6 py-4 rounded-lg text-lg font-semibold text-white bg-black hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition duration-300 flex items-center justify-center">
+                        <span id="addEmailText">Verify Email</span>
+                        <div id="addEmailSpinner" class="spinner ml-3" style="display: none;"></div>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Step 4: Success -->
+            <div id="successStep" style="display: none;">
+                <div class="text-center">
+                    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52"><circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/><path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/></svg>
+                    <h2 id="successTitle" class="text-2xl font-bold mt-4 mb-2">Welcome!</h2>
+                    <p id="successMessage">Redirecting to your dashboard...</p>
+                </div>
+            </div>
+
+            <!-- Error Message Area -->
+            <div id="errorMessage" class="mt-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // ====================================
+        // UBER-STYLE SEAMLESS AUTHENTICATION
+        // ====================================
+        // This demo implements a single entry point that intelligently
+        // routes users to login or signup based on their credentials
+        
+        console.log('🚀 Uber-Style Authentication Demo Loaded');
+        console.log('📝 Try "new@user.com" or "+1 555 123 4567" for signup flow');
+        console.log('📝 Any other email/phone for login flow');
+
+        // --- DOM Element Selection ---
+        const authModal = document.getElementById('authModal');
+        const modalBackdrop = authModal;
+        const modalContent = authModal.querySelector('.modal-content');
+        const getStartedBtn = document.getElementById('getStartedBtn');
+        
+        // Modal Steps
+        const steps = {
+            loginOptions: document.getElementById('loginOptions'),
+            phoneOtp: document.getElementById('phoneOtpStep'),
+            email: document.getElementById('emailStep'),
+            emailOtp: document.getElementById('emailOtpStep'),
+            createAccount: document.getElementById('createAccountStep'),
+            addPhone: document.getElementById('addPhoneStep'),
+            addEmail: document.getElementById('addEmailStep'),
+            success: document.getElementById('successStep'),
+        };
+        
+        // --- CORE STATE MANAGEMENT ---
+        let isSignUpFlow = false;  // Critical flag for tracking user journey
+        let currentUserData = {
+            email: null,
+            phone: null,
+            firstName: null,
+            lastName: null,
+            referralCode: null
+        };
+        
+        // Resend timer states
+        let phoneResendTimer = null;
+        let emailResendTimer = null;
+        let phoneResendAttempts = 0;
+        let emailResendAttempts = 0;
+        const MAX_RESEND_ATTEMPTS = 3;
+        const RESEND_COUNTDOWN_SECONDS = 60; // 60 seconds for production
+
+        // Forms and Inputs
+        const phoneLoginForm = document.getElementById('phoneLoginForm');
+        const phoneLoginInput = document.getElementById('phoneLoginInput');
+        const phoneDisplay = document.getElementById('phoneDisplay');
+        const phoneOtpForm = document.getElementById('phoneOtpForm');
+        const phoneOtpBoxes = steps.phoneOtp.querySelectorAll('.otp-box');
+        
+        const emailForm = document.getElementById('emailForm');
+        const emailInput = document.getElementById('emailInput');
+        const emailDisplay = document.getElementById('emailDisplay');
+        const emailOtpForm = document.getElementById('emailOtpForm');
+        const emailOtpBoxes = steps.emailOtp.querySelectorAll('.otp-box');
+
+        const createAccountForm = document.getElementById('createAccountForm');
+        
+        const addPhoneForm = document.getElementById('addPhoneForm');
+        const addPhoneInput = document.getElementById('addPhoneInput');
+        
+        const addEmailForm = document.getElementById('addEmailForm');
+        const addEmailInput = document.getElementById('addEmailInput');
+
+        // Buttons and Indicators
+        const sendCodeBtn = document.getElementById('sendCodeBtn');
+        const verifyPhoneBtn = document.getElementById('verifyPhoneBtn');
+        const sendEmailBtn = document.getElementById('sendEmailBtn');
+        const verifyEmailBtn = document.getElementById('verifyEmailBtn');
+        const errorMessage = document.getElementById('errorMessage');
+
+        // --- Modal Control Functions ---
+        const showStep = (stepName) => {
+            Object.values(steps).forEach(step => step.style.display = 'none');
+            if (steps[stepName]) {
+                steps[stepName].style.display = 'block';
+            }
+            hideError();
+            console.log(`📍 Navigated to step: ${stepName}`);
+        };
+
+        const showModal = () => {
+            authModal.style.display = 'block';
+            setTimeout(() => {
+                modalBackdrop.classList.add('show');
+                modalContent.classList.add('show');
+            }, 10);
+        };
+
+        const hideModal = () => {
+            modalBackdrop.classList.remove('show');
+            modalContent.classList.remove('show');
+            setTimeout(() => {
+                authModal.style.display = 'none';
+                resetAuthFlow();
+            }, 300);
+        };
+
+        const resetAuthFlow = () => {
+            isSignUpFlow = false;
+            currentUserData = { email: null, phone: null, firstName: null, lastName: null, referralCode: null };
+            showStep('loginOptions');
+            
+            // Clear timers
+            if (phoneResendTimer) {
+                clearInterval(phoneResendTimer);
+                phoneResendTimer = null;
+            }
+            if (emailResendTimer) {
+                clearInterval(emailResendTimer);
+                emailResendTimer = null;
+            }
+            
+            // Reset attempt counters
+            phoneResendAttempts = 0;
+            emailResendAttempts = 0;
+            
+            // Clear all inputs
+            phoneLoginInput.value = '';
+            emailInput.value = '';
+            addPhoneInput.value = '';
+            addEmailInput.value = '';
+            document.getElementById('firstNameInput').value = '';
+            document.getElementById('lastNameInput').value = '';
+            document.getElementById('referralCodeInput').value = '';
+            phoneOtpBoxes.forEach(box => box.value = '');
+            emailOtpBoxes.forEach(box => box.value = '');
+        };
+        
+        const showError = (message) => {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        };
+        
+        const hideError = () => {
+            errorMessage.style.display = 'none';
+        };
+
+        // --- Event Listeners ---
+        getStartedBtn.addEventListener('click', showModal);
+        
+        // --- Input Formatting & Validation ---
+        const formatPhoneNumber = (inputElement) => {
+            let value = inputElement.value.replace(/\D/g, '');
+            
+            // Auto-add US country code
+            if (value.length > 0 && value[0] !== '1') {
+                value = '1' + value;
+            }
+            
+            // Format as: +1 (786) 509-3955
+            let formatted = '';
+            if (value.length > 0) {
+                formatted = '+' + value.slice(0, 1);
+                if (value.length > 1) {
+                    formatted += ' (' + value.slice(1, 4);
+                    if (value.length > 4) {
+                        formatted += ') ' + value.slice(4, 7);
+                        if (value.length > 7) {
+                            formatted += '-' + value.slice(7, 11);
+                        }
+                    }
+                }
+            }
+            
+            inputElement.value = formatted;
+            
+            // Validate and show error if needed
+            if (value.length > 0 && value.length !== 11) {
+                inputElement.classList.add('input-error');
+            } else {
+                inputElement.classList.remove('input-error');
+            }
+        };
+        
+        // Validate email format
+        const validateEmail = (email) => {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
+        };
+        
+        // Show inline error
+        const showInlineError = (inputId, errorId, show = true) => {
+            const input = document.getElementById(inputId);
+            const error = document.getElementById(errorId);
+            if (show) {
+                input.classList.add('input-error');
+                if (error) error.classList.add('show');
+            } else {
+                input.classList.remove('input-error');
+                if (error) error.classList.remove('show');
+            }
+        };
+        
+        phoneLoginInput.addEventListener('input', () => formatPhoneNumber(phoneLoginInput));
+        addPhoneInput.addEventListener('input', () => formatPhoneNumber(addPhoneInput));
+        
+        // Email validation on blur
+        emailInput.addEventListener('blur', () => {
+            if (emailInput.value && !validateEmail(emailInput.value)) {
+                emailInput.classList.add('input-error');
+            } else {
+                emailInput.classList.remove('input-error');
+            }
+        });
+        
+        addEmailInput.addEventListener('blur', () => {
+            if (addEmailInput.value && !validateEmail(addEmailInput.value)) {
+                addEmailInput.classList.add('input-error');
+            } else {
+                addEmailInput.classList.remove('input-error');
+            }
+        });
+
+        // --- OTP Box Management with Auto-focus ---
+        const setupOtpBoxes = (boxes, verifyBtn) => {
+            boxes.forEach((box, index) => {
+                // Auto-focus next box on input
+                box.addEventListener('input', (e) => {
+                    const value = e.target.value;
+                    
+                    // Only allow digits
+                    if (value && !/^\d$/.test(value)) {
+                        e.target.value = '';
+                        return;
+                    }
+                    
+                    // Auto-advance to next box
+                    if (value.length === 1 && index < boxes.length - 1) {
+                        boxes[index + 1].focus();
+                    }
+                    
+                    // Check if all boxes are filled
+                    const otpValue = Array.from(boxes).map(b => b.value).join('');
+                    verifyBtn.style.display = otpValue.length === 4 ? 'flex' : 'none';
+                    
+                    // Auto-submit if all 4 digits entered
+                    if (otpValue.length === 4) {
+                        verifyBtn.click();
+                    }
+                });
+                
+                // Handle backspace
+                box.addEventListener('keydown', (e) => {
+                    if (e.key === 'Backspace' && !e.target.value && index > 0) {
+                        e.preventDefault();
+                        boxes[index - 1].focus();
+                        boxes[index - 1].value = '';
+                    }
+                });
+                
+                // Handle paste
+                box.addEventListener('paste', (e) => {
+                    e.preventDefault();
+                    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+                    pastedData.split('').forEach((digit, i) => {
+                        if (boxes[i]) boxes[i].value = digit;
+                    });
+                    if (pastedData.length === 4) {
+                        verifyBtn.style.display = 'flex';
+                        verifyBtn.click();
+                    }
+                });
+            });
+        };
+        setupOtpBoxes(phoneOtpBoxes, verifyPhoneBtn);
+        setupOtpBoxes(emailOtpBoxes, verifyEmailBtn);
+
+        // --- Resend OTP Functionality ---
+        const startResendTimer = (type) => {
+            let seconds = RESEND_COUNTDOWN_SECONDS;
+            const linkElement = document.getElementById(type === 'phone' ? 'phoneResendLink' : 'emailResendLink');
+            const timerElement = document.getElementById(type === 'phone' ? 'phoneResendTimer' : 'emailResendTimer');
+            
+            // Reset the link text to show initial state
+            linkElement.innerHTML = `Resend in <span id="${type}ResendTimer">${RESEND_COUNTDOWN_SECONDS}</span>s`;
+            linkElement.classList.add('disabled');
+            linkElement.onclick = null;
+            
+            const timer = setInterval(() => {
+                seconds--;
+                if (seconds <= 0) {
+                    clearInterval(timer);
+                    
+                    // Check if max attempts reached
+                    const attempts = type === 'phone' ? phoneResendAttempts : emailResendAttempts;
+                    if (attempts >= MAX_RESEND_ATTEMPTS) {
+                        linkElement.innerHTML = 'Maximum attempts reached';
+                        linkElement.classList.add('disabled');
+                        linkElement.style.color = '#ef4444'; // Red color
+                    } else {
+                        linkElement.innerHTML = 'Resend code';
+                        linkElement.classList.remove('disabled');
+                        linkElement.onclick = () => resendOTP(type);
+                    }
+                } else {
+                    // Update the timer display
+                    const currentTimerElement = document.getElementById(type + 'ResendTimer');
+                    if (currentTimerElement) {
+                        currentTimerElement.textContent = seconds;
+                    }
+                }
+            }, 1000);
+            
+            if (type === 'phone') {
+                phoneResendTimer = timer;
+            } else {
+                emailResendTimer = timer;
+            }
+        };
+        
+        const resendOTP = (type) => {
+            // Increment attempt counter
+            if (type === 'phone') {
+                phoneResendAttempts++;
+                console.log(`📤 Resending phone OTP... (Attempt ${phoneResendAttempts}/${MAX_RESEND_ATTEMPTS})`);
+            } else {
+                emailResendAttempts++;
+                console.log(`📤 Resending email OTP... (Attempt ${emailResendAttempts}/${MAX_RESEND_ATTEMPTS})`);
+            }
+            
+            // Show loading state
+            const linkElement = document.getElementById(type === 'phone' ? 'phoneResendLink' : 'emailResendLink');
+            linkElement.innerHTML = 'Sending...';
+            linkElement.classList.add('disabled');
+            
+            setTimeout(() => {
+                console.log(`✅ OTP resent to ${type}`);
+                
+                const attempts = type === 'phone' ? phoneResendAttempts : emailResendAttempts;
+                if (attempts >= MAX_RESEND_ATTEMPTS) {
+                    linkElement.innerHTML = 'Maximum attempts reached';
+                    linkElement.classList.add('disabled');
+                    linkElement.style.color = '#ef4444';
+                    
+                    // Show error message
+                    showError(`Maximum resend attempts reached. Please try again later or contact support.`);
+                } else {
+                    linkElement.innerHTML = `Resend in <span id="${type}ResendTimer">${RESEND_COUNTDOWN_SECONDS}</span>s`;
+                    linkElement.style.color = ''; // Reset color
+                    startResendTimer(type);
+                    
+                    // Clear OTP boxes
+                    const boxes = type === 'phone' ? phoneOtpBoxes : emailOtpBoxes;
+                    boxes.forEach(box => box.value = '');
+                    boxes[0].focus();
+                    
+                    // Show remaining attempts
+                    const remaining = MAX_RESEND_ATTEMPTS - attempts;
+                    if (remaining === 1) {
+                        showError(`Last resend attempt remaining`);
+                    }
+                }
+            }, 1500);
+        };
+
+        // --- Navigation Functions ---
+        const showLoginOptions = () => showStep('loginOptions');
+        const changePhoneNumber = () => {
+            if (phoneResendTimer) clearInterval(phoneResendTimer);
+            showStep('loginOptions');
+        };
+        const showEmailLogin = () => showStep('email');
+        const showCreateAccount = () => showStep('createAccount');
+
+        // ================================================
+        // CORE AUTHENTICATION LOGIC - THE MAGIC HAPPENS HERE
+        // ================================================
+        
+        /**
+         * This is the KEY function that determines if a user exists
+         * In production, this would query your database
+         * For demo: specific test values trigger signup flow
+         */
+        const checkUserExists = async (identifier) => {
+            // Simulate API delay
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Demo logic: these specific values indicate NEW users
+            const newUserIdentifiers = ['new@user.com', '15551234567', '5551234567'];
+            
+            const isNewUser = newUserIdentifiers.includes(
+                identifier.toLowerCase().replace(/\D/g, '') // Remove non-digits for phone comparison
+            ) || identifier.toLowerCase() === 'new@user.com';
+            
+            if (isNewUser) {
+                console.log(`🆕 NEW USER DETECTED: ${identifier}`);
+                console.log('🚀 Initiating SIGN-UP flow...');
+                isSignUpFlow = true;
+                return false;
+            } else {
+                console.log(`✅ EXISTING USER FOUND: ${identifier}`);
+                console.log('🔓 Initiating LOGIN flow...');
+                isSignUpFlow = false;
+                return true;
+            }
+        };
+
+        // ================================================
+        // AUTHENTICATION FLOWS
+        // ================================================
+
+        // 1. PHONE NUMBER ENTRY (Single Entry Point)
+        phoneLoginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phone = phoneLoginInput.value.replace(/\D/g, '');
+            
+            if (phone.length !== 11 || phone[0] !== '1') {
+                showError('Please enter a valid US phone number (e.g., +1 555 555 5555)');
+                return;
+            }
+            
+            currentUserData.phone = phone;
+            
+            // Show loading state
+            sendCodeBtn.disabled = true;
+            document.getElementById('sendCodeText').style.display = 'none';
+            document.getElementById('sendCodeSpinner').style.display = 'block';
+            
+            console.log(`📱 Sending OTP to: +${phone}`);
+            
+            // Simulate sending OTP
+            setTimeout(() => {
+                phoneDisplay.textContent = `+${phone.slice(0,1)} (${phone.slice(1,4)}) ${phone.slice(4,7)}-${phone.slice(7,11)}`;
+                showStep('phoneOtp');
+                phoneOtpBoxes[0].focus();
+                
+                // Start resend timer
+                startResendTimer('phone');
+                
+                // Show progress indicator for signup flow
+                document.getElementById('phoneOtpProgress').style.display = 'none';
+                
+                sendCodeBtn.disabled = false;
+                document.getElementById('sendCodeText').style.display = 'inline';
+                document.getElementById('sendCodeSpinner').style.display = 'none';
+            }, 1500);
+        });
+
+        // 2. PHONE OTP VERIFICATION (Decision Point)
+        phoneOtpForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const otp = Array.from(phoneOtpBoxes).map(b => b.value).join('');
+            
+            if (otp.length !== 4) {
+                showError('Please enter the complete 4-digit code');
+                return;
+            }
+            
+            // Show loading
+            verifyPhoneBtn.disabled = true;
+            document.getElementById('verifyPhoneText').style.display = 'none';
+            document.getElementById('verifyPhoneSpinner').style.display = 'block';
+            
+            console.log(`🔐 Verifying OTP: ${otp}`);
+            
+            setTimeout(async () => {
+                // CRITICAL DECISION POINT
+                if (isSignUpFlow) {
+                    // User is completing signup (came from email->name->phone flow)
+                    console.log('✨ SIGNUP COMPLETE! Creating new account...');
+                    document.getElementById('successTitle').textContent = "Account Created!";
+                    document.getElementById('successMessage').textContent = "Welcome to I ❤️ Miami! Setting up your dashboard...";
+                    showStep('success');
+                    setTimeout(hideModal, 3000);
+                } else {
+                    // Check if this is an existing user
+                    const userExists = await checkUserExists(currentUserData.phone);
+                    
+                    if (userExists) {
+                        // LOGIN PATH
+                        console.log('🎉 LOGIN SUCCESSFUL!');
+                        document.getElementById('successTitle').textContent = "Welcome Back!";
+                        document.getElementById('successMessage').textContent = "Great to see you again! Loading your dashboard...";
+                        showStep('success');
+                        setTimeout(hideModal, 3000);
+                    } else {
+                        // SIGNUP PATH - Collect name
+                        console.log('📝 New user - collecting profile information...');
+                        showStep('createAccount');
+                    }
+                }
+                
+                verifyPhoneBtn.disabled = false;
+                document.getElementById('verifyPhoneText').style.display = 'inline';
+                document.getElementById('verifyPhoneSpinner').style.display = 'none';
+            }, 1500);
+        });
+
+        // 3. EMAIL ENTRY
+        emailForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = emailInput.value;
+            
+            if (!email || !email.includes('@')) {
+                showError('Please enter a valid email address');
+                return;
+            }
+            
+            currentUserData.email = email;
+            
+            sendEmailBtn.disabled = true;
+            document.getElementById('sendEmailText').style.display = 'none';
+            document.getElementById('sendEmailSpinner').style.display = 'block';
+
+            console.log(`📧 Sending OTP to: ${email}`);
+            
+            setTimeout(() => {
+                emailDisplay.textContent = email;
+                showStep('emailOtp');
+                emailOtpBoxes[0].focus();
+                
+                // Start resend timer
+                startResendTimer('email');
+                
+                // Show progress indicator for signup flow  
+                document.getElementById('emailOtpProgress').style.display = 'none';
+
+                sendEmailBtn.disabled = false;
+                document.getElementById('sendEmailText').style.display = 'inline';
+                document.getElementById('sendEmailSpinner').style.display = 'none';
+            }, 1500);
+        });
+
+        // 4. EMAIL OTP VERIFICATION (Decision Point)
+        emailOtpForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const otp = Array.from(emailOtpBoxes).map(b => b.value).join('');
+            
+            if (otp.length !== 4) {
+                showError('Please enter the complete 4-digit code');
+                return;
+            }
+
+            verifyEmailBtn.disabled = true;
+            document.getElementById('verifyEmailText').style.display = 'none';
+            document.getElementById('verifyEmailSpinner').style.display = 'block';
+
+            console.log(`🔐 Verifying email OTP: ${otp}`);
+            
+            setTimeout(async () => {
+                // Check if user exists
+                const userExists = await checkUserExists(currentUserData.email);
+                
+                if (userExists) {
+                    // LOGIN PATH
+                    console.log('🎉 EMAIL LOGIN SUCCESSFUL!');
+                    document.getElementById('successTitle').textContent = "Welcome Back!";
+                    document.getElementById('successMessage').textContent = "Great to see you again! Loading your dashboard...";
+                    showStep('success');
+                    setTimeout(hideModal, 3000);
+                } else {
+                    // SIGNUP PATH - Collect name
+                    console.log('📝 New email user - collecting profile information...');
+                    showStep('createAccount');
+                }
+
+                verifyEmailBtn.disabled = false;
+                document.getElementById('verifyEmailText').style.display = 'inline';
+                document.getElementById('verifyEmailSpinner').style.display = 'none';
+            }, 1500);
+        });
+
+        // 5. NAME COLLECTION (Signup Only)
+        createAccountForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const firstName = document.getElementById('firstNameInput').value.trim();
+            const lastName = document.getElementById('lastNameInput').value.trim();
+            const referralCode = document.getElementById('referralCodeInput').value.trim();
+            
+            // Validate names
+            let hasError = false;
+            if (!firstName) {
+                showInlineError('firstNameInput', 'firstNameError', true);
+                hasError = true;
+            } else {
+                showInlineError('firstNameInput', 'firstNameError', false);
+            }
+            
+            if (!lastName) {
+                showInlineError('lastNameInput', 'lastNameError', true);
+                hasError = true;
+            } else {
+                showInlineError('lastNameInput', 'lastNameError', false);
+            }
+            
+            if (hasError) return;
+            
+            currentUserData.firstName = firstName;
+            currentUserData.lastName = lastName;
+            currentUserData.referralCode = referralCode || null;
+            
+            console.log(`👤 Profile captured: ${firstName} ${lastName}`);
+            if (referralCode) {
+                console.log(`🎁 Referral code: ${referralCode}`);
+            }
+            
+            // Determine what's missing and route accordingly
+            if (currentUserData.email && !currentUserData.phone) {
+                // User came from email, needs to add phone
+                console.log('📱 User needs to add phone number for security...');
+                showStep('addPhone');
+            } else if (currentUserData.phone && !currentUserData.email) {
+                // User came from phone, needs to add email
+                console.log('📧 User needs to add email for receipts...');
+                showStep('addEmail');
+            }
+        });
+
+        // 6. PHONE ADDITION (For Email Signups)
+        addPhoneForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phone = addPhoneInput.value.replace(/\D/g, '');
+            
+            if (phone.length !== 11 || phone[0] !== '1') {
+                showError('Please enter a valid US phone number');
+                return;
+            }
+            
+            currentUserData.phone = phone;
+
+            document.getElementById('addPhoneBtn').disabled = true;
+            document.getElementById('addPhoneText').style.display = 'none';
+            document.getElementById('addPhoneSpinner').style.display = 'block';
+            
+            console.log(`📱 Adding phone for verification: +${phone}`);
+            
+            setTimeout(() => {
+                // Move to phone verification for final step
+                phoneDisplay.textContent = `+${phone.slice(0,1)} (${phone.slice(1,4)}) ${phone.slice(4,7)}-${phone.slice(7,11)}`;
+                showStep('phoneOtp');
+                phoneOtpBoxes[0].focus();
+
+                document.getElementById('addPhoneBtn').disabled = false;
+                document.getElementById('addPhoneText').style.display = 'inline';
+                document.getElementById('addPhoneSpinner').style.display = 'none';
+            }, 1500);
+        });
+        
+        // 7. EMAIL ADDITION (For Phone Signups)
+        if (addEmailForm) {
+            addEmailForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = addEmailInput.value;
+                
+                if (!email || !email.includes('@')) {
+                    showError('Please enter a valid email address');
+                    return;
+                }
+                
+                currentUserData.email = email;
+
+                document.getElementById('addEmailBtn').disabled = true;
+                document.getElementById('addEmailText').style.display = 'none';
+                document.getElementById('addEmailSpinner').style.display = 'block';
+                
+                console.log(`📧 Adding email for verification: ${email}`);
+                
+                setTimeout(() => {
+                    // Move to email verification for final step
+                    emailDisplay.textContent = email;
+                    showStep('emailOtp');
+                    emailOtpBoxes[0].focus();
+
+                    document.getElementById('addEmailBtn').disabled = false;
+                    document.getElementById('addEmailText').style.display = 'inline';
+                    document.getElementById('addEmailSpinner').style.display = 'none';
+                }, 1500);
+            });
+        }
+
+        // 8. GOOGLE SIGN-IN (Demo)
+        function handleGoogleSignIn() {
+            console.log('🔷 Google Sign-In clicked (Demo mode)');
+            showError("Google Sign-In is in demo mode. Try phone or email instead!");
+        }
+
+        // Log initial state
+        console.log('🎯 Authentication system ready!');
+        console.log('Current state:', { isSignUpFlow, currentUserData });
+    </script>
+
+</body>
+</html>

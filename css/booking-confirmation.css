@@ -29,12 +29,12 @@
 
 /* Confirmation Content Container */
 .confirmation-content {
-    background-color: #2C2C2E;
+    background-color: var(--panel-bg);
     border-radius: 16px;
     padding: 2rem;
     width: 90%;
     max-width: 500px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg);
     text-align: center;
     animation: slideUp 0.3s ease-out;
 }

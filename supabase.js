@@ -1,57 +1,72 @@
 // supabase-config.js
-// Create this file in your project root
+// Browser-compatible Supabase configuration
 
-import { createClient } from '@supabase/supabase-js'
+// Get configuration from window.APP_CONFIG or use defaults
+const getSupabaseConfig = () => {
+    // Try to use centralized config first
+    if (window.APP_CONFIG) {
+        return {
+            url: window.APP_CONFIG.SUPABASE_URL || 'https://hncpybxwblpkyxvskoxd.supabase.co',
+            anonKey: window.APP_CONFIG.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA'
+        };
+    }
+    
+    // Fallback to direct values
+    return {
+        url: 'https://hncpybxwblpkyxvskoxd.supabase.co',
+        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA'
+    };
+};
 
-// Supabase configuration from environment or window variables
-// In production, these should be injected by your build process or backend
-const SUPABASE_URL = window.SUPABASE_URL || 'https://YOUR_PROJECT_ID.supabase.co'
-const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'your-anon-key-here'
+const config = getSupabaseConfig();
 
 // Check if credentials are configured
-if (SUPABASE_URL.includes('YOUR_PROJECT_ID') || SUPABASE_ANON_KEY === 'your-anon-key-here') {
+if (config.url.includes('YOUR_PROJECT_ID') || config.anonKey === 'your-anon-key-here') {
     console.warn('⚠️ Supabase credentials not configured. Database features will not work.')
     console.warn('Please set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.')
 }
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Using the global window.supabase from the CDN
+if (typeof window !== 'undefined' && window.supabase) {
+    window.supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+}
 
 // Auth helper functions
-export const auth = {
+window.auth = {
   // Get current user
   getUser: async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await window.supabaseClient.auth.getUser()
     return user
   },
 
   // Get current session
   getSession: async () => {
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data: { session } } = await window.supabaseClient.auth.getSession()
     return session
   },
 
   // Sign out
   signOut: async () => {
-    const { error } = await supabase.auth.signOut()
+    const { error } = await window.supabaseClient.auth.signOut()
     if (error) throw error
-    window.location.href = '/index.html' // Redirect to landing page
+    window.location.href = '/dev/templates/LandingLOGIN.html' // Redirect to landing page
   },
 
   // Listen to auth changes
   onAuthStateChange: (callback) => {
-    return supabase.auth.onAuthStateChange(callback)
+    return window.supabaseClient.auth.onAuthStateChange(callback)
   }
 }
 
 // Database helper functions
-export const db = {
+window.db = {
   // Create a new trip
   createTrip: async (tripData) => {
     const user = await auth.getUser()
     if (!user) throw new Error('User not authenticated')
 
-    const { data, error } = await supabase
+    const { data, error } = await window.supabaseClient
       .from('trips')
       .insert([{
         user_id: user.id,
@@ -79,7 +94,7 @@ export const db = {
     const user = await auth.getUser()
     if (!user) throw new Error('User not authenticated')
 
-    const { data, error } = await supabase
+    const { data, error } = await window.supabaseClient
       .from('trips')
       .select('*')
       .eq('user_id', user.id)
@@ -92,7 +107,7 @@ export const db = {
 
   // Get single trip
   getTrip: async (tripId) => {
-    const { data, error } = await supabase
+    const { data, error } = await window.supabaseClient
       .from('trips')
       .select('*')
       .eq('id', tripId)
@@ -104,7 +119,7 @@ export const db = {
 
   // Update trip status
   updateTripStatus: async (tripId, status) => {
-    const { data, error } = await supabase
+    const { data, error } = await window.supabaseClient
       .from('trips')
       .update({ status })
       .eq('id', tripId)
@@ -117,7 +132,7 @@ export const db = {
 
   // Subscribe to trip updates
   subscribeToTrip: (tripId, callback) => {
-    return supabase
+    return window.supabaseClient
       .channel(`trip-${tripId}`)
       .on(
         'postgres_changes',
@@ -134,10 +149,10 @@ export const db = {
 }
 
 // Real-time helper functions
-export const realtime = {
+window.realtime = {
   // Subscribe to driver location
   subscribeToDriverLocation: (tripId, callback) => {
-    return supabase
+    return window.supabaseClient
       .channel(`driver-location-${tripId}`)
       .on('broadcast', { event: 'location' }, ({ payload }) => {
         callback(payload)
@@ -147,7 +162,7 @@ export const realtime = {
 
   // Broadcast driver location (for driver app)
   broadcastDriverLocation: async (tripId, location) => {
-    const channel = supabase.channel(`driver-location-${tripId}`)
+    const channel = window.supabaseClient.channel(`driver-location-${tripId}`)
     await channel.send({
       type: 'broadcast',
       event: 'location',
