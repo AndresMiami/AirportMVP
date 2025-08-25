@@ -20,21 +20,24 @@
     /* Hide scrollbar */
     scrollbar-width: none;
     -ms-overflow-style: none;
+    /* Ensure snap points work correctly */
+    scroll-padding: 0;
 }
 
-/* Mobile optimization - ultra compact */
+/* Mobile optimization - consistent centering */
 @media (max-width: 430px) {
     .carousel-wrapper {
         height: 120px; /* Very compact for mobile */
     }
     
     .carousel-track {
-        padding: 0 calc(50% - 37.5%); /* Adjust padding for 75% card width */
-        gap: 15px; /* Smaller gap on mobile */
+        padding: 0 15px; /* Smaller peek on mobile */
+        gap: 12px; /* Smaller gap on mobile */
     }
     
     .vehicle-card {
-        flex: 0 0 75%; /* Smaller cards for better fit */
+        flex: 0 0 calc(100% - 30px); /* Adjust for mobile peek space */
+        min-width: calc(100% - 30px);
     }
 }
 
@@ -42,18 +45,20 @@
     display: flex;
     height: 100%;
     align-items: center;
-    padding: 0 calc(50% - 42.5%); /* Padding to center first/last items (50% - half of card width) */
-    gap: 20px; /* Space between cards */
+    padding: 0 20px; /* Small padding to show peek of adjacent cards */
+    gap: 16px; /* Consistent gap between cards */
 }
 
 /* Removed cursor styles - using native scroll */
 
 .carousel-wrapper::-webkit-scrollbar { display: none; }
 
-/* Vehicle Cards - Minimal design */
+/* Vehicle Cards - Full panel width design */
 .vehicle-card {
-    flex: 0 0 85%;
+    flex: 0 0 calc(100% - 40px); /* Full width minus peek space */
+    min-width: calc(100% - 40px);
     scroll-snap-align: center; /* Snap to center */
+    scroll-snap-stop: always; /* Stop at each card */
     cursor: pointer;
     transition: all 0.3s ease;
     border: none;
@@ -61,18 +66,21 @@
     overflow: visible !important;
     background: transparent;
     box-shadow: none;
-    transform: scale(0.9);
-    opacity: 0.7;
+    transform: scale(0.92);
+    opacity: 0.6;
     position: relative;
     height: 100%;
     z-index: 1;
+    /* Prevent selection during swipe */
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .vehicle-card.active {
     transform: scale(1);
     opacity: 1;
-    border: none; /* No border for active state */
-    box-shadow: none; /* No shadow for active state */
+    border: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
     z-index: 10; /* Higher z-index to ensure price is visible */
 }
 
@@ -83,8 +91,8 @@
 
 .vehicle-card.prev,
 .vehicle-card.next {
-    transform: scale(0.85);
-    opacity: 0.5;
+    transform: scale(0.88);
+    opacity: 0.4;
 }
 
 /* Vehicle Images - No container, just image */

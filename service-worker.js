@@ -3,7 +3,7 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'luxeride-v1.0.0';
+const CACHE_NAME = 'luxeride-v1.0.1';
 const RUNTIME_CACHE = 'luxeride-runtime';
 
 // Files to cache immediately on install
