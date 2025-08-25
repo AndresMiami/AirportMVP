@@ -1977,14 +1977,8 @@
                 this.app = app;
                 this.currentIndex = 0;
                 this.totalSlides = 3;
-                this.isAnimating = false;
-                this.touchStartX = 0;
-                this.touchEndX = 0;
-                this.isDragging = false;
-                this.isMouseDragging = false;
-                this.mouseStartX = 0;
-                this.currentTransform = 0;
                 this.selectedVehicle = 'tesla';
+                this.wrapper = null;
                 
                 this.vehicles = [
                     { id: 'tesla', name: 'Tesla Model Y' },
@@ -2002,67 +1996,73 @@
             }
             
             cacheElements() {
+                this.wrapper = document.querySelector('.carousel-wrapper');
                 this.track = document.getElementById('carouselTrack');
-                // Navigation buttons removed - using swipe only
                 this.cards = document.querySelectorAll('.vehicle-card');
             }
             
             bindEvents() {
-                if (!this.track) return;
+                if (!this.wrapper) return;
                 
-                // Navigation buttons removed - swipe/drag gestures only
-                
+                // Click events for vehicle cards
                 this.cards.forEach((card, index) => {
                     card.addEventListener('click', () => this.goToSlide(index));
                 });
                 
-                // Touch events for mobile
-                this.track.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
-                this.track.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
-                this.track.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+                // Listen to scroll events to detect which card is centered
+                this.wrapper.addEventListener('scroll', () => this.handleScroll(), { passive: true });
                 
-                // Mouse events for desktop drag
-                this.track.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-                this.track.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-                this.track.addEventListener('mouseup', (e) => this.handleMouseUp(e));
-                this.track.addEventListener('mouseleave', (e) => this.handleMouseLeave(e));
+                // Optional: Add wheel event for horizontal scrolling with mouse wheel
+                this.wrapper.addEventListener('wheel', (e) => {
+                    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+                    e.preventDefault();
+                    this.wrapper.scrollLeft += e.deltaY;
+                }, { passive: false });
             }
             
             goToSlide(index) {
-                if (this.isAnimating || index === this.currentIndex) return;
+                if (index === this.currentIndex) return;
                 
-                this.isAnimating = true;
                 this.currentIndex = index;
                 
-                this.updateCarousel();
+                // Scroll to the selected card
+                const card = this.cards[index];
+                if (card && this.wrapper) {
+                    card.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest',
+                        inline: 'center'
+                    });
+                }
                 
-                setTimeout(() => {
-                    this.isAnimating = false;
-                }, 600);
+                this.updateCarousel();
             }
             
-            goToNext() {
-                const nextIndex = (this.currentIndex + 1) % this.totalSlides;
-                this.goToSlide(nextIndex);
-            }
-            
-            goToPrevious() {
-                const prevIndex = (this.currentIndex - 1 + this.totalSlides) % this.totalSlides;
-                this.goToSlide(prevIndex);
+            handleScroll() {
+                if (!this.wrapper) return;
+                
+                // Find which card is closest to center
+                const wrapperCenter = this.wrapper.scrollLeft + this.wrapper.clientWidth / 2;
+                let closestIndex = 0;
+                let closestDistance = Infinity;
+                
+                this.cards.forEach((card, index) => {
+                    const cardCenter = card.offsetLeft + card.clientWidth / 2;
+                    const distance = Math.abs(cardCenter - wrapperCenter);
+                    
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        closestIndex = index;
+                    }
+                });
+                
+                if (closestIndex !== this.currentIndex) {
+                    this.currentIndex = closestIndex;
+                    this.updateCarousel();
+                }
             }
             
             updateCarousel() {
-                if (!this.track) return;
-                
-                // Calculate centering: center position (50%) minus half of card width (42.5%)
-                const cardWidth = 85; // Card is 85% of container width
-                const gap = 3.2; // Gap between cards
-                const centerOffset = 7.5; // (100 - 85) / 2 = 7.5% to center a card
-                
-                // Position to center the active card
-                const translateX = centerOffset - (this.currentIndex * (cardWidth + gap));
-                this.track.style.transform = `translateX(${translateX}%)`;
-                
                 this.cards.forEach((card, index) => {
                     card.classList.remove('active', 'prev', 'next');
                     
@@ -2079,110 +2079,6 @@
                 
                 if (this.app && this.app.updateVehiclePrices) {
                     this.app.updateVehiclePrices();
-                }
-            }
-            
-            handleTouchStart(e) {
-                this.touchStartX = e.touches[0].clientX;
-                this.isDragging = true;
-                this.track.style.transition = 'none';
-                this.currentTransform = -this.currentIndex * (85 + 3.2);
-            }
-            
-            handleTouchMove(e) {
-                if (!this.isDragging) return;
-                
-                const currentX = e.touches[0].clientX;
-                const deltaX = currentX - this.touchStartX;
-                
-                if (Math.abs(deltaX) > 10) {
-                    e.preventDefault();
-                    
-                    const dragOffset = (deltaX / window.innerWidth) * 100;
-                    const newTransform = this.currentTransform + dragOffset;
-                    this.track.style.transform = `translateX(${newTransform}%)`;
-                }
-            }
-            
-            handleTouchEnd(e) {
-                if (!this.isDragging) return;
-                
-                this.isDragging = false;
-                this.touchEndX = e.changedTouches[0].clientX;
-                
-                this.track.style.transition = 'transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                
-                const deltaX = this.touchStartX - this.touchEndX;
-                const swipeThreshold = 50;
-                
-                if (Math.abs(deltaX) > swipeThreshold) {
-                    if (deltaX > 0) {
-                        this.goToNext();
-                    } else {
-                        this.goToPrevious();
-                    }
-                } else {
-                    this.updateCarousel();
-                }
-            }
-            
-            // Mouse event handlers for desktop drag
-            handleMouseDown(e) {
-                // Prevent text selection during drag
-                e.preventDefault();
-                this.isMouseDragging = true;
-                this.mouseStartX = e.clientX;
-                this.track.style.transition = 'none';
-                this.currentTransform = -this.currentIndex * (85 + 3.2);
-                
-                // Change cursor to grabbing
-                this.track.style.cursor = 'grabbing';
-            }
-            
-            handleMouseMove(e) {
-                if (!this.isMouseDragging) return;
-                
-                e.preventDefault();
-                const currentX = e.clientX;
-                const deltaX = currentX - this.mouseStartX;
-                
-                if (Math.abs(deltaX) > 10) {
-                    const dragOffset = (deltaX / window.innerWidth) * 100;
-                    const newTransform = this.currentTransform + dragOffset;
-                    this.track.style.transform = `translateX(${newTransform}%)`;
-                }
-            }
-            
-            handleMouseUp(e) {
-                if (!this.isMouseDragging) return;
-                
-                this.isMouseDragging = false;
-                const mouseEndX = e.clientX;
-                
-                this.track.style.transition = 'transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                this.track.style.cursor = 'grab';
-                
-                const deltaX = this.mouseStartX - mouseEndX;
-                const swipeThreshold = 50;
-                
-                if (Math.abs(deltaX) > swipeThreshold) {
-                    if (deltaX > 0) {
-                        this.goToNext();
-                    } else {
-                        this.goToPrevious();
-                    }
-                } else {
-                    this.updateCarousel();
-                }
-            }
-            
-            handleMouseLeave(e) {
-                // Reset if mouse leaves the carousel area
-                if (this.isMouseDragging) {
-                    this.isMouseDragging = false;
-                    this.track.style.transition = 'transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                    this.track.style.cursor = 'grab';
-                    this.updateCarousel();
                 }
             }
         }
