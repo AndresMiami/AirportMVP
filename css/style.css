@@ -1645,13 +1645,7 @@ select:focus-visible {
 @media (max-width: 480px) {
     .app-container { padding: var(--space-md); }
 
-    .carousel-wrapper { height: 300px; }
-    .vehicle-card { flex: 0 0 90%; }
-    .vehicle-image-section { height: 180px; }
-
-    .vehicle-name { font-size: 16px; }
-    .vehicle-price { font-size: 20px; }
-    .spec-icon, .spec-value { font-size: 14px; }
+    /* All vehicle carousel styles moved to vehicle-carousel.css */
 
     /* Mobile summary bar - Match desktop compact style */
     .summary-content {
@@ -1684,16 +1678,7 @@ select:focus-visible {
         padding: 0 8px;
         line-height: 1;
     }
-    .vehicle-subtitle { font-size: 13px; }
-
-    .carousel-nav {
-        width: 36px;
-        height: 36px;
-        font-size: var(--font-base);
-    }
-
-    .carousel-nav.prev { left: var(--space-sm); }
-    .carousel-nav.next { right: var(--space-sm); }
+    /* Vehicle carousel navigation moved to vehicle-carousel.css */
 
     .airport-grid { grid-template-columns: 1fr; }
 
@@ -1715,15 +1700,14 @@ select:focus-visible {
         max-height: 180px;
     }
 
-    .carousel-wrapper { height: 280px; }
-    .vehicle-image-section { height: 160px; }
+    /* Carousel wrapper styles moved to vehicle-carousel.css */
 
     #vehiclePanel .content-section {
         padding: 10px;
         gap: 10px;
     }
 
-    .vehicle-info { padding: 12px; }
+    /* .vehicle-info padding managed in vehicle-carousel.css */
 
     .control-button,
     .payment-method-mobile,
@@ -1755,8 +1739,7 @@ select:focus-visible {
         max-height: 300px;
     }
 
-    .carousel-wrapper { height: 360px; }
-    .vehicle-image-section { height: 220px; }
+    /* Carousel wrapper styles moved to vehicle-carousel.css */
 
     #vehiclePanel .content-section {
         padding: 16px;
@@ -1787,59 +1770,7 @@ select:focus-visible {
         font-size: 16px;
     }
 
-    #vehiclePanel .carousel-container {
-        padding: 0;
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-    }
-
-    #vehiclePanel .carousel-wrapper {
-        flex: 1;
-        height: auto;
-        min-height: 0;
-    }
-
-    #vehiclePanel .carousel-track {
-        height: 100%;
-    }
-
-    #vehiclePanel .vehicle-card {
-        margin: 0 4px;
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-    }
-
-    #vehiclePanel .vehicle-image-section {
-        height: 60%;
-        min-height: 160px;
-    }
-
-    #vehiclePanel .vehicle-info {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-    }
-
-    #vehiclePanel .carousel-nav {
-        width: 36px;
-        height: 36px;
-        font-size: 18px;
-    }
-
-    #vehiclePanel .carousel-nav.prev {
-        left: 8px;
-    }
-
-    #vehiclePanel .carousel-nav.next {
-        right: 8px;
-    }
-
-    #vehiclePanel .swipe-hint {
-        display: none;
-    }
+    /* All #vehiclePanel carousel styles moved to vehicle-carousel.css */
 }
 
 /* Smooth Scrolling */

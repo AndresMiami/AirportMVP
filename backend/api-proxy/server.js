@@ -184,7 +184,7 @@ app.use('/shared', express.static(path.join(__dirname, '../shared')));
 
 // Main app route - serve indexMVP.html at root
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'indexMVP.html'));
+    res.sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
 });
 
 // ============================================
@@ -206,11 +206,11 @@ app.get('/health', (req, res) => {
 
 // Main app routes
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../indexMVP.html'));
+  res.sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
 });
 
 app.get('/passenger', (req, res) => {
-  res.sendFile(path.join(__dirname, '../passenger-app/indexMVP.html'));
+  res.sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
 });
 
 app.get('/driver', (req, res) => {
@@ -554,7 +554,7 @@ app.use('/api/*', (req, res) => {
 
 // 404 handler for other routes
 app.use('*', (req, res) => {
-  res.status(404).sendFile(path.join(__dirname, '../indexMVP.html'));
+  res.status(404).sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
 });
 
 // Start server

@@ -11,32 +11,67 @@
 .carousel-wrapper {
     position: relative;
     width: 100%;
-    height: min(180px, 21.3vh);
+    height: 200px; /* Fixed height for consistency */
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Tablet optimization */
+@media (max-width: 768px) {
+    .carousel-wrapper {
+        height: 180px;
+    }
+}
+
+/* Mobile optimization - compact carousel for no-scroll viewing */
+@media (max-width: 430px) {
+    .carousel-wrapper {
+        height: 160px; /* Optimized height for mobile viewing without scroll */
+        padding: 8px 0;
+    }
+    
+    .vehicle-card {
+        flex: 0 0 80%; /* Slightly smaller cards for better side preview */
+    }
 }
 
 .carousel-track {
     display: flex;
     transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     height: 100%;
-    align-items: center;
+    align-items: center; /* Vertically center all cards */
+    justify-content: flex-start; /* Start alignment for proper sliding */
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    position: absolute; /* Position absolutely within wrapper */
+    left: 0;
+    top: 0;
+}
+
+.carousel-track:active {
+    cursor: grabbing;
 }
 
 .carousel-wrapper::-webkit-scrollbar { display: none; }
 
-/* Vehicle Cards */
+/* Vehicle Cards - Simplified for mobile */
 .vehicle-card {
     flex: 0 0 85%;
     margin: 0 var(--space-md);
     cursor: pointer;
     transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    border: 2px solid var(--border);
+    border: none; /* Removed border */
     border-radius: var(--radius-lg);
-    overflow: hidden;
-    background: #1C1C1E;
-    box-shadow: var(--shadow-sm);
+    overflow: visible; /* Allow price badge to overflow */
+    background: transparent; /* Transparent background */
+    box-shadow: none; /* No shadow */
     transform: scale(0.9);
     opacity: 0.7;
     position: relative;
@@ -46,15 +81,14 @@
 .vehicle-card.active {
     transform: scale(1);
     opacity: 1;
-    border-color: #ff9933;
-    box-shadow: 0 0 0 4px rgba(255, 153, 51, 0.1), var(--shadow-md);
+    border: none; /* No border for active state */
+    box-shadow: none; /* No shadow for active state */
     z-index: 2;
 }
 
 .vehicle-card.selected {
-    border-color: var(--primary-gradient-start);
-    border-width: 2px;
-    box-shadow: 0 6px 16px rgba(255, 153, 51, 0.25);
+    border: none; /* No border for selected state */
+    box-shadow: none; /* Clean look */
 }
 
 .vehicle-card.prev,
@@ -63,21 +97,58 @@
     opacity: 0.5;
 }
 
-/* Vehicle Images */
+/* Vehicle Images - Centered on all screen sizes */
 .vehicle-image-section {
     position: relative;
-    height: 120px;
+    height: 140px;
     background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
     overflow: hidden;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    /* Flexbox for perfect centering */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Desktop optimization - taller images for larger screens */
+@media (min-width: 768px) {
+    .vehicle-image-section {
+        height: 180px; /* Taller on desktop for better visibility */
+    }
+}
+
+/* Mobile optimization - compact for no-scroll viewing */
+@media (max-width: 430px) {
+    .vehicle-image-section {
+        height: 140px;
+    }
 }
 
 .vehicle-image {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: center;
+    object-fit: contain; /* Maintain aspect ratio */
+    object-position: center center; /* Always center the image */
     transition: transform 0.4s ease;
-    background: var(--surface);
+    background: transparent; /* Remove background for cleaner look */
+    pointer-events: none; /* Prevent image drag */
+    -webkit-user-drag: none;
+    -khtml-user-drag: none;
+    -moz-user-drag: none;
+    -o-user-drag: none;
+    /* Ensure image doesn't overflow */
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* Mobile: ensure perfect centering on small screens */
+@media (max-width: 430px) {
+    .vehicle-image {
+        object-fit: contain; /* Show full vehicle without cropping */
+        object-position: center center; /* Center the vehicle in the frame */
+        padding: 8px; /* Small padding to prevent edge touching */
+    }
 }
 
 .vehicle-card:hover .vehicle-image,
@@ -114,17 +185,23 @@
     margin-bottom: 8px;
 }
 
-/* Vehicle Info */
-.vehicle-info {
-    padding: 8px;
-    background: #1C1C1E;
-}
+/* Vehicle Info - Removed for cleaner UI */
+/* All vehicle information is now embedded in images or shown as price badge only */
 
 .vehicle-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 8px;
+}
+
+/* Mobile optimization - clean header alignment */
+@media (max-width: 430px) {
+    .vehicle-header {
+        margin-bottom: 2px; /* Very small margin for tight spacing */
+        align-items: center; /* Center alignment with price */
+        height: 22px; /* Slightly reduced height */
+    }
 }
 
 .vehicle-details {
@@ -139,11 +216,31 @@
     line-height: 1.2;
 }
 
+/* Mobile optimization - clean spacing for readability */
+@media (max-width: 430px) {
+    .vehicle-name {
+        margin-bottom: 0px; /* No margin - specs will be in header */
+        font-size: 15px; /* Slightly larger for readability */
+        line-height: 1.2; /* Better line height for readability */
+        font-weight: 600;
+    }
+}
+
 /* Vehicle Specs */
 .vehicle-specs {
     display: flex;
     gap: 16px;
     align-items: center;
+}
+
+/* Mobile optimization - clean specs layout */
+@media (max-width: 430px) {
+    .vehicle-specs {
+        gap: 12px; /* Comfortable spacing */
+        margin-top: 0px; /* No top margin */
+        height: 20px; /* Fixed height for consistency */
+        align-items: center;
+    }
 }
 
 .spec-item {
@@ -163,6 +260,17 @@
     color: var(--text-primary);
 }
 
+/* Mobile optimization - compact spec icons and text */
+@media (max-width: 430px) {
+    .spec-icon {
+        font-size: 14px;
+    }
+    
+    .spec-value {
+        font-size: 14px;
+    }
+}
+
 /* Vehicle Price */
 .vehicle-price {
     font-size: 24px;
@@ -178,6 +286,13 @@
     color: var(--text-secondary);
     margin: 0;
     font-weight: 400;
+}
+
+/* Mobile optimization - compact subtitle */
+@media (max-width: 430px) {
+    .vehicle-subtitle {
+        font-size: 12px;
+    }
 }
 
 /* Vehicle Badges */
@@ -196,6 +311,32 @@
     transition: all var(--transition-slow);
     box-shadow: var(--shadow-md);
     z-index: 3;
+}
+
+/* Vehicle Class Overlay - New addition for hero layout */
+.vehicle-class-overlay {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(0, 0, 0, 0.75);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 2;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 430px) {
+    .vehicle-class-overlay {
+        top: 8px;
+        left: 8px;
+        padding: 4px 10px;
+        font-size: 12px;
+        border-radius: 12px;
+    }
 }
 
 .vehicle-card.active .selection-badge {
@@ -238,38 +379,39 @@
     display: none !important;
 }
 
-/* Carousel Navigation */
-.carousel-nav {
+/* New Minimal Price Badge */
+.vehicle-price-badge {
     position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 40px;
-    height: 40px;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid var(--border-light);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all var(--transition-base);
-    box-shadow: var(--shadow-sm);
-    z-index: var(--z-sticky);
-    font-size: var(--font-xl);
-    color: var(--text-secondary);
+    bottom: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #32D74B;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 20px;
+    font-weight: 700;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    min-width: 60px;
+    text-align: center;
 }
 
-.carousel-nav:hover {
-    background: var(--surface-light);
-    border-color: var(--primary);
-    color: var(--primary);
-    transform: translateY(-50%) scale(1.05);
-    box-shadow: var(--shadow-md);
+/* Mobile optimization for price badge */
+@media (max-width: 430px) {
+    .vehicle-price-badge {
+        font-size: 18px;
+        padding: 5px 10px;
+        bottom: 8px;
+        right: 8px;
+    }
 }
 
-.carousel-nav:active { transform: translateY(-50%) scale(0.95); }
-.carousel-nav.prev { left: var(--space-md); }
-.carousel-nav.next { right: var(--space-md); }
+/* Carousel Navigation - Hidden for cleaner mobile UI */
+.carousel-nav {
+    display: none !important; /* Hide navigation buttons completely */
+}
 
 /* Price Animation */
 .vehicle-price.price-updating {
