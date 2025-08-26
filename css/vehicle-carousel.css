@@ -32,7 +32,7 @@
     }
     
     .carousel-track {
-        padding: 0 15px; /* Smaller peek on mobile */
+        padding: 0; /* Removed - padding handled by carousel-wrapper */
         gap: 12px; /* Smaller gap on mobile */
     }
     
@@ -46,7 +46,7 @@
     display: flex;
     height: 100%;
     align-items: center;
-    padding: 0 20px; /* Small padding to show peek of adjacent cards */
+    padding: 0; /* Removed - padding is handled by carousel-wrapper */
     gap: 16px; /* Consistent gap between cards */
 }
 
@@ -414,7 +414,10 @@
 /* Mobile Responsive */
 @media (max-width: 480px) {
     .carousel-wrapper { height: min(180px, 21.3vh); }
-    .vehicle-card { flex: 0 0 90%; }
+    .vehicle-card { 
+        flex: 0 0 calc(100vw - 60px); /* Fixed: Account for peek space */
+        min-width: calc(100vw - 60px);
+    }
     .vehicle-image-section { height: min(120px, 14.2vh); }
 
     .vehicle-name { font-size: 16px; }
