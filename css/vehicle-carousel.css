@@ -22,6 +22,7 @@
     -ms-overflow-style: none;
     /* Ensure snap points work correctly */
     scroll-padding: 0;
+    padding: 0 30px; /* Create peek space on both sides */
 }
 
 /* Mobile optimization - consistent centering */
@@ -36,8 +37,8 @@
     }
     
     .vehicle-card {
-        flex: 0 0 calc(100% - 30px); /* Adjust for mobile peek space */
-        min-width: calc(100% - 30px);
+        flex: 0 0 calc(100vw - 60px); /* Adjust for mobile peek space */
+        min-width: calc(100vw - 60px);
     }
 }
 
@@ -55,8 +56,8 @@
 
 /* Vehicle Cards - Full panel width design */
 .vehicle-card {
-    flex: 0 0 calc(100% - 40px); /* Full width minus peek space */
-    min-width: calc(100% - 40px);
+    flex: 0 0 calc(100vw - 60px); /* Full width minus peek space */
+    min-width: calc(100vw - 60px);
     scroll-snap-align: center; /* Snap to center */
     scroll-snap-stop: always; /* Stop at each card */
     cursor: pointer;
@@ -361,7 +362,7 @@
 .vehicle-price-badge {
     position: absolute;
     bottom: 8px;
-    right: 8px;
+    right: 16px;
     background: rgba(0, 0, 0, 0.75);
     color: #32D74B;
     padding: 4px 10px;
@@ -443,6 +444,15 @@
 }
 
 @media (max-width: 768px) {
+    .carousel-wrapper {
+        padding: 0 60px; /* Tablet peek space */
+    }
+    
+    .vehicle-card {
+        flex: 0 0 calc(100vw - 120px); /* Tablet width calculation */
+        min-width: calc(100vw - 120px);
+    }
+
     #vehiclePanel .carousel-container {
         padding: 0;
         flex: 1;
@@ -488,4 +498,16 @@
     #vehiclePanel .carousel-nav.prev { left: 8px; }
     #vehiclePanel .carousel-nav.next { right: 8px; }
     #vehiclePanel .swipe-hint { display: none; }
+}
+
+/* Desktop responsive - larger peek space */
+@media (min-width: 1024px) {
+    .carousel-wrapper {
+        padding: 0 80px; /* Desktop peek space */
+    }
+    
+    .vehicle-card {
+        flex: 0 0 calc(100vw - 160px); /* Desktop width calculation */
+        min-width: calc(100vw - 160px);
+    }
 }
