@@ -402,6 +402,11 @@ button {
     padding-bottom: 0;
 }
 
+/* Add this right after to override for vehiclePanel specifically */
+#vehiclePanel .panel-content {
+    overflow: visible;
+}
+
 .panel h2 {
     font-size: 17px;
     font-weight: var(--font-semibold);
@@ -1063,14 +1068,12 @@ button.back-btn:active { transform: scale(0.95); }
     padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    justify-content: flex-start;  /* Stack content from top */
-    overflow-y: visible;  /* Allow carousel to extend beyond boundaries */
-    overflow-x: hidden;  /* Prevent horizontal scroll */
-    -webkit-overflow-scrolling: touch;  /* Smooth scrolling on iOS */
+    gap: 16px;
+    justify-content: flex-start;
+    overflow: visible;  /* Remove !important, just use visible */
     background: var(--panel-bg);
     min-height: 0;
-    padding-bottom: 20px;  /* Add padding for scroll buffer */
+    padding-bottom: 20px;
 }
 
 /* Scroll indicator removed - was blocking content */
@@ -1478,19 +1481,16 @@ select:focus-visible {
 .vehicle-display-mobile {
     display: flex;
     flex-direction: column;
-    min-height: 0;
-    margin: 0 -4px;
-    margin-bottom: 20px; /* Increased spacing to prevent price badge cutoff */
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;  /* Ensure carousel renders above container boundaries */
+    margin-bottom: 16px;  /* Space below carousel */
+    flex-shrink: 0;  /* Prevent compression */
 }
 
 #vehiclePanel {
     height: auto;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     background: var(--panel-bg);
     transform: translateX(0);
 }
@@ -1787,22 +1787,24 @@ select:focus-visible {
     }
     
     #vehiclePanel {
-        min-height: 100dvh !important;
+        min-height: 100dvh;
     }
 }
 
 /* Fixed carousel iframe height to prevent layout shifts */
 #vehicle-carousel-frame {
-    height: 200px !important;  /* Increased to accommodate price badges */
+    height: 210px;
     max-height: 220px;
     min-height: 180px;
+    flex-shrink: 0;
+    margin-bottom: 16px;
     position: relative;
     z-index: 1;  /* Ensure badges render above container boundaries */
 }
 
 @media (max-width: 430px) {
     #vehicle-carousel-frame {
-        height: 180px !important;  /* Increased from 160px for price badges */
+        height: 180px;
         min-height: 160px;
     }
 }
@@ -1850,7 +1852,7 @@ select:focus-visible {
         min-height: auto; 
     }
     #vehiclePanel { 
-        min-height: auto !important; 
+        min-height: auto;
     }
 }
 
@@ -1873,45 +1875,38 @@ select:focus-visible {
 .app-container,
 .booking-container,
 .panels-wrapper {
-    height: auto !important;
-    min-height: 0 !important;
+    height: auto;
+    min-height: 0;
 }
 
 /* ============================================
    13. IPHONE PORTRAIT MODE FIX
    ============================================ */
 
-/* iPhone 14 portrait-specific fix for price badge cutoff */
-@media only screen 
-  and (min-width: 390px) 
-  and (max-width: 430px) 
-  and (orientation: portrait) 
-  and (min-height: 800px) {
+/* iPhone portrait-specific fix for price badge cutoff */
+@media only screen and (max-width: 430px) and (orientation: portrait) {
     
-    /* Stop content-section from clipping children */
+    /* Fix overflow hierarchy for portrait mode */
     #vehiclePanel .content-section {
-        overflow-y: visible !important;  /* Critical: prevents clipping */
-        min-height: 0;  /* Allow natural sizing */
+        overflow: visible !important;  /* Don't clip children */
+        min-height: 0;
     }
     
-    /* Ensure iframe gets full height needed for price badge */
+    /* Ensure carousel gets enough height in portrait */
     #vehicle-carousel-frame {
-        height: 210px !important;  /* Increased from 180px to accommodate badge */
-        flex-shrink: 0;  /* Prevent Safari compression */
-    }
-    
-    /* Wrapper accommodates new height */
-    .vehicle-display-mobile {
-        min-height: 210px;
+        height: 220px !important;  /* Extra space for price badge */
         flex-shrink: 0;
     }
-}
-
-/* Move scroll to parent container in portrait mode */
-@media only screen and (max-width: 430px) and (orientation: portrait) {
+    
+    /* Fix base content-section min-height for mobile */
+    .content-section {
+        min-height: auto !important;  /* Remove forced min-height */
+    }
+    
+    /* Ensure parent handles scrolling */
     #vehiclePanel {
-        overflow-y: auto;  /* Scroll moved here from content-section */
-        -webkit-overflow-scrolling: touch;  /* Smooth iOS scrolling */
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 }
 
