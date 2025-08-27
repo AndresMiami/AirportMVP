@@ -408,17 +408,10 @@ button {
     color: var(--text-primary);
 }
 
+/* panel-actions removed - buttons moved to schedule-section for consistency */
+/* Legacy panel-actions styles kept for reference only */
 .panel-actions {
-    position: sticky;
-    bottom: 0;
-    height: min(100px, 11.8vh);
-    padding: 12px var(--space-md);
-    padding-bottom: max(20px, env(safe-area-inset-bottom));
-    border-top: 1px solid var(--border);
-    background: var(--panel-bg);
-    z-index: 10;
-    margin-top: auto;
-    display: flex;
+    display: none; /* Deprecated - use schedule-section instead */
     align-items: center;
     justify-content: center;
 }
@@ -966,6 +959,7 @@ button {
    ============================================ */
 .continue-btn,
 .book-btn {
+    flex: 1;  /* Allow equal distribution in schedule-section */
     width: 100%;
     padding: var(--space-md);
     background: linear-gradient(to right, var(--primary-gradient-start), var(--primary-gradient-end));
@@ -981,7 +975,7 @@ button {
     border: none;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
-    min-height: 48px;
+    min-height: 52px;  /* Consistent height across all panels */
 }
 
 .continue-btn:hover:not(:disabled),
@@ -1129,6 +1123,8 @@ button.back-btn:active { transform: scale(0.95); }
     padding: 24px 20px;
     background: var(--panel-bg);
     min-height: calc(100vh - 320px);
+    display: flex;
+    flex-direction: column;
 }
 
 
@@ -1562,11 +1558,13 @@ select:focus-visible {
 
 /* Panel actions removed - no longer used */
 
+/* Schedule section - consistent action buttons for all panels */
 .schedule-section {
     display: flex;
     gap: 8px;
     width: 100%;
-    margin-top: 4px;  /* Reduced from 10px */
+    margin-top: auto;  /* Push to bottom of content */
+    padding-top: 12px;  /* Consistent spacing from content above */
     padding-bottom: env(safe-area-inset-bottom, 16px);  /* iOS safe area support */
 }
 
