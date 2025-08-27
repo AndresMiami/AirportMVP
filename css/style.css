@@ -1068,12 +1068,12 @@ button.back-btn:active { transform: scale(0.95); }
     padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;  /* Slightly reduced gap */
+    gap: 6px;  /* Reduced from 10px for tighter spacing */
     overflow-y: auto;  /* Changed from 'hidden' to 'auto' */
     -webkit-overflow-scrolling: touch;  /* Smooth scrolling on iOS */
     background: var(--panel-bg);
     min-height: 0;
-    padding-bottom: 20px;  /* Add padding at bottom since schedule is now inside */
+    padding-bottom: 12px;  /* Reduced from 20px */
 }
 
 /* Scroll Indicator */
@@ -1154,12 +1154,12 @@ button.back-btn:active { transform: scale(0.95); }
     display: flex;
     gap: 6px;
     flex-shrink: 0;
-    margin-bottom: 8px;  /* Add consistent spacing between rows */
+    /* margin-bottom removed - gap handles spacing */
 }
 
 /* Payment controls specific spacing */
 .payment-controls {
-    margin-top: 8px;  /* Add space after carousel */
+    /* margin-top removed - gap handles spacing */
 }
 
 .control-button {
@@ -1595,8 +1595,8 @@ select:focus-visible {
     display: flex;
     gap: 8px;
     width: 100%;
-    margin-top: 10px;  /* Add spacing from payment row */
-    padding-bottom: env(safe-area-inset-bottom, 12px);  /* Safe area for bottom */
+    margin-top: 4px;  /* Reduced from 10px */
+    padding-bottom: env(safe-area-inset-bottom, 8px);  /* Reduced from 12px */
 }
 
 #vehiclePanel .book-btn {
