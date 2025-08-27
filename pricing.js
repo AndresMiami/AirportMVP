@@ -69,7 +69,7 @@ export class PricingService {
         this.popularRoutes = {
             'MIA-MCO': { distance: 240, flatRates: { tesla: 450, escalade: 650, sprinter: 850 }, description: 'Miami to Orlando' },
             'MCO-MIA': { distance: 240, flatRates: { tesla: 450, escalade: 650, sprinter: 850 }, description: 'Orlando to Miami' },
-            'MIA-TPA': { distance: 280, flatRates: { tesla: 520, escalade: 750, sprinter: 950 }, description: 'Miami to Tampa' },
+            'MIA-TPA': { distance: 280, flatRates: { tesla: 650, escalade: 950, sprinter: 1400 }, description: 'Miami to Tampa' },
             'TPA-MIA': { distance: 280, flatRates: { tesla: 520, escalade: 750, sprinter: 950 }, description: 'Tampa to Miami' },
             'FLL-PBI': { distance: 45, flatRates: { tesla: 120, escalade: 165, sprinter: 220 }, description: 'Fort Lauderdale to West Palm Beach' },
             'PBI-FLL': { distance: 45, flatRates: { tesla: 120, escalade: 165, sprinter: 220 }, description: 'West Palm Beach to Fort Lauderdale' }
@@ -685,12 +685,12 @@ export class PricingService {
             escalade: { 
                 name: 'Cadillac Escalade',
                 basePrice: 169,
-                capacity: { passengers: 7, bags: 8 } 
+                capacity: { passengers: 7, bags: 5 } 
             },
             sprinter: { 
                 name: 'Mercedes Sprinter',
                 basePrice: 219,
-                capacity: { passengers: 12, bags: 15 } 
+                capacity: { passengers: 12, bags: 12 } 
             }
         };
     }

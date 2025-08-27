@@ -3,7 +3,7 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'luxeride-v1.0.1';
+const CACHE_NAME = 'luxeride-v1.0.2';
 const RUNTIME_CACHE = 'luxeride-runtime';
 
 // Files to cache immediately on install
@@ -11,8 +11,6 @@ const STATIC_CACHE_URLS = [
   '/indexMVP.html',
   '/offline.html',
   '/css/style.css',
-  '/css/vehicle-carousel.css',
-  '/css/modals.css',
   '/css/maps-autocomplete.css',
   '/debug.js',
   '/error-handler.js',
@@ -21,6 +19,7 @@ const STATIC_CACHE_URLS = [
   '/datetime-utils.js',
   '/pricing.js',
   '/supabase.js',
+  '/vehicle-carousel-standalone.html',
   '/images/luxury-sedan.jpg',
   '/images/premium-suv-escalade.jpg',
   '/images/vip-sprinter.jpg'

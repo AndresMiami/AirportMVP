@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Carousel Component</title>
+    <style>
+        /* Reset for component isolation */
+        .vehicle-carousel-component * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Main carousel container */
+        .vehicle-carousel-component {
+            position: relative;
+            width: 100%;
+            overflow: hidden;
+            background: transparent;
+            contain: layout style paint; /* Isolates rendering */
+            will-change: transform; /* GPU acceleration hint */
+        }
+
+        /* Scroll container with peek padding */
+        .carousel-scroll-wrapper {
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            /* Critical: Padding creates the peek effect */
+            padding: 0 30px;
+            touch-action: pan-x; /* Optimize touch scrolling */
+            overscroll-behavior-x: contain; /* Prevent scroll chaining */
+        }
+
+        .carousel-scroll-wrapper::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Track containing all vehicles */
+        .carousel-vehicle-track {
+            display: flex;
+            gap: 15px;
+            align-items: stretch;
+            height: 200px; /* Consistent height that fits in 220px iframe */
+        }
+
+        /* Individual vehicle card - seamless design */
+        .vehicle-carousel-card {
+            flex: 0 0 min(375px, calc(100vw - 60px)); /* Max 375px width, responsive on smaller screens */
+            min-width: min(375px, calc(100vw - 60px));
+            max-width: 375px; /* Enforce maximum width */
+            scroll-snap-align: center;
+            scroll-snap-stop: always;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            border-radius: 16px;
+            overflow: hidden;
+            /* Seamless look - no borders or backgrounds */
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            /* Prevent text selection during swipe */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        /* Active/selected states */
+        .vehicle-carousel-card.active {
+            transform: scale(1);
+            opacity: 1;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+            z-index: 10; /* Higher z-index to ensure price is visible */
+        }
+
+        .vehicle-carousel-card:not(.active) {
+            transform: scale(0.95);
+            opacity: 0.7;
+        }
+
+        /* Selected state (when chosen but not necessarily active) */
+        .vehicle-carousel-card.selected {
+            border: none;
+            box-shadow: none;
+        }
+
+        /* Previous and next card states for visual hierarchy */
+        .vehicle-carousel-card.prev,
+        .vehicle-carousel-card.next {
+            transform: scale(0.88);
+            opacity: 0.4;
+        }
+
+        /* Image container for seamless display */
+        .vehicle-image-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 16px;
+            overflow: hidden;
+            padding: 10px; /* Subtle padding to prevent edge touching */
+            background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%); /* Gradient for professional look */
+        }
+
+        .vehicle-carousel-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* Changed from cover to contain - shows full vehicle */
+            object-position: center;
+            display: block;
+            border-radius: 16px;
+            transition: transform 0.4s ease;
+            background: #1a1a1a; /* Dark background for empty space */
+            pointer-events: none;
+            -webkit-user-drag: none;
+            -khtml-user-drag: none;
+            -moz-user-drag: none;
+            -o-user-drag: none;
+            user-select: none;
+        }
+
+        /* Hover effect for images */
+        .vehicle-carousel-card:hover .vehicle-carousel-image,
+        .vehicle-carousel-card.active .vehicle-carousel-image {
+            transform: scale(1.05);
+        }
+
+        /* Price badge - floating design */
+        .vehicle-price-tag {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: #32D74B;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 20px;
+            font-weight: 700;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            z-index: 2;
+            transition: all 0.3s ease;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        /* Price update animation */
+        .vehicle-price-tag.updating {
+            animation: priceFlash 0.5s ease;
+        }
+
+        @keyframes priceFlash {
+            0% { transform: scale(1); background: rgba(0, 0, 0, 0.8); }
+            50% { transform: scale(1.1); background: rgba(50, 215, 75, 0.2); }
+            100% { transform: scale(1); background: rgba(0, 0, 0, 0.8); }
+        }
+
+        /* Popular badge */
+        .vehicle-popular-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: #FF6B35;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 18px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            z-index: 2;
+        }
+
+        /* Navigation arrows for desktop */
+        .carousel-nav-arrow {
+            display: none;
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 10;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .carousel-nav-arrow:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-50%) scale(1.1);
+        }
+
+        .carousel-nav-arrow:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .carousel-nav-arrow.prev {
+            left: 10px;
+        }
+
+        .carousel-nav-arrow.next {
+            right: 10px;
+        }
+
+        /* Mobile specific adjustments */
+        @media (max-width: 430px) {
+            
+            .carousel-scroll-wrapper {
+                padding: 0 25px; /* Slightly less padding on small screens */
+            }
+            
+            .vehicle-carousel-card {
+                flex: 0 0 calc(100vw - 100px); /* Increased peek space for mobile */
+                min-width: calc(100vw - 100px);
+            }
+            
+            .vehicle-price-tag {
+                font-size: 18px;
+                padding: 6px 14px;
+                bottom: 10px;
+                right: 10px;
+            }
+        }
+
+        /* Standard mobile */
+        @media (max-width: 480px) {
+            /* Height now consistent at 200px */
+        }
+
+        /* Tablet */
+        @media (min-width: 481px) and (max-width: 768px) {
+            .carousel-scroll-wrapper {
+                padding: 0 60px;
+            }
+            
+            .vehicle-carousel-card {
+                flex: 0 0 calc(100vw - 120px);
+                min-width: calc(100vw - 120px);
+            }
+        }
+
+        /* Height-responsive adjustments removed - now using consistent 200px */
+
+        /* Desktop */
+        @media (min-width: 769px) {
+            .carousel-nav-arrow {
+                display: flex;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .carousel-scroll-wrapper {
+                padding: 0 80px;
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+            
+            .vehicle-carousel-card {
+                flex: 0 0 min(700px, calc(100vw - 160px));
+                min-width: min(700px, calc(100vw - 160px));
+            }
+            
+            .carousel-vehicle-track {
+                gap: 20px; /* Height already 200px */
+            }
+        }
+
+        /* Image loading fallback */
+        .vehicle-image-fallback {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            color: white;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            border-radius: 16px;
+        }
+
+        .fallback-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+
+        /* Panel-specific adjustments when carousel is inside vehiclePanel */
+        @media (max-width: 768px) {
+            #vehiclePanel .vehicle-carousel-component {
+                padding: 0;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+            }
+
+            #vehiclePanel .carousel-scroll-wrapper {
+                flex: 1;
+                height: auto;
+                min-height: 0;
+            }
+
+            #vehiclePanel .carousel-vehicle-track {
+                height: 100%;
+            }
+
+            #vehiclePanel .vehicle-carousel-card {
+                margin: 0 4px;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+            }
+
+            #vehiclePanel .carousel-nav-arrow {
+                width: 36px;
+                height: 36px;
+                font-size: 18px;
+            }
+
+            #vehiclePanel .carousel-nav-arrow.prev { left: 8px; }
+            #vehiclePanel .carousel-nav-arrow.next { right: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Vehicle Carousel Component -->
+    <div class="vehicle-carousel-component" id="vehicleCarouselComponent">
+        <!-- Navigation Arrows -->
+        <button class="carousel-nav-arrow prev" id="carouselPrevBtn" aria-label="Previous vehicle">‹</button>
+        <button class="carousel-nav-arrow next" id="carouselNextBtn" aria-label="Next vehicle">›</button>
+        
+        <div class="carousel-scroll-wrapper" id="carouselScrollWrapper">
+            <div class="carousel-vehicle-track" id="carouselTrack">
+                <!-- Tesla Model Y -->
+                <div class="vehicle-carousel-card active" data-vehicle="tesla" data-base-price="132">
+                    <div class="vehicle-image-wrapper">
+                        <img src="./images/luxury-sedan.jpg?v=202508251820" 
+                             alt="Tesla Model Y" 
+                             class="vehicle-carousel-image"
+                             loading="lazy"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="vehicle-image-fallback">
+                            <div class="fallback-icon">🚗</div>
+                            <div>Tesla Model Y</div>
+                        </div>
+                        <div class="vehicle-price-tag" id="tesla-price">$132</div>
+                    </div>
+                </div>
+
+                <!-- Cadillac Escalade -->
+                <div class="vehicle-carousel-card" data-vehicle="escalade" data-base-price="165">
+                    <div class="vehicle-image-wrapper">
+                        <img src="./images/premium-suv-escalade.jpg?v=202508251820" 
+                             alt="Cadillac Escalade" 
+                             class="vehicle-carousel-image"
+                             loading="lazy"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="vehicle-image-fallback">
+                            <div class="fallback-icon">🚙</div>
+                            <div>Cadillac Escalade</div>
+                        </div>
+                        <div class="vehicle-popular-badge">Most Popular</div>
+                        <div class="vehicle-price-tag" id="escalade-price">$165</div>
+                    </div>
+                </div>
+
+                <!-- Mercedes Sprinter -->
+                <div class="vehicle-carousel-card" data-vehicle="sprinter" data-base-price="220">
+                    <div class="vehicle-image-wrapper">
+                        <img src="./images/vip-sprinter.jpg?v=202508251820" 
+                             alt="Mercedes Sprinter Van" 
+                             class="vehicle-carousel-image"
+                             loading="lazy"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="vehicle-image-fallback">
+                            <div class="fallback-icon">🚐</div>
+                            <div>Mercedes Sprinter</div>
+                        </div>
+                        <div class="vehicle-price-tag" id="sprinter-price">$220</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // Vehicle Carousel Component Class
+        class VehicleCarouselStandalone {
+            constructor() {
+                // State
+                this.currentIndex = 0;
+                this.vehicles = [
+                    { id: 'tesla', name: 'Tesla Model Y', basePrice: 132 },
+                    { id: 'escalade', name: 'Cadillac Escalade', basePrice: 165 },
+                    { id: 'sprinter', name: 'Mercedes Sprinter', basePrice: 220 }
+                ];
+
+                // DOM elements
+                this.scrollWrapper = null;
+                this.track = null;
+                this.cards = null;
+                this.prevBtn = null;
+                this.nextBtn = null;
+
+                // Initialize
+                this.init();
+            }
+
+            init() {
+                // Wait for DOM
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => this.setup());
+                } else {
+                    this.setup();
+                }
+            }
+
+            setup() {
+                this.cacheElements();
+                this.bindEvents();
+                this.setupCommunication();
+                this.updateNavButtons();
+                
+                // Initial center positioning
+                setTimeout(() => this.centerCard(0), 100);
+                
+                console.log('🚗 Vehicle Carousel Standalone initialized');
+            }
+
+            cacheElements() {
+                this.scrollWrapper = document.getElementById('carouselScrollWrapper');
+                this.track = document.getElementById('carouselTrack');
+                this.cards = document.querySelectorAll('.vehicle-carousel-card');
+                this.prevBtn = document.getElementById('carouselPrevBtn');
+                this.nextBtn = document.getElementById('carouselNextBtn');
+            }
+
+            bindEvents() {
+                if (!this.scrollWrapper) return;
+
+                // Card click events
+                this.cards.forEach((card, index) => {
+                    card.addEventListener('click', () => this.selectCard(index));
+                });
+
+                // Navigation buttons
+                if (this.prevBtn) {
+                    this.prevBtn.addEventListener('click', () => {
+                        if (this.currentIndex > 0) {
+                            this.selectCard(this.currentIndex - 1);
+                        }
+                    });
+                }
+
+                if (this.nextBtn) {
+                    this.nextBtn.addEventListener('click', () => {
+                        if (this.currentIndex < this.vehicles.length - 1) {
+                            this.selectCard(this.currentIndex + 1);
+                        }
+                    });
+                }
+
+                // Scroll detection
+                let scrollTimeout;
+                this.scrollWrapper.addEventListener('scroll', () => {
+                    clearTimeout(scrollTimeout);
+                    scrollTimeout = setTimeout(() => this.detectActiveCard(), 50);
+                }, { passive: true });
+
+                // Touch events
+                let touchStartX = 0;
+                let touchStartTime = 0;
+
+                this.scrollWrapper.addEventListener('touchstart', (e) => {
+                    touchStartX = e.touches[0].clientX;
+                    touchStartTime = Date.now();
+                }, { passive: true });
+
+                this.scrollWrapper.addEventListener('touchend', (e) => {
+                    const touchEndX = e.changedTouches[0].clientX;
+                    const touchDuration = Date.now() - touchStartTime;
+                    const deltaX = touchEndX - touchStartX;
+                    
+                    if (Math.abs(deltaX) > 50 && touchDuration < 300) {
+                        if (deltaX > 0 && this.currentIndex > 0) {
+                            this.selectCard(this.currentIndex - 1);
+                        } else if (deltaX < 0 && this.currentIndex < this.vehicles.length - 1) {
+                            this.selectCard(this.currentIndex + 1);
+                        }
+                    }
+                }, { passive: true });
+
+                // Keyboard navigation
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'ArrowLeft' && this.currentIndex > 0) {
+                        this.selectCard(this.currentIndex - 1);
+                    } else if (e.key === 'ArrowRight' && this.currentIndex < this.vehicles.length - 1) {
+                        this.selectCard(this.currentIndex + 1);
+                    }
+                });
+
+                // Mouse wheel horizontal scrolling
+                this.scrollWrapper.addEventListener('wheel', (e) => {
+                    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+                    e.preventDefault();
+                    this.scrollWrapper.scrollLeft += e.deltaY * 0.5;
+                }, { passive: false });
+            }
+
+            selectCard(index) {
+                if (index < 0 || index >= this.vehicles.length) return;
+                
+                this.currentIndex = index;
+                this.centerCard(index);
+                this.updateActiveStates();
+                this.updateNavButtons();
+                this.notifySelection();
+            }
+
+            centerCard(index) {
+                const card = this.cards[index];
+                if (!card || !this.scrollWrapper) return;
+
+                // Calculate perfect center position
+                const scrollWrapperRect = this.scrollWrapper.getBoundingClientRect();
+                const cardWidth = card.offsetWidth;
+                const scrollWrapperCenter = scrollWrapperRect.width / 2;
+                
+                // Account for padding when calculating center
+                const paddingLeft = parseInt(window.getComputedStyle(this.scrollWrapper).paddingLeft);
+                const cardOffsetLeft = card.offsetLeft;
+                const scrollTo = cardOffsetLeft - scrollWrapperCenter + (cardWidth / 2) + paddingLeft;
+
+                this.scrollWrapper.scrollTo({
+                    left: scrollTo,
+                    behavior: 'smooth'
+                });
+            }
+
+            detectActiveCard() {
+                const scrollWrapperRect = this.scrollWrapper.getBoundingClientRect();
+                const scrollCenter = scrollWrapperRect.left + scrollWrapperRect.width / 2;
+
+                let closestIndex = 0;
+                let closestDistance = Infinity;
+
+                this.cards.forEach((card, index) => {
+                    const cardRect = card.getBoundingClientRect();
+                    const cardCenter = cardRect.left + cardRect.width / 2;
+                    const distance = Math.abs(cardCenter - scrollCenter);
+
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        closestIndex = index;
+                    }
+                });
+
+                if (closestIndex !== this.currentIndex) {
+                    this.currentIndex = closestIndex;
+                    this.updateActiveStates();
+                    this.updateNavButtons();
+                    this.notifySelection();
+                }
+            }
+
+            updateActiveStates() {
+                this.cards.forEach((card, index) => {
+                    if (index === this.currentIndex) {
+                        card.classList.add('active');
+                    } else {
+                        card.classList.remove('active');
+                    }
+                });
+            }
+
+            updateNavButtons() {
+                if (this.prevBtn) {
+                    this.prevBtn.disabled = this.currentIndex === 0;
+                }
+                if (this.nextBtn) {
+                    this.nextBtn.disabled = this.currentIndex === this.vehicles.length - 1;
+                }
+            }
+
+            setupCommunication() {
+                // Check if we're in an iframe
+                const isInIframe = window.parent !== window;
+                
+                if (isInIframe) {
+                    // Listen for messages from parent (iframe mode)
+                    window.addEventListener('message', (event) => {
+                        const { type, data } = event.data || {};
+                        
+                        switch(type) {
+                            case 'updatePrices':
+                                if (data) {
+                                    this.updatePrices(data);
+                                    // Send confirmation back
+                                    window.parent.postMessage({
+                                        type: 'pricesUpdated',
+                                        prices: data
+                                    }, '*');
+                                }
+                                break;
+                                
+                            case 'selectVehicle':
+                                if (data?.vehicleId) {
+                                    const index = this.vehicles.findIndex(v => v.id === data.vehicleId);
+                                    if (index !== -1) {
+                                        this.selectCard(index);
+                                    }
+                                }
+                                break;
+                                
+                            case 'reset':
+                                this.selectCard(0);
+                                break;
+                        }
+                    });
+                    
+                    // Notify parent that carousel is ready
+                    window.parent.postMessage({ type: 'carouselReady' }, '*');
+                    
+                } else {
+                    // Standard event listeners for non-iframe mode
+                    window.addEventListener('updateCarouselPrices', (event) => {
+                        const prices = event.detail;
+                        if (prices) {
+                            this.updatePrices(prices);
+                        }
+                    });
+
+                    // Listen for external vehicle selection
+                    window.addEventListener('selectCarouselVehicle', (event) => {
+                        const vehicleId = event.detail;
+                        const index = this.vehicles.findIndex(v => v.id === vehicleId);
+                        if (index !== -1) {
+                            this.selectCard(index);
+                        }
+                    });
+                }
+            }
+
+            updatePrices(prices) {
+                Object.keys(prices).forEach(vehicleId => {
+                    const priceElement = document.getElementById(`${vehicleId}-price`);
+                    if (priceElement) {
+                        priceElement.classList.add('updating');
+                        priceElement.textContent = `$${prices[vehicleId]}`;
+                        
+                        setTimeout(() => {
+                            priceElement.classList.remove('updating');
+                        }, 500);
+                    }
+                });
+            }
+
+            notifySelection() {
+                const vehicle = this.vehicles[this.currentIndex];
+                const card = this.cards[this.currentIndex];
+                const priceElement = card?.querySelector('.vehicle-price-tag');
+                const currentPrice = priceElement?.textContent || `$${vehicle.basePrice}`;
+                
+                const vehicleData = {
+                    id: vehicle.id,
+                    name: vehicle.name,
+                    basePrice: vehicle.basePrice,
+                    price: currentPrice,
+                    // Add more details for compatibility
+                    vehicle: vehicle.id,
+                    passengers: vehicle.id === 'tesla' ? 4 : vehicle.id === 'escalade' ? 6 : 8,
+                    luggage: vehicle.id === 'tesla' ? 2 : vehicle.id === 'escalade' ? 4 : 6
+                };
+                
+                // Check if we're in an iframe
+                const isInIframe = window.parent !== window;
+                
+                if (isInIframe) {
+                    // Send postMessage to parent
+                    window.parent.postMessage({
+                        type: 'vehicleSelected',
+                        vehicle: vehicleData
+                    }, '*');
+                } else {
+                    // Dispatch event for non-iframe mode
+                    window.dispatchEvent(new CustomEvent('vehicleSelected', {
+                        detail: vehicleData
+                    }));
+                }
+
+                console.log('Vehicle selected:', vehicle.id);
+            }
+        }
+
+        // Initialize the carousel
+        new VehicleCarouselStandalone();
+    })();
+    </script>
+</body>
+</html>

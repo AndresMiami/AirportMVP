@@ -49,7 +49,6 @@ AirportMVP/
 ├── indexMVP.html           # Main application (single-page app)
 ├── css/                    # Stylesheets
 │   ├── style.css          # Core styles and variables
-│   ├── vehicle-carousel.css # Vehicle selection UI
 │   ├── modals.css         # Modal dialogs
 │   └── maps-autocomplete.css # Address autocomplete
 │

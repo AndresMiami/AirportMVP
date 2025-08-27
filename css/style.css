@@ -1388,10 +1388,8 @@ select:focus-visible {
 .btn, 
 .airport-option, 
 .date-btn,
-.vehicle-card,
 .mode-btn,
 .calendar-day,
-.carousel-nav,
 .time-select {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
@@ -1645,7 +1643,7 @@ select:focus-visible {
 @media (max-width: 480px) {
     .app-container { padding: var(--space-md); }
 
-    /* All vehicle carousel styles moved to vehicle-carousel.css */
+    /* All vehicle carousel styles moved to vehicle-carousel-standalone.html */
 
     /* Mobile summary bar - Match desktop compact style */
     .summary-content {
@@ -1678,7 +1676,7 @@ select:focus-visible {
         padding: 0 8px;
         line-height: 1;
     }
-    /* Vehicle carousel navigation moved to vehicle-carousel.css */
+    /* Vehicle carousel navigation moved to vehicle-carousel-standalone.html */
 
     .airport-grid { grid-template-columns: 1fr; }
 
@@ -1700,14 +1698,14 @@ select:focus-visible {
         max-height: 180px;
     }
 
-    /* Carousel wrapper styles moved to vehicle-carousel.css */
+    /* Carousel wrapper styles moved to vehicle-carousel-standalone.html */
 
     #vehiclePanel .content-section {
         padding: 10px;
         gap: 10px;
     }
 
-    /* .vehicle-info padding managed in vehicle-carousel.css */
+    /* .vehicle-info padding managed in vehicle-carousel-standalone.html */
 
     .control-button,
     .payment-method-mobile,
@@ -1739,7 +1737,7 @@ select:focus-visible {
         max-height: 300px;
     }
 
-    /* Carousel wrapper styles moved to vehicle-carousel.css */
+    /* Carousel wrapper styles moved to vehicle-carousel-standalone.html */
 
     #vehiclePanel .content-section {
         padding: 16px;
@@ -1750,7 +1748,6 @@ select:focus-visible {
 @media (pointer: coarse) {
     .airport-option:active,
     .date-btn:active,
-    .vehicle-card:active,
     .mode-btn:active,
     .time-select:active {
         transform: scale(0.98);
@@ -1770,7 +1767,7 @@ select:focus-visible {
         font-size: 16px;
     }
 
-    /* All #vehiclePanel carousel styles moved to vehicle-carousel.css */
+    /* All #vehiclePanel carousel styles moved to vehicle-carousel-standalone.html */
 }
 
 /* Smooth Scrolling */
