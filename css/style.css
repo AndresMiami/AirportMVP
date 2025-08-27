@@ -1567,7 +1567,7 @@ select:focus-visible {
     gap: 8px;
     width: 100%;
     margin-top: 4px;  /* Reduced from 10px */
-    padding-bottom: env(safe-area-inset-bottom, 8px);  /* Reduced from 12px */
+    padding-bottom: env(safe-area-inset-bottom, 16px);  /* iOS safe area support */
 }
 
 #vehiclePanel .book-btn {
@@ -1772,6 +1772,35 @@ select:focus-visible {
 .panel-content {
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
+}
+
+/* ============================================
+   12. MOBILE OPTIMIZATIONS (Copilot Recommendations)
+   ============================================ */
+
+/* Dynamic viewport height support for modern browsers */
+@supports (height: 100dvh) {
+    .panel {
+        min-height: 100dvh; /* Dynamic viewport height */
+    }
+    
+    #vehiclePanel {
+        min-height: 100dvh !important;
+    }
+}
+
+/* Fixed carousel iframe height to prevent layout shifts */
+#vehicle-carousel-frame {
+    height: 180px !important;
+    max-height: 200px;
+    min-height: 160px;
+}
+
+@media (max-width: 430px) {
+    #vehicle-carousel-frame {
+        height: 160px !important;
+        min-height: 140px;
+    }
 }
 
 
