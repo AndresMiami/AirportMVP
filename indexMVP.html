@@ -258,8 +258,7 @@
                             <span class="time-period">PM</span>
                         </div>
                         <div class="map-time-badge dropoff-label">
-                            <span class="label-text">Drop-off</span>
-                            <span class="location-text" id="mapLocationText">Miami International...</span>
+                            <span id="mapLocationText">📍 MIA</span>
                         </div>
                     </div>
                     
@@ -283,22 +282,20 @@
                             <div id="vehicle-carousel-mount"></div>
                         </div>
                         
-                        <!-- Payment Row -->
-                        <!-- Payment Row moved to panel-actions below -->
-                        <div class="payment-row-mobile">
-                            <button class="payment-method-mobile" onclick="PaymentModal.getInstance().open()">
-                                <div class="card-icon">VISA</div>
-                                <span class="payment-details">Visa, •••• 1187</span>
+                        <!-- Payment and Promotion Controls - Moved right after vehicle carousel -->
+                        <div class="controls-row payment-controls">
+                            <button class="control-button payment-method" onclick="PaymentModal.getInstance().open()">
+                                <span class="control-icon">💳</span>
+                                <span class="control-text">Visa •••• 1187</span>
                                 <span class="dropdown-arrow">▼</span>
                             </button>
-                            <button class="promo-button-mobile" onclick="PromotionModal.getInstance().open()">
+                            <button class="control-button promo-button" onclick="PromotionModal.getInstance().open()">
                                 <span class="control-icon">🎫</span>
-                                <span>Add promotion</span>
+                                <span class="control-text">Add promotion</span>
                             </button>
                         </div>
-                    </div>
-                    
-                    <div class="panel-actions">
+                        
+                        <!-- Schedule Section - Moved up from panel-actions -->
                         <div class="schedule-section">
                             <button class="book-btn" id="bookBtn">
                                 <span class="btn-main-text">Schedule ride</span>
@@ -306,6 +303,10 @@
                             </button>
                             <button class="calendar-button-mobile" onclick="modifyDateTime()">📅</button>
                         </div>
+                    </div>
+                    
+                    <!-- Panel actions now empty or can be removed -->
+                    <div class="panel-actions" style="display: none;">
                     </div>
                 </div>
             </div>
@@ -1096,8 +1097,9 @@
                 }
                 
                 if (this.state.locations.airport) {
-                    const airportName = this.getAirportName(this.state.locations.airport.code);
-                    this.els.mapLocationText.textContent = airportName + '...';
+                    // Show airport code instead of full name for compact display
+                    const airportCode = this.state.locations.airport.code.toUpperCase();
+                    this.els.mapLocationText.textContent = `📍 ${airportCode}`;
                 }
             }
             
