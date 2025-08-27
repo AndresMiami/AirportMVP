@@ -185,6 +185,7 @@ button {
     box-shadow: var(--shadow-lg);
     overflow: hidden;
     transition: all var(--transition-slow);
+    height: auto;
 }
 
 .booking-container.active {
@@ -385,7 +386,7 @@ button {
 .panel {
     width: 100%;
     flex-shrink: 0;
-    min-height: 100vh;  /* Changed from height to min-height */
+    height: auto;
     display: flex;
     flex-direction: column;
     position: relative;
@@ -398,7 +399,7 @@ button {
     flex: 1;
     padding: var(--space-md) var(--space-lg);
     overflow-y: auto;
-    padding-bottom: 80px; /* Space for bottom navigation */
+    padding-bottom: 0;
 }
 
 .panel h2 {
@@ -1048,8 +1049,8 @@ button.back-btn:active { transform: scale(0.95); }
 
 /* Vehicle Panel Layout */
 #vehiclePanel .map-section {
-    height: 30vh;  /* Reduced from 45vh */
-    max-height: 250px;  /* Reduced from 380px */
+    height: 35vh;
+    max-height: 280px;
     min-height: 200px;  /* Ensure map doesn't get too small */
     position: relative;
     flex-shrink: 0;
@@ -1062,13 +1063,14 @@ button.back-btn:active { transform: scale(0.95); }
     padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 6px;  /* Reduced from 10px for tighter spacing */
+    gap: 8px;
     justify-content: flex-start;  /* Stack content from top */
-    overflow-y: auto;  /* Changed from 'hidden' to 'auto' */
+    overflow-y: visible;  /* Allow carousel to extend beyond boundaries */
+    overflow-x: hidden;  /* Prevent horizontal scroll */
     -webkit-overflow-scrolling: touch;  /* Smooth scrolling on iOS */
     background: var(--panel-bg);
     min-height: 0;
-    padding-bottom: 12px;  /* Reduced from 20px */
+    padding-bottom: 20px;  /* Add padding for scroll buffer */
 }
 
 /* Scroll indicator removed - was blocking content */
@@ -1135,12 +1137,11 @@ button.back-btn:active { transform: scale(0.95); }
     display: flex;
     gap: 6px;
     flex-shrink: 0;
-    /* margin-bottom removed - gap handles spacing */
+    margin-bottom: 12px; /* Add consistent vertical spacing */
 }
 
-/* Payment controls specific spacing */
-.payment-controls {
-    /* margin-top removed - gap handles spacing */
+.controls-row:last-child {
+    margin-bottom: 0; /* Remove margin from last control row */
 }
 
 .control-button {
@@ -1479,12 +1480,14 @@ select:focus-visible {
     flex-direction: column;
     min-height: 0;
     margin: 0 -4px;
+    margin-bottom: 20px; /* Increased spacing to prevent price badge cutoff */
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;  /* Ensure carousel renders above container boundaries */
 }
 
 #vehiclePanel {
-    min-height: 100vh;  /* Changed from height to min-height */
-    /* Removed max-height: 100vh */
+    height: auto;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1563,9 +1566,10 @@ select:focus-visible {
     display: flex;
     gap: 8px;
     width: 100%;
-    margin-top: auto;  /* Push to bottom of content */
-    padding-top: 12px;  /* Consistent spacing from content above */
-    padding-bottom: env(safe-area-inset-bottom, 16px);  /* iOS safe area support */
+    margin-top: 12px;
+    padding: 12px 20px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    background: var(--panel-bg);
 }
 
 #vehiclePanel .book-btn {
@@ -1789,16 +1793,88 @@ select:focus-visible {
 
 /* Fixed carousel iframe height to prevent layout shifts */
 #vehicle-carousel-frame {
-    height: 180px !important;
-    max-height: 200px;
-    min-height: 160px;
+    height: 200px !important;  /* Increased to accommodate price badges */
+    max-height: 220px;
+    min-height: 180px;
+    position: relative;
+    z-index: 1;  /* Ensure badges render above container boundaries */
 }
 
 @media (max-width: 430px) {
     #vehicle-carousel-frame {
-        height: 160px !important;
-        min-height: 140px;
+        height: 180px !important;  /* Increased from 160px for price badges */
+        min-height: 160px;
     }
+}
+
+/* ============================================
+   MOBILE LAYOUT FIXES - Button Alignment & Viewport Constraints
+   ============================================ */
+
+/* Button alignment fix */
+#vehiclePanel .schedule-section {
+    position: relative;
+    padding-right: 60px;
+}
+
+#vehiclePanel .book-btn {
+    width: 100%;
+}
+
+#vehiclePanel .calendar-button-mobile {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 52px;
+    height: 52px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+#vehiclePanel .calendar-button-mobile:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Remove viewport constraints */
+@supports (height: 100dvh) {
+    .panel { 
+        min-height: auto; 
+    }
+    #vehiclePanel { 
+        min-height: auto !important; 
+    }
+}
+
+/* Alternative: Stack buttons on very small screens */
+@media (max-width: 320px) {
+    #vehiclePanel .schedule-section {
+        flex-direction: column;
+        padding-right: 0;
+        gap: 8px;
+    }
+    
+    #vehiclePanel .calendar-button-mobile {
+        position: static;
+        width: 100%;
+        height: 44px;
+    }
+}
+
+/* Ensure no layout constraints on containers */
+.app-container,
+.booking-container,
+.panels-wrapper {
+    height: auto !important;
+    min-height: 0 !important;
 }
 
 
