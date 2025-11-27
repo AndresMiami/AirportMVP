@@ -1,0 +1,1714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LinkMia Admin - Dispatch Dashboard</title>
+
+    <!-- iOS Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="LinkMia Admin">
+    <meta name="theme-color" content="#1C1C1E">
+
+    <!-- Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        /* ============================================
+           LINKMIA ADMIN DASHBOARD STYLES
+           Dark theme matching main app
+           ============================================ */
+
+        :root {
+            --primary-gradient-start: #FF9933;
+            --primary-gradient-end: #FF5733;
+            --primary: #FF9500;
+            --primary-dark: #FF5733;
+            --primary-light: rgba(255, 149, 0, 0.15);
+            --secondary: #3B82F6;
+            --success: #32D74B;
+            --error: #FF453A;
+            --warning: #FFD60A;
+            --text-primary: #FFFFFF;
+            --text-secondary: #8E8E93;
+            --text-light: #636366;
+            --panel-bg: #2C2C2E;
+            --background: #1C1C1E;
+            --surface: #3A3A3C;
+            --surface-light: #48484A;
+            --border: #48484A;
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+            --transition-base: 0.2s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--background);
+            color: var(--text-primary);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+            padding-bottom: 80px;
+        }
+
+        /* Header */
+        .admin-header {
+            background: linear-gradient(135deg, var(--primary-gradient-start), var(--primary-gradient-end));
+            padding: 16px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .admin-header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 14px;
+            color: rgba(255,255,255,0.9);
+        }
+
+        .header-stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header-stat-value {
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .header-stat-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            opacity: 0.8;
+        }
+
+        /* Tab Navigation */
+        .tab-nav {
+            display: flex;
+            background: var(--panel-bg);
+            padding: 8px;
+            gap: 4px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .tab-btn {
+            flex: 1;
+            min-width: 80px;
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition-base);
+            white-space: nowrap;
+        }
+
+        .tab-btn.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .tab-btn:not(.active):hover {
+            background: var(--surface);
+        }
+
+        /* Main Content */
+        .main-content {
+            padding: 16px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Section Headers */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .section-count {
+            background: var(--surface);
+            padding: 4px 10px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Booking Cards */
+        .booking-card {
+            background: var(--panel-bg);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            margin-bottom: 12px;
+            border-left: 4px solid var(--primary);
+            transition: var(--transition-base);
+        }
+
+        .booking-card:active {
+            transform: scale(0.98);
+        }
+
+        .booking-card.status-pending { border-left-color: var(--warning); }
+        .booking-card.status-confirmed { border-left-color: var(--success); }
+        .booking-card.status-assigned { border-left-color: var(--secondary); }
+        .booking-card.status-in-progress { border-left-color: var(--primary); }
+        .booking-card.status-completed { border-left-color: var(--text-light); }
+        .booking-card.status-cancelled { border-left-color: var(--error); }
+
+        .booking-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .booking-customer {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .booking-id {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .booking-status {
+            padding: 4px 10px;
+            border-radius: var(--radius-md);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-pending { background: rgba(255, 214, 10, 0.2); color: var(--warning); }
+        .status-confirmed { background: rgba(50, 215, 75, 0.2); color: var(--success); }
+        .status-assigned { background: rgba(59, 130, 246, 0.2); color: var(--secondary); }
+        .status-in-progress { background: rgba(255, 149, 0, 0.2); color: var(--primary); }
+        .status-completed { background: rgba(99, 99, 102, 0.2); color: var(--text-light); }
+        .status-cancelled { background: rgba(255, 69, 58, 0.2); color: var(--error); }
+
+        .booking-route {
+            margin-bottom: 12px;
+        }
+
+        .route-point {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .route-icon {
+            width: 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .route-text {
+            font-size: 14px;
+            color: var(--text-primary);
+            flex: 1;
+        }
+
+        .route-connector {
+            width: 20px;
+            display: flex;
+            justify-content: center;
+            padding: 2px 0;
+        }
+
+        .route-connector::before {
+            content: '';
+            width: 2px;
+            height: 16px;
+            background: var(--border);
+        }
+
+        .booking-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .booking-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .booking-price {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--success);
+        }
+
+        .booking-driver {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .booking-driver strong {
+            color: var(--text-primary);
+        }
+
+        .booking-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-btn {
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition-base);
+        }
+
+        .action-btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .action-btn-secondary {
+            background: var(--surface);
+            color: var(--text-primary);
+        }
+
+        .action-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state-text {
+            font-size: 16px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--panel-bg);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-top: 4px;
+        }
+
+        /* Driver List */
+        .driver-card {
+            background: var(--panel-bg);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .driver-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .driver-info {
+            flex: 1;
+        }
+
+        .driver-name {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .driver-vehicle {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .driver-status {
+            padding: 6px 12px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .driver-status.active {
+            background: rgba(50, 215, 75, 0.2);
+            color: var(--success);
+        }
+
+        .driver-status.busy {
+            background: rgba(255, 149, 0, 0.2);
+            color: var(--primary);
+        }
+
+        .driver-status.inactive {
+            background: rgba(99, 99, 102, 0.2);
+            color: var(--text-light);
+        }
+
+        /* Customer List */
+        .customer-card {
+            background: var(--panel-bg);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .customer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .customer-name {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .customer-type {
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .type-vip { background: rgba(255, 149, 0, 0.2); color: var(--primary); }
+        .type-repeat { background: rgba(59, 130, 246, 0.2); color: var(--secondary); }
+        .type-guest { background: var(--surface); color: var(--text-secondary); }
+
+        .customer-meta {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Quick Add Form */
+        .quick-add-card {
+            background: var(--panel-bg);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .quick-add-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 12px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 15px;
+            transition: var(--transition-base);
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            border-color: var(--primary);
+            outline: none;
+        }
+
+        .form-input::placeholder {
+            color: var(--text-light);
+        }
+
+        .form-textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--primary-gradient-start), var(--primary-gradient-end));
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition-base);
+        }
+
+        .submit-btn:active {
+            transform: scale(0.98);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Bottom Navigation */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--panel-bg);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+            z-index: 100;
+        }
+
+        .bottom-nav-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 8px 16px;
+            color: var(--text-secondary);
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition-base);
+        }
+
+        .bottom-nav-btn.active {
+            color: var(--primary);
+        }
+
+        .bottom-nav-icon {
+            font-size: 24px;
+        }
+
+        .bottom-nav-label {
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* FAB */
+        .fab {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-gradient-start), var(--primary-gradient-end));
+            color: white;
+            border: none;
+            font-size: 28px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(255, 149, 0, 0.4);
+            transition: var(--transition-base);
+            z-index: 50;
+        }
+
+        .fab:active {
+            transform: scale(0.9);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            z-index: 200;
+            opacity: 0;
+            visibility: hidden;
+            transition: var(--transition-base);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-content {
+            background: var(--panel-bg);
+            border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: translateY(0);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            background: var(--panel-bg);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--surface);
+            border: none;
+            color: var(--text-primary);
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        /* Status Select in Modal */
+        .status-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px;
+            background: var(--surface);
+            border-radius: var(--radius-md);
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: var(--transition-base);
+        }
+
+        .status-option:hover, .status-option.selected {
+            background: var(--surface-light);
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .status-dot.pending { background: var(--warning); }
+        .status-dot.confirmed { background: var(--success); }
+        .status-dot.assigned { background: var(--secondary); }
+        .status-dot.in-progress { background: var(--primary); }
+        .status-dot.completed { background: var(--text-light); }
+        .status-dot.cancelled { background: var(--error); }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            justify-content: center;
+            padding: 48px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--surface);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--surface);
+            color: var(--text-primary);
+            padding: 14px 24px;
+            border-radius: var(--radius-lg);
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: var(--shadow-md);
+            z-index: 300;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success { border-left: 4px solid var(--success); }
+        .toast.error { border-left: 4px solid var(--error); }
+
+        /* Responsive */
+        @media (min-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        /* Pull to refresh indicator */
+        .pull-indicator {
+            text-align: center;
+            padding: 12px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="admin-header">
+        <h1>LinkMia</h1>
+        <div class="header-stats">
+            <div class="header-stat">
+                <span class="header-stat-value" id="todayCount">0</span>
+                <span class="header-stat-label">Today</span>
+            </div>
+            <div class="header-stat">
+                <span class="header-stat-value" id="pendingCount">0</span>
+                <span class="header-stat-label">Pending</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="tab-nav">
+        <button class="tab-btn active" data-tab="today">Today</button>
+        <button class="tab-btn" data-tab="bookings">All Bookings</button>
+        <button class="tab-btn" data-tab="drivers">Drivers</button>
+        <button class="tab-btn" data-tab="customers">Customers</button>
+        <button class="tab-btn" data-tab="revenue">Revenue</button>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Today Tab -->
+        <div class="tab-content active" id="todayTab">
+            <div class="section-header">
+                <span class="section-title">Today's Rides</span>
+                <span class="section-count" id="todayCountBadge">0 rides</span>
+            </div>
+            <div id="todayBookings">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- All Bookings Tab -->
+        <div class="tab-content" id="bookingsTab">
+            <div class="section-header">
+                <span class="section-title">All Bookings</span>
+                <span class="section-count" id="allCountBadge">0 total</span>
+            </div>
+            <div id="allBookings">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Drivers Tab -->
+        <div class="tab-content" id="driversTab">
+            <div class="section-header">
+                <span class="section-title">Driver Network</span>
+                <span class="section-count" id="driverCountBadge">0 drivers</span>
+            </div>
+            <div id="driversList">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Customers Tab -->
+        <div class="tab-content" id="customersTab">
+            <div class="section-header">
+                <span class="section-title">Customers</span>
+                <span class="section-count" id="customerCountBadge">0 customers</span>
+            </div>
+            <div id="customersList">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Revenue Tab -->
+        <div class="tab-content" id="revenueTab">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalRevenue">$0</div>
+                    <div class="stat-label">Total Revenue</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCommission">$0</div>
+                    <div class="stat-label">Your Commission</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalRides">0</div>
+                    <div class="stat-label">Total Rides</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="avgRide">$0</div>
+                    <div class="stat-label">Avg Per Ride</div>
+                </div>
+            </div>
+
+            <div class="section-header">
+                <span class="section-title">This Month</span>
+            </div>
+            <div id="revenueDetails">
+                <!-- Revenue breakdown will go here -->
+            </div>
+        </div>
+    </main>
+
+    <!-- FAB - Quick Add -->
+    <button class="fab" id="fabAdd" title="Add Booking">+</button>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+        <button class="bottom-nav-btn active" data-tab="today">
+            <span class="bottom-nav-icon">📅</span>
+            <span class="bottom-nav-label">Today</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="bookings">
+            <span class="bottom-nav-icon">📋</span>
+            <span class="bottom-nav-label">Bookings</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="drivers">
+            <span class="bottom-nav-icon">🚗</span>
+            <span class="bottom-nav-label">Drivers</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="customers">
+            <span class="bottom-nav-icon">👥</span>
+            <span class="bottom-nav-label">Customers</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="revenue">
+            <span class="bottom-nav-icon">💰</span>
+            <span class="bottom-nav-label">Revenue</span>
+        </button>
+    </nav>
+
+    <!-- Quick Add Modal -->
+    <div class="modal-overlay" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">New Booking</h2>
+                <button class="modal-close" id="closeAddModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="quickAddForm">
+                    <div class="form-group">
+                        <label class="form-label">Customer Name *</label>
+                        <input type="text" class="form-input" id="customerName" placeholder="e.g., Chrissy Rice" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Phone *</label>
+                        <input type="tel" class="form-input" id="customerPhone" placeholder="+1 (555) 123-4567" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Pickup Location *</label>
+                        <input type="text" class="form-input" id="pickupLocation" placeholder="Address or landmark" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Dropoff Location *</label>
+                        <input type="text" class="form-input" id="dropoffLocation" placeholder="Address or airport code" required>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Date *</label>
+                            <input type="date" class="form-input" id="pickupDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Time *</label>
+                            <input type="time" class="form-input" id="pickupTime" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Passengers</label>
+                            <input type="number" class="form-input" id="passengers" value="1" min="1" max="50">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Bags</label>
+                            <input type="number" class="form-input" id="bags" value="1" min="0" max="50">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Vehicle</label>
+                            <select class="form-select" id="vehicleType">
+                                <option value="sedan">Sedan</option>
+                                <option value="suv">SUV</option>
+                                <option value="escalade">Escalade</option>
+                                <option value="sprinter">Sprinter</option>
+                                <option value="multiple">Multiple</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Price ($)</label>
+                            <input type="number" class="form-input" id="price" placeholder="0.00" min="0" step="0.01">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Assign Driver</label>
+                        <select class="form-select" id="assignedDriver">
+                            <option value="">-- Unassigned --</option>
+                            <!-- Drivers will be populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-textarea" id="notes" placeholder="Flight number, special requests, group info..."></textarea>
+                    </div>
+
+                    <button type="submit" class="submit-btn">Create Booking</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Booking Modal -->
+    <div class="modal-overlay" id="editModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Update Booking</h2>
+                <button class="modal-close" id="closeEditModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editBookingId">
+
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <div id="statusOptions">
+                        <div class="status-option" data-status="pending">
+                            <span class="status-dot pending"></span>
+                            <span>Pending</span>
+                        </div>
+                        <div class="status-option" data-status="confirmed">
+                            <span class="status-dot confirmed"></span>
+                            <span>Confirmed</span>
+                        </div>
+                        <div class="status-option" data-status="assigned">
+                            <span class="status-dot assigned"></span>
+                            <span>Assigned</span>
+                        </div>
+                        <div class="status-option" data-status="in_progress">
+                            <span class="status-dot in-progress"></span>
+                            <span>In Progress</span>
+                        </div>
+                        <div class="status-option" data-status="completed">
+                            <span class="status-dot completed"></span>
+                            <span>Completed</span>
+                        </div>
+                        <div class="status-option" data-status="cancelled">
+                            <span class="status-dot cancelled"></span>
+                            <span>Cancelled</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Assign Driver</label>
+                    <select class="form-select" id="editAssignedDriver">
+                        <option value="">-- Unassigned --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Price ($)</label>
+                    <input type="number" class="form-input" id="editPrice" min="0" step="0.01">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-textarea" id="editNotes"></textarea>
+                </div>
+
+                <button type="button" class="submit-btn" id="saveEditBtn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ============================================
+        // LINKMIA ADMIN DASHBOARD
+        // ============================================
+
+        // Supabase Configuration
+        const SUPABASE_URL = window.APP_CONFIG?.SUPABASE_URL || 'https://hncpybxwblpkyxvskoxd.supabase.co';
+        const SUPABASE_ANON_KEY = window.APP_CONFIG?.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA';
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // App State
+        const state = {
+            bookings: [],
+            drivers: [],
+            customers: [],
+            currentTab: 'today',
+            selectedStatus: null
+        };
+
+        // ============================================
+        // INITIALIZATION
+        // ============================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initTabs();
+            initModals();
+            initForm();
+            setDefaultDate();
+            loadAllData();
+            setupRealtimeSubscription();
+        });
+
+        function setDefaultDate() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('pickupDate').value = today;
+        }
+
+        // ============================================
+        // TAB NAVIGATION
+        // ============================================
+
+        function initTabs() {
+            // Tab buttons (top)
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+            });
+
+            // Bottom nav buttons
+            document.querySelectorAll('.bottom-nav-btn').forEach(btn => {
+                btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+            });
+        }
+
+        function switchTab(tabName) {
+            state.currentTab = tabName;
+
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabName);
+            });
+
+            // Update bottom nav
+            document.querySelectorAll('.bottom-nav-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabName);
+            });
+
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('active', content.id === `${tabName}Tab`);
+            });
+        }
+
+        // ============================================
+        // MODALS
+        // ============================================
+
+        function initModals() {
+            // FAB opens add modal
+            document.getElementById('fabAdd').addEventListener('click', () => {
+                openModal('addModal');
+            });
+
+            // Close buttons
+            document.getElementById('closeAddModal').addEventListener('click', () => {
+                closeModal('addModal');
+            });
+
+            document.getElementById('closeEditModal').addEventListener('click', () => {
+                closeModal('editModal');
+            });
+
+            // Click outside to close
+            document.querySelectorAll('.modal-overlay').forEach(overlay => {
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) {
+                        closeModal(overlay.id);
+                    }
+                });
+            });
+
+            // Status options
+            document.querySelectorAll('.status-option').forEach(option => {
+                option.addEventListener('click', () => {
+                    document.querySelectorAll('.status-option').forEach(o => o.classList.remove('selected'));
+                    option.classList.add('selected');
+                    state.selectedStatus = option.dataset.status;
+                });
+            });
+
+            // Save edit button
+            document.getElementById('saveEditBtn').addEventListener('click', saveBookingEdit);
+        }
+
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // ============================================
+        // FORM HANDLING
+        // ============================================
+
+        function initForm() {
+            document.getElementById('quickAddForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await createBooking();
+            });
+        }
+
+        async function createBooking() {
+            const submitBtn = document.querySelector('#quickAddForm .submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating...';
+
+            try {
+                const pickupDate = document.getElementById('pickupDate').value;
+                const pickupTime = document.getElementById('pickupTime').value;
+                const pickupDatetime = new Date(`${pickupDate}T${pickupTime}`).toISOString();
+
+                const bookingData = {
+                    customer_name: document.getElementById('customerName').value,
+                    customer_phone: document.getElementById('customerPhone').value,
+                    pickup_location: document.getElementById('pickupLocation').value,
+                    dropoff_location: document.getElementById('dropoffLocation').value,
+                    pickup_datetime: pickupDatetime,
+                    passengers: parseInt(document.getElementById('passengers').value) || 1,
+                    bags: parseInt(document.getElementById('bags').value) || 0,
+                    vehicle_type: document.getElementById('vehicleType').value,
+                    price: parseFloat(document.getElementById('price').value) || 0,
+                    assigned_driver: document.getElementById('assignedDriver').value || null,
+                    notes: document.getElementById('notes').value,
+                    status: document.getElementById('assignedDriver').value ? 'assigned' : 'pending',
+                    source: 'admin'
+                };
+
+                const { data, error } = await supabase
+                    .from('bookings')
+                    .insert([bookingData])
+                    .select()
+                    .single();
+
+                if (error) throw error;
+
+                showToast('Booking created successfully!', 'success');
+                closeModal('addModal');
+                document.getElementById('quickAddForm').reset();
+                setDefaultDate();
+                loadAllData();
+
+            } catch (error) {
+                console.error('Error creating booking:', error);
+                showToast('Failed to create booking', 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Booking';
+            }
+        }
+
+        // ============================================
+        // DATA LOADING
+        // ============================================
+
+        async function loadAllData() {
+            await Promise.all([
+                loadBookings(),
+                loadDrivers(),
+                loadCustomers()
+            ]);
+            updateStats();
+        }
+
+        async function loadBookings() {
+            try {
+                const { data, error } = await supabase
+                    .from('bookings')
+                    .select('*')
+                    .order('pickup_datetime', { ascending: true });
+
+                if (error) throw error;
+
+                state.bookings = data || [];
+                renderBookings();
+
+            } catch (error) {
+                console.error('Error loading bookings:', error);
+                // Show demo data if table doesn't exist
+                state.bookings = getDemoBookings();
+                renderBookings();
+            }
+        }
+
+        async function loadDrivers() {
+            try {
+                const { data, error } = await supabase
+                    .from('drivers')
+                    .select('*')
+                    .order('name');
+
+                if (error) throw error;
+
+                state.drivers = data || [];
+                renderDrivers();
+                populateDriverSelects();
+
+            } catch (error) {
+                console.error('Error loading drivers:', error);
+                // Show demo data
+                state.drivers = getDemoDrivers();
+                renderDrivers();
+                populateDriverSelects();
+            }
+        }
+
+        async function loadCustomers() {
+            try {
+                const { data, error } = await supabase
+                    .from('customers')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+
+                state.customers = data || [];
+                renderCustomers();
+
+            } catch (error) {
+                console.error('Error loading customers:', error);
+                state.customers = getDemoCustomers();
+                renderCustomers();
+            }
+        }
+
+        // ============================================
+        // RENDERING
+        // ============================================
+
+        function renderBookings() {
+            const today = new Date().toDateString();
+            const todayBookings = state.bookings.filter(b =>
+                new Date(b.pickup_datetime).toDateString() === today
+            );
+
+            // Today's bookings
+            document.getElementById('todayBookings').innerHTML = todayBookings.length
+                ? todayBookings.map(renderBookingCard).join('')
+                : renderEmptyState('No rides scheduled for today', '📅');
+
+            document.getElementById('todayCountBadge').textContent = `${todayBookings.length} rides`;
+            document.getElementById('todayCount').textContent = todayBookings.length;
+
+            // All bookings
+            document.getElementById('allBookings').innerHTML = state.bookings.length
+                ? state.bookings.map(renderBookingCard).join('')
+                : renderEmptyState('No bookings yet', '📋');
+
+            document.getElementById('allCountBadge').textContent = `${state.bookings.length} total`;
+
+            // Pending count
+            const pendingCount = state.bookings.filter(b =>
+                b.status === 'pending' || b.status === 'confirmed'
+            ).length;
+            document.getElementById('pendingCount').textContent = pendingCount;
+        }
+
+        function renderBookingCard(booking) {
+            const date = new Date(booking.pickup_datetime);
+            const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            const statusClass = booking.status.replace('_', '-');
+
+            return `
+                <div class="booking-card status-${statusClass}" onclick="openEditModal('${booking.id}')">
+                    <div class="booking-header">
+                        <div>
+                            <div class="booking-customer">${escapeHtml(booking.customer_name)}</div>
+                            <div class="booking-id">#${booking.id.slice(0, 8)}</div>
+                        </div>
+                        <span class="booking-status status-${statusClass}">${formatStatus(booking.status)}</span>
+                    </div>
+
+                    <div class="booking-route">
+                        <div class="route-point">
+                            <span class="route-icon">📍</span>
+                            <span class="route-text">${escapeHtml(booking.pickup_location)}</span>
+                        </div>
+                        <div class="route-connector"></div>
+                        <div class="route-point">
+                            <span class="route-icon">🏁</span>
+                            <span class="route-text">${escapeHtml(booking.dropoff_location)}</span>
+                        </div>
+                    </div>
+
+                    <div class="booking-meta">
+                        <span class="meta-item">📅 ${dateStr}</span>
+                        <span class="meta-item">🕐 ${timeStr}</span>
+                        <span class="meta-item">👥 ${booking.passengers || 1}</span>
+                        <span class="meta-item">🧳 ${booking.bags || 0}</span>
+                    </div>
+
+                    <div class="booking-footer">
+                        <span class="booking-price">$${(booking.price || 0).toFixed(2)}</span>
+                        <span class="booking-driver">
+                            ${booking.assigned_driver
+                                ? `<strong>${escapeHtml(getDriverName(booking.assigned_driver))}</strong>`
+                                : '<em>Unassigned</em>'}
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDrivers() {
+            const container = document.getElementById('driversList');
+
+            if (!state.drivers.length) {
+                container.innerHTML = renderEmptyState('No drivers added yet', '🚗');
+                return;
+            }
+
+            container.innerHTML = state.drivers.map(driver => `
+                <div class="driver-card">
+                    <div class="driver-avatar">${driver.name.charAt(0).toUpperCase()}</div>
+                    <div class="driver-info">
+                        <div class="driver-name">${escapeHtml(driver.name)}</div>
+                        <div class="driver-vehicle">${escapeHtml(driver.vehicle_type || 'Vehicle not specified')} ${driver.vehicle_details ? `• ${escapeHtml(driver.vehicle_details)}` : ''}</div>
+                    </div>
+                    <span class="driver-status ${driver.status || 'active'}">${formatDriverStatus(driver.status)}</span>
+                </div>
+            `).join('');
+
+            document.getElementById('driverCountBadge').textContent = `${state.drivers.length} drivers`;
+        }
+
+        function renderCustomers() {
+            const container = document.getElementById('customersList');
+
+            if (!state.customers.length) {
+                container.innerHTML = renderEmptyState('No customers yet', '👥');
+                return;
+            }
+
+            container.innerHTML = state.customers.map(customer => `
+                <div class="customer-card">
+                    <div class="customer-header">
+                        <span class="customer-name">${escapeHtml(customer.name)}</span>
+                        <span class="customer-type type-${customer.type || 'guest'}">${customer.type || 'Guest'}</span>
+                    </div>
+                    <div class="customer-meta">
+                        ${customer.phone ? `📱 ${escapeHtml(customer.phone)}` : ''}
+                        ${customer.total_rides ? ` • ${customer.total_rides} rides` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('customerCountBadge').textContent = `${state.customers.length} customers`;
+        }
+
+        function renderEmptyState(message, icon) {
+            return `
+                <div class="empty-state">
+                    <div class="empty-state-icon">${icon}</div>
+                    <div class="empty-state-text">${message}</div>
+                </div>
+            `;
+        }
+
+        function updateStats() {
+            const completedBookings = state.bookings.filter(b => b.status === 'completed');
+            const totalRevenue = completedBookings.reduce((sum, b) => sum + (b.price || 0), 0);
+            const commissionRate = 0.25; // 25% commission
+
+            document.getElementById('totalRevenue').textContent = `$${totalRevenue.toFixed(0)}`;
+            document.getElementById('totalCommission').textContent = `$${(totalRevenue * commissionRate).toFixed(0)}`;
+            document.getElementById('totalRides').textContent = completedBookings.length;
+            document.getElementById('avgRide').textContent = completedBookings.length
+                ? `$${(totalRevenue / completedBookings.length).toFixed(0)}`
+                : '$0';
+        }
+
+        function populateDriverSelects() {
+            const options = state.drivers.map(d =>
+                `<option value="${d.id}">${escapeHtml(d.name)}</option>`
+            ).join('');
+
+            document.getElementById('assignedDriver').innerHTML =
+                '<option value="">-- Unassigned --</option>' + options;
+            document.getElementById('editAssignedDriver').innerHTML =
+                '<option value="">-- Unassigned --</option>' + options;
+        }
+
+        // ============================================
+        // EDIT BOOKING
+        // ============================================
+
+        function openEditModal(bookingId) {
+            const booking = state.bookings.find(b => b.id === bookingId);
+            if (!booking) return;
+
+            document.getElementById('editBookingId').value = bookingId;
+            document.getElementById('editPrice').value = booking.price || '';
+            document.getElementById('editNotes').value = booking.notes || '';
+            document.getElementById('editAssignedDriver').value = booking.assigned_driver || '';
+
+            // Set selected status
+            state.selectedStatus = booking.status;
+            document.querySelectorAll('.status-option').forEach(option => {
+                option.classList.toggle('selected', option.dataset.status === booking.status);
+            });
+
+            openModal('editModal');
+        }
+
+        async function saveBookingEdit() {
+            const bookingId = document.getElementById('editBookingId').value;
+            const saveBtn = document.getElementById('saveEditBtn');
+
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+
+            try {
+                const updates = {
+                    status: state.selectedStatus,
+                    assigned_driver: document.getElementById('editAssignedDriver').value || null,
+                    price: parseFloat(document.getElementById('editPrice').value) || 0,
+                    notes: document.getElementById('editNotes').value
+                };
+
+                const { error } = await supabase
+                    .from('bookings')
+                    .update(updates)
+                    .eq('id', bookingId);
+
+                if (error) throw error;
+
+                showToast('Booking updated!', 'success');
+                closeModal('editModal');
+                loadAllData();
+
+            } catch (error) {
+                console.error('Error updating booking:', error);
+                showToast('Failed to update booking', 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+        }
+
+        // ============================================
+        // REALTIME SUBSCRIPTION
+        // ============================================
+
+        function setupRealtimeSubscription() {
+            supabase
+                .channel('bookings-changes')
+                .on('postgres_changes',
+                    { event: '*', schema: 'public', table: 'bookings' },
+                    (payload) => {
+                        console.log('Realtime update:', payload);
+                        loadBookings();
+                    }
+                )
+                .subscribe();
+        }
+
+        // ============================================
+        // UTILITIES
+        // ============================================
+
+        function formatStatus(status) {
+            const statusMap = {
+                'pending': 'Pending',
+                'confirmed': 'Confirmed',
+                'assigned': 'Assigned',
+                'in_progress': 'In Progress',
+                'completed': 'Completed',
+                'cancelled': 'Cancelled'
+            };
+            return statusMap[status] || status;
+        }
+
+        function formatDriverStatus(status) {
+            const statusMap = {
+                'active': 'Available',
+                'busy': 'Busy',
+                'inactive': 'Offline'
+            };
+            return statusMap[status] || 'Available';
+        }
+
+        function getDriverName(driverId) {
+            const driver = state.drivers.find(d => d.id === driverId);
+            return driver ? driver.name : 'Unknown';
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // ============================================
+        // DEMO DATA (for testing without database)
+        // ============================================
+
+        function getDemoBookings() {
+            const today = new Date();
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+
+            return [
+                {
+                    id: 'demo-1-' + Date.now(),
+                    customer_name: 'Chrissy Rice',
+                    customer_phone: '+1 555-123-4567',
+                    pickup_location: 'Cruise Terminal, Fort Lauderdale',
+                    dropoff_location: 'South Beach Hotel, Miami',
+                    pickup_datetime: new Date(today.setHours(9, 0)).toISOString(),
+                    passengers: 7,
+                    bags: 8,
+                    vehicle_type: 'escalade',
+                    price: 150,
+                    status: 'confirmed',
+                    assigned_driver: null,
+                    notes: 'VIP group - 19 total passengers across 3 vehicles'
+                },
+                {
+                    id: 'demo-2-' + Date.now(),
+                    customer_name: 'John Smith',
+                    customer_phone: '+1 555-987-6543',
+                    pickup_location: 'Miami International Airport (MIA)',
+                    dropoff_location: 'Four Seasons Miami',
+                    pickup_datetime: new Date(today.setHours(14, 30)).toISOString(),
+                    passengers: 2,
+                    bags: 3,
+                    vehicle_type: 'sedan',
+                    price: 85,
+                    status: 'pending',
+                    assigned_driver: null,
+                    notes: 'Flight AA1234 arriving 2pm'
+                },
+                {
+                    id: 'demo-3-' + Date.now(),
+                    customer_name: 'Maria Garcia',
+                    customer_phone: '+1 555-456-7890',
+                    pickup_location: 'Fontainebleau Miami Beach',
+                    dropoff_location: 'Fort Lauderdale Airport (FLL)',
+                    pickup_datetime: tomorrow.toISOString(),
+                    passengers: 4,
+                    bags: 5,
+                    vehicle_type: 'suv',
+                    price: 120,
+                    status: 'assigned',
+                    assigned_driver: 'demo-driver-1',
+                    notes: ''
+                }
+            ];
+        }
+
+        function getDemoDrivers() {
+            return [
+                {
+                    id: 'demo-driver-1',
+                    name: 'Andres (You)',
+                    phone: '+1 555-000-0001',
+                    vehicle_type: 'Escalade',
+                    vehicle_details: 'Black 2024',
+                    status: 'active'
+                },
+                {
+                    id: 'demo-driver-2',
+                    name: 'Carlos M.',
+                    phone: '+1 555-000-0002',
+                    vehicle_type: 'Suburban',
+                    vehicle_details: 'Black 2023',
+                    status: 'active'
+                },
+                {
+                    id: 'demo-driver-3',
+                    name: 'David R.',
+                    phone: '+1 555-000-0003',
+                    vehicle_type: 'Sprinter',
+                    vehicle_details: 'Black 2022',
+                    status: 'busy'
+                }
+            ];
+        }
+
+        function getDemoCustomers() {
+            return [
+                {
+                    id: 'demo-customer-1',
+                    name: 'Chrissy Rice',
+                    phone: '+1 555-123-4567',
+                    type: 'vip',
+                    total_rides: 3
+                },
+                {
+                    id: 'demo-customer-2',
+                    name: 'Cruise Port Lady',
+                    phone: '+1 555-234-5678',
+                    type: 'repeat',
+                    total_rides: 2
+                },
+                {
+                    id: 'demo-customer-3',
+                    name: 'John Smith',
+                    phone: '+1 555-987-6543',
+                    type: 'guest',
+                    total_rides: 1
+                }
+            ];
+        }
+    </script>
+</body>
+</html>
