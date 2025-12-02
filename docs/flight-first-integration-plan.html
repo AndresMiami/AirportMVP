@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategic Integration Plan: Flight-First Booking for LinkMia</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #fff;
+            padding: 40px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        @media print {
+            body {
+                padding: 20px;
+                font-size: 11pt;
+            }
+            .page-break {
+                page-break-before: always;
+            }
+            h1, h2 {
+                page-break-after: avoid;
+            }
+            table, pre {
+                page-break-inside: avoid;
+            }
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #FF6B35;
+            margin-bottom: 10px;
+            border-bottom: 3px solid #FF6B35;
+            padding-bottom: 15px;
+        }
+
+        h2 {
+            font-size: 22px;
+            color: #2c3e50;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+
+        h3 {
+            font-size: 18px;
+            color: #34495e;
+            margin-top: 25px;
+            margin-bottom: 15px;
+        }
+
+        h4 {
+            font-size: 16px;
+            color: #555;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        .meta {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .executive-summary {
+            background: #f8f9fa;
+            border-left: 4px solid #FF6B35;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .executive-summary strong {
+            color: #FF6B35;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background: #2c3e50;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        tr:hover {
+            background: #fff3e0;
+        }
+
+        pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 20px 0;
+        }
+
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+        }
+
+        .diagram {
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 20px 0;
+        }
+
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 25px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .status-good { color: #27ae60; }
+        .status-warning { color: #f39c12; }
+        .status-critical { color: #e74c3c; }
+
+        .highlight-box {
+            background: #fff3e0;
+            border: 1px solid #FF6B35;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .phase-box {
+            background: #e8f5e9;
+            border-left: 4px solid #27ae60;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .phase-box h4 {
+            color: #27ae60;
+            margin-top: 0;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 30px 0;
+        }
+
+        .toc h3 {
+            margin-top: 0;
+        }
+
+        .toc ol {
+            columns: 2;
+            column-gap: 40px;
+        }
+
+        .toc li {
+            margin-bottom: 5px;
+        }
+
+        .toc a {
+            color: #2c3e50;
+            text-decoration: none;
+        }
+
+        .toc a:hover {
+            color: #FF6B35;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #e0e0e0;
+            margin: 30px 0;
+        }
+
+        .footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+            color: #666;
+            font-size: 12px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>Strategic Integration Plan: Flight-First Booking for LinkMia</h1>
+
+    <div class="meta">
+        <strong>Document Version:</strong> 1.0 &nbsp;|&nbsp;
+        <strong>Date:</strong> December 2, 2024 &nbsp;|&nbsp;
+        <strong>Author:</strong> LinkMia Technical Team
+    </div>
+
+    <div class="executive-summary">
+        <h3>Executive Summary</h3>
+        <p><strong>The Opportunity:</strong> The current MVP has a solid foundation with panel architecture, state management, and a working flight field. However, the flight input is buried in Panel 2, optional, and disconnected from timing logic. This plan transforms flight information from an afterthought into the <strong>central organizing principle</strong> of the booking experience.</p>
+        <p><strong>The Strategy:</strong> Rather than rebuilding, we'll evolve Panel 2 (WHEN) into a "smart" panel with conditional states based on direction. Flight input becomes the <strong>primary</strong> path for arrivals, with manual time as fallback. For departures, flight input becomes the recommended path for precise dropoff timing.</p>
+        <p><strong>Key Insight:</strong> The existing <code>state.mode</code> logic already handles direction well. We're extending this pattern to make the WHEN panel direction-aware, showing different flows for <code>pickup</code> vs <code>dropoff</code>.</p>
+    </div>
+
+    <div class="toc">
+        <h3>Table of Contents</h3>
+        <ol>
+            <li><a href="#section-1">Current State Analysis</a></li>
+            <li><a href="#section-2">Architecture Strategy</a></li>
+            <li><a href="#section-3">UI/UX Integration Strategy</a></li>
+            <li><a href="#section-4">Data Flow & API Design</a></li>
+            <li><a href="#section-5">Backward Compatibility</a></li>
+            <li><a href="#section-6">Implementation Phases</a></li>
+            <li><a href="#section-7">Visual Flow Diagram</a></li>
+            <li><a href="#section-8">Edge Cases & Risk Mitigation</a></li>
+            <li><a href="#section-9">Template Architecture</a></li>
+            <li><a href="#section-10">Decision Points</a></li>
+            <li><a href="#section-11">Success Metrics</a></li>
+            <li><a href="#section-12">Summary & Next Steps</a></li>
+        </ol>
+    </div>
+
+    <h2 id="section-1">1. Current State Analysis</h2>
+
+    <h3>What You Have (Strengths)</h3>
+    <table>
+        <tr>
+            <th>Component</th>
+            <th>Status</th>
+            <th>Notes</th>
+        </tr>
+        <tr>
+            <td>Panel Architecture</td>
+            <td class="status-good">&#10003; Solid</td>
+            <td>3-panel flow with smooth transitions</td>
+        </tr>
+        <tr>
+            <td>Direction Logic</td>
+            <td class="status-good">&#10003; Working</td>
+            <td><code>state.mode</code> switches between dropoff/pickup</td>
+        </tr>
+        <tr>
+            <td>Flight Field</td>
+            <td class="status-warning">&#9888; Exists but weak</td>
+            <td>Optional text input, no validation, no tracking</td>
+        </tr>
+        <tr>
+            <td>State Management</td>
+            <td class="status-good">&#10003; Centralized</td>
+            <td><code>this.state</code> object holds all booking data</td>
+        </tr>
+        <tr>
+            <td>Time Selection</td>
+            <td class="status-warning">&#9888; Manual only</td>
+            <td>3 dropdowns, no auto-calculation</td>
+        </tr>
+        <tr>
+            <td>Pricing Integration</td>
+            <td class="status-good">&#10003; Sophisticated</td>
+            <td>Time-based surcharges already work</td>
+        </tr>
+    </table>
+
+    <h3>What's Missing (Gaps)</h3>
+    <table>
+        <tr>
+            <th>Gap</th>
+            <th>Impact</th>
+            <th>Priority</th>
+        </tr>
+        <tr>
+            <td>Flight validation</td>
+            <td>Users enter garbage, no feedback</td>
+            <td class="status-warning">High</td>
+        </tr>
+        <tr>
+            <td>Flight &rarr; Time calculation</td>
+            <td>Manual time defeats the purpose</td>
+            <td class="status-critical">Critical</td>
+        </tr>
+        <tr>
+            <td>Real-time flight tracking</td>
+            <td>No delay handling</td>
+            <td class="status-warning">High</td>
+        </tr>
+        <tr>
+            <td>Departure flight support</td>
+            <td>Can't calculate "arrive 2hrs before"</td>
+            <td>Medium</td>
+        </tr>
+        <tr>
+            <td>Fallback for no-flight</td>
+            <td>Must always allow manual booking</td>
+            <td>Medium</td>
+        </tr>
+    </table>
+
+    <h3>Current Panel Structure</h3>
+    <p><strong>Panel 1 (WHERE):</strong> Mode selector, Address input with Google Maps autocomplete, Airport selection grid (MIA, FLL, PBI), Continue button.</p>
+    <p><strong>Panel 2 (WHEN):</strong> Date selection (Today, Tomorrow, Other), Time selection (3 dropdowns), Flight input (currently optional, pickup mode only), Continue button.</p>
+    <p><strong>Panel 3 (VEHICLE):</strong> Route map display, Vehicle carousel (Tesla, Escalade, Sprinter), Pricing display, Book button.</p>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-2">2. Architecture Strategy</h2>
+
+    <h3>The "Smart WHEN Panel" Approach</h3>
+    <p>Instead of adding new panels, transform Panel 2 into a <strong>direction-aware, flight-first experience</strong>.</p>
+
+    <div class="highlight-box">
+        <h4>For ARRIVING (pickup mode):</h4>
+        <ul>
+            <li>Show prominent flight input as the hero element</li>
+            <li>Date picker becomes secondary (auto-set from flight)</li>
+            <li>Time picker hidden unless "manual" selected</li>
+            <li>Display flight status card once flight found</li>
+        </ul>
+    </div>
+
+    <div class="highlight-box">
+        <h4>For DEPARTING (dropoff mode):</h4>
+        <ul>
+            <li>Show date picker first (today/tomorrow/other)</li>
+            <li>Flight input optional but encouraged</li>
+            <li>If flight provided: auto-calculate pickup time</li>
+            <li>If no flight: show time picker</li>
+            <li>Display "arrive X hours before departure" guidance</li>
+        </ul>
+    </div>
+
+    <h3>State Extension</h3>
+    <pre>state.flight: {
+    number: 'AA1234',           // Flight number
+    carrier: 'AA',              // Airline code
+    origin: 'JFK',              // Origin airport
+    destination: 'MIA',         // Destination airport
+    scheduledTime: Date,        // Scheduled arrival/departure
+    estimatedTime: Date,        // Estimated (with delays)
+    status: 'on_time',          // on_time, delayed, cancelled, landed
+    terminal: 'N',              // Terminal letter
+    gate: 'D42',                // Gate number
+}
+
+state.timing: {
+    method: 'flight' | 'manual',  // How time was determined
+    flightTime: Date,             // Flight arrival/departure time
+    bufferMinutes: 35,            // Post-landing buffer (arrivals)
+    preArrivalMinutes: 150,       // Pre-departure buffer (departures)
+    calculatedPickup: Date,       // Computed pickup time
+}</pre>
+
+    <h3>Direction-Specific Timing Logic</h3>
+    <table>
+        <tr>
+            <th>Direction</th>
+            <th>Formula</th>
+            <th>Example</th>
+        </tr>
+        <tr>
+            <td>ARRIVING (pickup)</td>
+            <td>Pickup = Flight Arrival + 40 min</td>
+            <td>Flight lands 6:00 PM &rarr; Pickup 6:40 PM</td>
+        </tr>
+        <tr>
+            <td>DEPARTING (dropoff)</td>
+            <td>Pickup = Flight Departure - 150 min - Drive Time</td>
+            <td>Flight 3:00 PM, 30 min drive &rarr; Pickup 12:00 PM</td>
+        </tr>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-3">3. UI/UX Integration Strategy</h2>
+
+    <h3>Panel 2: Arrival Flow Layout</h3>
+    <div class="diagram">&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502; &#x1F6EC; What flight are you on?                  &#x2502;
+&#x2502;                                             &#x2502;
+&#x2502; &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510; &#x2502;
+&#x2502; &#x2502; Flight #: [AA1234____________] [Search] &#x2502; &#x2502;
+&#x2502; &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518; &#x2502;
+&#x2502;                                             &#x2502;
+&#x2502; &#x2500;&#x2500;&#x2500; OR search by airline &#x2500;&#x2500;&#x2500;                &#x2502;
+&#x2502; [Select Airline &#x25BC;]                          &#x2502;
+&#x2502; [Select Date    &#x25BC;]                          &#x2502;
+&#x2502; [Select Flight  &#x25BC;]                          &#x2502;
+&#x2502;                                             &#x2502;
+&#x2502; &#x2500;&#x2500;&#x2500; OR skip flight info &#x2500;&#x2500;&#x2500;                 &#x2502;
+&#x2502; [I'll enter my time manually]               &#x2502;
+&#x2502;                                             &#x2502;
+&#x2502; &#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550;&#x2550; &#x2502;
+&#x2502; &#x2708;&#xFE0F; AA1234: JFK &#x2192; MIA                        &#x2502;
+&#x2502; &#x1F4C5; Lands: Today at 6:00 PM                  &#x2502;
+&#x2502; &#x1F697; Pickup: 6:40 PM                          &#x2502;
+&#x2502;    (+40 min buffer for bags)                &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+
+    <h3>Flight Status Card Design</h3>
+    <div class="diagram">&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502; &#x2708;&#xFE0F; AA1234                          ON TIME  &#x2502;
+&#x2502; &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500; &#x2502;
+&#x2502; JFK New York  &#x2192;  MIA Miami                  &#x2502;
+&#x2502;                                             &#x2502;
+&#x2502; &#x1F4C5; Today, December 2                        &#x2502;
+&#x2502; &#x1F6EC; Lands: 6:00 PM                           &#x2502;
+&#x2502; &#x1F697; Pickup: 6:40 PM                          &#x2502;
+&#x2502;    (+40 min for bags & customs)             &#x2502;
+&#x2502;                                             &#x2502;
+&#x2502; Terminal N &#xB7; Gate D42                       &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+
+    <p><strong>Status Badge Variants:</strong></p>
+    <ul>
+        <li><span class="status-good">ON TIME</span> &mdash; Green badge</li>
+        <li><span class="status-warning">DELAYED 30 MIN</span> &mdash; Yellow badge, shows new time</li>
+        <li><span class="status-critical">CANCELLED</span> &mdash; Red badge, prompts manual entry</li>
+        <li>LANDED &mdash; Blue badge, pickup time is now</li>
+    </ul>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-4">4. Data Flow & API Design</h2>
+
+    <h3>Flight Tracking API Comparison</h3>
+    <table>
+        <tr>
+            <th>Provider</th>
+            <th>Cost</th>
+            <th>Coverage</th>
+            <th>Real-time</th>
+            <th>Recommendation</th>
+        </tr>
+        <tr>
+            <td>FlightAware</td>
+            <td>$$</td>
+            <td>Excellent</td>
+            <td>Yes</td>
+            <td>Best for production</td>
+        </tr>
+        <tr>
+            <td>AeroAPI</td>
+            <td>$$$</td>
+            <td>Excellent</td>
+            <td>Yes</td>
+            <td>Enterprise scale</td>
+        </tr>
+        <tr>
+            <td>AviationStack</td>
+            <td>$</td>
+            <td>Good</td>
+            <td>Limited</td>
+            <td><strong>Budget option (MVP)</strong></td>
+        </tr>
+        <tr>
+            <td>FlightStats</td>
+            <td>$$</td>
+            <td>Good</td>
+            <td>Yes</td>
+            <td>Alternative</td>
+        </tr>
+    </table>
+
+    <h3>API Endpoints Required</h3>
+    <pre>POST /api/flights/lookup
+Body: { flightNumber: "AA1234", date: "2024-12-02" }
+Response: {
+    found: true,
+    flight: {
+        number: "AA1234",
+        carrier: { code: "AA", name: "American Airlines" },
+        departure: { airport: "JFK", scheduled: "...", terminal: "8" },
+        arrival: { airport: "MIA", scheduled: "...", terminal: "N", gate: "D42" },
+        status: "scheduled"
+    }
+}
+
+GET /api/flights/status/{flightNumber}?date={date}
+Response: {
+    status: "delayed",
+    scheduledArrival: "...",
+    estimatedArrival: "...",
+    delayMinutes: 45
+}</pre>
+
+    <h3>Caching Strategy</h3>
+    <table>
+        <tr>
+            <th>Data</th>
+            <th>Cache Duration</th>
+            <th>Reason</th>
+        </tr>
+        <tr>
+            <td>Airline list</td>
+            <td>24 hours</td>
+            <td>Rarely changes</td>
+        </tr>
+        <tr>
+            <td>Airport flights</td>
+            <td>15 minutes</td>
+            <td>New flights added</td>
+        </tr>
+        <tr>
+            <td>Flight status</td>
+            <td>5 minutes</td>
+            <td>Delays can change</td>
+        </tr>
+        <tr>
+            <td>Flight lookup</td>
+            <td>30 minutes</td>
+            <td>Schedule is stable</td>
+        </tr>
+    </table>
+
+    <h3>Polling Strategy for Active Bookings</h3>
+    <table>
+        <tr>
+            <th>Time to Flight</th>
+            <th>Poll Frequency</th>
+        </tr>
+        <tr><td>T-24 hours</td><td>Every 4 hours</td></tr>
+        <tr><td>T-6 hours</td><td>Every hour</td></tr>
+        <tr><td>T-2 hours</td><td>Every 15 minutes</td></tr>
+        <tr><td>T-30 minutes</td><td>Every 5 minutes</td></tr>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-5">5. Backward Compatibility</h2>
+
+    <h3>Feature Flag Implementation</h3>
+    <pre>window.FEATURES = {
+    flightFirst: false,        // Toggle new flow
+    flightTracking: false,     // Enable API calls
+    autoTimeCalculation: false // Auto-compute pickup
+};</pre>
+
+    <h3>Rollout Plan</h3>
+    <ol>
+        <li><strong>Week 1:</strong> Internal testing (flag on for your bookings)</li>
+        <li><strong>Week 2:</strong> 10% of users (random selection)</li>
+        <li><strong>Week 3:</strong> 50% of users</li>
+        <li><strong>Week 4:</strong> 100% of users</li>
+        <li><strong>Week 5:</strong> Remove flag, flight-first is default</li>
+    </ol>
+
+    <h3>Graceful Degradation</h3>
+    <p>If flight API is unavailable or flight is not found, the system falls back to manual time entry with helpful guidance.</p>
+
+    <h2 id="section-6">6. Implementation Phases</h2>
+
+    <div class="phase-box">
+        <h4>Phase 1: Foundation (Week 1-2)</h4>
+        <p><strong>Goal:</strong> Flight input works, basic validation, no tracking</p>
+        <ul>
+            <li>Extend state object with <code>flight</code> and <code>timing</code> properties</li>
+            <li>Create flight input component (text field + search button)</li>
+            <li>Add basic flight number validation (format: 2 letters + 1-4 digits)</li>
+            <li>Create "Skip" option to reveal manual time picker</li>
+            <li>Wire up conditional rendering in Panel 2 based on mode</li>
+        </ul>
+        <p><strong>Deliverable:</strong> Users can enter flight numbers, system stores them.</p>
+    </div>
+
+    <div class="phase-box">
+        <h4>Phase 2: Flight Lookup (Week 3-4)</h4>
+        <p><strong>Goal:</strong> Flight numbers resolve to actual flight data</p>
+        <ul>
+            <li>Set up AviationStack/FlightAware account</li>
+            <li>Create <code>flight-lookup.js</code> Netlify function</li>
+            <li>Build flight status card component</li>
+            <li>Implement airline &rarr; date &rarr; flight picker</li>
+            <li>Cache flight data in localStorage (30 min TTL)</li>
+        </ul>
+        <p><strong>Deliverable:</strong> Users see flight details, timing auto-calculated.</p>
+    </div>
+
+    <div class="phase-box">
+        <h4>Phase 3: Smart Timing (Week 5-6)</h4>
+        <p><strong>Goal:</strong> Automatic pickup time calculation</p>
+        <ul>
+            <li>Implement arrival buffer logic (landing + 40 min)</li>
+            <li>Implement departure buffer logic (flight - 2.5 hrs)</li>
+            <li>Factor in drive duration to pickup location</li>
+            <li>Create timing breakdown display</li>
+            <li>Add "adjust time" override option</li>
+        </ul>
+        <p><strong>Deliverable:</strong> System suggests optimal pickup times.</p>
+    </div>
+
+    <div class="phase-box">
+        <h4>Phase 4: Real-Time Tracking (Week 7-8)</h4>
+        <p><strong>Goal:</strong> Live flight status updates</p>
+        <ul>
+            <li>Create <code>flight-status.js</code> polling function</li>
+            <li>Implement status change detection</li>
+            <li>Build notification system for delays</li>
+            <li>Update pickup time when flight delayed</li>
+            <li>Add SMS/WhatsApp alerts for significant changes</li>
+        </ul>
+        <p><strong>Deliverable:</strong> Bookings automatically adjust for delays.</p>
+    </div>
+
+    <div class="phase-box">
+        <h4>Phase 5: Polish & Edge Cases (Week 9-10)</h4>
+        <p><strong>Goal:</strong> Production-ready, all edge cases handled</p>
+        <ul>
+            <li>Handle cancelled flights</li>
+            <li>Support international vs domestic (customs buffer)</li>
+            <li>Add "flight already landed" detection</li>
+            <li>Implement retry logic for API failures</li>
+            <li>A/B test flight-first vs current flow</li>
+        </ul>
+        <p><strong>Deliverable:</strong> Robust, production-grade flight-first booking.</p>
+    </div>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-7">7. Visual Flow Diagram</h2>
+
+    <h3>Arriving Passenger Journey</h3>
+    <div class="diagram">PANEL 1: WHERE              PANEL 2: WHEN              PANEL 3: VEHICLE
+&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;           &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;           &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;        &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;        &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502; [To ][&#x25CF;From    ]&#x2502;        &#x2502; What flight?    &#x2502;        &#x2502; &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510; &#x2502;
+&#x2502;                 &#x2502;        &#x2502;                 &#x2502;        &#x2502; &#x2502;  [Map]      &#x2502; &#x2502;
+&#x2502; &#x1F6EC; Arriving at  &#x2502;        &#x2502; [AA1234    ] &#x1F50D; &#x2502;        &#x2502; &#x2502;  MIA &#x2192; Dest &#x2502; &#x2502;
+&#x2502;    Airport      &#x2502;        &#x2502;                 &#x2502;        &#x2502; &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518; &#x2502;
+&#x2502;                 &#x2502;        &#x2502; &#x2500;&#x2500;&#x2500; OR &#x2500;&#x2500;&#x2500;      &#x2502;        &#x2502;                 &#x2502;
+&#x2502; Select Airport: &#x2502;        &#x2502;                 &#x2502;        &#x2502; &#x2708;&#xFE0F; AA1234       &#x2502;
+&#x2502; [MIA][FLL][PBI] &#x2502;  &#x2500;&#x2500;&#x25B6;  &#x2502; [Airline    &#x25BC;]  &#x2502;  &#x2500;&#x2500;&#x25B6;  &#x2502; &#x1F6EC; 6:00 PM     &#x2502;
+&#x2502;  &#x25CF;              &#x2502;        &#x2502; [Date       &#x25BC;]  &#x2502;        &#x2502; &#x1F697; 6:40 PM     &#x2502;
+&#x2502;                 &#x2502;        &#x2502; [Flight     &#x25BC;]  &#x2502;        &#x2502;                 &#x2502;
+&#x2502; Destination:    &#x2502;        &#x2502;                 &#x2502;        &#x2502; [Tesla   $89 ] &#x2502;
+&#x2502; [123 Main St___]&#x2502;        &#x2502; &#x2500;&#x2500;&#x2500; OR &#x2500;&#x2500;&#x2500;      &#x2502;        &#x2502; [Escalade$129] &#x2502;
+&#x2502;                 &#x2502;        &#x2502;                 &#x2502;        &#x2502; [Sprinter$179] &#x2502;
+&#x2502;                 &#x2502;        &#x2502; [Enter manually]&#x2502;        &#x2502;                 &#x2502;
+&#x2502; [Continue &#x2192;]    &#x2502;        &#x2502; [Continue &#x2192;]    &#x2502;        &#x2502; [Book Now $89] &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;        &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;        &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+
+    <h3>Departing Passenger Journey</h3>
+    <div class="diagram">PANEL 1: WHERE              PANEL 2: WHEN              PANEL 3: VEHICLE
+&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;           &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;           &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;        &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;        &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502; [&#x25CF;To ][From    ]&#x2502;        &#x2502; When leaving?   &#x2502;        &#x2502; &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510; &#x2502;
+&#x2502;                 &#x2502;        &#x2502;                 &#x2502;        &#x2502; &#x2502;  [Map]      &#x2502; &#x2502;
+&#x2502; &#x1F6EB; Going to     &#x2502;        &#x2502; [Today][Tmrw][] &#x2502;        &#x2502; &#x2502;  Home &#x2192; MIA &#x2502; &#x2502;
+&#x2502;    Airport      &#x2502;        &#x2502;                 &#x2502;        &#x2502; &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518; &#x2502;
+&#x2502;                 &#x2502;        &#x2502; &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500; &#x2502;        &#x2502;                 &#x2502;
+&#x2502; Pickup Address: &#x2502;        &#x2502;                 &#x2502;        &#x2502; &#x2708;&#xFE0F; AA567        &#x2502;
+&#x2502; [123 Main St___]&#x2502;  &#x2500;&#x2500;&#x25B6;  &#x2502; Flight (helps   &#x2502;  &#x2500;&#x2500;&#x25B6;  &#x2502; &#x1F6EB; 3:00 PM     &#x2502;
+&#x2502;                 &#x2502;        &#x2502; us time it):    &#x2502;        &#x2502; &#x1F697; 12:00 PM    &#x2502;
+&#x2502; Select Airport: &#x2502;        &#x2502; [AA567     ] &#x1F50D; &#x2502;        &#x2502;                 &#x2502;
+&#x2502; [MIA][FLL][PBI] &#x2502;        &#x2502;                 &#x2502;        &#x2502; [Tesla   $89 ] &#x2502;
+&#x2502;      &#x25CF;          &#x2502;        &#x2502; &#x2500;&#x2500;&#x2500; OR &#x2500;&#x2500;&#x2500;      &#x2502;        &#x2502; [Escalade$129] &#x2502;
+&#x2502;                 &#x2502;        &#x2502;                 &#x2502;        &#x2502; [Sprinter$179] &#x2502;
+&#x2502;                 &#x2502;        &#x2502; [2]:[30][PM &#x25BC;]  &#x2502;        &#x2502;                 &#x2502;
+&#x2502; [Continue &#x2192;]    &#x2502;        &#x2502; [Continue &#x2192;]    &#x2502;        &#x2502; [Book Now $89] &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;        &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;        &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-8">8. Edge Cases & Risk Mitigation</h2>
+
+    <h3>Edge Case Matrix</h3>
+    <table>
+        <tr>
+            <th>Scenario</th>
+            <th>Detection</th>
+            <th>User Experience</th>
+            <th>System Action</th>
+        </tr>
+        <tr>
+            <td>Flight not found</td>
+            <td>API returns 404</td>
+            <td>"Flight not found. Check number or enter manually."</td>
+            <td>Enable manual picker</td>
+        </tr>
+        <tr>
+            <td>Flight cancelled</td>
+            <td>Status = cancelled</td>
+            <td>"Flight cancelled. Contact airline."</td>
+            <td>Disable booking</td>
+        </tr>
+        <tr>
+            <td>Flight delayed</td>
+            <td>estimated &ne; scheduled</td>
+            <td>"Delayed 45 min. Pickup adjusted."</td>
+            <td>Update pickup time</td>
+        </tr>
+        <tr>
+            <td>Flight landed</td>
+            <td>Status = landed</td>
+            <td>"Your flight has landed!"</td>
+            <td>Show driver ETA</td>
+        </tr>
+        <tr>
+            <td>API timeout</td>
+            <td>5s timeout</td>
+            <td>"Checking flight..."</td>
+            <td>Use cache or manual</td>
+        </tr>
+        <tr>
+            <td>International arrival</td>
+            <td>Origin country &ne; US</td>
+            <td>Add 30 min customs buffer</td>
+            <td>Auto-adjust time</td>
+        </tr>
+        <tr>
+            <td>Red-eye flight</td>
+            <td>Arrival 12am-5am</td>
+            <td>"Night surcharge (+15%)"</td>
+            <td>Apply surcharge</td>
+        </tr>
+    </table>
+
+    <h3>Risk Assessment</h3>
+    <table>
+        <tr>
+            <th>Risk</th>
+            <th>Probability</th>
+            <th>Impact</th>
+            <th>Mitigation</th>
+        </tr>
+        <tr>
+            <td>API costs exceed budget</td>
+            <td>Medium</td>
+            <td class="status-critical">High</td>
+            <td>Rate limiting, caching, fallback</td>
+        </tr>
+        <tr>
+            <td>User confusion</td>
+            <td>Medium</td>
+            <td>Medium</td>
+            <td>A/B testing, clear fallback</td>
+        </tr>
+        <tr>
+            <td>Flight data inaccurate</td>
+            <td>Low</td>
+            <td class="status-critical">High</td>
+            <td>Multiple sources, user override</td>
+        </tr>
+        <tr>
+            <td>API downtime</td>
+            <td>Low</td>
+            <td class="status-critical">High</td>
+            <td>Graceful degradation</td>
+        </tr>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-9">9. Template Architecture for Future Use Cases</h2>
+
+    <h3>Abstraction Layer</h3>
+    <p>The flight-first concept generalizes to <strong>"scheduled-event-first"</strong>:</p>
+    <table>
+        <tr>
+            <th>Event Type</th>
+            <th>Identifier</th>
+            <th>Time Reference</th>
+            <th>Buffer Logic</th>
+        </tr>
+        <tr>
+            <td>Flight</td>
+            <td>Flight #</td>
+            <td>Arrival/Departure</td>
+            <td>+40 min / -150 min</td>
+        </tr>
+        <tr>
+            <td>Cruise</td>
+            <td>Ship name</td>
+            <td>Dock time</td>
+            <td>+60 min / -180 min</td>
+        </tr>
+        <tr>
+            <td>Medical</td>
+            <td>Appt ID</td>
+            <td>Appointment time</td>
+            <td>+15 min / -30 min</td>
+        </tr>
+        <tr>
+            <td>Hotel</td>
+            <td>Room #</td>
+            <td>Checkout time</td>
+            <td>+30 min</td>
+        </tr>
+    </table>
+
+    <h3>Code Reuse Estimate</h3>
+    <ul>
+        <li><strong>New code per use case:</strong> 100-200 lines (adapter)</li>
+        <li><strong>Reused code:</strong> 2000+ lines (calculator, UI, state)</li>
+        <li><strong>Reuse ratio:</strong> ~90%</li>
+    </ul>
+
+    <h2 id="section-10">10. Decision Points</h2>
+
+    <h3>Business Decisions Required</h3>
+    <table>
+        <tr>
+            <th>Question</th>
+            <th>Options</th>
+            <th>Recommendation</th>
+        </tr>
+        <tr>
+            <td>Flight input mandatory for arrivals?</td>
+            <td>Required / Encouraged / Optional</td>
+            <td><strong>Encouraged</strong></td>
+        </tr>
+        <tr>
+            <td>International flight buffer?</td>
+            <td>30 / 45 / 60 min</td>
+            <td><strong>45 min</strong></td>
+        </tr>
+        <tr>
+            <td>Flight delayed &gt; 2 hours?</td>
+            <td>Auto-adjust / Contact / Cancel</td>
+            <td><strong>Auto-adjust + notify</strong></td>
+        </tr>
+        <tr>
+            <td>Cancelled flight policy?</td>
+            <td>Full refund / Partial / None</td>
+            <td><strong>Full refund</strong></td>
+        </tr>
+    </table>
+
+    <h3>Technical Decisions Required</h3>
+    <table>
+        <tr>
+            <th>Question</th>
+            <th>Options</th>
+            <th>Recommendation</th>
+        </tr>
+        <tr>
+            <td>Flight API provider?</td>
+            <td>FlightAware / AviationStack</td>
+            <td><strong>AviationStack</strong> for MVP</td>
+        </tr>
+        <tr>
+            <td>Data storage?</td>
+            <td>Supabase / localStorage / Both</td>
+            <td><strong>Both</strong></td>
+        </tr>
+        <tr>
+            <td>Polling approach?</td>
+            <td>Fixed / Dynamic / Webhook</td>
+            <td><strong>Dynamic</strong></td>
+        </tr>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2 id="section-11">11. Success Metrics</h2>
+
+    <h3>Primary Metrics</h3>
+    <table>
+        <tr>
+            <th>Metric</th>
+            <th>Current</th>
+            <th>Target</th>
+            <th>Measurement</th>
+        </tr>
+        <tr>
+            <td>Flight info capture rate</td>
+            <td>~10%</td>
+            <td class="status-good">70%+</td>
+            <td>% arrivals with flight #</td>
+        </tr>
+        <tr>
+            <td>Booking completion rate</td>
+            <td>Baseline</td>
+            <td class="status-good">+15%</td>
+            <td>Panel 1 to Book conversion</td>
+        </tr>
+        <tr>
+            <td>Driver wait time</td>
+            <td>~20 min</td>
+            <td class="status-good">&lt;10 min</td>
+            <td>Arrival to pickup</td>
+        </tr>
+        <tr>
+            <td>Customer satisfaction</td>
+            <td>Baseline</td>
+            <td class="status-good">4.5+ stars</td>
+            <td>Post-ride survey</td>
+        </tr>
+    </table>
+
+    <h3>Qualitative Indicators</h3>
+    <ul>
+        <li>Customers mention "they knew my flight" in reviews</li>
+        <li>Hosts comment on reliability to guests</li>
+        <li>Drivers report less pickup confusion</li>
+        <li>"Timing issues" cancellations decrease</li>
+    </ul>
+
+    <h2 id="section-12">12. Summary & Next Steps</h2>
+
+    <h3>The Vision</h3>
+    <p>Transform LinkMia from "a ride booking app that accepts flight numbers" to "a flight-aware logistics platform that guarantees stress-free airport transfers."</p>
+
+    <div class="highlight-box">
+        <p><strong>The before:</strong> "What time do you need pickup?"</p>
+        <p><strong>The after:</strong> "What flight are you on? We'll handle the rest."</p>
+    </div>
+
+    <h3>Recommended Starting Point</h3>
+    <p><strong>Begin with Phase 1 (Foundation):</strong></p>
+    <ol>
+        <li>Extend state object with flight/timing properties</li>
+        <li>Build conditional Panel 2 rendering</li>
+        <li>Create flight input component with validation</li>
+        <li>Add "Skip" fallback to manual time</li>
+        <li>Test with your own bookings</li>
+    </ol>
+    <p><strong>Timeline:</strong> 1-2 weeks, no API costs, validates UX.</p>
+
+    <h3>Questions Before Starting</h3>
+    <ol>
+        <li><strong>API Budget:</strong> Monthly budget for flight data?</li>
+        <li><strong>MVP Scope:</strong> Arrivals only or both directions?</li>
+        <li><strong>Fallback Behavior:</strong> Encourage flight input or proceed silently?</li>
+        <li><strong>Driver Notifications:</strong> SMS, WhatsApp, or app?</li>
+        <li><strong>Pricing Impact:</strong> Premium for tracked bookings?</li>
+    </ol>
+
+    <div class="footer">
+        <p>This document provides the strategic foundation for building flight-first booking incrementally, without breaking the working MVP. The architecture supports future expansion to cruise ports, medical transport, and beyond.</p>
+        <p><strong>LinkMia</strong> &mdash; Scheduled Logistics Platform</p>
+    </div>
+</body>
+</html>
