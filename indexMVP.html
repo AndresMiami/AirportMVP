@@ -1690,6 +1690,12 @@
             }
             
             async confirmBooking() {
+                // ========== PAYMENT CONFIGURATION ==========
+                // Set to false to skip Stripe payment (handle via WhatsApp/CashApp/Zelle)
+                // Set to true when ready to enable Stripe payments
+                const REQUIRE_PAYMENT = false;
+                // ============================================
+
                 const tripId = this.generateTripId();
                 const bookingData = {
                     tripId: tripId,
@@ -1736,49 +1742,57 @@
                     // Show loading state
                     const bookBtn = document.getElementById('bookBtn');
                     const originalText = bookBtn.innerHTML;
-                    bookBtn.innerHTML = '<span class="btn-main-text">Processing payment...</span>';
+                    bookBtn.innerHTML = '<span class="btn-main-text">Processing...</span>';
                     bookBtn.disabled = true;
-                    
-                    // Get payment controller
-                    const paymentController = PaymentModal.getInstance();
-                    const selectedPayment = paymentController.getSelectedPayment();
-                    
-                    if (!selectedPayment) {
-                        alert('Please select a payment method first');
-                        bookBtn.innerHTML = originalText;
-                        bookBtn.disabled = false;
-                        return;
+
+                    if (REQUIRE_PAYMENT) {
+                        // ===== STRIPE PAYMENT FLOW =====
+                        // Get payment controller
+                        const paymentController = PaymentModal.getInstance();
+                        const selectedPayment = paymentController.getSelectedPayment();
+
+                        if (!selectedPayment) {
+                            alert('Please select a payment method first');
+                            bookBtn.innerHTML = originalText;
+                            bookBtn.disabled = false;
+                            return;
+                        }
+
+                        // Process payment with Stripe
+                        const paymentResult = await window.StripePayment.processPayment(
+                            bookingData,
+                            selectedPayment
+                        );
+
+                        if (!paymentResult.success) {
+                            throw new Error(paymentResult.error || 'Payment failed');
+                        }
+
+                        // Payment successful
+                        bookingData.status = 'confirmed';
+                        bookingData.payment.transactionId = paymentResult.paymentIntentId;
+                    } else {
+                        // ===== SKIP PAYMENT - Handle via WhatsApp =====
+                        bookingData.status = 'payment_pending';
+                        bookingData.payment.method = 'whatsapp';
+                        bookingData.payment.note = 'Payment to be collected via WhatsApp (CashApp/Zelle)';
                     }
-                    
-                    // Process payment with Stripe
-                    const paymentResult = await window.StripePayment.processPayment(
-                        bookingData,
-                        selectedPayment
-                    );
-                    
-                    if (!paymentResult.success) {
-                        throw new Error(paymentResult.error || 'Payment failed');
-                    }
-                    
-                    // Payment successful
-                    bookingData.status = 'confirmed';
-                    bookingData.payment.transactionId = paymentResult.paymentIntentId;
-                    
+
                     localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
-                    
+
                     // Show confirmation
                     this.showBookingConfirmation(tripId, bookingData);
-                    
+
                 } catch (error) {
-                    console.error('Payment failed:', error);
-                    
+                    console.error('Booking failed:', error);
+
                     // Restore button
                     const bookBtn = document.getElementById('bookBtn');
                     bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
                     bookBtn.disabled = false;
-                    
+
                     // Show more detailed error message
-                    const errorMessage = error.message || 'Payment failed. Please try again.';
+                    const errorMessage = error.message || 'Booking failed. Please try again.';
                     this.showPaymentError(errorMessage);
                 }
             }
