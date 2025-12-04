@@ -412,10 +412,11 @@
             constructor() {
                 // State
                 this.currentIndex = 0;
+                // Vehicle data - capacity must match pricing.js vehicleConfig
                 this.vehicles = [
-                    { id: 'tesla', name: 'Tesla Model Y', basePrice: 132 },
-                    { id: 'escalade', name: 'Cadillac Escalade', basePrice: 165 },
-                    { id: 'sprinter', name: 'Mercedes Sprinter', basePrice: 220 }
+                    { id: 'tesla', name: 'Tesla Model Y', basePrice: 132, passengers: 4, bags: 4 },
+                    { id: 'escalade', name: 'Cadillac Escalade', basePrice: 165, passengers: 7, bags: 8 },
+                    { id: 'sprinter', name: 'Mercedes Sprinter', basePrice: 220, passengers: 12, bags: 15 }
                 ];
 
                 // DOM elements
@@ -682,17 +683,19 @@
                 const vehicle = this.vehicles[this.currentIndex];
                 const card = this.cards[this.currentIndex];
                 const priceElement = card?.querySelector('.vehicle-price-tag');
-                const currentPrice = priceElement?.textContent || `$${vehicle.basePrice}`;
-                
+                const priceText = priceElement?.textContent || `$${vehicle.basePrice}`;
+                // Parse price as number (remove $ and any non-numeric chars except decimal)
+                const priceNumber = parseFloat(priceText.replace(/[^0-9.]/g, '')) || vehicle.basePrice;
+
+                // Send complete vehicle data - capacity from vehicles array (matches pricing.js)
                 const vehicleData = {
                     id: vehicle.id,
                     name: vehicle.name,
                     basePrice: vehicle.basePrice,
-                    price: currentPrice,
-                    // Add more details for compatibility
-                    vehicle: vehicle.id,
-                    passengers: vehicle.id === 'tesla' ? 4 : vehicle.id === 'escalade' ? 6 : 8,
-                    luggage: vehicle.id === 'tesla' ? 2 : vehicle.id === 'escalade' ? 4 : 6
+                    price: priceNumber,
+                    priceFormatted: priceText,
+                    passengers: vehicle.passengers,
+                    bags: vehicle.bags
                 };
                 
                 // Check if we're in an iframe

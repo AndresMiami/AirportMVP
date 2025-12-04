@@ -246,8 +246,8 @@ export class CustomAutocomplete {
             console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
             
             // Use Railway proxy for autocomplete
-            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-            const apiBase = isLocal ? 'http://localhost:3001' : 'https://reliable-warmth-production-d382.up.railway.app';
+            // For local testing, use production proxy (localhost:3001 requires running backend locally)
+            const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
             const response = await fetch(`${apiBase}/api/places/autocomplete?${params}`);
 
             if (!response.ok) {
@@ -339,8 +339,8 @@ export class CustomAutocomplete {
                 console.log('Fetching place details with session:', this.sessionToken);
                 
                 // Use Railway proxy for place details
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const apiBase = isLocal ? 'http://localhost:3001' : 'https://reliable-warmth-production-d382.up.railway.app';
+                // For local testing, use production proxy (localhost:3001 requires running backend locally)
+                const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
                 const response = await fetch(`${apiBase}/api/places/details?${params}`);
 
                 if (response.ok) {

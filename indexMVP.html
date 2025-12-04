@@ -34,7 +34,66 @@
     <link rel="stylesheet" href="css/maps-autocomplete.css?v=fix-visibility"> <!-- Maps Integration -->
 </head>
 <body>
-    <div class="app-container">
+    <!-- Business Card Overlay (shows first) -->
+    <div id="businessCardOverlay" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #1a1a1a;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        transition: transform 0.3s ease-out;
+    ">
+        <div style="text-align: center; padding: 40px 20px;">
+
+            <!-- Primary Button -->
+            <button onclick="showBooking()" style="
+                display: block;
+                width: 280px;
+                padding: 18px;
+                margin: 0 auto 20px;
+                background: linear-gradient(135deg, #FF6B35, #F7931E);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 15px rgba(255, 107, 53, 0.3);
+            ">
+                🚗 Book Airport Transfer
+            </button>
+
+            <!-- Secondary Button -->
+            <a href="https://wa.me/17865093955?text=Hi!%20I%27d%20like%20to%20book%20a%20ride"
+               target="_blank"
+               rel="noopener"
+               style="
+                display: block;
+                width: 280px;
+                padding: 18px;
+                margin: 0 auto;
+                background: #25D366;
+                color: white;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 600;
+                text-decoration: none;
+                text-align: center;
+                box-shadow: 0 4px 15px rgba(37, 211, 102, 0.3);
+            ">
+                💬 Chat on WhatsApp
+            </a>
+
+        </div>
+    </div>
+
+    <div class="app-container" id="bookingApp" style="display: none;">
         <!-- Start Search Button -->
         <button class="start-search-btn" id="startSearchBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -894,8 +953,7 @@
                     }
                     
                     // Use Railway proxy for directions
-                    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                    const directionsUrl = isLocal ? 'http://localhost:3001/api/directions' : 'https://reliable-warmth-production-d382.up.railway.app/api/directions';
+                    const directionsUrl = 'https://reliable-warmth-production-d382.up.railway.app/api/directions';
                     const response = await fetch(directionsUrl, {
                         method: 'POST',
                         headers: {
@@ -1412,42 +1470,55 @@
                 }
             }
             
-            selectVehicle(vehicleType) {
-                // DOM manipulation removed - selection state handled by iframe carousel
-                
-                // Get vehicle name from the vehicle type mapping
-                const vehicleNames = {
-                    tesla: 'Tesla Model Y',
-                    escalade: 'Cadillac Escalade',
-                    sprinter: 'Mercedes Sprinter'
-                };
-                
-                // Price will come from the pricing calculation below
+            selectVehicle(vehicleData) {
+                // Accept either string (legacy) or object (from carousel)
+                const isObject = typeof vehicleData === 'object';
+                const vehicleType = isObject ? vehicleData.id : vehicleData;
+
+                // Use data from carousel if available, otherwise get from pricing service
+                let vehicleName, passengers, bags, carouselPrice;
+
+                if (isObject) {
+                    // Data from carousel - already has correct values from pricing.js
+                    vehicleName = vehicleData.name;
+                    passengers = vehicleData.passengers;
+                    bags = vehicleData.bags;
+                    carouselPrice = vehicleData.price; // The displayed price from carousel
+                } else {
+                    // Fallback: get from pricing service
+                    const config = this.pricingService?.getVehicleConfig(vehicleType);
+                    vehicleName = config?.name || vehicleType;
+                    passengers = config?.capacity?.passengers || 4;
+                    bags = config?.capacity?.bags || 4;
+                    carouselPrice = null;
+                }
+
+                // Set vehicle state with capacity data
                 this.state.vehicle = {
                     selected: vehicleType,
                     type: vehicleType,
-                    name: vehicleNames[vehicleType] || vehicleType,
-                    price: 55 // Default, will be updated from pricing calculation
+                    name: vehicleName,
+                    passengers: passengers,
+                    bags: bags,
+                    price: carouselPrice // Use carousel price as initial value
                 };
-                
+
+                // Calculate pricing if route data is available
                 if (this.state.route.distance && this.state.route.duration) {
                     const pricing = this.calculateVehiclePrice(vehicleType, this.state.route.distance, this.state.route.duration);
-                    
+
                     if (pricing && !pricing.error) {
                         this.state.vehicle.pricing = pricing;
+                        this.state.vehicle.price = pricing.finalPrice; // Update with calculated price
                         this.state.route.price = pricing.finalPrice;
                     } else {
-                        this.state.route.price = null;
+                        // Keep carousel price if calculation fails
+                        this.state.route.price = carouselPrice || null;
                     }
                 } else {
-                    // No pricing calculation without route data
-                    this.state.route.price = null;
+                    // No route data - keep carousel price
+                    this.state.route.price = carouselPrice || null;
                 }
-                
-                // Button is always enabled - no need to control disabled state
-                // if (this.els.bookBtn) {
-                //     this.els.bookBtn.disabled = false;
-                // }
             }
             
             calculateVehiclePrice(vehicleType, distance, duration, options = {}) {
@@ -1740,10 +1811,11 @@
                         promo: this.state.promoCode
                     },
                     pricing: {
-                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.vehiclePrices?.[this.state.vehicle?.type] || this.state.vehicle.price || 55,
+                        // Price priority: calculated pricing > route price > carousel price
+                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price,
                         surge: 0,
                         discount: 0,
-                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.vehiclePrices?.[this.state.vehicle?.type] || this.state.vehicle.price || 55
+                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price
                     },
                     status: 'pending',
                     createdAt: new Date().toISOString()
@@ -1908,22 +1980,15 @@
                     hour: 'numeric', minute: '2-digit', hour12: true
                 });
 
-                // Get vehicle details
-                const vehicleName = bookingData.vehicle?.name || bookingData.vehicle?.type || 'Vehicle';
-                const vehicleType = bookingData.vehicle?.type || bookingData.vehicle?.selected || '';
+                // Get vehicle details - data flows from pricing.js > carousel > selectVehicle > bookingData
+                const vehicleName = bookingData.vehicle?.name || 'Vehicle';
+                const passengers = bookingData.vehicle?.passengers || 4;
+                const bags = bookingData.vehicle?.bags || 4;
 
-                // Vehicle capacity lookup
-                const vehicleCapacity = {
-                    tesla: { passengers: 4, bags: 4 },
-                    escalade: { passengers: 7, bags: 8 },
-                    sprinter: { passengers: 12, bags: 15 }
-                };
-                const capacity = vehicleCapacity[vehicleType] || { passengers: 4, bags: 4 };
-
-                // Get the actual calculated price
+                // Get price - priority: calculated pricing > booking total > vehicle price
                 const price = bookingData.vehicle?.pricing?.finalPrice ||
                               bookingData.pricing?.total ||
-                              bookingData.vehicle?.price || 55;
+                              bookingData.vehicle?.price;
 
                 // Build optional sections
                 const passengerInfo = bookingData.passenger?.name && bookingData.passenger.name !== 'Self'
@@ -1959,7 +2024,7 @@
 📍 From: ${bookingData.route.from}
 📍 To: ${bookingData.route.to}
 📅 ${formattedDate} at ${formattedTime}
-🚙 ${vehicleName} (${capacity.passengers} passengers, ${capacity.bags} bags)
+🚙 ${vehicleName} (${passengers} passengers, ${bags} bags)
 💰 $${price}${passengerInfo}${passengerCount}${pickupNotesText}${promoCode}
 
 Please confirm my booking!`;
@@ -1992,7 +2057,7 @@ Please confirm my booking!`;
                             </div>
                             <div class="confirmation-item">
                                 <span class="label">Capacity:</span>
-                                <span class="value">${capacity.passengers} passengers, ${capacity.bags} bags</span>
+                                <span class="value">${passengers} passengers, ${bags} bags</span>
                             </div>
                             <div class="confirmation-item">
                                 <span class="label">When:</span>
@@ -2309,8 +2374,7 @@ Please confirm my booking!`;
         const script = document.createElement('script');
         
         // Use Railway proxy for Google Maps script
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const apiUrl = isLocal ? 'http://localhost:3001/api/maps-script' : 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
+        const apiUrl = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
         
         debug.network('GET', apiUrl, { source: 'Google Maps Script' });
         script.src = apiUrl;
@@ -2482,6 +2546,23 @@ Please confirm my booking!`;
         window.addEventListener('offline', updateOnlineStatus);
         updateOnlineStatus();
     </script>
-    
+
+    <!-- Business Card Overlay Script -->
+    <script>
+        function showBooking() {
+            const overlay = document.getElementById('businessCardOverlay');
+            const booking = document.getElementById('bookingApp');
+
+            // Slide overlay up
+            overlay.style.transform = 'translateY(-100%)';
+
+            // After animation, hide overlay and show booking
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                booking.style.display = 'block';
+            }, 300);
+        }
+    </script>
+
 </body>
 </html>

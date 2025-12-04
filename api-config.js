@@ -13,13 +13,8 @@ export const API_CONFIG = {
   
   // Get Maps Proxy URL (for custom autocomplete)
   getMapsProxyUrl() {
-    // Production: Your deployed proxy server
-    if (this.isProduction) {
-      // Railway proxy server URL
-      return 'https://reliable-warmth-production-d382.up.railway.app';
-    }
-    // Local development
-    return 'http://localhost:3001';
+    // Always use production Railway proxy (no local backend needed for testing)
+    return 'https://reliable-warmth-production-d382.up.railway.app';
   },
 
   // Get API endpoints
