@@ -1595,9 +1595,23 @@
                     
                     // Store prices for later use
                     this.vehiclePrices = prices;
+
+                    // IMPORTANT: Also update selected vehicle's pricing if one is already selected
+                    if (this.state.vehicle?.type && prices[this.state.vehicle.type]) {
+                        const selectedVehiclePricing = this.calculateVehiclePrice(
+                            this.state.vehicle.type,
+                            this.state.route.distance,
+                            this.state.route.duration
+                        );
+                        if (selectedVehiclePricing && !selectedVehiclePricing.error) {
+                            this.state.vehicle.pricing = selectedVehiclePricing;
+                            this.state.route.price = selectedVehiclePricing.finalPrice;
+                            console.log('✅ Updated selected vehicle pricing:', this.state.vehicle.type, '$' + selectedVehiclePricing.finalPrice);
+                        }
+                    }
                 }
             }
-            
+
             validateVehicleCapacity() {
                 // TODO: Refactor to send capacity validation to iframe via postMessage
                 // The iframe should handle disabling vehicles that can't accommodate passengers
@@ -1726,10 +1740,10 @@
                         promo: this.state.promoCode
                     },
                     pricing: {
-                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price || 55,
+                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.vehiclePrices?.[this.state.vehicle?.type] || this.state.vehicle.price || 55,
                         surge: 0,
                         discount: 0,
-                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price || 55
+                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.vehiclePrices?.[this.state.vehicle?.type] || this.state.vehicle.price || 55
                     },
                     status: 'pending',
                     createdAt: new Date().toISOString()
