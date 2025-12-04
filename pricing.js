@@ -676,21 +676,22 @@ export class PricingService {
      * Get fallback vehicle configuration
      */
     getFallbackVehicleConfig() {
+        // Must match vehicleConfig capacity values above
         return {
-            tesla: { 
+            tesla: {
                 name: 'Tesla Model Y',
                 basePrice: 125,
-                capacity: { passengers: 4, bags: 4 } 
+                capacity: { passengers: 4, bags: 4 }
             },
-            escalade: { 
+            escalade: {
                 name: 'Cadillac Escalade',
                 basePrice: 169,
-                capacity: { passengers: 7, bags: 5 } 
+                capacity: { passengers: 7, bags: 8 }
             },
-            sprinter: { 
+            sprinter: {
                 name: 'Mercedes Sprinter',
                 basePrice: 219,
-                capacity: { passengers: 12, bags: 12 } 
+                capacity: { passengers: 12, bags: 15 }
             }
         };
     }
