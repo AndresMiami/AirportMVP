@@ -1726,10 +1726,10 @@
                         promo: this.state.promoCode
                     },
                     pricing: {
-                        base: this.state.vehicle.price || 55,
+                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price || 55,
                         surge: 0,
                         discount: 0,
-                        total: this.state.vehicle.price || 55
+                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price || 55
                     },
                     status: 'pending',
                     createdAt: new Date().toISOString()
@@ -1798,7 +1798,13 @@
             }
 
             generateTripId() {
-                return 'TRIP-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+                // Generate a short, friendly booking ID like "LM-A2B3"
+                const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars (0,O,1,I)
+                let id = '';
+                for (let i = 0; i < 4; i++) {
+                    id += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return 'LM-' + id;
             }
             
             showPaymentError(message) {
@@ -1876,7 +1882,7 @@
             }
 
             showBookingConfirmation(tripId, bookingData) {
-                // LinkMia WhatsApp Business number - UPDATE THIS TO YOUR NUMBER
+                // LinkMia WhatsApp Business number
                 const LINKMIA_WHATSAPP = '17865093955'; // Format: country code + number, no + or spaces
 
                 // Format the date/time nicely
@@ -1888,15 +1894,59 @@
                     hour: 'numeric', minute: '2-digit', hour12: true
                 });
 
-                // Create pre-filled WhatsApp message
-                const whatsappMessage = `Hi! I just booked a ride on LinkMia:
+                // Get vehicle details
+                const vehicleName = bookingData.vehicle?.name || bookingData.vehicle?.type || 'Vehicle';
+                const vehicleType = bookingData.vehicle?.type || bookingData.vehicle?.selected || '';
 
-📋 Booking: ${tripId}
+                // Vehicle capacity lookup
+                const vehicleCapacity = {
+                    tesla: { passengers: 4, bags: 4 },
+                    escalade: { passengers: 7, bags: 8 },
+                    sprinter: { passengers: 12, bags: 15 }
+                };
+                const capacity = vehicleCapacity[vehicleType] || { passengers: 4, bags: 4 };
+
+                // Get the actual calculated price
+                const price = bookingData.vehicle?.pricing?.finalPrice ||
+                              bookingData.pricing?.total ||
+                              bookingData.vehicle?.price || 55;
+
+                // Build optional sections
+                const passengerInfo = bookingData.passenger?.name && bookingData.passenger.name !== 'Self'
+                    ? `\n👤 Passenger: ${bookingData.passenger.name}`
+                    : '';
+                const passengerCount = bookingData.passenger?.count > 1
+                    ? `\n👥 Passengers: ${bookingData.passenger.count}`
+                    : '';
+
+                // Parse pickup notes object (has chauffeurNotes, pickupSign, referenceCode)
+                const notes = bookingData.passenger?.notes;
+                let pickupNotesText = '';
+                if (notes) {
+                    if (notes.chauffeurNotes) {
+                        pickupNotesText += `\n📝 Driver Notes: ${notes.chauffeurNotes}`;
+                    }
+                    if (notes.pickupSign) {
+                        pickupNotesText += `\n🪧 Pickup Sign: ${notes.pickupSign}`;
+                    }
+                    if (notes.referenceCode) {
+                        pickupNotesText += `\n🔖 Reference: ${notes.referenceCode}`;
+                    }
+                }
+
+                const promoCode = bookingData.payment?.promo
+                    ? `\n🎟️ Promo: ${bookingData.payment.promo}`
+                    : '';
+
+                // Create pre-filled WhatsApp message
+                const whatsappMessage = `Hi! I'd like to book a ride:
+
+📋 ${tripId}
 📍 From: ${bookingData.route.from}
 📍 To: ${bookingData.route.to}
 📅 ${formattedDate} at ${formattedTime}
-🚙 ${bookingData.vehicle.name}
-💰 $${bookingData.pricing.total}
+🚙 ${vehicleName} (${capacity.passengers} passengers, ${capacity.bags} bags)
+💰 $${price}${passengerInfo}${passengerCount}${pickupNotesText}${promoCode}
 
 Please confirm my booking!`;
 
@@ -1911,7 +1961,7 @@ Please confirm my booking!`;
                         <div class="confirmation-header">
                             <div class="confirmation-checkmark">✓</div>
                             <h2>Booking Submitted!</h2>
-                            <p class="confirmation-trip-id">Booking ID: ${tripId}</p>
+                            <p class="confirmation-trip-id">${tripId}</p>
                         </div>
                         <div class="confirmation-details">
                             <div class="confirmation-item">
@@ -1924,7 +1974,11 @@ Please confirm my booking!`;
                             </div>
                             <div class="confirmation-item">
                                 <span class="label">Vehicle:</span>
-                                <span class="value">${bookingData.vehicle.name}</span>
+                                <span class="value">${vehicleName}</span>
+                            </div>
+                            <div class="confirmation-item">
+                                <span class="label">Capacity:</span>
+                                <span class="value">${capacity.passengers} passengers, ${capacity.bags} bags</span>
                             </div>
                             <div class="confirmation-item">
                                 <span class="label">When:</span>
@@ -1932,7 +1986,7 @@ Please confirm my booking!`;
                             </div>
                             <div class="confirmation-item">
                                 <span class="label">Total:</span>
-                                <span class="value confirmation-price">$${bookingData.pricing.total}</span>
+                                <span class="value confirmation-price">$${price}</span>
                             </div>
                         </div>
 
