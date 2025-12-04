@@ -1726,10 +1726,10 @@
                         promo: this.state.promoCode
                     },
                     pricing: {
-                        base: this.state.vehicle.price || 55,
+                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price || 55,
                         surge: 0,
                         discount: 0,
-                        total: this.state.vehicle.price || 55
+                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price || 55
                     },
                     status: 'pending',
                     createdAt: new Date().toISOString()
@@ -1918,9 +1918,22 @@
                 const passengerCount = bookingData.passenger?.count > 1
                     ? `\n👥 Passengers: ${bookingData.passenger.count}`
                     : '';
-                const pickupNotes = bookingData.passenger?.notes
-                    ? `\n📝 Notes: ${bookingData.passenger.notes}`
-                    : '';
+
+                // Parse pickup notes object (has chauffeurNotes, pickupSign, referenceCode)
+                const notes = bookingData.passenger?.notes;
+                let pickupNotesText = '';
+                if (notes) {
+                    if (notes.chauffeurNotes) {
+                        pickupNotesText += `\n📝 Driver Notes: ${notes.chauffeurNotes}`;
+                    }
+                    if (notes.pickupSign) {
+                        pickupNotesText += `\n🪧 Pickup Sign: ${notes.pickupSign}`;
+                    }
+                    if (notes.referenceCode) {
+                        pickupNotesText += `\n🔖 Reference: ${notes.referenceCode}`;
+                    }
+                }
+
                 const promoCode = bookingData.payment?.promo
                     ? `\n🎟️ Promo: ${bookingData.payment.promo}`
                     : '';
@@ -1933,7 +1946,7 @@
 📍 To: ${bookingData.route.to}
 📅 ${formattedDate} at ${formattedTime}
 🚙 ${vehicleName} (${capacity.passengers} passengers, ${capacity.bags} bags)
-💰 $${price}${passengerInfo}${passengerCount}${pickupNotes}${promoCode}
+💰 $${price}${passengerInfo}${passengerCount}${pickupNotesText}${promoCode}
 
 Please confirm my booking!`;
 
