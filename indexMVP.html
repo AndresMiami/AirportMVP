@@ -34,7 +34,66 @@
     <link rel="stylesheet" href="css/maps-autocomplete.css?v=fix-visibility"> <!-- Maps Integration -->
 </head>
 <body>
-    <div class="app-container">
+    <!-- Business Card Overlay (shows first) -->
+    <div id="businessCardOverlay" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #1a1a1a;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        transition: transform 0.3s ease-out;
+    ">
+        <div style="text-align: center; padding: 40px 20px;">
+
+            <!-- Primary Button -->
+            <button onclick="showBooking()" style="
+                display: block;
+                width: 280px;
+                padding: 18px;
+                margin: 0 auto 20px;
+                background: linear-gradient(135deg, #FF6B35, #F7931E);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 15px rgba(255, 107, 53, 0.3);
+            ">
+                🚗 Book Airport Transfer
+            </button>
+
+            <!-- Secondary Button -->
+            <a href="https://wa.me/17865093955?text=Hi!%20I%27d%20like%20to%20book%20a%20ride"
+               target="_blank"
+               rel="noopener"
+               style="
+                display: block;
+                width: 280px;
+                padding: 18px;
+                margin: 0 auto;
+                background: #25D366;
+                color: white;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 600;
+                text-decoration: none;
+                text-align: center;
+                box-shadow: 0 4px 15px rgba(37, 211, 102, 0.3);
+            ">
+                💬 Chat on WhatsApp
+            </a>
+
+        </div>
+    </div>
+
+    <div class="app-container" id="bookingApp" style="display: none;">
         <!-- Start Search Button -->
         <button class="start-search-btn" id="startSearchBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2473,6 +2532,23 @@ Please confirm my booking!`;
         window.addEventListener('offline', updateOnlineStatus);
         updateOnlineStatus();
     </script>
-    
+
+    <!-- Business Card Overlay Script -->
+    <script>
+        function showBooking() {
+            const overlay = document.getElementById('businessCardOverlay');
+            const booking = document.getElementById('bookingApp');
+
+            // Slide overlay up
+            overlay.style.transform = 'translateY(-100%)';
+
+            // After animation, hide overlay and show booking
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                booking.style.display = 'block';
+            }, 300);
+        }
+    </script>
+
 </body>
 </html>
