@@ -3,23 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LuxeRide - Premium Airport Transfer Booking</title>
-    
+    <title>LinkMia - Miami Airport Transfers</title>
+
     <!-- PWA Meta Tags -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#FF6B35">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="LuxeRide">
-    
+    <meta name="application-name" content="LinkMia">
+
     <!-- iOS Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <meta name="apple-mobile-web-app-title" content="LuxeRide">
-    <link rel="apple-touch-icon" href="/images/icon-152x152.png">
-    
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LinkMia">
+    <link rel="apple-touch-icon" href="/images/icon-192x192.png">
+
     <!-- SEO & Social -->
-    <meta name="description" content="Premium airport transfer service in Miami. Book luxury vehicles for comfortable airport transportation.">
-    <meta property="og:title" content="LuxeRide - Premium Airport Transfer">
+    <meta name="description" content="Book luxury airport transfers in Miami. Fast, reliable, premium service.">
+    <meta property="og:title" content="LinkMia - Miami Airport Transfers">
     <meta property="og:description" content="Book luxury airport transfers in Miami">
     <meta property="og:image" content="/images/social-preview.png">
     <meta property="og:type" content="website">
@@ -89,6 +89,34 @@
             ">
                 💬 Chat on WhatsApp
             </a>
+
+            <!-- Install App Button (hidden by default, shown when installable) -->
+            <button id="installBtn" onclick="installApp()" style="
+                display: none;
+                width: 280px;
+                padding: 16px;
+                margin: 24px auto 0;
+                background: transparent;
+                color: #888;
+                border: 1px solid #444;
+                border-radius: 12px;
+                font-size: 16px;
+                font-weight: 500;
+                cursor: pointer;
+            ">
+                📲 Add to Home Screen
+            </button>
+
+            <!-- iOS Install Hint -->
+            <p id="iosInstallHint" style="
+                display: none;
+                margin-top: 24px;
+                color: #666;
+                font-size: 14px;
+                line-height: 1.5;
+            ">
+                Tap <span style="color: #007AFF;">Share</span> then <span style="color: #007AFF;">"Add to Home Screen"</span>
+            </p>
 
         </div>
     </div>
@@ -2549,6 +2577,44 @@ Please confirm my booking!`;
 
     <!-- Business Card Overlay Script -->
     <script>
+        // PWA Install prompt
+        let deferredPrompt;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            // Prevent default install prompt
+            e.preventDefault();
+            // Save the event for later
+            deferredPrompt = e;
+            // Show install button
+            document.getElementById('installBtn').style.display = 'block';
+        });
+
+        // Check if iOS and show hint
+        window.addEventListener('DOMContentLoaded', () => {
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+
+            if (isIOS && !isStandalone) {
+                document.getElementById('iosInstallHint').style.display = 'block';
+            }
+        });
+
+        function installApp() {
+            if (!deferredPrompt) return;
+
+            // Show the install prompt
+            deferredPrompt.prompt();
+
+            // Wait for user response
+            deferredPrompt.userChoice.then((choiceResult) => {
+                if (choiceResult.outcome === 'accepted') {
+                    console.log('User accepted install');
+                }
+                deferredPrompt = null;
+                document.getElementById('installBtn').style.display = 'none';
+            });
+        }
+
         function showBooking() {
             const overlay = document.getElementById('businessCardOverlay');
             const booking = document.getElementById('bookingApp');

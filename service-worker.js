@@ -1,10 +1,10 @@
 /**
- * Service Worker for LuxeRide PWA
+ * Service Worker for LinkMia PWA
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'luxeride-v1.0.2';
-const RUNTIME_CACHE = 'luxeride-runtime';
+const CACHE_NAME = 'linkmia-v1.0.0';
+const RUNTIME_CACHE = 'linkmia-runtime';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
@@ -80,7 +80,7 @@ self.addEventListener('activate', (event) => {
         return Promise.all(
           cacheNames
             .filter((cacheName) => {
-              return cacheName.startsWith('luxeride-') && cacheName !== CACHE_NAME;
+              return (cacheName.startsWith('linkmia-') || cacheName.startsWith('luxeride-')) && cacheName !== CACHE_NAME;
             })
             .map((cacheName) => {
               console.log('[Service Worker] Deleting old cache:', cacheName);
@@ -267,7 +267,7 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification('LuxeRide', options)
+    self.registration.showNotification('LinkMia', options)
   );
 });
 
