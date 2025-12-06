@@ -522,6 +522,12 @@
                 this.bindEvents();
                 this.initializeDateTime();
                 console.log('✅ AirportBookingApp setup complete');
+
+                // Auto-start booking if coming from landing page or PWA
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('book') === '1') {
+                    this.startBooking();
+                }
             }
             
             cacheElements() {
