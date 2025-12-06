@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Where+When Combined Panel - Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
+        }
+
+        .mockup-label {
+            background: #FF6B35;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 768px) {
+            .comparison {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel-wrapper {
+            background: #242424;
+            border-radius: 16px;
+            padding: 20px;
+        }
+
+        .panel-title {
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .progress-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .step-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #333;
+            color: #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .step-number.active {
+            background: #FF6B35;
+            color: white;
+        }
+
+        .step-number.completed {
+            background: #25D366;
+            color: white;
+        }
+
+        .step-label {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .step-label.active {
+            color: #FF6B35;
+        }
+
+        .progress-line {
+            width: 40px;
+            height: 2px;
+            background: #333;
+            margin-bottom: 20px;
+        }
+
+        /* Mode Selector */
+        .mode-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .mode-btn {
+            padding: 14px;
+            background: #333;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            color: #888;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .mode-btn.active {
+            background: rgba(255, 107, 53, 0.15);
+            border-color: #FF6B35;
+            color: white;
+        }
+
+        .mode-icon {
+            font-size: 20px;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .mode-text {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* Input Field */
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        .input-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 14px 16px;
+            background: #333;
+            border: 1px solid #444;
+            border-radius: 10px;
+            color: white;
+            font-size: 15px;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #FF6B35;
+        }
+
+        .input-field::placeholder {
+            color: #666;
+        }
+
+        /* Date/Time Row */
+        .datetime-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .datetime-field {
+            padding: 12px;
+            background: #333;
+            border: 1px solid #444;
+            border-radius: 10px;
+            color: white;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        /* Continue Button */
+        .continue-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #FF6B35, #F7931E);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        .continue-btn:disabled {
+            background: #444;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        /* Step indicator for current */
+        .step-indicator {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 16px;
+        }
+
+        /* Benefits callout */
+        .benefits {
+            background: rgba(37, 211, 102, 0.1);
+            border: 1px solid rgba(37, 211, 102, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 30px;
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .benefits h3 {
+            color: #25D366;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        .benefits ul {
+            list-style: none;
+            color: #aaa;
+            font-size: 13px;
+        }
+
+        .benefits li {
+            padding: 4px 0;
+        }
+
+        .benefits li::before {
+            content: "✓ ";
+            color: #25D366;
+        }
+
+        /* Strike through for old */
+        .old-flow {
+            opacity: 0.6;
+        }
+
+        .old-flow .panel-title::after {
+            content: " (Current - 3 steps)";
+            color: #ff6b6b;
+        }
+
+        .new-flow .panel-title::after {
+            content: " (Proposed - 2 steps)";
+            color: #25D366;
+        }
+    </style>
+</head>
+<body>
+    <div style="text-align: center; margin-bottom: 30px;">
+        <span class="mockup-label">MOCKUP - Not Live</span>
+        <h1 style="font-size: 24px; margin-top: 10px;">Where + When Combined Panel</h1>
+        <p style="color: #888; margin-top: 8px;">Compare current 3-step flow vs proposed 2-step flow</p>
+    </div>
+
+    <div class="comparison">
+        <!-- CURRENT: 3 Steps -->
+        <div class="panel-wrapper old-flow">
+            <div class="panel-title">Current Flow</div>
+
+            <div class="progress-bar">
+                <div class="progress-step">
+                    <span class="step-number active">1</span>
+                    <span class="step-label active">Where</span>
+                </div>
+                <div class="progress-line"></div>
+                <div class="progress-step">
+                    <span class="step-number">2</span>
+                    <span class="step-label">When</span>
+                </div>
+                <div class="progress-line"></div>
+                <div class="progress-step">
+                    <span class="step-number">3</span>
+                    <span class="step-label">Vehicle</span>
+                </div>
+            </div>
+
+            <div class="mode-selector">
+                <button class="mode-btn active">
+                    <span class="mode-icon">🛫</span>
+                    <span class="mode-text">To Airport</span>
+                </button>
+                <button class="mode-btn">
+                    <span class="mode-icon">🛬</span>
+                    <span class="mode-text">From Airport</span>
+                </button>
+            </div>
+
+            <div class="input-group">
+                <input type="text" class="input-field" placeholder="Enter pickup address...">
+            </div>
+
+            <button class="continue-btn" disabled>Continue to When →</button>
+
+            <p class="step-indicator">Step 1 of 3</p>
+        </div>
+
+        <!-- NEW: 2 Steps -->
+        <div class="panel-wrapper new-flow">
+            <div class="panel-title">Proposed Flow</div>
+
+            <div class="progress-bar">
+                <div class="progress-step">
+                    <span class="step-number active">1</span>
+                    <span class="step-label active">Details</span>
+                </div>
+                <div class="progress-line"></div>
+                <div class="progress-step">
+                    <span class="step-number">2</span>
+                    <span class="step-label">Vehicle</span>
+                </div>
+            </div>
+
+            <div class="mode-selector">
+                <button class="mode-btn active">
+                    <span class="mode-icon">🛫</span>
+                    <span class="mode-text">To Airport</span>
+                </button>
+                <button class="mode-btn">
+                    <span class="mode-icon">🛬</span>
+                    <span class="mode-text">From Airport</span>
+                </button>
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Pickup Location</label>
+                <input type="text" class="input-field" placeholder="Enter address, hotel, or landmark...">
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Pickup Date & Time</label>
+                <div class="datetime-row">
+                    <input type="text" class="datetime-field" value="Dec 15, 2024">
+                    <input type="text" class="datetime-field" value="10:30 AM">
+                </div>
+            </div>
+
+            <button class="continue-btn">Choose Your Vehicle →</button>
+
+            <p class="step-indicator">Step 1 of 2</p>
+        </div>
+    </div>
+
+    <div class="benefits">
+        <h3>Benefits of Combined Where+When</h3>
+        <ul>
+            <li><strong>33% fewer steps</strong> - 2 screens instead of 3</li>
+            <li><strong>Faster booking</strong> - Users see all required info at once</li>
+            <li><strong>Less cognitive load</strong> - One decision point, not two</li>
+            <li><strong>Better mobile UX</strong> - Fewer page transitions</li>
+            <li><strong>Natural grouping</strong> - "Where & When" is how people think about trips</li>
+        </ul>
+    </div>
+
+    <div style="max-width: 900px; margin: 30px auto; padding: 20px; background: #242424; border-radius: 12px;">
+        <h3 style="color: #FF6B35; margin-bottom: 16px;">Implementation Notes</h3>
+        <ul style="color: #aaa; font-size: 14px; line-height: 1.8; list-style: disc; padding-left: 20px;">
+            <li>Merge WHERE and WHEN panels into single "Details" panel</li>
+            <li>Date/time pickers inline below address input</li>
+            <li>Progress bar updates to 2 steps: Details → Vehicle</li>
+            <li>Single Continue button validates both address AND date/time</li>
+            <li>Keep the airport selector and flight info fields as-is</li>
+            <li>Calendar can be a compact date picker or scrollable date buttons</li>
+        </ul>
+    </div>
+
+    <div style="text-align: center; margin-top: 30px; color: #666; font-size: 13px;">
+        <p>Open this file in your browser: <code style="background: #333; padding: 4px 8px; border-radius: 4px;">mockup-where-when.html</code></p>
+    </div>
+</body>
+</html>
