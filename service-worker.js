@@ -3,11 +3,12 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'linkmia-v1.0.0';
+const CACHE_NAME = 'linkmia-v1.1.0';
 const RUNTIME_CACHE = 'linkmia-runtime';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
+  '/index.html',
   '/indexMVP.html',
   '/offline.html',
   '/css/style.css',

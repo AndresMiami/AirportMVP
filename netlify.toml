@@ -41,10 +41,10 @@
   to = "/.netlify/functions/track-flight"
   status = 200
 
-# Redirect root to indexMVP.html
+# Redirect root to landing page
 [[redirects]]
   from = "/"
-  to = "/indexMVP.html"
+  to = "/index.html"
   status = 200
 
 # Allow all static assets to be served directly
