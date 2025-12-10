@@ -24,6 +24,11 @@
     <meta property="og:image" content="/images/social-preview.png">
     <meta property="og:type" content="website">
 
+    <!-- Performance: Preconnect to Railway proxy for faster Google Maps loading -->
+    <link rel="preconnect" href="https://reliable-warmth-production-d382.up.railway.app" crossorigin>
+    <link rel="dns-prefetch" href="https://reliable-warmth-production-d382.up.railway.app">
+    <link rel="prefetch" href="https://reliable-warmth-production-d382.up.railway.app/api/maps-script" as="script">
+
     <style>
         * {
             margin: 0;
@@ -225,6 +230,22 @@
             navigator.serviceWorker.register('/service-worker.js')
                 .then(reg => console.log('SW registered'))
                 .catch(err => console.log('SW registration failed:', err));
+        }
+
+        // Performance: Preload Google Maps script on hover/touch of Book button
+        // Gives ~200-400ms head start before user actually clicks
+        const bookBtn = document.querySelector('.btn-primary');
+        if (bookBtn) {
+            const preloadMaps = () => {
+                const link = document.createElement('link');
+                link.rel = 'preload';
+                link.href = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
+                link.as = 'script';
+                document.head.appendChild(link);
+                console.log('🚀 Preloading Google Maps script');
+            };
+            bookBtn.addEventListener('mouseenter', preloadMaps, { once: true });
+            bookBtn.addEventListener('touchstart', preloadMaps, { once: true, passive: true });
         }
     </script>
 </body>
