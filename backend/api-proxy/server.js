@@ -511,7 +511,8 @@ app.get('/api/maps-script', async (req, res) => {
       key: process.env.GOOGLE_MAPS_API_KEY,
       v: 'weekly',
       libraries: 'places',
-      callback: 'initGoogleMaps'
+      callback: 'initGoogleMaps',
+      loading: 'async'  // Fix Google Maps async loading warning
     });
     
     const response = await axios.get(`${mapsUrl}?${params}`, {
