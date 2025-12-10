@@ -566,7 +566,10 @@
                 debug.info(`Found ${this.els.modeBtns.length} mode buttons, ${this.els.airportOptions.length} airport options`);
             }
             
-            async initializeAutocomplete() {
+            async initializeAutocomplete(retryCount = 0) {
+                const MAX_RETRIES = 5;
+                const RETRY_DELAY = 500; // ms
+
                 try {
                     // Check if required elements exist
                     if (!this.els.addressInput) {
@@ -577,10 +580,18 @@
                         debug.warn('Cannot initialize autocomplete: autocompleteDropdown element not found');
                         return;
                     }
-                
-                    
-                    if (!google || !google.maps) {
-                        throw new Error('Google Maps not loaded');
+
+                    // Wait for Google Maps to load with retry mechanism
+                    if (typeof google === 'undefined' || !google.maps) {
+                        if (retryCount < MAX_RETRIES) {
+                            console.log(`⏳ Google Maps not ready, retrying in ${RETRY_DELAY}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+                            if (this.els.addressInput) {
+                                this.els.addressInput.placeholder = 'Loading maps...';
+                            }
+                            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                            return this.initializeAutocomplete(retryCount + 1);
+                        }
+                        throw new Error('Google Maps not loaded after retries');
                     }
                     
                     // Show loading state
@@ -652,14 +663,12 @@
             }
             
             bindEvents() {
-                // Lazy load autocomplete on first interaction
-                let autocompleteLoaded = false;
+                // Lazy load autocomplete on first interaction (with retry support)
                 this.els.addressInput?.addEventListener('focus', async () => {
-                    if (!autocompleteLoaded && !this.autocomplete) {
-                        autocompleteLoaded = true;
+                    if (!this.autocomplete) {
                         await this.initializeAutocomplete();
                     }
-                }, { once: true });
+                });
                 
                 this.els.startSearchBtn?.addEventListener('click', () => this.startBooking());
                 
