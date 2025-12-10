@@ -61,6 +61,33 @@ export class CustomAutocomplete {
         this.input.addEventListener('blur', () => this.handleBlur());
     }
 
+    // Fetch with timeout for slow networks
+    async fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+            console.warn('⏱️ Request timed out after', timeoutMs, 'ms');
+            if (window.showNetworkWarning) {
+                window.showNetworkWarning('Request taking too long. Please check your connection.');
+            }
+        }, timeoutMs);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error('Request timed out');
+            }
+            throw error;
+        }
+    }
+
     // Session token management
     generateSessionToken() {
         this.sessionToken = 'sess_' + Math.random().toString(36).substr(2, 9);
@@ -244,11 +271,11 @@ export class CustomAutocomplete {
             });
             
             console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
-            
+
             // Use Railway proxy for autocomplete
             // For local testing, use production proxy (localhost:3001 requires running backend locally)
             const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
-            const response = await fetch(`${apiBase}/api/places/autocomplete?${params}`);
+            const response = await this.fetchWithTimeout(`${apiBase}/api/places/autocomplete?${params}`, {}, 10000);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch suggestions');
@@ -341,7 +368,7 @@ export class CustomAutocomplete {
                 // Use Railway proxy for place details
                 // For local testing, use production proxy (localhost:3001 requires running backend locally)
                 const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
-                const response = await fetch(`${apiBase}/api/places/details?${params}`);
+                const response = await this.fetchWithTimeout(`${apiBase}/api/places/details?${params}`, {}, 10000);
 
                 if (response.ok) {
                     const data = await response.json();
