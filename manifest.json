@@ -2,7 +2,7 @@
   "name": "LinkMia - Miami Airport Transfers",
   "short_name": "LinkMia",
   "description": "Book luxury airport transfers in Miami. Fast, reliable, premium service.",
-  "start_url": "/indexMVP.html?book=1",
+  "start_url": "/index.html",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#1a1a1a",
