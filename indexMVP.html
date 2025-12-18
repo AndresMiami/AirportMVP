@@ -2032,6 +2032,7 @@ Please confirm my booking!`;
                 confirmationElement.className = 'booking-confirmation';
                 confirmationElement.innerHTML = `
                     <div class="confirmation-content">
+                        <button class="confirmation-close-btn" id="confirmationCloseBtn" title="Go back and edit">✕</button>
                         <div class="confirmation-header">
                             <div class="confirmation-checkmark">✓</div>
                             <h2>Booking Submitted!</h2>
@@ -2081,6 +2082,31 @@ Please confirm my booking!`;
                 // Add WhatsApp button styles
                 const whatsappStyles = document.createElement('style');
                 whatsappStyles.textContent = `
+                    .confirmation-content {
+                        position: relative;
+                    }
+                    .confirmation-close-btn {
+                        position: absolute;
+                        top: 12px;
+                        right: 12px;
+                        width: 36px;
+                        height: 36px;
+                        border: none;
+                        background: rgba(255, 255, 255, 0.1);
+                        color: #8E8E93;
+                        font-size: 18px;
+                        border-radius: 50%;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.2s ease;
+                        z-index: 10;
+                    }
+                    .confirmation-close-btn:hover {
+                        background: rgba(255, 255, 255, 0.2);
+                        color: #FFFFFF;
+                    }
                     .confirmation-checkmark {
                         width: 60px;
                         height: 60px;
@@ -2156,10 +2182,25 @@ Please confirm my booking!`;
 
                 document.body.appendChild(confirmationElement);
 
+                // Close button - allows user to go back and edit trip details
+                const closeBtn = document.getElementById('confirmationCloseBtn');
+                closeBtn.addEventListener('click', () => {
+                    confirmationElement.remove();
+                    // Don't reload - user can edit and resubmit
+                });
+
+                // Done button - resets form for new booking
                 const doneBtn = document.getElementById('confirmationDoneBtn');
                 doneBtn.addEventListener('click', () => {
                     confirmationElement.remove();
                     window.location.reload();
+                });
+
+                // Also close on backdrop click
+                confirmationElement.addEventListener('click', (e) => {
+                    if (e.target === confirmationElement) {
+                        confirmationElement.remove();
+                    }
                 });
             }
             

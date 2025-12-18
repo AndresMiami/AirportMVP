@@ -404,9 +404,9 @@ class PassengerModal {
             <div id="passengerSelectionModal" class="passenger-full-modal">
                 <div class="passenger-modal-panel">
                     <div class="passenger-modal-header">
-                        <div style="width: 40px;"></div>
+                        <button class="passenger-modal-back-btn" onclick="PassengerModal.getInstance().close()" id="passengerBackBtn">←</button>
                         <h2>Who's traveling?</h2>
-                        <button class="passenger-modal-back-btn" onclick="PassengerModal.getInstance().close()" style="display: none;" id="passengerCloseBtn">✕</button>
+                        <button class="passenger-modal-back-btn" onclick="PassengerModal.getInstance().close()" id="passengerCloseBtn">✕</button>
                     </div>
 
                     <div class="passenger-modal-content-section">
@@ -572,11 +572,10 @@ class PassengerModal {
     }
 
     // Open modal and require completion before proceeding
+    // Note: User can still close and go back to edit trip details
     openRequired(onComplete) {
         this.open(onComplete);
-        // Hide close button since this is required
-        const closeBtn = document.getElementById('passengerCloseBtn');
-        if (closeBtn) closeBtn.style.display = 'none';
+        // Keep close button visible so user can go back to edit trip
     }
 
     // Close passenger selection modal
