@@ -7,7 +7,9 @@ class PassengerModal {
     constructor() {
         this.selectedType = 'myself';
         this.guestData = null;
+        this.userData = null;  // User's own data (name, phone)
         this.isInitialized = false;
+        this.onComplete = null;  // Callback when user completes the form
     }
 
     init() {
@@ -359,6 +361,17 @@ class PassengerModal {
                     transform: scale(0.98);
                 }
 
+                /* Form Section */
+                .passenger-form-section {
+                    margin-top: 24px;
+                    padding-top: 24px;
+                    border-top: 1px solid #3A3A3C;
+                }
+
+                .passenger-form-section.hidden {
+                    display: none;
+                }
+
                 /* Mobile optimizations */
                 @media (max-width: 480px) {
                     .passenger-modal-panel {
@@ -390,33 +403,68 @@ class PassengerModal {
             <!-- Passenger Selection Modal -->
             <div id="passengerSelectionModal" class="passenger-full-modal">
                 <div class="passenger-modal-panel">
-                    <div class="passenger-modal-map-section">
-                        <div id="passengerModalMap" class="passenger-modal-map"></div>
+                    <div class="passenger-modal-header">
+                        <div style="width: 40px;"></div>
+                        <h2>Who's traveling?</h2>
+                        <button class="passenger-modal-back-btn" onclick="PassengerModal.getInstance().close()" style="display: none;" id="passengerCloseBtn">✕</button>
                     </div>
-                    
+
                     <div class="passenger-modal-content-section">
-                        <div class="passenger-booking-option-card">
-                            <div class="passenger-option-icon">
-                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FFFFFF' stroke-width='2'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E" alt="Person icon">
-                            </div>
-                            <div class="passenger-option-content">
-                                <h3>Booking a ride for someone else?</h3>
-                                <p>Arrange their ride in a few taps, and we'll keep them informed every step of the way.</p>
-                                <a href="#" class="passenger-learn-more-link" onclick="event.preventDefault()">Learn more</a>
-                            </div>
-                        </div>
-                        
                         <div class="passenger-booking-options">
-                            <button class="passenger-booking-option-btn active" onclick="PassengerModal.getInstance().selectBookingType('myself')">
+                            <button class="passenger-booking-option-btn active" data-type="myself" onclick="PassengerModal.getInstance().selectBookingType('myself')">
                                 <span class="passenger-option-radio">●</span>
                                 <span class="passenger-option-text">Book for myself</span>
                             </button>
-                            
-                            <button class="passenger-booking-option-btn" onclick="PassengerModal.getInstance().openAddGuestModal()">
-                                <span class="passenger-option-icon-plus">+</span>
-                                <span class="passenger-option-text">Add guest</span>
+
+                            <button class="passenger-booking-option-btn" data-type="guest" onclick="PassengerModal.getInstance().selectBookingType('guest')">
+                                <span class="passenger-option-radio">●</span>
+                                <span class="passenger-option-text">Book for someone else</span>
                                 <span class="passenger-option-arrow">›</span>
                             </button>
+                        </div>
+
+                        <!-- For Myself Form -->
+                        <div id="myselfFormSection" class="passenger-form-section">
+                            <div class="passenger-info-notes" style="margin-bottom: 20px;">
+                                <div class="passenger-info-note">
+                                    <span class="passenger-info-icon">ℹ️</span>
+                                    <p>We need your contact info to confirm your booking and send ride updates.</p>
+                                </div>
+                            </div>
+
+                            <form id="myselfForm" onsubmit="PassengerModal.getInstance().saveMyself(event)">
+                                <div class="passenger-form-group">
+                                    <label for="userFirstName">First name *</label>
+                                    <input type="text" id="userFirstName" class="passenger-form-input" placeholder="Enter your first name" required>
+                                </div>
+
+                                <div class="passenger-form-group">
+                                    <label for="userLastName">Last name</label>
+                                    <input type="text" id="userLastName" class="passenger-form-input" placeholder="Enter your last name (optional)">
+                                </div>
+
+                                <div class="passenger-form-row">
+                                    <div class="passenger-form-group" style="flex: 0 0 100px;">
+                                        <label for="userCountryCode">Code</label>
+                                        <select id="userCountryCode" class="passenger-form-select">
+                                            <option value="+1">+1</option>
+                                            <option value="+44">+44</option>
+                                            <option value="+33">+33</option>
+                                            <option value="+49">+49</option>
+                                            <option value="+34">+34</option>
+                                            <option value="+52">+52</option>
+                                        </select>
+                                    </div>
+                                    <div class="passenger-form-group" style="flex: 1;">
+                                        <label for="userPhone">Phone number *</label>
+                                        <input type="tel" id="userPhone" class="passenger-form-input" placeholder="(305) 555-0123" required>
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="passenger-modal-action-btn" id="myselfSubmitBtn">
+                                    Continue to Booking
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -498,14 +546,37 @@ class PassengerModal {
     }
 
     // Open passenger selection modal
-    open() {
+    open(onComplete = null) {
         this.init();
+        this.onComplete = onComplete;
+
         const modal = document.getElementById('passengerSelectionModal');
         if (modal) {
             modal.style.display = 'flex';
             setTimeout(() => modal.classList.add('active'), 10);
             this.updateModalInfo();
+
+            // Pre-fill form if user data already exists
+            if (this.userData) {
+                const firstNameInput = document.getElementById('userFirstName');
+                const lastNameInput = document.getElementById('userLastName');
+                const countryCodeSelect = document.getElementById('userCountryCode');
+                const phoneInput = document.getElementById('userPhone');
+
+                if (firstNameInput) firstNameInput.value = this.userData.firstName || '';
+                if (lastNameInput) lastNameInput.value = this.userData.lastName || '';
+                if (countryCodeSelect) countryCodeSelect.value = this.userData.countryCode || '+1';
+                if (phoneInput) phoneInput.value = this.userData.phone || '';
+            }
         }
+    }
+
+    // Open modal and require completion before proceeding
+    openRequired(onComplete) {
+        this.open(onComplete);
+        // Hide close button since this is required
+        const closeBtn = document.getElementById('passengerCloseBtn');
+        if (closeBtn) closeBtn.style.display = 'none';
     }
 
     // Close passenger selection modal
@@ -522,18 +593,66 @@ class PassengerModal {
     // Select booking type
     selectBookingType(type) {
         this.selectedType = type;
-        
+
         // Update button states
         const buttons = document.querySelectorAll('.passenger-booking-option-btn');
         buttons.forEach(btn => {
             btn.classList.remove('active');
+            if (btn.dataset.type === type) {
+                btn.classList.add('active');
+            }
         });
-        
+
+        // Show/hide form section based on selection
+        const myselfForm = document.getElementById('myselfFormSection');
+
         if (type === 'myself') {
-            buttons[0]?.classList.add('active');
+            // Show the myself form
+            if (myselfForm) myselfForm.classList.remove('hidden');
             this.guestData = null;
-            this.close();
-            this.updatePassengerButton();
+        } else if (type === 'guest') {
+            // Hide myself form and open guest modal
+            if (myselfForm) myselfForm.classList.add('hidden');
+            this.openAddGuestModal();
+        }
+    }
+
+    // Save user's own information (For Myself)
+    saveMyself(event) {
+        event.preventDefault();
+
+        const firstName = document.getElementById('userFirstName').value.trim();
+        const lastName = document.getElementById('userLastName').value.trim();
+        const countryCode = document.getElementById('userCountryCode').value;
+        const phone = document.getElementById('userPhone').value.trim();
+
+        if (!firstName || !phone) {
+            alert('Please enter your name and phone number');
+            return;
+        }
+
+        this.userData = {
+            firstName,
+            lastName,
+            countryCode,
+            phone,
+            fullPhone: `${countryCode} ${phone}`,
+            fullName: lastName ? `${firstName} ${lastName}` : firstName
+        };
+
+        console.log('✅ User data saved:', this.userData);
+
+        // Close modal and trigger callback
+        this.close();
+
+        // Dispatch event for app state sync
+        window.dispatchEvent(new CustomEvent('passengerDataChanged', {
+            detail: { type: 'myself', userData: this.userData }
+        }));
+
+        // Call the completion callback if set
+        if (this.onComplete) {
+            this.onComplete(this.userData);
         }
     }
 
@@ -567,14 +686,14 @@ class PassengerModal {
     // Save guest information
     saveGuest(event) {
         event.preventDefault();
-        
+
         const title = document.getElementById('guestTitle').value;
         const firstName = document.getElementById('guestFirstName').value;
         const lastName = document.getElementById('guestLastName').value;
         const email = document.getElementById('guestEmail').value;
         const countryCode = document.getElementById('countryCode').value;
         const phone = document.getElementById('guestPhone').value;
-        
+
         this.guestData = {
             title,
             firstName,
@@ -584,7 +703,12 @@ class PassengerModal {
             phone,
             fullName: `${title} ${firstName} ${lastName}`
         };
-        
+
+        this.selectedType = 'guest';
+        this.userData = null;  // Clear user data when booking for guest
+
+        console.log('✅ Guest data saved:', this.guestData);
+
         // Close modal
         const modal = document.getElementById('addGuestModal');
         if (modal) {
@@ -593,9 +717,19 @@ class PassengerModal {
                 modal.style.display = 'none';
             }, 300);
         }
-        
+
         // Update passenger button
         this.updatePassengerButton();
+
+        // Dispatch event for app state sync
+        window.dispatchEvent(new CustomEvent('passengerDataChanged', {
+            detail: { type: 'guest', guestData: this.guestData }
+        }));
+
+        // Call the completion callback if set
+        if (this.onComplete) {
+            this.onComplete(this.guestData);
+        }
     }
 
     // Update passenger button display
@@ -629,10 +763,33 @@ class PassengerModal {
 
     // Get selected passenger data
     getPassengerData() {
-        if (this.selectedType === 'myself') {
-            return { type: 'myself' };
-        } else if (this.guestData) {
+        if (this.selectedType === 'myself' && this.userData) {
+            return { type: 'myself', data: this.userData };
+        } else if (this.selectedType === 'guest' && this.guestData) {
             return { type: 'guest', data: this.guestData };
+        }
+        return null;
+    }
+
+    // Check if user has completed the form
+    hasUserData() {
+        return !!(this.userData || this.guestData);
+    }
+
+    // Get the contact info for WhatsApp message
+    getContactInfo() {
+        if (this.userData) {
+            return {
+                name: this.userData.fullName,
+                phone: this.userData.fullPhone,
+                type: 'booker'
+            };
+        } else if (this.guestData) {
+            return {
+                name: this.guestData.fullName,
+                phone: `${this.guestData.countryCode} ${this.guestData.phone}`,
+                type: 'guest'
+            };
         }
         return null;
     }

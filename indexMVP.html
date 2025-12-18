@@ -685,7 +685,7 @@
                 this.els.summaryBackBtn?.addEventListener('click', () => this.goBackFromSummary());
                 this.els.vehicleSelectionBtn?.addEventListener('click', () => this.navigateToPanel('vehicle'));
                 this.els.vehicleBackBtn?.addEventListener('click', () => this.navigateToPanel('when'));
-                this.els.bookBtn?.addEventListener('click', () => this.confirmBooking());
+                this.els.bookBtn?.addEventListener('click', () => this.handleBookingClick());
                 this.els.editRouteBtn?.addEventListener('click', () => this.navigateToPanel('where'));
                 
                 // Vehicle card clicks now handled via iframe postMessage
@@ -1730,6 +1730,24 @@
                 }
             }
             
+            // Handle booking button click - open passenger modal first
+            handleBookingClick() {
+                const passengerModal = PassengerModal.getInstance();
+
+                // Check if we already have user data
+                if (passengerModal.hasUserData()) {
+                    // User already provided info, proceed to booking
+                    this.confirmBooking();
+                } else {
+                    // Open passenger modal to collect user info
+                    passengerModal.openRequired(() => {
+                        // User completed the form, now proceed to booking
+                        console.log('✅ User info collected, proceeding to booking');
+                        this.confirmBooking();
+                    });
+                }
+            }
+
             async confirmBooking() {
                 // ========== PAYMENT CONFIGURATION ==========
                 // Set to false to skip Stripe payment (handle via WhatsApp/CashApp/Zelle)
@@ -1738,13 +1756,28 @@
                 // ============================================
 
                 const tripId = this.generateTripId();
+
+                // Get contact info from passenger modal
+                const passengerModal = PassengerModal.getInstance();
+                const contactInfo = passengerModal.getContactInfo();
+                const passengerData = passengerModal.getPassengerData();
+
                 const bookingData = {
                     tripId: tripId,
+                    booker: {
+                        name: contactInfo?.name || 'Unknown',
+                        phone: contactInfo?.phone || 'Not provided',
+                        type: contactInfo?.type || 'booker'
+                    },
                     passenger: {
-                        name: this.state.guestData ? `${this.state.guestData.firstName} ${this.state.guestData.lastName}` : "Self",
-                        guestData: this.state.guestData,
+                        name: passengerData?.type === 'guest'
+                            ? passengerData.data.fullName
+                            : contactInfo?.name || 'Self',
+                        guestData: passengerData?.type === 'guest' ? passengerData.data : null,
                         count: this.state.passengers,
-                        phone: this.state.guestData?.phone || "+1 (555) 123-4567",
+                        phone: passengerData?.type === 'guest'
+                            ? `${passengerData.data.countryCode} ${passengerData.data.phone}`
+                            : contactInfo?.phone || 'Not provided',
                         notes: this.state.pickupNotes
                     },
                     driver: {
@@ -1946,9 +1979,13 @@
                               bookingData.pricing?.total ||
                               bookingData.vehicle?.price;
 
+                // Build booker info section (always included now)
+                const bookerName = bookingData.booker?.name || 'Unknown';
+                const bookerPhone = bookingData.booker?.phone || 'Not provided';
+
                 // Build optional sections
-                const passengerInfo = bookingData.passenger?.name && bookingData.passenger.name !== 'Self'
-                    ? `\n👤 Passenger: ${bookingData.passenger.name}`
+                const guestInfo = bookingData.booker?.type === 'guest' && bookingData.passenger?.name
+                    ? `\n👤 Guest: ${bookingData.passenger.name} (${bookingData.passenger.phone})`
                     : '';
                 const passengerCount = bookingData.passenger?.count > 1
                     ? `\n👥 Passengers: ${bookingData.passenger.count}`
@@ -1973,15 +2010,17 @@
                     ? `\n🎟️ Promo: ${bookingData.payment.promo}`
                     : '';
 
-                // Create pre-filled WhatsApp message
+                // Create pre-filled WhatsApp message with booker info
                 const whatsappMessage = `Hi! I'd like to book a ride:
 
 📋 ${tripId}
+👤 ${bookerName}
+📱 ${bookerPhone}
 📍 From: ${bookingData.route.from}
 📍 To: ${bookingData.route.to}
 📅 ${formattedDate} at ${formattedTime}
 🚙 ${vehicleName} (${passengers} passengers, ${bags} bags)
-💰 $${price}${passengerInfo}${passengerCount}${pickupNotesText}${promoCode}
+💰 $${price}${guestInfo}${passengerCount}${pickupNotesText}${promoCode}
 
 Please confirm my booking!`;
 
