@@ -19,8 +19,7 @@
 | API Proxy | Express.js on Railway | Google Maps proxy with caching |
 | Database | Supabase PostgreSQL | 6 tables, views, RLS enabled |
 | Payments | Stripe (test mode) | Fully integrated, disabled in flow |
-| WhatsApp | Twilio (outbound only) | Sends admin notifications |
-| Email | SendGrid (outbound only) | Backup notifications |
+| Telegram | Telegram Bot API | Passenger + driver + admin messaging |
 | Maps | Google Maps via Railway proxy | Autocomplete, directions, geocoding |
 
 ### Database Schema (Supabase)
@@ -46,7 +45,7 @@
 
 | Function | Endpoint | Status | What It Does |
 |----------|----------|--------|-------------|
-| `create-booking.js` | POST `/api/create-booking` | **Working** | Creates booking + WhatsApp notification + email backup |
+| `create-booking.js` | POST `/api/create-booking` | **Working** | Creates booking + Telegram admin notification |
 | `calculate-price.js` | POST `/api/calculate-price` | **Working** | Server-side pricing (prevents tampering) |
 | `create-payment-intent.js` | POST `/api/create-payment-intent` | **Working** | Stripe PaymentIntent creation |
 | `create-payment.js` | POST `/api/create-payment` | **Working** | Duplicate of above |
@@ -90,11 +89,9 @@ Features: Rate limiting (100 req/15 min), in-memory caching, CORS, pre-cached ai
 
 ### Existing Integrations
 
-**Stripe:** Fully integrated. Test key `pk_test_51R05aBI...`. PaymentIntents, Checkout Sessions, Apple Pay. Currently disabled (`REQUIRE_PAYMENT = false`) — payments handled manually via WhatsApp.
+**Stripe:** Fully integrated. Test key `pk_test_51R05aBI...`. PaymentIntents, Checkout Sessions, Apple Pay. Currently disabled (`REQUIRE_PAYMENT = false`) — payments handled manually via Telegram.
 
-**Twilio WhatsApp:** Outbound only. `create-booking.js` sends formatted admin notifications with booking details and approve/reject commands. Admin number: `+17865093955`.
-
-**SendGrid:** Outbound email backup with HTML-formatted booking details.
+**Telegram:** `create-booking.js` sends formatted admin notifications with inline keyboard buttons for approve/reject. Bot token stored in `TELEGRAM_BOT_TOKEN`.
 
 **Google Maps:** Full integration via Railway proxy — autocomplete, directions, geocoding with caching.
 
@@ -102,10 +99,10 @@ Features: Rate limiting (100 req/15 min), in-memory caching, CORS, pre-cached ai
 
 | Feature | Status |
 |---------|--------|
-| Telegram bot | **Zero code** — nothing in codebase |
+| Telegram bot handlers | **Zero code** — notification works, no incoming handler |
 | Firebase | **Zero code** — no config, no references |
 | AI/Claude/Agent SDK | **Zero code** — no references |
-| Incoming WhatsApp handling | **Nothing** — only outbound notifications |
+| Incoming Telegram handling | **Nothing** — only outbound notifications |
 | Real-time driver tracking | **Nothing** — no location code |
 | Driver-facing app | **Archived HTML mockups only** in `dev/archive/` |
 | Memory/personalization | **Nothing** |
@@ -135,13 +132,10 @@ SUPABASE_ANON_KEY=[exists, hardcoded in supabase.js]
 # Stripe
 STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET
 
-# Twilio
-TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
-TWILIO_WHATSAPP_NUMBER=+14155238886
-ADMIN_WHATSAPP_NUMBER=+17865093955
-
-# SendGrid
-SENDGRID_API_KEY, ADMIN_EMAIL
+# Telegram
+TELEGRAM_BOT_TOKEN=[create via @BotFather]
+TELEGRAM_WEBHOOK_SECRET=[random string]
+ADMIN_TELEGRAM_CHAT_ID=[get via getUpdates API]
 ```
 
 ---
@@ -164,15 +158,14 @@ SENDGRID_API_KEY, ADMIN_EMAIL
 | Asset | File | Change Needed |
 |-------|------|---------------|
 | `create-booking.js` | `backend/functions/` | Currently does NOT write to Supabase — only sends notifications. Add Supabase insert. |
-| `server.js` (Railway) | `backend/api-proxy/` | Add webhook routes for WhatsApp (Twilio) and Telegram. Currently only handles Maps. |
+| `server.js` (Railway) | `backend/api-proxy/` | Add webhook route for Telegram. Currently only handles Maps. |
 | Database schema | `database/linkmia-schema.sql` | Add `customer_memory` table for personalization. Add `language` column to customers. |
 
 ### Must Build From Scratch
 
 | Component | Complexity | Details |
 |-----------|-----------|---------|
-| WhatsApp webhook receiver | Medium | Twilio webhook → message normalization → agent bridge |
-| Telegram bot + handlers | Medium | Bot setup, command handlers, inline keyboards, callback queries, live location processing |
+| Telegram bot + handlers | Medium | Bot setup, command handlers, inline keyboards, callback queries, live location processing, passenger + driver handling |
 | Firebase setup + integration | Medium | Project creation, Realtime DB for driver locations + ride state, security rules |
 | Claude Agent SDK bridge | Medium | The core ~150-line bridge: message → Claude subprocess → response |
 | SKILL.md dispatch context | Small | System prompt defining Claude's dispatcher persona and rules |
@@ -188,7 +181,7 @@ SENDGRID_API_KEY, ADMIN_EMAIL
 
 ### Biggest Technical Risk
 
-**Claude agent latency vs WhatsApp user expectations.** Claude subprocess may take 5-15 seconds. WhatsApp users expect near-instant replies. Mitigation: Send immediate "typing" acknowledgment within 1 second, process agent response async, send follow-up message.
+**Claude agent latency vs Telegram user expectations.** Claude subprocess may take 5-15 seconds. Mitigation: Send immediate "Un momento..." / "One moment..." acknowledgment within 1 second via Telegram sendChatAction, process agent response async, send follow-up message.
 
 ---
 
@@ -225,20 +218,17 @@ FIREBASE_PRIVATE_KEY
 FIREBASE_DATABASE_URL
 ```
 
-#### 1.2 WhatsApp Webhook Receiver
+#### 1.2 Telegram Bot Setup
 
-Receive incoming WhatsApp messages from Twilio.
-
-**Files to modify:**
-- `backend/api-proxy/server.js` — Add `POST /webhook/whatsapp` route. Twilio sends POST with `Body`, `From`, `To`, `MessageSid`. Validates Twilio signature. Returns `200` immediately. Spawns agent processing async.
-
-#### 1.3 Telegram Bot Setup
-
-Create Telegram bot for driver communication.
+Create unified Telegram bot for both passengers and drivers.
 
 **Files to create:**
-- `agent/telegram/telegram-bot.js` — Bot initialization using `node-telegram-bot-api`. Registers webhook at `POST /webhook/telegram` on the Railway server. Handles `/start`, `/help`, `/available`, `/busy`, `/offline` commands.
-- `agent/telegram/telegram-handlers.js` — Processes callback queries (accept_ride, decline_ride), incoming commands, and live location updates.
+- `agent/telegram/telegram-bot.js` — Bot initialization using `node-telegram-bot-api`. Registers webhook at `POST /webhook/telegram` on the Railway server.
+  - Handles `/start` with payload: `t.me/LinkMiaBot?start=booking_B1234` → greets passenger with booking info
+  - Handles `/start` without payload: new user greeting
+  - Handles `/available`, `/busy`, `/offline` for drivers
+- `agent/telegram/telegram-handlers.js` — Processes callback queries (accept_ride, decline_ride, approve_booking, reject_booking), incoming commands, and live location updates.
+- `agent/telegram/telegram-templates.js` — Bilingual message templates for notifications.
 
 **Files to modify:**
 - `backend/api-proxy/server.js` — Add `POST /webhook/telegram` route.
@@ -247,31 +237,32 @@ Create Telegram bot for driver communication.
 ```
 TELEGRAM_BOT_TOKEN
 TELEGRAM_WEBHOOK_SECRET
+ADMIN_TELEGRAM_CHAT_ID
 ```
 
-#### 1.4 Message Router
+#### 1.3 Message Router
 
-Normalize messages from different channels into a common format.
+Normalize messages from Telegram into a common format.
 
 **Files to create:**
-- `agent/router/message-router.js` — Accepts messages from WhatsApp or Telegram, normalizes to `{ source, phone, text, timestamp, metadata }`, routes to appropriate handler (agent bridge for WhatsApp passengers, command handler for Telegram drivers).
+- `agent/router/message-router.js` — Accepts messages from Telegram, normalizes to `{ source, chatId, text, timestamp, metadata, isDriver }`, routes to appropriate handler (agent bridge for passengers, command handler for drivers).
 
-#### 1.5 Fix create-booking.js
+#### 1.4 Fix create-booking.js
 
 **Files to modify:**
-- `backend/functions/create-booking.js` — Add Supabase insert after generating booking ID. Currently only sends WhatsApp/email but doesn't persist to database.
+- `backend/functions/create-booking.js` — Add Supabase insert after generating booking ID. Currently only sends Telegram notification but doesn't persist to database.
 
 #### Testing Phase 1
 1. Firebase: Write and read a test ride document via Node.js script
-2. WhatsApp: Send message to Twilio number, verify webhook fires on Railway
-3. Telegram: Send `/start` to bot, verify it responds
-4. Message router: Send test messages from both channels, verify normalization
+2. Telegram passenger: Click `t.me/LinkMiaBot?start=booking_TEST`, verify bot responds with greeting
+3. Telegram driver: Send `/start` to bot, verify it responds with driver menu
+4. Message router: Send test messages, verify normalization
 
 ---
 
 ### Phase 2: Core Dispatch Loop (Minimum Viable Ride)
 
-**Goal:** Passenger sends WhatsApp message → Claude processes intent → booking created → driver notified via Telegram. No live tracking yet.
+**Goal:** Passenger sends Telegram message → Claude processes intent → booking created → driver notified via Telegram. No live tracking yet.
 
 **Dependencies:** Phase 1 complete
 
@@ -291,7 +282,7 @@ Normalize messages from different channels into a common format.
   //    - maxTurns: 10
   //    - model: claude-sonnet-4-20250514
   // 6. Collect agent response
-  // 7. Send response via WhatsApp (through messaging-mcp or direct Twilio)
+  // 7. Send response via Telegram (through messaging tools or direct API)
   // 8. Update conversation state
   ```
 - `agent/bridge/skill-loader.js` — Reads SKILL.md, appends dynamic context (memory, active rides)
@@ -306,7 +297,7 @@ Normalize messages from different channels into a common format.
 
   ## Identity
   You are the AI dispatcher for LinkMia, a premium transportation
-  service in Miami. You communicate with passengers via WhatsApp
+  service in Miami. You communicate with passengers via Telegram
   in their preferred language (Spanish or English).
 
   ## Vehicles
@@ -369,16 +360,16 @@ Normalize messages from different channels into a common format.
 **`agent/mcp-servers/messaging-mcp/index.js`** — 4 tools:
 | Tool | Purpose |
 |------|---------|
-| `send_whatsapp(phone, message)` | Send via Twilio (handles 1600 char limit) |
-| `send_telegram(driverId, message, keyboard)` | Send via Telegram bot |
+| `send_telegram(chatId, message, keyboard)` | Send via Telegram bot (passengers and drivers) |
+| `send_telegram_admin(message, keyboard)` | Send to admin chat (booking notifications) |
 | `notify_driver_new_ride(driverId, bookingData)` | Formatted ride offer with accept/decline |
-| `notify_passenger_driver_assigned(phone, driverName, vehicle, eta)` | WhatsApp confirmation |
+| `notify_passenger_driver_assigned(chatId, driverName, vehicle, eta)` | Telegram confirmation to passenger |
 
 **`agent/mcp-servers/stripe-mcp/index.js`** — 4 tools (Phase 5, but skeleton in Phase 2):
 | Tool | Purpose |
 |------|---------|
 | `create_payment_intent(bookingId, amount)` | Reuses existing Netlify function logic |
-| `send_payment_link(phone, bookingId, amount)` | Stripe Payment Link via WhatsApp |
+| `send_payment_link(chatId, bookingId, amount)` | Stripe Payment Link via Telegram |
 | `check_payment_status(bookingId)` | Payment intent status check |
 | `process_refund(bookingId, amount)` | Stripe refund |
 
@@ -409,10 +400,10 @@ Normalize messages from different channels into a common format.
   6. After 3 attempts, notify passenger of delay
 
 #### Testing Phase 2
-1. Send WhatsApp: "Necesito un ride de MIA a Brickell" → verify agent asks for time
+1. Send Telegram: "Necesito un ride de MIA a Brickell" → verify agent asks for time
 2. Complete full conversation → verify booking in Supabase
 3. Verify driver gets Telegram notification with accept/decline buttons
-4. Driver taps Accept → verify passenger gets WhatsApp confirmation
+4. Driver taps Accept → verify passenger gets Telegram confirmation
 5. Driver declines → verify next driver gets the offer
 
 ---
@@ -443,18 +434,18 @@ Normalize messages from different channels into a common format.
 
 - `agent/tracking/tracking-token.js` — HMAC-SHA256 tokens for tracking URLs
 
-#### 3.3 "Where's My Driver?" via WhatsApp
+#### 3.3 "Where's My Driver?" via Telegram
 
 **Files to modify:**
 - `agent/SKILL.md` — Add tracking query instructions
-- `agent/mcp-servers/supabase-mcp/index.js` — Add `get_active_ride(phone)` tool
+- `agent/mcp-servers/supabase-mcp/index.js` — Add `get_active_ride(chatId)` tool
 
 Agent flow: passenger asks → lookup active ride → get driver location from Firebase → calculate ETA via Maps → respond with ETA + tracking link.
 
 #### 3.4 Proactive ETA Notifications
 
 **Files to create:**
-- `agent/tracking/eta-notifier.js` — Monitors active rides via Firebase. Sends WhatsApp when driver is 5 minutes away.
+- `agent/tracking/eta-notifier.js` — Monitors active rides via Firebase. Sends Telegram when driver is 5 minutes away.
 
 #### Testing Phase 3
 1. Accept ride as driver → share live location → verify marker moves on tracking page
@@ -531,7 +522,7 @@ CREATE UNIQUE INDEX idx_memory_phone_key ON customer_memory(customer_phone, key)
 
 ### Phase 5: Payments + Driver Management
 
-**Goal:** Stripe charges on completion, payment links via WhatsApp, driver earnings tracking, availability management.
+**Goal:** Stripe charges on completion, payment links via Telegram, driver earnings tracking, availability management.
 
 **Dependencies:** Phase 2 complete
 
@@ -539,16 +530,16 @@ CREATE UNIQUE INDEX idx_memory_phone_key ON customer_memory(customer_phone, key)
 
 **Files to create:**
 - `agent/payments/payment-links.js` — Generate Stripe Payment Links with booking metadata
-- `agent/payments/receipt-generator.js` — Bilingual receipt formatting for WhatsApp
+- `agent/payments/receipt-generator.js` — Bilingual receipt formatting for Telegram
 - `backend/api-proxy/webhooks/stripe-webhook.js` — Handle `payment_intent.succeeded` and `payment_intent.payment_failed`
 
 **Payment sequence:**
 1. Driver taps "Completed" in Telegram
 2. Firebase ride state → `completed`
-3. Agent sends passenger: payment summary + Stripe Payment Link via WhatsApp
+3. Agent sends passenger: payment summary + Stripe Payment Link via Telegram
 4. Passenger taps link → pays on Stripe-hosted page
 5. Stripe webhook fires → updates `bookings.payment_status` to `paid_by_guest`
-6. Passenger receives receipt via WhatsApp
+6. Passenger receives receipt via Telegram
 7. Driver receives earnings confirmation via Telegram
 
 **Files to modify:**
@@ -569,7 +560,7 @@ CREATE UNIQUE INDEX idx_memory_phone_key ON customer_memory(customer_phone, key)
   - `/available` / `/busy` / `/offline` — Status toggles
 
 #### Testing Phase 5
-1. Complete ride → verify payment link sent via WhatsApp
+1. Complete ride → verify payment link sent via Telegram
 2. Pay with Stripe test card → verify webhook fires and booking updates
 3. Check driver earnings via `/earnings` command
 4. Toggle availability, verify both Supabase and Firebase update
@@ -637,7 +628,7 @@ agent/mcp-servers/
 ├── supabase-mcp/    8 tools  (database operations)
 ├── maps-mcp/        3 tools  (wraps existing Railway proxy)
 ├── pricing-mcp/     3 tools  (wraps existing PricingService)
-├── messaging-mcp/   4 tools  (WhatsApp + Telegram outbound)
+├── messaging-mcp/   4 tools  (Telegram outbound for passengers, drivers, admin)
 └── stripe-mcp/      4 tools  (payments)
 
 Total: 22 tools across 5 MCP servers
@@ -650,7 +641,7 @@ agent/
 ├── bridge/
 │   ├── agent-bridge.js          # Core: message → Claude subprocess → response
 │   ├── skill-loader.js          # Loads SKILL.md + dynamic context
-│   └── response-sender.js       # Routes to WhatsApp or Telegram
+│   └── response-sender.js       # Routes to Telegram (passengers or drivers)
 ├── SKILL.md                     # Dispatch persona and rules
 ├── mcp-servers/
 │   ├── supabase-mcp/index.js    # 8 database tools
@@ -684,7 +675,7 @@ agent/
 │   └── templates.js             # Structured bilingual notifications
 ├── tracking/
 │   ├── tracking-token.js        # HMAC tokens for tracking URLs
-│   └── eta-notifier.js          # Proactive ETA WhatsApp updates
+│   └── eta-notifier.js          # Proactive ETA Telegram updates
 ├── payments/
 │   ├── payment-links.js         # Stripe Payment Link generation
 │   └── receipt-generator.js     # Bilingual receipt formatting
@@ -710,26 +701,22 @@ agent/
 ## Technical Risks & Mitigations
 
 ### Risk 1: Claude Agent Latency (HIGH)
-**Problem:** 5-15 second processing time. WhatsApp users expect near-instant replies.
-**Mitigation:** Send immediate "Un momento..." / "One moment..." acknowledgment within 1 second via Twilio. Process agent async. Send response as follow-up message.
+**Problem:** 5-15 second processing time. Telegram users expect near-instant replies.
+**Mitigation:** Send immediate "Un momento..." / "One moment..." acknowledgment within 1 second via Telegram sendChatAction. Process agent async. Send response as follow-up message.
 
-### Risk 2: WhatsApp 24-Hour Session Window (HIGH)
-**Problem:** Twilio/WhatsApp only allows free-form messages within 24 hours of user-initiated message. Outside window, only pre-approved templates allowed.
-**Mitigation:** Register WhatsApp message templates for critical notifications (booking confirmation, driver assigned, ETA, receipt). Track session windows in conversation state.
-
-### Risk 3: Firebase + Supabase Dual-Write Consistency (MEDIUM)
+### Risk 2: Firebase + Supabase Dual-Write Consistency (MEDIUM)
 **Problem:** Writing to both systems risks inconsistency if one fails.
 **Mitigation:** Supabase is source of truth. Firebase is derived cache. Write Supabase first, then Firebase. Reconciliation job every 5 minutes corrects Firebase divergence.
 
-### Risk 4: Concurrent Driver Dispatch (MEDIUM)
+### Risk 3: Concurrent Driver Dispatch (MEDIUM)
 **Problem:** Two rides offered to same driver simultaneously.
 **Mitigation:** Firebase transactions for driver status changes. Atomically check-and-set from `available` to `offered`. Transaction failure → skip to next driver.
 
-### Risk 5: Agent Cost Control (MEDIUM)
+### Risk 4: Agent Cost Control (MEDIUM)
 **Problem:** Each message spawns Claude subprocess with multiple tool calls.
-**Mitigation:** (a) Use Sonnet not Opus. (b) `maxTurns: 10` hard limit. (c) Per-phone rate limit: 20 agent calls/hour. (d) Cache common queries. (e) Daily spend alerts.
+**Mitigation:** (a) Use Sonnet not Opus. (b) `maxTurns: 10` hard limit. (c) Per-chatId rate limit: 20 agent calls/hour. (d) Cache common queries. (e) Daily spend alerts.
 
-### Risk 6: Railway Single Point of Failure (LOW)
+### Risk 5: Railway Single Point of Failure (LOW)
 **Problem:** Railway server handles webhooks + bot + agent bridge.
 **Mitigation:** Railway auto-restart + health checks. Acceptable for MVP. Scale to multi-instance later.
 

@@ -1750,7 +1750,7 @@
 
             async confirmBooking() {
                 // ========== PAYMENT CONFIGURATION ==========
-                // Set to false to skip Stripe payment (handle via WhatsApp/CashApp/Zelle)
+                // Set to false to skip Stripe payment (handle via Telegram/CashApp/Zelle)
                 // Set to true when ready to enable Stripe payments
                 const REQUIRE_PAYMENT = false;
                 // ============================================
@@ -1847,10 +1847,10 @@
                         bookingData.status = 'confirmed';
                         bookingData.payment.transactionId = paymentResult.paymentIntentId;
                     } else {
-                        // ===== SKIP PAYMENT - Handle via WhatsApp =====
+                        // ===== SKIP PAYMENT - Handle via Telegram =====
                         bookingData.status = 'payment_pending';
-                        bookingData.payment.method = 'whatsapp';
-                        bookingData.payment.note = 'Payment to be collected via WhatsApp (CashApp/Zelle)';
+                        bookingData.payment.method = 'telegram';
+                        bookingData.payment.note = 'Payment to be collected via Telegram (CashApp/Zelle)';
                     }
 
                     localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
@@ -1957,8 +1957,8 @@
             }
 
             showBookingConfirmation(tripId, bookingData) {
-                // LinkMia WhatsApp Business number
-                const LINKMIA_WHATSAPP = '17865093955'; // Format: country code + number, no + or spaces
+                // LinkMia Telegram Bot username
+                const LINKMIA_TELEGRAM = 'LinkMiaBot'; // Telegram bot username (without @)
 
                 // Format the date/time nicely
                 const tripDateTime = new Date(bookingData.dateTime.time);
@@ -2010,23 +2010,9 @@
                     ? `\n🎟️ Promo: ${bookingData.payment.promo}`
                     : '';
 
-                // Create pre-filled WhatsApp message with booker info
-                const whatsappMessage = `Hi! I'd like to book a ride:
-
-📋 ${tripId}
-👤 ${bookerName}
-📱 ${bookerPhone}
-📍 From: ${bookingData.route.from}
-📍 To: ${bookingData.route.to}
-📅 ${formattedDate} at ${formattedTime}
-🚙 ${vehicleName} (${passengers} passengers, ${bags} bags)
-💰 $${price}${guestInfo}${passengerCount}${pickupNotesText}${promoCode}
-
-Please confirm my booking!`;
-
-                // URL encode the message
-                const encodedMessage = encodeURIComponent(whatsappMessage);
-                const whatsappLink = `https://wa.me/${LINKMIA_WHATSAPP}?text=${encodedMessage}`;
+                // Create Telegram deep link with booking ID payload
+                // When passenger taps, bot receives /start booking_TRIPID and greets them
+                const telegramLink = `https://t.me/${LINKMIA_TELEGRAM}?start=booking_${tripId}`;
 
                 const confirmationElement = document.createElement('div');
                 confirmationElement.className = 'booking-confirmation';
@@ -2065,13 +2051,13 @@ Please confirm my booking!`;
                             </div>
                         </div>
 
-                        <div class="confirmation-whatsapp-section">
-                            <p class="whatsapp-prompt">Chat with us to confirm your driver:</p>
-                            <a href="${whatsappLink}" target="_blank" class="whatsapp-btn" id="whatsappChatBtn">
-                                <svg class="whatsapp-icon" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                        <div class="confirmation-telegram-section">
+                            <p class="telegram-prompt">Chat with us to confirm your driver:</p>
+                            <a href="${telegramLink}" target="_blank" class="telegram-btn" id="telegramChatBtn">
+                                <svg class="telegram-icon" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
                                 </svg>
-                                <span>Continue on WhatsApp</span>
+                                <span>Continue on Telegram</span>
                             </a>
                         </div>
 
@@ -2079,9 +2065,9 @@ Please confirm my booking!`;
                     </div>
                 `;
 
-                // Add WhatsApp button styles
-                const whatsappStyles = document.createElement('style');
-                whatsappStyles.textContent = `
+                // Add Telegram button styles
+                const telegramStyles = document.createElement('style');
+                telegramStyles.textContent = `
                     .confirmation-content {
                         position: relative;
                     }
@@ -2110,7 +2096,7 @@ Please confirm my booking!`;
                     .confirmation-checkmark {
                         width: 60px;
                         height: 60px;
-                        background: linear-gradient(135deg, #25D366, #128C7E);
+                        background: linear-gradient(135deg, #0088cc, #0077b5);
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
@@ -2123,25 +2109,25 @@ Please confirm my booking!`;
                         color: #32D74B;
                         font-weight: 700;
                     }
-                    .confirmation-whatsapp-section {
+                    .confirmation-telegram-section {
                         margin: 24px 0;
                         padding: 20px;
-                        background: rgba(37, 211, 102, 0.1);
+                        background: rgba(0, 136, 204, 0.1);
                         border-radius: 12px;
-                        border: 1px solid rgba(37, 211, 102, 0.3);
+                        border: 1px solid rgba(0, 136, 204, 0.3);
                     }
-                    .whatsapp-prompt {
+                    .telegram-prompt {
                         color: #8E8E93;
                         font-size: 14px;
                         margin: 0 0 12px 0;
                         text-align: center;
                     }
-                    .whatsapp-btn {
+                    .telegram-btn {
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         gap: 10px;
-                        background: #25D366;
+                        background: #0088cc;
                         color: white;
                         text-decoration: none;
                         padding: 14px 24px;
@@ -2150,14 +2136,14 @@ Please confirm my booking!`;
                         font-weight: 600;
                         transition: all 0.2s ease;
                     }
-                    .whatsapp-btn:hover {
-                        background: #22c55e;
+                    .telegram-btn:hover {
+                        background: #0077b5;
                         transform: scale(1.02);
                     }
-                    .whatsapp-btn:active {
+                    .telegram-btn:active {
                         transform: scale(0.98);
                     }
-                    .whatsapp-icon {
+                    .telegram-icon {
                         width: 24px;
                         height: 24px;
                     }
@@ -2178,7 +2164,7 @@ Please confirm my booking!`;
                         color: white;
                     }
                 `;
-                document.head.appendChild(whatsappStyles);
+                document.head.appendChild(telegramStyles);
 
                 document.body.appendChild(confirmationElement);
 

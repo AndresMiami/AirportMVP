@@ -1,5 +1,5 @@
-// Secure Booking Creation with WhatsApp Notification
-// Handles bookings and sends formatted WhatsApp alerts
+// Secure Booking Creation with Telegram Notification
+// Handles bookings and sends formatted Telegram alerts to admin
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -62,8 +62,8 @@ exports.handler = async (event, context) => {
     const isToday = new Date().toDateString() === tripDate.toDateString();
     const isUrgent = (tripDate - new Date()) < (2 * 60 * 60 * 1000); // Less than 2 hours
 
-    // Format WhatsApp message for admin review
-    const whatsappMessage = `🆕 BOOKING RECEIVED #${bookingId}
+    // Format Telegram message for admin review
+    const telegramMessage = `🆕 BOOKING RECEIVED #${bookingId}
 ━━━━━━━━━━━━━━━━━━━
 👤 Name: ${booking.customerName}
 📱 Phone: ${booking.phone}
@@ -81,94 +81,46 @@ ${isUrgent ? '⚡ URGENT - Less than 2 hours!' : ''}
 ${booking.flightNumber ? `✈️ Flight: ${booking.flightNumber}` : ''}
 
 ${booking.notes ? `✍️ Notes: "${booking.notes}"` : ''}
-💳 Payment: ${booking.paymentMethod || 'Card'}
+💳 Payment: ${booking.paymentMethod || 'Card'}`;
 
-━━━━━━━━━━━━━━━━━━━
-📋 TO APPROVE: Type "POST ${bookingId}"
-❌ TO REJECT: Type "REJECT ${bookingId} [reason]"
-🔍 TO VERIFY: Type "CHECK ${bookingId}"`;
+    // Send Telegram notification to admin with inline keyboard
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.ADMIN_TELEGRAM_CHAT_ID) {
+      const telegramApiUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
 
-    // Send WhatsApp notification (via Twilio or WhatsApp Business API)
-    if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const client = require('twilio')(accountSid, authToken);
-
-      try {
-        await client.messages.create({
-          body: whatsappMessage,
-          from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-          to: `whatsapp:${process.env.ADMIN_WHATSAPP_NUMBER}`
-        });
-        console.log(`📱 WhatsApp notification sent for booking #${bookingId}`);
-      } catch (twilioError) {
-        console.error('❌ Twilio error:', twilioError);
-        // Continue processing even if WhatsApp fails
-      }
-    }
-
-    // Send email backup (using SendGrid or similar)
-    if (process.env.SENDGRID_API_KEY) {
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #FF5733;">New Booking #${bookingId}</h1>
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>Customer:</strong></td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;">${booking.customerName}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>Phone:</strong></td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;">${booking.phone}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>Route:</strong></td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;">${booking.pickup} → ${booking.dropoff}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>Time:</strong></td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;">${formattedDate} ${formattedTime}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>Price:</strong></td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee;">$${booking.price}</td>
-            </tr>
-          </table>
-          <div style="margin-top: 20px; padding: 20px; background: #f5f5f5; border-radius: 8px;">
-            <p><strong>WhatsApp Message:</strong></p>
-            <pre style="white-space: pre-wrap; font-family: monospace; font-size: 12px;">${whatsappMessage}</pre>
-          </div>
-        </div>
-      `;
+      // Inline keyboard for quick approve/reject
+      const inlineKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '✅ Approve', callback_data: `approve_${bookingId}` },
+            { text: '❌ Reject', callback_data: `reject_${bookingId}` }
+          ],
+          [
+            { text: '📞 Call Customer', url: `tel:${booking.phone}` }
+          ]
+        ]
+      };
 
       try {
-        const sgResponse = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        const telegramResponse = await fetch(telegramApiUrl, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            personalizations: [{
-              to: [{ email: process.env.ADMIN_EMAIL || 'admin@ilovemiami.com' }]
-            }],
-            from: { 
-              email: 'bookings@ilovemiami.com',
-              name: 'I Love Miami Bookings'
-            },
-            subject: `${isUrgent ? '🔴 URGENT' : '🆕 New'} Booking #${bookingId} - ${booking.customerName}`,
-            content: [{
-              type: 'text/html',
-              value: emailHtml
-            }]
+            chat_id: process.env.ADMIN_TELEGRAM_CHAT_ID,
+            text: telegramMessage,
+            parse_mode: 'HTML',
+            reply_markup: inlineKeyboard
           })
         });
 
-        if (!sgResponse.ok) {
-          console.error('SendGrid error:', await sgResponse.text());
+        if (telegramResponse.ok) {
+          console.log(`📱 Telegram notification sent for booking #${bookingId}`);
+        } else {
+          const errorData = await telegramResponse.json();
+          console.error('❌ Telegram error:', errorData);
         }
-      } catch (emailError) {
-        console.error('Email error:', emailError);
+      } catch (telegramError) {
+        console.error('❌ Telegram error:', telegramError);
+        // Continue processing even if Telegram fails
       }
     }
 

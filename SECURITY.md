@@ -5,8 +5,7 @@
 ### ✅ Secure (Protected)
 - **Google Maps API Key**: Protected via Railway proxy server
 - **Stripe Secret Key**: Only on backend (Netlify Functions)
-- **Twilio Auth Token**: Only on backend (Netlify Functions)
-- **SendGrid API Key**: Only on backend (Netlify Functions)
+- **Telegram Bot Token**: Only on backend (Netlify Functions)
 
 ### ⚠️ Needs Configuration
 - **Supabase Credentials**: Currently using placeholders in `supabase.js`
@@ -23,8 +22,7 @@ indexMVP.html              Railway Proxy
 └─ Public keys only       
                           Netlify Functions
                           ├─ STRIPE_SECRET_KEY
-                          ├─ TWILIO_AUTH_TOKEN
-                          ├─ SENDGRID_API_KEY
+                          ├─ TELEGRAM_BOT_TOKEN
                           └─ SUPABASE_SERVICE_KEY
 ```
 
@@ -117,9 +115,8 @@ git log -S "API_KEY" --oneline
 - `STRIPE_PUBLISHABLE_KEY` (Frontend)
 
 ### Required for Notifications
-- `TWILIO_ACCOUNT_SID` (Backend)
-- `TWILIO_AUTH_TOKEN` (Backend)
-- `SENDGRID_API_KEY` (Backend)
+- `TELEGRAM_BOT_TOKEN` (Backend)
+- `ADMIN_TELEGRAM_CHAT_ID` (Backend)
 
 ## 🆘 If Keys Are Exposed
 

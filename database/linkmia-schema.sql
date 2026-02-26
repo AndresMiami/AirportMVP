@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS customers (
     phone TEXT,
     email TEXT,
     type TEXT DEFAULT 'guest' CHECK (type IN ('guest', 'repeat', 'vip', 'host')),
-    source TEXT DEFAULT 'whatsapp' CHECK (source IN ('whatsapp', 'imessage', 'website', 'referral', 'host_link')),
+    source TEXT DEFAULT 'telegram' CHECK (source IN ('telegram', 'imessage', 'website', 'referral', 'host_link')),
+    telegram_chat_id TEXT, -- Telegram chat ID for direct messaging
     referred_by UUID REFERENCES customers(id),
     notes TEXT,
     total_rides INTEGER DEFAULT 0,
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS drivers (
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     email TEXT,
+    telegram_chat_id TEXT, -- Telegram chat ID for ride notifications
     vehicle_type TEXT CHECK (vehicle_type IN ('sedan', 'suv', 'escalade', 'sprinter', 'other')),
     vehicle_details TEXT, -- e.g., "Black Escalade 2024"
     license_plate TEXT,
@@ -137,9 +139,12 @@ CREATE TABLE IF NOT EXISTS bookings (
     notes TEXT,
 
     -- Referral tracking
-    source TEXT DEFAULT 'whatsapp',
+    source TEXT DEFAULT 'telegram',
     referred_by_host UUID REFERENCES hosts(id),
     host_commission DECIMAL(10,2) DEFAULT 0,
+
+    -- Passenger communication (linked when passenger taps Telegram link)
+    passenger_telegram_chat_id TEXT,
 
     -- Group bookings (link related multi-car bookings)
     group_booking_id UUID,

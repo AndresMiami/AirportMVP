@@ -34,10 +34,10 @@
       "url": "/indexMVP.html?book=1"
     },
     {
-      "name": "Chat on WhatsApp",
+      "name": "Chat on Telegram",
       "short_name": "Chat",
       "description": "Message us directly",
-      "url": "https://wa.me/17865093955"
+      "url": "https://t.me/LinkMiaBot?start=booking"
     }
   ]
 }
