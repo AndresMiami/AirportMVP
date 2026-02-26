@@ -445,8 +445,8 @@
                 this.setupCommunication();
                 this.updateNavButtons();
                 
-                // Initial center positioning
-                setTimeout(() => this.centerCard(0), 100);
+                // Initial selection - use selectCard to notify parent of default vehicle
+                setTimeout(() => this.selectCard(0), 100);
                 
                 console.log('🚗 Vehicle Carousel Standalone initialized');
             }

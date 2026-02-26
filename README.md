@@ -100,8 +100,8 @@ PORT=3001
 SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_key
 STRIPE_SECRET_KEY=your_stripe_key
-TWILIO_ACCOUNT_SID=your_twilio_sid
-TWILIO_AUTH_TOKEN=your_twilio_token
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+ADMIN_TELEGRAM_CHAT_ID=your_admin_chat_id
 ```
 
 ## 🚀 Deployment
@@ -167,7 +167,7 @@ Before pushing changes, verify:
 - **Dynamic pricing** based on distance and vehicle type
 - **Mobile-optimized** responsive design
 - **Secure payments** via Stripe
-- **SMS notifications** via Twilio
+- **Telegram notifications** via Telegram Bot API
 - **Database storage** via Supabase
 - **Three vehicle types**: Luxury Sedan, Premium SUV, VIP Sprinter
 
@@ -196,7 +196,7 @@ Before pushing changes, verify:
 ### Production
 - `express: ^4.21.2` - API proxy server
 - `stripe: ^18.4.0` - Payment processing
-- `twilio: ^5.8.0` - SMS notifications
+- `node-telegram-bot-api: ^0.66.0` - Telegram notifications
 
 ### Frontend (No build required)
 - Vanilla JavaScript (ES6 modules)
