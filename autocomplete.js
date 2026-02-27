@@ -282,7 +282,9 @@ export class CustomAutocomplete {
             }
 
             const data = await response.json();
+            console.log('📦 API response data:', data);
             this.predictions = data.predictions || [];
+            console.log('📊 Predictions count:', this.predictions.length);
             
             // Cache the results
             this.setCachedSuggestions(input, this.predictions);
@@ -297,6 +299,8 @@ export class CustomAutocomplete {
     }
 
     renderSuggestions(suggestions) {
+        console.log('🎨 renderSuggestions called with:', suggestions?.length, 'items');
+        console.log('📍 suggestionsContainer:', this.suggestionsContainer);
         if (!suggestions || suggestions.length === 0) {
             this.suggestionsContainer.innerHTML = '<div class="no-results">No results found</div>';
             this.showSuggestions();
@@ -489,6 +493,7 @@ export class CustomAutocomplete {
     }
 
     showSuggestions() {
+        console.log('👁️ showSuggestions called, adding .visible class');
         this.suggestionsContainer.classList.add('visible');
     }
 
