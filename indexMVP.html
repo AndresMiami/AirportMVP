@@ -320,11 +320,8 @@
     
     <!-- Authentication Check - Run IMMEDIATELY -->
     <script>
-        // Initialize Supabase using centralized config
-        const supabase = window.supabaseClient || window.supabase.createClient(
-            window.APP_CONFIG?.SUPABASE_URL || 'https://hncpybxwblpkyxvskoxd.supabase.co',
-            window.APP_CONFIG?.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA'
-        );
+        // Use the supabaseClient already initialized in supabase.js
+        // (Avoids duplicate declaration error with the Supabase SDK global)
         
         // Store user session globally
         let currentUser = null;
@@ -351,7 +348,7 @@
                 return;
             }
             
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await window.supabaseClient.auth.getSession();
             if (!session) {
                 // No session - redirect to login page
                 window.location.href = '/dev/templates/LandingLOGIN.html';
@@ -367,7 +364,7 @@
         
         // Logout function
         async function logout() {
-            const { error } = await supabase.auth.signOut();
+            const { error } = await window.supabaseClient.auth.signOut();
             if (!error) {
                 window.location.href = '/dev/templates/LandingLOGIN.html';
             }
