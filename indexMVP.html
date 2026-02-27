@@ -1534,52 +1534,6 @@
                     to: this.state.locations.airport?.name || 'Airport'
                 });
                 
-                vehicleTypes.forEach(vehicleType => {
-                    const pricing = this.calculateVehiclePrice(
-                        vehicleType, 
-                        this.state.route.distance, 
-                        this.state.route.duration
-                    );
-                    
-                    const priceElement = document.getElementById(`${vehicleType}-price`);
-                    if (priceElement) {
-                        // Add visual feedback for price updates
-                        priceElement.classList.add('price-updating');
-                        
-                        if (pricing && !pricing.error) {
-                            // Format price using pricing service
-                            let formattedPrice;
-                            if (this.pricingService && this.pricingService.formatPrice) {
-                                formattedPrice = '$' + this.pricingService.formatPrice(pricing.finalPrice);
-                            } else {
-                                formattedPrice = '$' + pricing.finalPrice;
-                            }
-                            
-                            priceElement.textContent = formattedPrice;
-                            
-                            // Log detailed pricing information
-                            console.log(`💰 ${vehicleType.toUpperCase()}: ${formattedPrice}`, {
-                                basePrice: '$' + pricing.basePrice,
-                                finalPrice: '$' + pricing.finalPrice,
-                                surcharges: pricing.breakdown.appliedSurcharges.length > 0 ? 
-                                    pricing.breakdown.appliedSurcharges.map(s => s.description).join(', ') : 'None',
-                                protectionModel: pricing.protectionApplied
-                            });
-                        } else {
-                            // Show price unavailable when pricing service is not available
-                            priceElement.textContent = 'Price unavailable';
-                            console.warn(`❌ Could not calculate price for ${vehicleType} - pricing service unavailable`);
-                        }
-                        
-                        // Remove visual feedback after animation
-                        setTimeout(() => {
-                            priceElement.classList.remove('price-updating');
-                        }, 500);
-                    } else {
-                        console.warn(`❌ Price element not found for ${vehicleType}`);
-                    }
-                });
-                
                 // Log surge pricing information if applicable
                 if (this.pricingService && this.state.dateTime.time) {
                     const surgeInfo = this.pricingService.checkSurgePeriod(new Date(this.state.dateTime.time));
