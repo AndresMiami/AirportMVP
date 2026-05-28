@@ -1014,7 +1014,7 @@ app.use('/api/*', (req, res) => {
 
 // 404 handler for other routes
 app.use('*', (req, res) => {
-  res.status(404).sendFile(path.join(__dirname, '..', '..', 'indexMVP.html');
+  res.status(404).sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
 });
 
 // Start server
