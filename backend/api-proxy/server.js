@@ -55,6 +55,92 @@ function cleanCache(cache, maxSize = MAX_CACHE_SIZE) {
 }
 
 // ============================================
+// BOOKING STORE (In-Memory with TTL)
+// ============================================
+
+const bookingStore = new Map();
+const BOOKING_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+// Store a booking with auto-cleanup
+function storeBooking(tripId, data) {
+  const booking = {
+    ...data,
+    tripId,
+    storedAt: Date.now(),
+    status: 'pending',
+    passengerChatId: null,
+    driverChatId: null
+  };
+  bookingStore.set(tripId, booking);
+  console.log(`📦 Booking stored: ${tripId}`);
+
+  // Auto-cleanup after TTL
+  setTimeout(() => {
+    if (bookingStore.has(tripId)) {
+      bookingStore.delete(tripId);
+      console.log(`🗑️ Booking expired: ${tripId}`);
+    }
+  }, BOOKING_TTL);
+
+  return booking;
+}
+
+function getBooking(tripId) {
+  return bookingStore.get(tripId);
+}
+
+function updateBooking(tripId, updates) {
+  const booking = bookingStore.get(tripId);
+  if (booking) {
+    const updated = { ...booking, ...updates };
+    bookingStore.set(tripId, updated);
+    return updated;
+  }
+  return null;
+}
+
+// ============================================
+// TELEGRAM BOT HELPERS
+// ============================================
+
+const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
+  ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
+  : null;
+
+async function sendTelegramMessage(chatId, text, options = {}) {
+  if (!TELEGRAM_API) {
+    console.warn('⚠️ Telegram not configured');
+    return null;
+  }
+
+  try {
+    const response = await axios.post(`${TELEGRAM_API}/sendMessage`, {
+      chat_id: chatId,
+      text,
+      parse_mode: 'HTML',
+      ...options
+    });
+    return response.data;
+  } catch (error) {
+    console.error('❌ Telegram send error:', error.response?.data || error.message);
+    return null;
+  }
+}
+
+async function answerCallbackQuery(callbackQueryId, text = '') {
+  if (!TELEGRAM_API) return null;
+
+  try {
+    await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+      callback_query_id: callbackQueryId,
+      text
+    });
+  } catch (error) {
+    console.error('❌ Callback answer error:', error.message);
+  }
+}
+
+// ============================================
 // API USAGE TRACKING
 // ============================================
 
@@ -536,10 +622,383 @@ app.get('/api/maps-script', async (req, res) => {
   }
 });
 
+// ============================================
+// BOOKING STORAGE API
+// ============================================
+
+// Store booking from frontend
+app.post('/api/store-booking', (req, res) => {
+  try {
+    const { tripId, ...bookingData } = req.body;
+
+    if (!tripId) {
+      return res.status(400).json({ error: 'tripId is required' });
+    }
+
+    const booking = storeBooking(tripId, bookingData);
+
+    // Send notification to admin
+    if (process.env.ADMIN_TELEGRAM_CHAT_ID) {
+      const adminMessage = formatAdminNotification(booking);
+      sendTelegramMessage(process.env.ADMIN_TELEGRAM_CHAT_ID, adminMessage, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Accept Ride', callback_data: `accept_${tripId}` },
+              { text: '❌ Decline', callback_data: `decline_${tripId}` }
+            ],
+            [
+              { text: '📞 Call Customer', url: `tel:${bookingData.phone || ''}` }
+            ]
+          ]
+        }
+      });
+    }
+
+    res.json({ success: true, tripId, message: 'Booking stored' });
+  } catch (error) {
+    console.error('Store booking error:', error);
+    res.status(500).json({ error: 'Failed to store booking' });
+  }
+});
+
+// Get booking by tripId
+app.get('/api/booking/:tripId', (req, res) => {
+  const booking = getBooking(req.params.tripId);
+  if (booking) {
+    res.json(booking);
+  } else {
+    res.status(404).json({ error: 'Booking not found' });
+  }
+});
+
+// Format admin notification message
+function formatAdminNotification(booking) {
+  const isUrgent = booking.pickupDateTime &&
+    (new Date(booking.pickupDateTime) - new Date()) < (2 * 60 * 60 * 1000);
+
+  return `🆕 NEW RIDE REQUEST #${booking.tripId}
+━━━━━━━━━━━━━━━━━━━
+👤 ${booking.customerName || 'Guest'}
+📱 ${booking.phone || 'No phone'}
+
+📍 From: ${booking.pickup || 'N/A'}
+✈️ To: ${booking.dropoff || 'N/A'}
+🕐 When: ${booking.pickupDateTime || 'ASAP'}
+${isUrgent ? '⚡ URGENT - Less than 2 hours!' : ''}
+
+💵 Price: $${booking.price || '0'}
+🚘 Vehicle: ${booking.vehicle || 'Standard'}
+👥 Passengers: ${booking.passengers || 1}
+
+${booking.notes ? `📝 Notes: ${booking.notes}` : ''}`;
+}
+
+// ============================================
+// TELEGRAM WEBHOOK
+// ============================================
+
+app.post('/webhook/telegram', async (req, res) => {
+  try {
+    const update = req.body;
+    console.log('📨 Telegram update received:', JSON.stringify(update, null, 2));
+
+    // Handle /start command
+    if (update.message?.text?.startsWith('/start')) {
+      await handleStartCommand(update.message);
+    }
+    // Handle button clicks (callback queries)
+    else if (update.callback_query) {
+      await handleCallbackQuery(update.callback_query);
+    }
+    // Handle regular messages (for driver-passenger chat)
+    else if (update.message?.text) {
+      await handleRegularMessage(update.message);
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.json({ ok: true }); // Always return 200 to Telegram
+  }
+});
+
+// Handle /start command from passengers
+async function handleStartCommand(message) {
+  const chatId = message.chat.id;
+  const text = message.text;
+  const firstName = message.from?.first_name || 'there';
+
+  // Check if it's a booking deep link: /start booking_LM-XXXX
+  const bookingMatch = text.match(/\/start\s+booking_(.+)/);
+
+  if (bookingMatch) {
+    const tripId = bookingMatch[1];
+    const booking = getBooking(tripId);
+
+    if (booking) {
+      // Link passenger's chat to this booking
+      updateBooking(tripId, { passengerChatId: chatId });
+
+      // Send confirmation to passenger
+      await sendTelegramMessage(chatId, `👋 Hi ${firstName}!
+
+✅ <b>Booking Confirmed!</b>
+
+📋 <b>Trip #${tripId}</b>
+📍 From: ${booking.pickup || 'N/A'}
+✈️ To: ${booking.dropoff || 'N/A'}
+🕐 When: ${booking.pickupDateTime || 'ASAP'}
+💵 Price: $${booking.price || '0'}
+🚘 Vehicle: ${booking.vehicle || 'Standard'}
+
+⏳ <b>Finding your driver...</b>
+I'll notify you as soon as a driver accepts your ride!
+
+💬 You can send me a message anytime if you need to update your pickup details.`);
+
+      console.log(`✅ Passenger ${chatId} linked to booking ${tripId}`);
+    } else {
+      // Booking not found
+      await sendTelegramMessage(chatId, `👋 Hi ${firstName}!
+
+❌ Sorry, I couldn't find booking #${tripId}.
+
+It may have expired or there was an error. Please try booking again:
+🔗 https://i-love-miami.netlify.app`);
+    }
+  } else {
+    // Generic /start without booking
+    await sendTelegramMessage(chatId, `👋 Welcome to LinkMia, ${firstName}!
+
+🚗 Premium Miami Airport Transfers
+
+To book a ride, visit:
+🔗 https://i-love-miami.netlify.app
+
+Or send me a message with your pickup details and I'll help you book!`);
+  }
+}
+
+// Handle callback queries (button clicks)
+async function handleCallbackQuery(callbackQuery) {
+  const chatId = callbackQuery.message.chat.id;
+  const data = callbackQuery.data;
+  const callbackQueryId = callbackQuery.id;
+
+  console.log(`🔘 Button clicked: ${data} by chat ${chatId}`);
+
+  // Parse callback data: accept_LM-XXXX or decline_LM-XXXX
+  const [action, tripId] = data.split('_');
+
+  if (!tripId) {
+    await answerCallbackQuery(callbackQueryId, 'Invalid action');
+    return;
+  }
+
+  const booking = getBooking(tripId);
+  if (!booking) {
+    await answerCallbackQuery(callbackQueryId, 'Booking not found or expired');
+    return;
+  }
+
+  if (action === 'accept') {
+    // Driver accepts the ride
+    updateBooking(tripId, {
+      status: 'accepted',
+      driverChatId: chatId,
+      acceptedAt: new Date().toISOString()
+    });
+
+    await answerCallbackQuery(callbackQueryId, '✅ Ride accepted!');
+
+    // Notify admin/driver
+    await sendTelegramMessage(chatId, `✅ <b>Ride Accepted!</b>
+
+📋 Trip #${tripId}
+📍 Pickup: ${booking.pickup}
+✈️ Dropoff: ${booking.dropoff}
+🕐 Time: ${booking.pickupDateTime || 'ASAP'}
+👤 Passenger: ${booking.customerName || 'Guest'}
+📱 Phone: ${booking.phone || 'N/A'}
+
+Use buttons below to update status:`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🚗 On My Way', callback_data: `otw_${tripId}` },
+            { text: '📍 Arrived', callback_data: `arrived_${tripId}` }
+          ],
+          [
+            { text: '✅ Trip Complete', callback_data: `complete_${tripId}` }
+          ],
+          [
+            { text: '💬 Message Passenger', callback_data: `msg_${tripId}` }
+          ]
+        ]
+      }
+    });
+
+    // Notify passenger if they're connected
+    if (booking.passengerChatId) {
+      await sendTelegramMessage(booking.passengerChatId, `🎉 <b>Driver Confirmed!</b>
+
+Your driver has accepted your ride request.
+
+📋 Trip #${tripId}
+🚗 Driver: Andres
+📱 Contact: Available through this chat
+
+Your driver will notify you when they're on the way.
+Feel free to send any messages here - they'll be forwarded to your driver!`);
+    }
+  }
+  else if (action === 'decline') {
+    updateBooking(tripId, { status: 'declined' });
+    await answerCallbackQuery(callbackQueryId, '❌ Ride declined');
+
+    // Notify passenger
+    if (booking.passengerChatId) {
+      await sendTelegramMessage(booking.passengerChatId, `😔 Sorry, no drivers are currently available for your ride.
+
+Please try again later or contact us for assistance.
+
+🔗 Book again: https://i-love-miami.netlify.app`);
+    }
+  }
+  else if (action === 'otw') {
+    updateBooking(tripId, { status: 'on_the_way' });
+    await answerCallbackQuery(callbackQueryId, '🚗 Status updated!');
+
+    if (booking.passengerChatId) {
+      await sendTelegramMessage(booking.passengerChatId, `🚗 <b>Driver On The Way!</b>
+
+Your driver Andres is heading to your pickup location.
+
+📍 Pickup: ${booking.pickup}
+⏱️ ETA: Check your confirmation for estimated time
+
+💬 Send a message here if you need to communicate with your driver.`);
+    }
+  }
+  else if (action === 'arrived') {
+    updateBooking(tripId, { status: 'arrived' });
+    await answerCallbackQuery(callbackQueryId, '📍 Passenger notified!');
+
+    if (booking.passengerChatId) {
+      await sendTelegramMessage(booking.passengerChatId, `📍 <b>Driver Has Arrived!</b>
+
+Your driver Andres is at the pickup location.
+
+🚗 Look for: Black Vehicle
+📍 Location: ${booking.pickup}
+
+Please head to the pickup point!`);
+    }
+  }
+  else if (action === 'complete') {
+    updateBooking(tripId, { status: 'completed', completedAt: new Date().toISOString() });
+    await answerCallbackQuery(callbackQueryId, '✅ Trip completed!');
+
+    if (booking.passengerChatId) {
+      await sendTelegramMessage(booking.passengerChatId, `✅ <b>Trip Complete!</b>
+
+Thank you for riding with LinkMia! 🙏
+
+📋 Trip #${tripId}
+💵 Total: $${booking.price || '0'}
+
+⭐ How was your ride?`, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '⭐⭐⭐⭐⭐ Excellent', callback_data: `rate_5_${tripId}` }
+            ],
+            [
+              { text: '⭐⭐⭐⭐ Good', callback_data: `rate_4_${tripId}` }
+            ],
+            [
+              { text: '⭐⭐⭐ OK', callback_data: `rate_3_${tripId}` }
+            ],
+            [
+              { text: '🔗 Book Another Ride', url: 'https://i-love-miami.netlify.app' }
+            ]
+          ]
+        }
+      });
+    }
+
+    // Notify driver
+    await sendTelegramMessage(chatId, `✅ Trip #${tripId} marked as complete!
+
+💵 Fare: $${booking.price || '0'}
+
+Ready for the next ride? 🚗`);
+  }
+  else if (action === 'msg') {
+    // Driver wants to message passenger
+    updateBooking(tripId, { awaitingDriverMessage: true, driverChatId: chatId });
+    await answerCallbackQuery(callbackQueryId, 'Send your message now');
+    await sendTelegramMessage(chatId, `💬 Send your message to the passenger now. I'll forward it to them.`);
+  }
+  else if (action.startsWith('rate_')) {
+    const rating = action.split('_')[1];
+    updateBooking(tripId, { rating: parseInt(rating) });
+    await answerCallbackQuery(callbackQueryId, 'Thank you for your feedback!');
+    await sendTelegramMessage(chatId, `Thank you for rating your ride! ⭐
+
+We appreciate your feedback and look forward to serving you again.
+
+🔗 Book your next ride: https://i-love-miami.netlify.app`);
+  }
+}
+
+// Handle regular messages (forward between driver and passenger)
+async function handleRegularMessage(message) {
+  const chatId = message.chat.id;
+  const text = message.text;
+
+  // Find any booking where this chat is passenger or driver
+  let foundBooking = null;
+  for (const [tripId, booking] of bookingStore) {
+    if (booking.passengerChatId === chatId || booking.driverChatId === chatId) {
+      if (booking.status === 'accepted' || booking.status === 'on_the_way' || booking.status === 'arrived') {
+        foundBooking = booking;
+        break;
+      }
+    }
+  }
+
+  if (foundBooking) {
+    const isPassenger = foundBooking.passengerChatId === chatId;
+    const targetChatId = isPassenger ? foundBooking.driverChatId : foundBooking.passengerChatId;
+
+    if (targetChatId) {
+      const sender = isPassenger ? '👤 Passenger' : '🚗 Driver';
+      await sendTelegramMessage(targetChatId, `${sender}:\n${text}`);
+      await sendTelegramMessage(chatId, `✅ Message sent!`);
+    } else {
+      await sendTelegramMessage(chatId, `⚠️ Cannot forward message - the other party hasn't connected yet.`);
+    }
+  } else {
+    // No active booking - general message
+    await sendTelegramMessage(chatId, `👋 Hi! I don't see an active ride for you.
+
+To book a ride, visit:
+🔗 https://i-love-miami.netlify.app
+
+Or reply with your pickup address and destination, and I can help you get started!`);
+  }
+}
+
+// ============================================
+// ERROR HANDLING
+// ============================================
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!'
   });
@@ -547,7 +1006,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler for API routes
 app.use('/api/*', (req, res) => {
-  res.status(404).json({ 
+  res.status(404).json({
     error: 'API endpoint not found',
     status: 'ERROR'
   });
@@ -555,7 +1014,7 @@ app.use('/api/*', (req, res) => {
 
 // 404 handler for other routes
 app.use('*', (req, res) => {
-  res.status(404).sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
+  res.status(404).sendFile(path.join(__dirname, '..', '..', 'indexMVP.html');
 });
 
 // Start server
