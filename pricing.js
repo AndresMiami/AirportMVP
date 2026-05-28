@@ -84,12 +84,12 @@ export class PricingService {
             cancellationFee: 15
         };
 
-        // Holiday dates
+        // Holiday dates (2026)
         this.holidays = [
-            '2025-01-01', // New Year's Day
-            '2025-07-04', // Independence Day
-            '2025-12-25', // Christmas Day
-            '2025-11-28', // Thanksgiving
+            '2026-01-01', // New Year's Day
+            '2026-07-04', // Independence Day
+            '2026-11-26', // Thanksgiving (4th Thursday of November)
+            '2026-12-25', // Christmas Day
         ];
     }
 

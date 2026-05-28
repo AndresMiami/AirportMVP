@@ -1806,6 +1806,50 @@
 
                     localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
 
+                    // ===== PERSIST TO SUPABASE VIA API =====
+                    try {
+                        const apiPayload = {
+                            customerName: bookingData.booker?.name || bookingData.passenger?.name || 'Guest',
+                            phone: bookingData.booker?.phone || '',
+                            email: null,
+                            pickup: bookingData.route.from,
+                            dropoff: bookingData.route.to,
+                            dateTime: bookingData.dateTime?.time || new Date().toISOString(),
+                            vehicle: bookingData.vehicle?.name || 'Sedan',
+                            price: bookingData.pricing?.total || 0,
+                            mode: this.state.mode,
+                            passengers: bookingData.passenger?.count || 1,
+                            tripId: tripId,
+                            bags: bookingData.vehicle?.bags || 0,
+                            paymentMethod: bookingData.payment?.method || 'telegram',
+                            notes: bookingData.passenger?.notes?.chauffeurNotes || '',
+                            flightNumber: bookingData.passenger?.notes?.referenceCode || null
+                        };
+
+                        const response = await fetch('/api/create-booking', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(apiPayload)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok && result.bookingId) {
+                            // Store Supabase ID in localStorage for reference
+                            const storedBooking = JSON.parse(localStorage.getItem(`trip_${tripId}`));
+                            storedBooking.supabaseId = result.bookingId;
+                            storedBooking.supabaseSaved = true;
+                            localStorage.setItem(`trip_${tripId}`, JSON.stringify(storedBooking));
+                            console.log('✅ Booking saved to Supabase:', result.bookingId);
+                        } else {
+                            console.error('⚠️ Supabase save failed (localStorage backup active):', result);
+                        }
+                    } catch (apiError) {
+                        console.error('⚠️ API call failed (localStorage backup active):', apiError);
+                        // Non-blocking - localStorage serves as backup
+                    }
+                    // ===== END SUPABASE PERSISTENCE =====
+
                     // Show confirmation
                     this.showBookingConfirmation(tripId, bookingData);
 
