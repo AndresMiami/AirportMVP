@@ -1,5 +1,6 @@
-// Secure Booking Creation with Supabase Persistence + Telegram Notification
-// IMPORTANT: Supabase insert happens FIRST, Telegram only fires on success
+// Secure Booking Creation with Supabase Persistence + Telegram doorbell ping
+// IMPORTANT: Supabase insert happens FIRST, the doorbell only fires on success.
+// All dispatch actions (accept/decline/status) happen on the driver page.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -91,12 +92,11 @@ exports.handler = async (event, context) => {
       vehicle_type: vehicleType,
       price: parseFloat(booking.price) || 0,
       status: 'pending',
-      payment_method: booking.paymentMethod || 'telegram',
+      payment_method: booking.paymentMethod || 'cash',
       payment_status: 'unpaid',
       flight_number: booking.flightNumber || null,
-      notes: booking.tripId
-        ? `Website booking ${booking.tripId}. ${booking.notes || ''}`
-        : (booking.notes || null),
+      trip_id: booking.tripId || null,
+      notes: booking.notes || null,
       source: 'website'
     };
 
@@ -128,7 +128,6 @@ exports.handler = async (event, context) => {
     // STEP 2: SEND TELEGRAM (ONLY AFTER SUCCESS)
     // ============================================
     const tripId = booking.tripId || `B${Date.now().toString().slice(-4)}`;
-    const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
 
     // Format date and time for display
     const formattedDate = tripDate.toLocaleDateString('en-US', {
@@ -146,74 +145,39 @@ exports.handler = async (event, context) => {
     const isToday = new Date().toDateString() === tripDate.toDateString();
     const isUrgent = (tripDate - new Date()) < (2 * 60 * 60 * 1000); // Less than 2 hours
 
-    // Format Telegram message for admin review
-    const telegramMessage = `🆕 NEW BOOKING #${tripId}
-━━━━━━━━━━━━━━━━━━━
-👤 Name: ${booking.customerName}
-📱 Phone: ${booking.phone}
-${booking.email ? `✉️ Email: ${booking.email}` : ''}
+    // Plain-text "doorbell" ping — all dispatch actions happen on the driver page
+    const siteUrl = process.env.URL || 'https://i-love-miami.netlify.app';
+    const doorbell = `🆕 New ride ${tripId} — ${isToday ? 'TODAY' : formattedDate} at ${formattedTime}${isUrgent ? ' (URGENT <2h)' : ''}
+${booking.pickup} → ${booking.dropoff}
+$${booking.price} | ${booking.vehicle} | ${booking.passengers || 1} pax
+Open driver page: ${siteUrl}/driver`;
 
-🚗 TYPE: ${booking.mode === 'dropoff' ? 'To Airport ✈️' : 'From Airport 🛬'}
-📍 From: ${booking.pickup}
-✈️ To: ${booking.dropoff}
-🕐 When: ${isToday ? '📅 TODAY' : formattedDate} at ${formattedTime}
-${isUrgent ? '⚡ URGENT - Less than 2 hours!' : ''}
-
-💵 Price: $${booking.price}
-🚘 Vehicle: ${booking.vehicle}
-👥 Passengers: ${booking.passengers || 1}
-${booking.flightNumber ? `✈️ Flight: ${booking.flightNumber}` : ''}
-
-${booking.notes ? `📝 Notes: "${booking.notes}"` : ''}
-💳 Payment: ${booking.paymentMethod || 'Telegram'}
-
-📊 Database ID: ${insertedBooking.id}
-🕐 Received: ${timestamp}`;
-
-    // Send Telegram notification to admin
     let telegramSent = false;
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.ADMIN_TELEGRAM_CHAT_ID) {
-      const telegramApiUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-      // Inline keyboard for quick actions
-      const inlineKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '✅ Approve', callback_data: `approve_${insertedBooking.id}` },
-            { text: '❌ Reject', callback_data: `reject_${insertedBooking.id}` }
-          ],
-          [
-            { text: '📞 Call Customer', url: `tel:${booking.phone}` }
-          ]
-        ]
-      };
-
       try {
-        const telegramResponse = await fetch(telegramApiUrl, {
+        const telegramResponse = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: process.env.ADMIN_TELEGRAM_CHAT_ID,
-            text: telegramMessage,
-            parse_mode: 'HTML',
-            reply_markup: inlineKeyboard
+            text: doorbell
           })
         });
 
         if (telegramResponse.ok) {
-          console.log(`📱 Telegram notification sent for booking #${tripId}`);
+          console.log(`📱 Doorbell sent for booking #${tripId}`);
           telegramSent = true;
         } else {
           const errorData = await telegramResponse.json();
-          console.error('⚠️ Telegram notification failed:', errorData);
+          console.error('⚠️ Doorbell failed:', errorData);
           // Continue - database save was successful
         }
       } catch (telegramError) {
-        console.error('⚠️ Telegram error:', telegramError.message);
+        console.error('⚠️ Doorbell error:', telegramError.message);
         // Continue - database save was successful
       }
     } else {
-      console.warn('⚠️ Telegram not configured - skipping notification');
+      console.warn('⚠️ Telegram not configured - skipping doorbell');
     }
 
     // Return success response with database ID
