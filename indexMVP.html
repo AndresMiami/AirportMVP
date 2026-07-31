@@ -1701,7 +1701,7 @@
 
             async confirmBooking() {
                 // ========== PAYMENT CONFIGURATION ==========
-                // Set to false to skip Stripe payment (handle via Telegram/CashApp/Zelle)
+                // Set to false to skip Stripe payment (driver collects cash/Zelle)
                 // Set to true when ready to enable Stripe payments
                 const REQUIRE_PAYMENT = false;
                 // ============================================
@@ -1798,15 +1798,16 @@
                         bookingData.status = 'confirmed';
                         bookingData.payment.transactionId = paymentResult.paymentIntentId;
                     } else {
-                        // ===== SKIP PAYMENT - Handle via Telegram =====
+                        // ===== SKIP PAYMENT - Collected by driver =====
                         bookingData.status = 'payment_pending';
-                        bookingData.payment.method = 'telegram';
-                        bookingData.payment.note = 'Payment to be collected via Telegram (CashApp/Zelle)';
+                        bookingData.payment.method = 'cash';
+                        bookingData.payment.note = 'Pay your driver by cash or Zelle';
                     }
 
                     localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
 
                     // ===== PERSIST TO SUPABASE VIA API =====
+                    let supabaseBookingId = null;
                     try {
                         const apiPayload = {
                             customerName: bookingData.booker?.name || bookingData.passenger?.name || 'Guest',
@@ -1821,7 +1822,7 @@
                             passengers: bookingData.passenger?.count || 1,
                             tripId: tripId,
                             bags: bookingData.vehicle?.bags || 0,
-                            paymentMethod: bookingData.payment?.method || 'telegram',
+                            paymentMethod: bookingData.payment?.method || 'cash',
                             notes: bookingData.passenger?.notes?.chauffeurNotes || '',
                             flightNumber: bookingData.passenger?.notes?.referenceCode || null
                         };
@@ -1836,10 +1837,12 @@
 
                         if (response.ok && result.bookingId) {
                             // Store Supabase ID in localStorage for reference
+                            supabaseBookingId = result.bookingId;
                             const storedBooking = JSON.parse(localStorage.getItem(`trip_${tripId}`));
                             storedBooking.supabaseId = result.bookingId;
                             storedBooking.supabaseSaved = true;
                             localStorage.setItem(`trip_${tripId}`, JSON.stringify(storedBooking));
+                            localStorage.setItem('lm_last_trip_id', result.bookingId);
                             console.log('✅ Booking saved to Supabase:', result.bookingId);
                         } else {
                             console.error('⚠️ Supabase save failed (localStorage backup active):', result);
@@ -1850,40 +1853,8 @@
                     }
                     // ===== END SUPABASE PERSISTENCE =====
 
-                    // ===== STORE BOOKING ON RAILWAY FOR TELEGRAM BOT =====
-                    try {
-                        const railwayPayload = {
-                            tripId: tripId,
-                            customerName: bookingData.booker?.name || bookingData.passenger?.name || 'Guest',
-                            phone: bookingData.booker?.phone || '',
-                            pickup: bookingData.route.from,
-                            dropoff: bookingData.route.to,
-                            pickupDateTime: bookingData.dateTime?.time || new Date().toISOString(),
-                            vehicle: bookingData.vehicle?.name || 'Sedan',
-                            price: bookingData.pricing?.total || 0,
-                            passengers: bookingData.passenger?.count || 1,
-                            notes: bookingData.passenger?.notes?.chauffeurNotes || '',
-                            paymentMethod: bookingData.payment?.method || 'telegram'
-                        };
-
-                        const railwayResponse = await fetch('https://reliable-warmth-production-d382.up.railway.app/api/store-booking', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(railwayPayload)
-                        });
-
-                        if (railwayResponse.ok) {
-                            console.log('✅ Booking stored on Railway for Telegram bot');
-                        } else {
-                            console.warn('⚠️ Railway store-booking failed:', await railwayResponse.text());
-                        }
-                    } catch (railwayError) {
-                        console.warn('⚠️ Railway store-booking call failed:', railwayError);
-                    }
-                    // ===== END RAILWAY STORE =====
-
                     // Show confirmation
-                    this.showBookingConfirmation(tripId, bookingData);
+                    this.showBookingConfirmation(tripId, bookingData, supabaseBookingId);
 
                 } catch (error) {
                     console.error('Booking failed:', error);
@@ -1983,10 +1954,7 @@
                 document.body.appendChild(errorModal);
             }
 
-            showBookingConfirmation(tripId, bookingData) {
-                // LinkMia Telegram Bot username
-                const LINKMIA_TELEGRAM = 'LinkMiamiBot'; // Telegram bot username (without @)
-
+            showBookingConfirmation(tripId, bookingData, bookingUuid) {
                 // Format the date/time nicely
                 const tripDateTime = new Date(bookingData.dateTime.time);
                 const formattedDate = tripDateTime.toLocaleDateString('en-US', {
@@ -2037,10 +2005,6 @@
                     ? `\n🎟️ Promo: ${bookingData.payment.promo}`
                     : '';
 
-                // Create Telegram deep link with booking ID payload
-                // When passenger taps, bot receives /start booking_TRIPID and greets them
-                const telegramLink = `https://t.me/${LINKMIA_TELEGRAM}?start=booking_${tripId}`;
-
                 const confirmationElement = document.createElement('div');
                 confirmationElement.className = 'booking-confirmation';
                 confirmationElement.innerHTML = `
@@ -2078,23 +2042,24 @@
                             </div>
                         </div>
 
-                        <div class="confirmation-telegram-section">
-                            <p class="telegram-prompt">Chat with us to confirm your driver:</p>
-                            <a href="${telegramLink}" target="_blank" class="telegram-btn" id="telegramChatBtn">
-                                <svg class="telegram-icon" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-                                </svg>
-                                <span>Continue on Telegram</span>
+                        <div class="confirmation-track-section">
+                            ${bookingUuid ? `
+                            <p class="track-prompt">We're notifying your driver now.</p>
+                            <a href="/trip?id=${bookingUuid}" class="track-btn" id="trackRideBtn">
+                                <span>Track your ride</span>
                             </a>
+                            ` : `
+                            <p class="track-prompt">Your request was received — we'll contact you shortly to confirm your driver.</p>
+                            `}
                         </div>
 
                         <button class="secondary-btn" id="confirmationDoneBtn">Done</button>
                     </div>
                 `;
 
-                // Add Telegram button styles
-                const telegramStyles = document.createElement('style');
-                telegramStyles.textContent = `
+                // Add confirmation modal styles
+                const confirmationStyles = document.createElement('style');
+                confirmationStyles.textContent = `
                     .confirmation-content {
                         position: relative;
                     }
@@ -2123,7 +2088,7 @@
                     .confirmation-checkmark {
                         width: 60px;
                         height: 60px;
-                        background: linear-gradient(135deg, #0088cc, #0077b5);
+                        background: linear-gradient(135deg, #34C759, #28A745);
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
@@ -2136,25 +2101,25 @@
                         color: #32D74B;
                         font-weight: 700;
                     }
-                    .confirmation-telegram-section {
+                    .confirmation-track-section {
                         margin: 24px 0;
                         padding: 20px;
-                        background: rgba(0, 136, 204, 0.1);
+                        background: rgba(52, 199, 89, 0.1);
                         border-radius: 12px;
-                        border: 1px solid rgba(0, 136, 204, 0.3);
+                        border: 1px solid rgba(52, 199, 89, 0.3);
                     }
-                    .telegram-prompt {
+                    .track-prompt {
                         color: #8E8E93;
                         font-size: 14px;
                         margin: 0 0 12px 0;
                         text-align: center;
                     }
-                    .telegram-btn {
+                    .track-btn {
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         gap: 10px;
-                        background: #0088cc;
+                        background: #28A745;
                         color: white;
                         text-decoration: none;
                         padding: 14px 24px;
@@ -2163,16 +2128,12 @@
                         font-weight: 600;
                         transition: all 0.2s ease;
                     }
-                    .telegram-btn:hover {
-                        background: #0077b5;
+                    .track-btn:hover {
+                        background: #218838;
                         transform: scale(1.02);
                     }
-                    .telegram-btn:active {
+                    .track-btn:active {
                         transform: scale(0.98);
-                    }
-                    .telegram-icon {
-                        width: 24px;
-                        height: 24px;
                     }
                     .secondary-btn {
                         background: transparent;
@@ -2191,7 +2152,7 @@
                         color: white;
                     }
                 `;
-                document.head.appendChild(telegramStyles);
+                document.head.appendChild(confirmationStyles);
 
                 document.body.appendChild(confirmationElement);
 
@@ -2202,11 +2163,15 @@
                     // Don't reload - user can edit and resubmit
                 });
 
-                // Done button - resets form for new booking
+                // Done button - go to trip status page if we have one, else reset form
                 const doneBtn = document.getElementById('confirmationDoneBtn');
                 doneBtn.addEventListener('click', () => {
                     confirmationElement.remove();
-                    window.location.reload();
+                    if (bookingUuid) {
+                        window.location.href = `/trip?id=${bookingUuid}`;
+                    } else {
+                        window.location.reload();
+                    }
                 });
 
                 // Also close on backdrop click

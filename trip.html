@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Your Trip - LinkMia</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f6f8;
+            color: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 16px 40px;
+        }
+        .brand {
+            font-size: 22px;
+            font-weight: 700;
+            margin: 8px 0 20px;
+            background: linear-gradient(135deg, #FF9933, #FF5733);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 24px 20px;
+            width: 100%;
+            max-width: 440px;
+            margin-bottom: 16px;
+        }
+        .status-hero { text-align: center; padding: 28px 20px; }
+        .status-icon { font-size: 44px; margin-bottom: 12px; display: block; }
+        .status-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+        .status-sub { font-size: 14px; color: #666; line-height: 1.5; }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 4px solid #ffe3d1;
+            border-top-color: #FF5733;
+            border-radius: 50%;
+            margin: 0 auto 14px;
+            animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .trip-code {
+            text-align: center;
+            font-size: 13px;
+            color: #999;
+            letter-spacing: 1px;
+            margin-bottom: 14px;
+        }
+        .route { display: flex; flex-direction: column; gap: 0; margin-bottom: 18px; }
+        .route-point { display: flex; gap: 12px; align-items: flex-start; }
+        .route-marker {
+            width: 26px; height: 26px; border-radius: 50%;
+            background: #1a1a2e; color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 700; flex-shrink: 0;
+        }
+        .route-line {
+            width: 2px; height: 22px; background: #ccc;
+            margin-left: 12px;
+        }
+        .route-text { font-size: 14px; line-height: 1.4; padding-top: 4px; }
+        .detail-row {
+            display: flex; justify-content: space-between;
+            padding: 9px 0; border-top: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+        .detail-row .label { color: #888; }
+        .detail-row .value { font-weight: 600; text-align: right; }
+        .price-value { color: #1eaa5c; font-size: 16px; }
+        .badge {
+            display: inline-block; padding: 3px 10px; border-radius: 10px;
+            font-size: 12px; font-weight: 700;
+        }
+        .badge.unpaid { background: #fff3e0; color: #cc7000; }
+        .badge.paid { background: #e6f7ec; color: #1eaa5c; }
+
+        .steps { display: flex; justify-content: space-between; margin: 4px 0 8px; }
+        .step { flex: 1; text-align: center; position: relative; }
+        .step-dot {
+            width: 14px; height: 14px; border-radius: 50%;
+            background: #ddd; margin: 0 auto 6px; position: relative; z-index: 1;
+        }
+        .step.done .step-dot { background: #1eaa5c; }
+        .step.current .step-dot {
+            background: #FF5733;
+            box-shadow: 0 0 0 4px rgba(255,87,51,0.2);
+        }
+        .step-label { font-size: 10px; color: #999; }
+        .step.done .step-label, .step.current .step-label { color: #1a1a2e; font-weight: 600; }
+        .step::before {
+            content: ''; position: absolute; top: 7px; left: -50%;
+            width: 100%; height: 2px; background: #ddd;
+        }
+        .step:first-child::before { display: none; }
+        .step.done::before, .step.current::before { background: #1eaa5c; }
+
+        .cancel-btn {
+            width: 100%; padding: 14px; margin-top: 4px;
+            background: white; color: #d33;
+            border: 1.5px solid #d33; border-radius: 12px;
+            font-size: 15px; font-weight: 600; cursor: pointer;
+        }
+        .cancel-btn:active { background: #fdf0f0; }
+        .home-link {
+            display: inline-block; margin-top: 10px;
+            color: #FF5733; text-decoration: none; font-weight: 600; font-size: 14px;
+        }
+        .support { font-size: 13px; color: #888; text-align: center; margin-top: 8px; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="brand">LinkMia</div>
+
+    <div class="card status-hero" id="statusCard">
+        <div class="spinner" id="spinner"></div>
+        <span class="status-icon hidden" id="statusIcon"></span>
+        <div class="status-title" id="statusTitle">Loading your trip…</div>
+        <div class="status-sub" id="statusSub"></div>
+    </div>
+
+    <div class="card hidden" id="stepsCard">
+        <div class="steps" id="steps">
+            <div class="step" data-step="pending"><div class="step-dot"></div><div class="step-label">Requested</div></div>
+            <div class="step" data-step="confirmed"><div class="step-dot"></div><div class="step-label">Confirmed</div></div>
+            <div class="step" data-step="on_the_way"><div class="step-dot"></div><div class="step-label">On the way</div></div>
+            <div class="step" data-step="arrived"><div class="step-dot"></div><div class="step-label">Arrived</div></div>
+            <div class="step" data-step="completed"><div class="step-dot"></div><div class="step-label">Done</div></div>
+        </div>
+    </div>
+
+    <div class="card hidden" id="tripCard">
+        <div class="trip-code" id="tripCode"></div>
+        <div class="route">
+            <div class="route-point">
+                <div class="route-marker">A</div>
+                <div class="route-text" id="routeFrom"></div>
+            </div>
+            <div class="route-line"></div>
+            <div class="route-point">
+                <div class="route-marker">B</div>
+                <div class="route-text" id="routeTo"></div>
+            </div>
+        </div>
+        <div class="detail-row"><span class="label">When</span><span class="value" id="tripWhen"></span></div>
+        <div class="detail-row"><span class="label">Vehicle</span><span class="value" id="tripVehicle"></span></div>
+        <div class="detail-row"><span class="label">Passengers</span><span class="value" id="tripPax"></span></div>
+        <div class="detail-row"><span class="label">Total</span><span class="value price-value" id="tripPrice"></span></div>
+        <div class="detail-row"><span class="label">Payment</span><span class="value" id="tripPayment"></span></div>
+        <button class="cancel-btn hidden" id="cancelBtn">Cancel booking</button>
+    </div>
+
+    <div class="support" id="supportText"></div>
+
+    <script>
+        const SUPPORT_PHONE = '+1 (305) XXX-XXXX'; // TODO(Andres): real support number
+        const POLL_MS = 7000;
+        const TERMINAL = ['completed', 'cancelled', 'declined'];
+
+        const STATUS_VIEW = {
+            pending:    { icon: null,  title: 'Waiting for driver confirmation…', sub: 'We\'ve notified your driver. This usually takes just a few minutes.' },
+            confirmed:  { icon: '✅', title: 'Driver confirmed!', sub: 'Andres will pick you up as scheduled.' },
+            on_the_way: { icon: '🚗', title: 'Your driver is on the way', sub: 'Please be ready at your pickup point.' },
+            arrived:    { icon: '📍', title: 'Your driver has arrived', sub: 'Please head to the pickup point.' },
+            completed:  { icon: '🎉', title: 'Trip complete', sub: 'Thank you for riding with LinkMia!' },
+            declined:   { icon: '😔', title: 'No driver available', sub: `Sorry, no driver is available for this ride right now. Call or text us: ${SUPPORT_PHONE}` },
+            cancelled:  { icon: '🚫', title: 'Booking cancelled', sub: 'This booking was cancelled.' },
+            // Legacy statuses map to sensible views
+            assigned:   { icon: '✅', title: 'Driver assigned!', sub: 'Your driver has been assigned.' },
+            in_progress:{ icon: '🚗', title: 'Trip in progress', sub: 'Enjoy your ride!' }
+        };
+
+        const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'completed'];
+
+        const params = new URLSearchParams(location.search);
+        const bookingId = params.get('id') || localStorage.getItem('lm_last_trip_id');
+        let pollTimer = null;
+
+        const $ = (id) => document.getElementById(id);
+
+        function showNoTrip() {
+            $('spinner').classList.add('hidden');
+            $('statusIcon').textContent = '🔍';
+            $('statusIcon').classList.remove('hidden');
+            $('statusTitle').textContent = 'No trip found';
+            $('statusSub').innerHTML = 'We couldn\'t find a booking to track.<br><a class="home-link" href="/">Book a ride</a>';
+        }
+
+        function fmtDateTime(iso) {
+            if (!iso) return 'ASAP';
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                + ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+
+        function render(booking) {
+            const view = STATUS_VIEW[booking.status] || { icon: 'ℹ️', title: booking.status, sub: '' };
+
+            if (booking.status === 'pending') {
+                $('spinner').classList.remove('hidden');
+                $('statusIcon').classList.add('hidden');
+            } else {
+                $('spinner').classList.add('hidden');
+                $('statusIcon').textContent = view.icon;
+                $('statusIcon').classList.remove('hidden');
+            }
+            $('statusTitle').textContent = view.title;
+            $('statusSub').textContent = view.sub;
+
+            // Progress steps (hide for declined/cancelled)
+            if (['declined', 'cancelled'].includes(booking.status)) {
+                $('stepsCard').classList.add('hidden');
+            } else {
+                $('stepsCard').classList.remove('hidden');
+                const idx = STEP_ORDER.indexOf(booking.status);
+                document.querySelectorAll('.step').forEach((el) => {
+                    const stepIdx = STEP_ORDER.indexOf(el.dataset.step);
+                    el.classList.remove('done', 'current');
+                    if (idx >= 0) {
+                        if (stepIdx < idx || booking.status === 'completed' && stepIdx <= idx) el.classList.add('done');
+                        else if (stepIdx === idx) el.classList.add('current');
+                    }
+                });
+            }
+
+            // Trip details
+            $('tripCard').classList.remove('hidden');
+            $('tripCode').textContent = booking.trip_id ? `TRIP ${booking.trip_id}` : '';
+            $('routeFrom').textContent = booking.pickup_location || '—';
+            $('routeTo').textContent = booking.dropoff_location || '—';
+            $('tripWhen').textContent = fmtDateTime(booking.pickup_datetime);
+            $('tripVehicle').textContent = (booking.vehicle_type || 'sedan').replace(/^\w/, c => c.toUpperCase());
+            $('tripPax').textContent = booking.passengers || 1;
+            $('tripPrice').textContent = '$' + (booking.price || 0);
+            $('tripPayment').innerHTML = booking.payment_status === 'unpaid'
+                ? '<span class="badge unpaid">Pay driver (cash/Zelle)</span>'
+                : '<span class="badge paid">Paid</span>';
+
+            // Cancel only while pending
+            $('cancelBtn').classList.toggle('hidden', booking.status !== 'pending');
+
+            $('supportText').textContent = `Questions? Call or text us: ${SUPPORT_PHONE}`;
+
+            if (TERMINAL.includes(booking.status) && pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
+                if (res.status === 404) {
+                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    showNoTrip();
+                    return;
+                }
+                if (!res.ok) return; // transient error — keep polling
+                const { booking } = await res.json();
+                render(booking);
+            } catch (e) {
+                // network hiccup — keep polling
+                console.warn('Status fetch failed:', e);
+            }
+        }
+
+        async function cancelBooking() {
+            if (!confirm('Cancel this booking?')) return;
+            try {
+                const res = await fetch('/api/booking-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: bookingId, action: 'cancel' })
+                });
+                if (res.status === 409) {
+                    alert(`Your driver already accepted this ride — call us to change plans: ${SUPPORT_PHONE}`);
+                }
+                fetchStatus();
+            } catch (e) {
+                alert('Could not cancel right now. Please try again.');
+            }
+        }
+
+        if (!bookingId) {
+            showNoTrip();
+        } else {
+            $('cancelBtn').addEventListener('click', cancelBooking);
+            fetchStatus();
+            pollTimer = setInterval(fetchStatus, POLL_MS);
+        }
+    </script>
+</body>
+</html>
