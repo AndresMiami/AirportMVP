@@ -1850,6 +1850,38 @@
                     }
                     // ===== END SUPABASE PERSISTENCE =====
 
+                    // ===== STORE BOOKING ON RAILWAY FOR TELEGRAM BOT =====
+                    try {
+                        const railwayPayload = {
+                            tripId: tripId,
+                            customerName: bookingData.booker?.name || bookingData.passenger?.name || 'Guest',
+                            phone: bookingData.booker?.phone || '',
+                            pickup: bookingData.route.from,
+                            dropoff: bookingData.route.to,
+                            pickupDateTime: bookingData.dateTime?.time || new Date().toISOString(),
+                            vehicle: bookingData.vehicle?.name || 'Sedan',
+                            price: bookingData.pricing?.total || 0,
+                            passengers: bookingData.passenger?.count || 1,
+                            notes: bookingData.passenger?.notes?.chauffeurNotes || '',
+                            paymentMethod: bookingData.payment?.method || 'telegram'
+                        };
+
+                        const railwayResponse = await fetch('https://reliable-warmth-production-d382.up.railway.app/api/store-booking', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(railwayPayload)
+                        });
+
+                        if (railwayResponse.ok) {
+                            console.log('✅ Booking stored on Railway for Telegram bot');
+                        } else {
+                            console.warn('⚠️ Railway store-booking failed:', await railwayResponse.text());
+                        }
+                    } catch (railwayError) {
+                        console.warn('⚠️ Railway store-booking call failed:', railwayError);
+                    }
+                    // ===== END RAILWAY STORE =====
+
                     // Show confirmation
                     this.showBookingConfirmation(tripId, bookingData);
 
