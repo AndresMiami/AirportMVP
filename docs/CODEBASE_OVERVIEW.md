@@ -266,7 +266,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ### Live URLs (from .env.example)
 - **Frontend**: `https://i-love-miami.netlify.app`
 - **API Proxy**: `https://reliable-warmth-production-d382.up.railway.app`
-- **Database**: `https://hncpybxwblpkyxvskoxd.supabase.co`
+- **Database**: `https://qvtqqggtpxesfcmpftej.supabase.co`
 
 ### Deployment Architecture
 ```
