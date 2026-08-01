@@ -80,10 +80,18 @@ exports.handler = async (event, context) => {
     };
     const vehicleType = vehicleTypeMap[booking.vehicle] || 'sedan';
 
+    // Booker info is stored only when someone books on behalf of another
+    // passenger — customer_* is always the person the driver picks up.
+    const isBookerDifferent = booking.bookerName &&
+      booking.bookerName !== booking.customerName;
+
     // Build the database record
     const bookingRecord = {
       customer_name: booking.customerName,
       customer_phone: booking.phone,
+      customer_email: booking.email || null,
+      booker_name: isBookerDifferent ? booking.bookerName : null,
+      booker_phone: isBookerDifferent ? (booking.bookerPhone || null) : null,
       pickup_location: booking.pickup,
       dropoff_location: booking.dropoff,
       pickup_datetime: pickupDatetime,
@@ -97,6 +105,9 @@ exports.handler = async (event, context) => {
       flight_number: booking.flightNumber || null,
       trip_id: booking.tripId || null,
       notes: booking.notes || null,
+      pickup_sign: booking.pickupSign || null,
+      promo_code: booking.promoCode || null,
+      booking_mode: booking.mode || null,
       source: 'website'
     };
 

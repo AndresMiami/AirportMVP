@@ -1809,10 +1809,14 @@
                     // ===== PERSIST TO SUPABASE VIA API =====
                     let supabaseBookingId = null;
                     try {
+                        // customerName/phone = the traveling passenger (who the driver meets);
+                        // bookerName/bookerPhone = who made the booking, when different
                         const apiPayload = {
-                            customerName: bookingData.booker?.name || bookingData.passenger?.name || 'Guest',
-                            phone: bookingData.booker?.phone || '',
-                            email: null,
+                            customerName: bookingData.passenger?.name || bookingData.booker?.name || 'Guest',
+                            phone: bookingData.passenger?.phone || bookingData.booker?.phone || '',
+                            bookerName: bookingData.booker?.name || null,
+                            bookerPhone: bookingData.booker?.phone || null,
+                            email: bookingData.passenger?.guestData?.email || null,
                             pickup: bookingData.route.from,
                             dropoff: bookingData.route.to,
                             dateTime: bookingData.dateTime?.time || new Date().toISOString(),
@@ -1824,6 +1828,8 @@
                             bags: bookingData.vehicle?.bags || 0,
                             paymentMethod: bookingData.payment?.method || 'cash',
                             notes: bookingData.passenger?.notes?.chauffeurNotes || '',
+                            pickupSign: bookingData.passenger?.notes?.pickupSign || null,
+                            promoCode: bookingData.payment?.promo || null,
                             flightNumber: bookingData.passenger?.notes?.referenceCode || null
                         };
 

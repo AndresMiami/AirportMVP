@@ -198,6 +198,8 @@
                     ${b.flight_number ? `<span>✈️ ${esc(b.flight_number)}</span>` : ''}
                 </div>
                 <div class="contact-row">👤 ${esc(b.customer_name)} — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a></div>
+                ${b.booker_name && b.booker_name !== b.customer_name ? `<div class="contact-row">📋 Booked by ${esc(b.booker_name)}${b.booker_phone ? ` — <a href="tel:${esc(b.booker_phone)}">${esc(b.booker_phone)}</a>` : ''}</div>` : ''}
+                ${b.pickup_sign ? `<div class="notes">🪧 Sign: ${esc(b.pickup_sign)}</div>` : ''}
                 ${b.notes ? `<div class="notes">📝 ${esc(b.notes)}</div>` : ''}
                 ${buttonsHtml}
             </div>`;
