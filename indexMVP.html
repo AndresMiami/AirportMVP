@@ -1830,7 +1830,8 @@
                             notes: bookingData.passenger?.notes?.chauffeurNotes || '',
                             pickupSign: bookingData.passenger?.notes?.pickupSign || null,
                             promoCode: bookingData.payment?.promo || null,
-                            flightNumber: bookingData.passenger?.notes?.referenceCode || null
+                            flightNumber: bookingData.passenger?.notes?.referenceCode || null,
+                            durationMinutes: this.state.route?.duration || null
                         };
 
                         const response = await fetch('/api/create-booking', {
@@ -1859,8 +1860,13 @@
                     }
                     // ===== END SUPABASE PERSISTENCE =====
 
-                    // Show confirmation
-                    this.showBookingConfirmation(tripId, bookingData, supabaseBookingId);
+                    // Success: slide up the live trip status sheet (same page, form
+                    // state preserved underneath for Modify). Failure: fallback modal.
+                    if (supabaseBookingId) {
+                        this.showTripSheet(supabaseBookingId);
+                    } else {
+                        this.showBookingConfirmation(tripId, bookingData, null);
+                    }
 
                 } catch (error) {
                     console.error('Booking failed:', error);
@@ -1958,6 +1964,56 @@
                 
                 document.head.appendChild(style);
                 document.body.appendChild(errorModal);
+            }
+
+            showTripSheet(bookingUuid) {
+                // Restore the book button so the form is usable if the
+                // passenger comes back via "Modify your request"
+                const bookBtn = document.getElementById('bookBtn');
+                if (bookBtn) {
+                    bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
+                    bookBtn.disabled = false;
+                }
+
+                const sheet = document.createElement('div');
+                sheet.className = 'trip-sheet';
+                sheet.innerHTML = `<iframe src="/trip?id=${bookingUuid}&embed=1" title="Your trip status"></iframe>`;
+
+                const sheetStyles = document.createElement('style');
+                sheetStyles.textContent = `
+                    .trip-sheet {
+                        position: fixed;
+                        inset: 0;
+                        z-index: 10000;
+                        background: #1C1C1E;
+                        transform: translateY(100%);
+                        transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+                    }
+                    .trip-sheet.open { transform: translateY(0); }
+                    .trip-sheet iframe {
+                        width: 100%; height: 100%;
+                        border: none; display: block;
+                    }
+                `;
+                document.head.appendChild(sheetStyles);
+                document.body.appendChild(sheet);
+
+                // Trigger the slide-up on the next frame
+                requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.add('open')));
+
+                // "Modify your request" inside the sheet slides it away —
+                // the booking form underneath still holds all selections
+                const onMessage = (e) => {
+                    if (e.data?.type === 'lm-modify') {
+                        sheet.classList.remove('open');
+                        setTimeout(() => {
+                            sheet.remove();
+                            sheetStyles.remove();
+                        }, 400);
+                        window.removeEventListener('message', onMessage);
+                    }
+                };
+                window.addEventListener('message', onMessage);
             }
 
             showBookingConfirmation(tripId, bookingData, bookingUuid) {

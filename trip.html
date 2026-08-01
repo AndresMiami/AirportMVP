@@ -5,252 +5,396 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Your Trip - LinkMia</title>
     <style>
+        :root {
+            --bg: #1C1C1E;
+            --panel-bg: #2C2C2E;
+            --panel-bg-2: #262628;
+            --text-primary: #FFFFFF;
+            --text-secondary: #8E8E93;
+            --text-light: #636366;
+            --brand-grad: linear-gradient(135deg, #FF9933, #FF5733);
+            --green: #32D74B;
+            --orange: #FF5733;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f6f8;
-            color: #1a1a2e;
+            background: var(--bg);
+            color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px 16px 40px;
         }
-        .brand {
-            font-size: 22px;
-            font-weight: 700;
-            margin: 8px 0 20px;
-            background: linear-gradient(135deg, #FF9933, #FF5733);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .card {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-            padding: 24px 20px;
-            width: 100%;
-            max-width: 440px;
-            margin-bottom: 16px;
-        }
-        .status-hero { text-align: center; padding: 28px 20px; }
-        .status-icon { font-size: 44px; margin-bottom: 12px; display: block; }
-        .status-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
-        .status-sub { font-size: 14px; color: #666; line-height: 1.5; }
-        .spinner {
-            width: 36px; height: 36px;
-            border: 4px solid #ffe3d1;
-            border-top-color: #FF5733;
-            border-radius: 50%;
-            margin: 0 auto 14px;
-            animation: spin 0.9s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        .page { width: 100%; max-width: 440px; padding: 0 14px 32px; }
 
-        .trip-code {
+        /* Status strip: the page header */
+        .status-strip {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
             text-align: center;
-            font-size: 13px;
-            color: #999;
-            letter-spacing: 1px;
-            margin-bottom: 14px;
+            font-size: 14px; font-weight: 600; color: #FF9933;
+            padding: 16px 2px 12px;
         }
-        .route { display: flex; flex-direction: column; gap: 0; margin-bottom: 18px; }
-        .route-point { display: flex; gap: 12px; align-items: flex-start; }
-        .route-marker {
-            width: 26px; height: 26px; border-radius: 50%;
-            background: #1a1a2e; color: white;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 12px; font-weight: 700; flex-shrink: 0;
+        .status-strip.green { color: var(--green); }
+        .status-strip.red { color: #FF453A; }
+        .status-strip.gray { color: var(--text-secondary); }
+        .pulse-dot {
+            width: 9px; height: 9px; border-radius: 50%;
+            background: #FF9933; flex-shrink: 0;
+            animation: pulse 1.2s ease-in-out infinite;
         }
-        .route-line {
-            width: 2px; height: 22px; background: #ccc;
-            margin-left: 12px;
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
         }
-        .route-text { font-size: 14px; line-height: 1.4; padding-top: 4px; }
-        .detail-row {
-            display: flex; justify-content: space-between;
-            padding: 9px 0; border-top: 1px solid #f0f0f0;
-            font-size: 14px;
+        .status-sub {
+            text-align: center; font-size: 12px; color: var(--text-secondary);
+            margin: -6px 0 12px; padding: 0 8px; line-height: 1.5;
         }
-        .detail-row .label { color: #888; }
-        .detail-row .value { font-weight: 600; text-align: right; }
-        .price-value { color: #1eaa5c; font-size: 16px; }
-        .badge {
-            display: inline-block; padding: 3px 10px; border-radius: 10px;
-            font-size: 12px; font-weight: 700;
-        }
-        .badge.unpaid { background: #fff3e0; color: #cc7000; }
-        .badge.paid { background: #e6f7ec; color: #1eaa5c; }
 
-        .steps { display: flex; justify-content: space-between; margin: 4px 0 8px; }
+        /* Progress steps */
+        .steps {
+            display: flex; padding: 12px 8px 10px;
+            background: linear-gradient(135deg, var(--panel-bg) 0%, var(--panel-bg-2) 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            margin-bottom: 12px;
+        }
         .step { flex: 1; text-align: center; position: relative; }
         .step-dot {
-            width: 14px; height: 14px; border-radius: 50%;
-            background: #ddd; margin: 0 auto 6px; position: relative; z-index: 1;
+            width: 12px; height: 12px; border-radius: 50%;
+            background: #48484A; margin: 0 auto 5px; position: relative; z-index: 1;
         }
-        .step.done .step-dot { background: #1eaa5c; }
+        .step.done .step-dot { background: var(--green); }
         .step.current .step-dot {
-            background: #FF5733;
-            box-shadow: 0 0 0 4px rgba(255,87,51,0.2);
+            background: var(--orange);
+            box-shadow: 0 0 0 4px rgba(255, 87, 51, 0.18);
         }
-        .step-label { font-size: 10px; color: #999; }
-        .step.done .step-label, .step.current .step-label { color: #1a1a2e; font-weight: 600; }
+        .step-label { font-size: 10px; color: var(--text-light); }
+        .step.done .step-label, .step.current .step-label { color: var(--text-primary); font-weight: 600; }
         .step::before {
-            content: ''; position: absolute; top: 7px; left: -50%;
-            width: 100%; height: 2px; background: #ddd;
+            content: ''; position: absolute; top: 5px; left: -50%;
+            width: 100%; height: 2px; background: #48484A;
         }
         .step:first-child::before { display: none; }
-        .step.done::before, .step.current::before { background: #1eaa5c; }
+        .step.done::before, .step.current::before { background: var(--green); }
 
-        .cancel-btn {
-            width: 100%; padding: 14px; margin-top: 4px;
-            background: white; color: #d33;
-            border: 1.5px solid #d33; border-radius: 12px;
-            font-size: 15px; font-weight: 600; cursor: pointer;
+        /* Card */
+        .card {
+            background: linear-gradient(135deg, var(--panel-bg) 0%, var(--panel-bg-2) 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            overflow: hidden;
+            margin-bottom: 12px;
         }
-        .cancel-btn:active { background: #fdf0f0; }
-        .home-link {
-            display: inline-block; margin-top: 10px;
-            color: #FF5733; text-decoration: none; font-weight: 600; font-size: 14px;
+
+        /* Vehicle */
+        .vehicle-image-wrap { position: relative; height: 150px; overflow: hidden; background: var(--panel-bg-2); }
+        .vehicle-image-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .vehicle-image-wrap::after {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(to top, rgba(28,28,30,0.85) 0%, transparent 45%);
         }
-        .support { font-size: 13px; color: #888; text-align: center; margin-top: 8px; }
+        .vehicle-overlay {
+            position: absolute; bottom: 10px; left: 14px; right: 14px;
+            display: flex; justify-content: space-between; align-items: flex-end; z-index: 1;
+        }
+        .vehicle-name { font-size: 17px; font-weight: 700; }
+        .vehicle-capacity { font-size: 12px; color: #d8d8dc; margin-top: 2px; }
+        .vehicle-price {
+            background: var(--brand-grad);
+            padding: 5px 13px; border-radius: 10px;
+            font-size: 15px; font-weight: 800; color: white;
+            box-shadow: 0 2px 10px rgba(255, 87, 51, 0.4);
+        }
+
+        /* Route timeline */
+        .route { padding: 14px 16px 0; }
+        .route-row { display: flex; gap: 12px; }
+        .route-rail { display: flex; flex-direction: column; align-items: center; }
+        .route-marker {
+            width: 24px; height: 24px; border-radius: 50%;
+            background: var(--text-primary); color: var(--bg);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 800; flex-shrink: 0;
+        }
+        .route-marker.b { background: var(--orange); color: white; }
+        .route-rail-line { width: 2px; flex: 1; background: #48484A; margin: 3px 0; min-height: 18px; }
+        .route-info { padding-bottom: 12px; flex: 1; min-width: 0; }
+        .route-time { font-size: 14px; font-weight: 700; color: var(--green); }
+        .route-time.eta { color: var(--text-secondary); }
+        .route-time .eta-badge {
+            font-size: 9px; font-weight: 700; color: var(--text-light);
+            border: 1px solid rgba(255,255,255,0.15);
+            padding: 1px 6px; border-radius: 8px; margin-left: 5px;
+            vertical-align: 2px; letter-spacing: 0.5px;
+        }
+        .route-addr { font-size: 13px; line-height: 1.35; margin-top: 2px; color: var(--text-primary); }
+        .route-duration { font-size: 11px; color: var(--text-light); margin: -4px 0 8px 36px; }
+
+        /* Detail chips */
+        .details {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 8px; padding: 2px 16px 16px;
+        }
+        .detail-chip {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 10px; padding: 8px 11px;
+        }
+        .detail-chip .label {
+            font-size: 10px; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .detail-chip .value { font-size: 13px; font-weight: 600; margin-top: 2px; }
+        .paid-badge { color: #FFB340; }
+        .paid-badge.paid { color: var(--green); }
+
+        /* Buttons */
+        .actions { display: flex; flex-direction: column; gap: 9px; }
+        .btn {
+            width: 100%; padding: 15px; border: none; border-radius: 13px;
+            font-size: 15px; font-weight: 700; cursor: pointer;
+            transition: transform 0.15s ease;
+            text-align: center; text-decoration: none; color: white; display: block;
+            font-family: inherit;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-modify {
+            background: var(--brand-grad);
+            box-shadow: 0 4px 16px rgba(255, 87, 51, 0.35);
+        }
+        .btn-cancel {
+            background: transparent;
+            border: 1.5px solid rgba(255, 69, 58, 0.6);
+            color: #FF453A;
+            padding: 13px;
+        }
+        .support { font-size: 12px; color: var(--text-light); text-align: center; margin-top: 14px; }
         .hidden { display: none !important; }
+        .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
+        .center-msg a { color: var(--orange); font-weight: 600; text-decoration: none; }
     </style>
 </head>
 <body>
-    <div class="brand">LinkMia</div>
+    <div class="page">
+        <div class="center-msg" id="loadingMsg">Loading your trip…</div>
 
-    <div class="card status-hero" id="statusCard">
-        <div class="spinner" id="spinner"></div>
-        <span class="status-icon hidden" id="statusIcon"></span>
-        <div class="status-title" id="statusTitle">Loading your trip…</div>
-        <div class="status-sub" id="statusSub"></div>
-    </div>
+        <div id="tripView" class="hidden">
+            <div class="status-strip" id="statusStrip">
+                <span class="pulse-dot" id="pulseDot"></span>
+                <span id="statusText"></span>
+            </div>
+            <div class="status-sub" id="statusSub"></div>
 
-    <div class="card hidden" id="stepsCard">
-        <div class="steps" id="steps">
-            <div class="step" data-step="pending"><div class="step-dot"></div><div class="step-label">Requested</div></div>
-            <div class="step" data-step="confirmed"><div class="step-dot"></div><div class="step-label">Confirmed</div></div>
-            <div class="step" data-step="on_the_way"><div class="step-dot"></div><div class="step-label">On the way</div></div>
-            <div class="step" data-step="arrived"><div class="step-dot"></div><div class="step-label">Arrived</div></div>
-            <div class="step" data-step="completed"><div class="step-dot"></div><div class="step-label">Done</div></div>
+            <div class="steps" id="steps">
+                <div class="step" data-step="pending"><div class="step-dot"></div><div class="step-label">Requested</div></div>
+                <div class="step" data-step="confirmed"><div class="step-dot"></div><div class="step-label">Confirmed</div></div>
+                <div class="step" data-step="on_the_way"><div class="step-dot"></div><div class="step-label">On the way</div></div>
+                <div class="step" data-step="arrived"><div class="step-dot"></div><div class="step-label">Arrived</div></div>
+                <div class="step" data-step="completed"><div class="step-dot"></div><div class="step-label">Done</div></div>
+            </div>
+
+            <div class="card">
+                <div class="vehicle-image-wrap" id="vehicleWrap">
+                    <img id="vehicleImg" src="" alt="Vehicle" onerror="this.style.display='none'">
+                    <div class="vehicle-overlay">
+                        <div>
+                            <div class="vehicle-name" id="vehicleName"></div>
+                            <div class="vehicle-capacity" id="vehicleCapacity"></div>
+                        </div>
+                        <div class="vehicle-price" id="tripPrice"></div>
+                    </div>
+                </div>
+
+                <div class="route">
+                    <div class="route-row">
+                        <div class="route-rail">
+                            <div class="route-marker">A</div>
+                            <div class="route-rail-line"></div>
+                        </div>
+                        <div class="route-info">
+                            <div class="route-time" id="pickupTime"></div>
+                            <div class="route-addr" id="routeFrom"></div>
+                        </div>
+                    </div>
+                    <div class="route-duration hidden" id="rideDuration"></div>
+                    <div class="route-row">
+                        <div class="route-rail">
+                            <div class="route-marker b">B</div>
+                        </div>
+                        <div class="route-info" style="padding-bottom: 6px;">
+                            <div class="route-time eta hidden" id="etaTime"></div>
+                            <div class="route-addr" id="routeTo"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="details">
+                    <div class="detail-chip">
+                        <div class="label">Your group</div>
+                        <div class="value" id="chipGroup"></div>
+                    </div>
+                    <div class="detail-chip">
+                        <div class="label">Luggage</div>
+                        <div class="value" id="chipBags"></div>
+                    </div>
+                    <div class="detail-chip">
+                        <div class="label">Payment</div>
+                        <div class="value" id="chipPayment"></div>
+                    </div>
+                    <div class="detail-chip" id="chipFlightWrap">
+                        <div class="label">Flight</div>
+                        <div class="value" id="chipFlight"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-modify hidden" id="modifyBtn">✏️ Modify your request</button>
+                <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
+                <a class="btn btn-modify hidden" id="rebookBtn" href="/" target="_top">🚗 Book another ride</a>
+            </div>
+
+            <div class="support" id="supportText"></div>
         </div>
     </div>
-
-    <div class="card hidden" id="tripCard">
-        <div class="trip-code" id="tripCode"></div>
-        <div class="route">
-            <div class="route-point">
-                <div class="route-marker">A</div>
-                <div class="route-text" id="routeFrom"></div>
-            </div>
-            <div class="route-line"></div>
-            <div class="route-point">
-                <div class="route-marker">B</div>
-                <div class="route-text" id="routeTo"></div>
-            </div>
-        </div>
-        <div class="detail-row"><span class="label">When</span><span class="value" id="tripWhen"></span></div>
-        <div class="detail-row"><span class="label">Vehicle</span><span class="value" id="tripVehicle"></span></div>
-        <div class="detail-row"><span class="label">Passengers</span><span class="value" id="tripPax"></span></div>
-        <div class="detail-row"><span class="label">Total</span><span class="value price-value" id="tripPrice"></span></div>
-        <div class="detail-row"><span class="label">Payment</span><span class="value" id="tripPayment"></span></div>
-        <button class="cancel-btn hidden" id="cancelBtn">Cancel booking</button>
-    </div>
-
-    <div class="support" id="supportText"></div>
 
     <script>
         const SUPPORT_PHONE = '+1 (305) XXX-XXXX'; // TODO(Andres): real support number
         const POLL_MS = 7000;
         const TERMINAL = ['completed', 'cancelled', 'declined'];
+        const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'completed'];
 
-        const STATUS_VIEW = {
-            pending:    { icon: null,  title: 'Waiting for driver confirmation…', sub: 'We\'ve notified your driver. This usually takes just a few minutes.' },
-            confirmed:  { icon: '✅', title: 'Driver confirmed!', sub: 'Andres will pick you up as scheduled.' },
-            on_the_way: { icon: '🚗', title: 'Your driver is on the way', sub: 'Please be ready at your pickup point.' },
-            arrived:    { icon: '📍', title: 'Your driver has arrived', sub: 'Please head to the pickup point.' },
-            completed:  { icon: '🎉', title: 'Trip complete', sub: 'Thank you for riding with LinkMia!' },
-            declined:   { icon: '😔', title: 'No driver available', sub: `Sorry, no driver is available for this ride right now. Call or text us: ${SUPPORT_PHONE}` },
-            cancelled:  { icon: '🚫', title: 'Booking cancelled', sub: 'This booking was cancelled.' },
-            // Legacy statuses map to sensible views
-            assigned:   { icon: '✅', title: 'Driver assigned!', sub: 'Your driver has been assigned.' },
-            in_progress:{ icon: '🚗', title: 'Trip in progress', sub: 'Enjoy your ride!' }
+        // Vehicle catalog: image + capacity per database vehicle_type
+        const VEHICLES = {
+            sedan:    { img: '/images/luxury-sedan.jpg',        label: 'Tesla Model Y',      pax: 4,  bags: 4 },
+            suv:      { img: '/images/premium-suv-escalade.jpg', label: 'Cadillac Escalade', pax: 7,  bags: 8 },
+            escalade: { img: '/images/premium-suv-escalade.jpg', label: 'Cadillac Escalade', pax: 7,  bags: 8 },
+            sprinter: { img: '/images/vip-sprinter.jpg',         label: 'Mercedes Sprinter', pax: 12, bags: 15 }
         };
 
-        const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'completed'];
+        const STATUS_VIEW = {
+            pending:     { color: '',      pulse: true,  text: 'Waiting for driver confirmation',
+                           sub: 'We\'ve notified your driver — this usually takes just a few minutes.' },
+            confirmed:   { color: 'green', pulse: false, text: '✅ Driver confirmed!',
+                           sub: 'Andres will pick you up as scheduled.' },
+            on_the_way:  { color: 'green', pulse: true,  text: '🚗 Your driver is on the way',
+                           sub: 'Please be ready at your pickup point.' },
+            arrived:     { color: 'green', pulse: true,  text: '📍 Your driver has arrived',
+                           sub: 'Please head to the pickup point.' },
+            completed:   { color: 'green', pulse: false, text: '🎉 Trip complete',
+                           sub: 'Thank you for riding with LinkMia!' },
+            declined:    { color: 'red',   pulse: false, text: '😔 No driver available',
+                           sub: `Sorry, no driver is available for this ride right now. Call or text us: ${SUPPORT_PHONE}` },
+            cancelled:   { color: 'gray',  pulse: false, text: '🚫 Booking cancelled',
+                           sub: 'This booking was cancelled.' },
+            assigned:    { color: 'green', pulse: false, text: '✅ Driver assigned!', sub: '' },
+            in_progress: { color: 'green', pulse: true,  text: '🚗 Trip in progress', sub: 'Enjoy your ride!' }
+        };
 
         const params = new URLSearchParams(location.search);
         const bookingId = params.get('id') || localStorage.getItem('lm_last_trip_id');
+        const isEmbedded = params.get('embed') === '1';
         let pollTimer = null;
 
         const $ = (id) => document.getElementById(id);
 
-        function showNoTrip() {
-            $('spinner').classList.add('hidden');
-            $('statusIcon').textContent = '🔍';
-            $('statusIcon').classList.remove('hidden');
-            $('statusTitle').textContent = 'No trip found';
-            $('statusSub').innerHTML = 'We couldn\'t find a booking to track.<br><a class="home-link" href="/">Book a ride</a>';
-        }
-
-        function fmtDateTime(iso) {
+        function fmtDayTime(iso) {
             if (!iso) return 'ASAP';
             const d = new Date(iso);
-            return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-                + ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            const now = new Date();
+            const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+            let day;
+            if (d.toDateString() === now.toDateString()) day = 'Today';
+            else if (d.toDateString() === tomorrow.toDateString()) day = 'Tomorrow';
+            else day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            return `${day} · ${time}`;
         }
 
-        function render(booking) {
-            const view = STATUS_VIEW[booking.status] || { icon: 'ℹ️', title: booking.status, sub: '' };
+        function fmtTime(d) {
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
 
-            if (booking.status === 'pending') {
-                $('spinner').classList.remove('hidden');
-                $('statusIcon').classList.add('hidden');
-            } else {
-                $('spinner').classList.add('hidden');
-                $('statusIcon').textContent = view.icon;
-                $('statusIcon').classList.remove('hidden');
-            }
-            $('statusTitle').textContent = view.title;
+        function showNoTrip() {
+            $('loadingMsg').innerHTML = 'We couldn\'t find a booking to track.<br><br><a href="/" target="_top">Book a ride</a>';
+        }
+
+        function render(b) {
+            $('loadingMsg').classList.add('hidden');
+            $('tripView').classList.remove('hidden');
+
+            const view = STATUS_VIEW[b.status] || { color: '', pulse: false, text: b.status, sub: '' };
+            const strip = $('statusStrip');
+            strip.className = 'status-strip ' + view.color;
+            $('statusText').textContent = view.text;
+            $('pulseDot').classList.toggle('hidden', !view.pulse);
             $('statusSub').textContent = view.sub;
 
-            // Progress steps (hide for declined/cancelled)
-            if (['declined', 'cancelled'].includes(booking.status)) {
-                $('stepsCard').classList.add('hidden');
-            } else {
-                $('stepsCard').classList.remove('hidden');
-                const idx = STEP_ORDER.indexOf(booking.status);
+            // Stepper (hidden for declined/cancelled)
+            const showSteps = !['declined', 'cancelled'].includes(b.status);
+            $('steps').classList.toggle('hidden', !showSteps);
+            if (showSteps) {
+                const idx = STEP_ORDER.indexOf(b.status);
                 document.querySelectorAll('.step').forEach((el) => {
-                    const stepIdx = STEP_ORDER.indexOf(el.dataset.step);
+                    const sIdx = STEP_ORDER.indexOf(el.dataset.step);
                     el.classList.remove('done', 'current');
                     if (idx >= 0) {
-                        if (stepIdx < idx || booking.status === 'completed' && stepIdx <= idx) el.classList.add('done');
-                        else if (stepIdx === idx) el.classList.add('current');
+                        if (b.status === 'completed' ? sIdx <= idx : sIdx < idx) el.classList.add('done');
+                        else if (sIdx === idx) el.classList.add('current');
                     }
                 });
             }
 
-            // Trip details
-            $('tripCard').classList.remove('hidden');
-            $('tripCode').textContent = booking.trip_id ? `TRIP ${booking.trip_id}` : '';
-            $('routeFrom').textContent = booking.pickup_location || '—';
-            $('routeTo').textContent = booking.dropoff_location || '—';
-            $('tripWhen').textContent = fmtDateTime(booking.pickup_datetime);
-            $('tripVehicle').textContent = (booking.vehicle_type || 'sedan').replace(/^\w/, c => c.toUpperCase());
-            $('tripPax').textContent = booking.passengers || 1;
-            $('tripPrice').textContent = '$' + (booking.price || 0);
-            $('tripPayment').innerHTML = booking.payment_status === 'unpaid'
-                ? '<span class="badge unpaid">Pay driver (cash/Zelle)</span>'
-                : '<span class="badge paid">Paid</span>';
+            // Vehicle
+            const v = VEHICLES[b.vehicle_type] || VEHICLES.sedan;
+            $('vehicleImg').src = v.img;
+            $('vehicleName').textContent = b.vehicle_name || v.label;
+            $('vehicleCapacity').innerHTML = `👥 Up to ${v.pax} &nbsp;·&nbsp; 🧳 Up to ${v.bags}`;
+            $('tripPrice').textContent = '$' + (b.price || 0);
 
-            // Cancel only while pending
-            $('cancelBtn').classList.toggle('hidden', booking.status !== 'pending');
+            // Route + times
+            $('pickupTime').textContent = fmtDayTime(b.pickup_datetime);
+            $('routeFrom').textContent = b.pickup_location || '—';
+            $('routeTo').textContent = b.dropoff_location || '—';
 
-            $('supportText').textContent = `Questions? Call or text us: ${SUPPORT_PHONE}`;
+            if (b.duration_minutes && b.pickup_datetime) {
+                const eta = new Date(new Date(b.pickup_datetime).getTime() + b.duration_minutes * 60000);
+                $('rideDuration').textContent = `⏱ ~${b.duration_minutes} min ride`;
+                $('rideDuration').classList.remove('hidden');
+                $('etaTime').innerHTML = `~${fmtTime(eta)} <span class="eta-badge">EST. ARRIVAL</span>`;
+                $('etaTime').classList.remove('hidden');
+            } else {
+                $('rideDuration').classList.add('hidden');
+                $('etaTime').classList.add('hidden');
+            }
 
-            if (TERMINAL.includes(booking.status) && pollTimer) {
+            // Chips
+            const vCap = VEHICLES[b.vehicle_type] || VEHICLES.sedan;
+            $('chipGroup').textContent = `👥 ${b.passengers || 1} of ${vCap.pax} seats`;
+            $('chipBags').textContent = `🧳 ${b.bags || 0} of ${vCap.bags} bags`;
+            const paid = b.payment_status && b.payment_status !== 'unpaid';
+            $('chipPayment').innerHTML = paid
+                ? '<span class="paid-badge paid">Paid ✓</span>'
+                : '<span class="paid-badge">Pay driver · cash/Zelle</span>';
+            if (b.flight_number) {
+                $('chipFlight').textContent = `✈️ ${b.flight_number}`;
+                $('chipFlightWrap').classList.remove('hidden');
+            } else {
+                $('chipFlightWrap').classList.add('hidden');
+            }
+
+            // Actions
+            const isPending = b.status === 'pending';
+            $('modifyBtn').classList.toggle('hidden', !isPending);
+            $('cancelBtn').classList.toggle('hidden', !isPending);
+            $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
+
+            $('supportText').textContent = `Trip ${b.trip_id || ''} · Questions? Call or text us: ${SUPPORT_PHONE}`;
+
+            if (TERMINAL.includes(b.status) && pollTimer) {
                 clearInterval(pollTimer);
                 pollTimer = null;
             }
@@ -264,23 +408,27 @@
                     showNoTrip();
                     return;
                 }
-                if (!res.ok) return; // transient error — keep polling
+                if (!res.ok) return; // transient — keep polling
                 const { booking } = await res.json();
                 render(booking);
             } catch (e) {
-                // network hiccup — keep polling
                 console.warn('Status fetch failed:', e);
             }
         }
 
-        async function cancelBooking() {
+        async function cancelRequest() {
+            const res = await fetch('/api/booking-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: bookingId, action: 'cancel' })
+            });
+            return res;
+        }
+
+        $('cancelBtn').addEventListener('click', async () => {
             if (!confirm('Cancel this booking?')) return;
             try {
-                const res = await fetch('/api/booking-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: bookingId, action: 'cancel' })
-                });
+                const res = await cancelRequest();
                 if (res.status === 409) {
                     alert(`Your driver already accepted this ride — call us to change plans: ${SUPPORT_PHONE}`);
                 }
@@ -288,12 +436,31 @@
             } catch (e) {
                 alert('Could not cancel right now. Please try again.');
             }
-        }
+        });
+
+        $('modifyBtn').addEventListener('click', async () => {
+            if (!confirm('Modify your request? Your current request will be cancelled so you can adjust and rebook.')) return;
+            try {
+                const res = await cancelRequest();
+                if (res.status === 409) {
+                    alert(`Your driver already accepted this ride — call us to change plans: ${SUPPORT_PHONE}`);
+                    fetchStatus();
+                    return;
+                }
+                if (isEmbedded) {
+                    // Slide the sheet away — the booking form underneath still has all selections
+                    window.parent.postMessage({ type: 'lm-modify' }, '*');
+                } else {
+                    window.location.href = '/';
+                }
+            } catch (e) {
+                alert('Could not modify right now. Please try again.');
+            }
+        });
 
         if (!bookingId) {
             showNoTrip();
         } else {
-            $('cancelBtn').addEventListener('click', cancelBooking);
             fetchStatus();
             pollTimer = setInterval(fetchStatus, POLL_MS);
         }

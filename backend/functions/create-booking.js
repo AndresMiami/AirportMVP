@@ -111,6 +111,7 @@ exports.handler = async (event, context) => {
       pickup_sign: booking.pickupSign || null,
       promo_code: booking.promoCode || null,
       booking_mode: booking.mode || null,
+      duration_minutes: parseInt(booking.durationMinutes) || null,
       source: 'website'
     };
 
