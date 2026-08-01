@@ -198,7 +198,7 @@
 
             <div class="card">
                 <div class="vehicle-image-wrap" id="vehicleWrap">
-                    <img id="vehicleImg" src="" alt="Vehicle" onerror="this.style.display='none'">
+                    <img id="vehicleImg" alt="">
                     <div class="vehicle-overlay">
                         <div>
                             <div class="vehicle-name" id="vehicleName"></div>
@@ -359,7 +359,10 @@
 
             // Vehicle
             const v = VEHICLES[b.vehicle_type] || VEHICLES.sedan;
-            $('vehicleImg').src = v.img;
+            const img = $('vehicleImg');
+            img.style.display = '';
+            img.onerror = () => { img.style.display = 'none'; };
+            if (img.getAttribute('src') !== v.img) img.src = v.img;
             $('vehicleName').textContent = b.vehicle_name || v.label;
             $('vehicleCapacity').innerHTML = `👥 Up to ${v.pax} &nbsp;·&nbsp; 🧳 Up to ${v.bags}`;
             $('tripPrice').textContent = '$' + (b.price || 0);
