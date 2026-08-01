@@ -69,11 +69,13 @@ exports.handler = async (event, context) => {
     const vehicleTypeMap = {
       'Sedan': 'sedan',
       'sedan': 'sedan',
+      'Tesla Model Y': 'sedan',
       'SUV': 'suv',
       'suv': 'suv',
       'Escalade': 'escalade',
       'escalade': 'escalade',
       'Black Escalade': 'escalade',
+      'Cadillac Escalade': 'escalade',
       'Sprinter': 'sprinter',
       'sprinter': 'sprinter',
       'Mercedes Sprinter': 'sprinter'
@@ -98,6 +100,7 @@ exports.handler = async (event, context) => {
       passengers: parseInt(booking.passengers) || 1,
       bags: parseInt(booking.bags) || 0,
       vehicle_type: vehicleType,
+      vehicle_name: booking.vehicle || null,
       price: parseFloat(booking.price) || 0,
       status: 'pending',
       payment_method: booking.paymentMethod || 'cash',
@@ -108,6 +111,7 @@ exports.handler = async (event, context) => {
       pickup_sign: booking.pickupSign || null,
       promo_code: booking.promoCode || null,
       booking_mode: booking.mode || null,
+      duration_minutes: parseInt(booking.durationMinutes) || null,
       source: 'website'
     };
 
