@@ -112,7 +112,7 @@
 
 # Environment variables (template - actual values in Netlify dashboard)
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
 
 # Function configuration
 [functions]
