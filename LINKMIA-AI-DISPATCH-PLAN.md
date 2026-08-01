@@ -126,7 +126,7 @@ Features: Rate limiting (100 req/15 min), in-memory caching, CORS, pre-cached ai
 GOOGLE_MAPS_API_KEY, ALLOWED_ORIGINS, PORT
 
 # Supabase
-SUPABASE_URL=https://hncpybxwblpkyxvskoxd.supabase.co
+SUPABASE_URL=https://qvtqqggtpxesfcmpftej.supabase.co
 SUPABASE_ANON_KEY=[exists, hardcoded in supabase.js]
 
 # Stripe

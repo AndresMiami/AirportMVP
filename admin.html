@@ -1066,8 +1066,8 @@
         // ============================================
 
         // Supabase Configuration
-        const SUPABASE_URL = window.APP_CONFIG?.SUPABASE_URL || 'https://hncpybxwblpkyxvskoxd.supabase.co';
-        const SUPABASE_ANON_KEY = window.APP_CONFIG?.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA';
+        const SUPABASE_URL = window.APP_CONFIG?.SUPABASE_URL || 'https://qvtqqggtpxesfcmpftej.supabase.co';
+        const SUPABASE_ANON_KEY = window.APP_CONFIG?.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2dHFxZ2d0cHhlc2ZjbXBmdGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MjU1MzMsImV4cCI6MjEwMTEwMTUzM30.lvg0EjbUNz8fZeKeUdUeGwHxMiFM7oogUcthtoZVr38';
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -1558,9 +1558,12 @@
             const statusMap = {
                 'pending': 'Pending',
                 'confirmed': 'Confirmed',
+                'on_the_way': 'On The Way',
+                'arrived': 'Arrived',
                 'assigned': 'Assigned',
                 'in_progress': 'In Progress',
                 'completed': 'Completed',
+                'declined': 'Declined',
                 'cancelled': 'Cancelled'
             };
             return statusMap[status] || status;

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Driver - LinkMia</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f6f8;
+            color: #1a1a2e;
+            min-height: 100vh;
+            padding-bottom: 40px;
+        }
+        header {
+            background: white;
+            padding: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+        .brand {
+            font-size: 20px; font-weight: 700;
+            background: linear-gradient(135deg, #FF9933, #FF5733);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .refresh-note { font-size: 12px; color: #999; }
+        main { max-width: 520px; margin: 0 auto; padding: 16px; }
+        .section-title {
+            font-size: 14px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.5px; color: #888; margin: 18px 0 10px;
+        }
+        .card {
+            background: white; border-radius: 16px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+            padding: 18px 16px; margin-bottom: 14px;
+        }
+        .card-top {
+            display: flex; justify-content: space-between; align-items: baseline;
+            margin-bottom: 10px;
+        }
+        .ride-when { font-size: 16px; font-weight: 700; }
+        .ride-code { font-size: 12px; color: #999; letter-spacing: 0.5px; }
+        .urgent-badge {
+            background: #ffefe8; color: #e04400; font-size: 11px; font-weight: 700;
+            padding: 3px 8px; border-radius: 8px;
+        }
+        .status-badge {
+            font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px;
+        }
+        .status-confirmed  { background: #e6f7ec; color: #1eaa5c; }
+        .status-on_the_way { background: #e8f1ff; color: #2668d9; }
+        .status-arrived    { background: #fff3e0; color: #cc7000; }
+        .route { margin: 12px 0; }
+        .route-point { display: flex; gap: 10px; align-items: flex-start; }
+        .route-marker {
+            width: 24px; height: 24px; border-radius: 50%;
+            background: #1a1a2e; color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        .route-line { width: 2px; height: 18px; background: #ccc; margin-left: 11px; }
+        .route-text { font-size: 14px; line-height: 1.35; padding-top: 3px; }
+        .meta-row {
+            display: flex; flex-wrap: wrap; gap: 8px 16px;
+            font-size: 13px; color: #555; margin: 10px 0;
+        }
+        .meta-row .price { color: #1eaa5c; font-weight: 700; font-size: 15px; }
+        .contact-row { font-size: 14px; margin: 8px 0; }
+        .contact-row a { color: #2668d9; text-decoration: none; font-weight: 600; }
+        .notes { font-size: 13px; color: #666; background: #f8f8f8; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+        .btn-row { display: flex; gap: 10px; margin-top: 12px; }
+        button {
+            flex: 1; padding: 14px; border: none; border-radius: 12px;
+            font-size: 15px; font-weight: 700; cursor: pointer;
+            transition: transform 0.1s ease;
+        }
+        button:active { transform: scale(0.98); }
+        button:disabled { opacity: 0.5; }
+        .btn-accept { background: #28A745; color: white; }
+        .btn-decline { background: white; color: #d33; border: 1.5px solid #d33; }
+        .btn-next { background: #1a1a2e; color: white; }
+        .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
+        .paid-badge {
+            display: inline-block; background: #e6f7ec; color: #1eaa5c;
+            font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px;
+        }
+        .empty {
+            text-align: center; color: #999; font-size: 14px; padding: 30px 10px;
+        }
+        .hidden { display: none !important; }
+
+        /* Passcode gate */
+        #gate {
+            position: fixed; inset: 0; background: #f5f6f8;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 100; padding: 20px;
+        }
+        #gate .brand { font-size: 28px; margin-bottom: 24px; }
+        #gate input {
+            width: 100%; max-width: 280px; padding: 14px 16px;
+            font-size: 18px; text-align: center; letter-spacing: 3px;
+            border: 1.5px solid #ddd; border-radius: 12px; outline: none;
+        }
+        #gate input:focus { border-color: #FF5733; }
+        #gate button {
+            flex: none; width: 100%; max-width: 280px; margin-top: 14px;
+            background: linear-gradient(135deg, #FF9933, #FF5733); color: white;
+        }
+        #gateError { color: #d33; font-size: 13px; margin-top: 12px; min-height: 18px; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+        .shake { animation: shake 0.3s ease 2; }
+    </style>
+</head>
+<body>
+    <div id="gate">
+        <div class="brand">LinkMia Driver</div>
+        <input type="password" id="gateInput" placeholder="Passcode" inputmode="text" autocomplete="current-password">
+        <button id="gateBtn">Enter</button>
+        <div id="gateError"></div>
+    </div>
+
+    <div id="app" class="hidden">
+        <header>
+            <div class="brand">LinkMia Driver</div>
+            <div class="refresh-note" id="lastRefresh"></div>
+        </header>
+        <main>
+            <div class="section-title">New requests</div>
+            <div id="pendingList"></div>
+            <div class="section-title">Active rides</div>
+            <div id="activeList"></div>
+        </main>
+    </div>
+
+    <script>
+        const POLL_MS = 10000;
+        let passcode = localStorage.getItem('lm_driver_pass') || '';
+        let pollTimer = null;
+
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+
+        // Next dispatch action for each active status
+        const NEXT_ACTION = {
+            confirmed:  { action: 'on_my_way', label: '🚗 On my way' },
+            on_the_way: { action: 'arrived',   label: '📍 Arrived' },
+            arrived:    { action: 'complete',  label: '✅ Complete trip' }
+        };
+        const STATUS_LABEL = {
+            confirmed: 'Accepted', on_the_way: 'On the way', arrived: 'At pickup'
+        };
+
+        function fmtWhen(iso) {
+            if (!iso) return 'ASAP';
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+
+        function isUrgent(iso) {
+            return iso && (new Date(iso) - new Date()) < 2 * 60 * 60 * 1000;
+        }
+
+        function rideCard(b, buttonsHtml, badgeHtml) {
+            return `
+            <div class="card" data-id="${b.id}">
+                <div class="card-top">
+                    <div>
+                        <div class="ride-when">${fmtWhen(b.pickup_datetime)}</div>
+                        <div class="ride-code">${esc(b.trip_id || b.id.slice(0, 8))}</div>
+                    </div>
+                    <div>${badgeHtml}</div>
+                </div>
+                <div class="route">
+                    <div class="route-point"><div class="route-marker">A</div><div class="route-text">${esc(b.pickup_location)}</div></div>
+                    <div class="route-line"></div>
+                    <div class="route-point"><div class="route-marker">B</div><div class="route-text">${esc(b.dropoff_location)}</div></div>
+                </div>
+                <div class="meta-row">
+                    <span class="price">$${b.price || 0}</span>
+                    <span>🚘 ${esc(b.vehicle_type || 'sedan')}</span>
+                    <span>👥 ${b.passengers || 1}</span>
+                    ${b.bags ? `<span>🧳 ${b.bags}</span>` : ''}
+                    ${b.flight_number ? `<span>✈️ ${esc(b.flight_number)}</span>` : ''}
+                </div>
+                <div class="contact-row">👤 ${esc(b.customer_name)} — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a></div>
+                ${b.notes ? `<div class="notes">📝 ${esc(b.notes)}</div>` : ''}
+                ${buttonsHtml}
+            </div>`;
+        }
+
+        function render(bookings) {
+            const pending = bookings.filter(b => b.status === 'pending');
+            const active = bookings.filter(b => ['confirmed', 'on_the_way', 'arrived'].includes(b.status));
+
+            $('pendingList').innerHTML = pending.length
+                ? pending.map(b => rideCard(b, `
+                    <div class="btn-row">
+                        <button class="btn-decline" data-action="decline" data-id="${b.id}">Decline</button>
+                        <button class="btn-accept" data-action="accept" data-id="${b.id}">Accept ride</button>
+                    </div>`,
+                    isUrgent(b.pickup_datetime) ? '<span class="urgent-badge">URGENT</span>' : ''
+                )).join('')
+                : '<div class="empty">No new ride requests right now.</div>';
+
+            $('activeList').innerHTML = active.length
+                ? active.map(b => {
+                    const next = NEXT_ACTION[b.status];
+                    const payBtn = b.payment_status === 'unpaid'
+                        ? `<button class="btn-payment" data-action="payment_collected" data-id="${b.id}">💵 Payment collected</button>`
+                        : '<span class="paid-badge">PAID ✓</span>';
+                    return rideCard(b, `
+                        <div class="btn-row">
+                            ${payBtn}
+                            <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
+                        </div>`,
+                        `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
+                    );
+                }).join('')
+                : '<div class="empty">No active rides.</div>';
+
+            $('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        }
+
+        async function fetchBookings(pass) {
+            const res = await fetch('/api/driver-bookings', {
+                headers: { 'x-driver-secret': pass }
+            });
+            if (res.status === 401) throw new Error('unauthorized');
+            if (!res.ok) throw new Error('server');
+            const { bookings } = await res.json();
+            return bookings;
+        }
+
+        async function refresh() {
+            try {
+                render(await fetchBookings(passcode));
+            } catch (e) {
+                if (e.message === 'unauthorized') {
+                    // Passcode revoked/changed — back to the gate
+                    localStorage.removeItem('lm_driver_pass');
+                    stopPolling();
+                    $('app').classList.add('hidden');
+                    $('gate').classList.remove('hidden');
+                }
+                // transient errors: keep the current list, retry on next poll
+            }
+        }
+
+        function startPolling() {
+            refresh();
+            pollTimer = setInterval(refresh, POLL_MS);
+        }
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        async function doAction(action, bookingId) {
+            let paymentMethod;
+            if (action === 'payment_collected') {
+                paymentMethod = confirm('Paid by Zelle? (Cancel = cash)') ? 'zelle' : 'cash';
+            }
+            if (action === 'decline' && !confirm('Decline this ride?')) return;
+
+            try {
+                const res = await fetch('/api/update-booking-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
+                    body: JSON.stringify({ bookingId, action, paymentMethod })
+                });
+                // 409 means the booking already moved on — just refresh
+                if (!res.ok && res.status !== 409) {
+                    alert('Action failed. Please try again.');
+                }
+            } catch (e) {
+                alert('Network error. Please try again.');
+            }
+            refresh();
+        }
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+            btn.disabled = true;
+            doAction(btn.dataset.action, btn.dataset.id).finally(() => { btn.disabled = false; });
+        });
+
+        // ---- Passcode gate ----
+        async function tryUnlock(pass) {
+            try {
+                const bookings = await fetchBookings(pass);
+                passcode = pass;
+                localStorage.setItem('lm_driver_pass', pass);
+                $('gate').classList.add('hidden');
+                $('app').classList.remove('hidden');
+                render(bookings);
+                pollTimer = setInterval(refresh, POLL_MS);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        $('gateBtn').addEventListener('click', async () => {
+            const pass = $('gateInput').value.trim();
+            if (!pass) return;
+            $('gateError').textContent = '';
+            const ok = await tryUnlock(pass);
+            if (!ok) {
+                $('gateInput').classList.add('shake');
+                setTimeout(() => $('gateInput').classList.remove('shake'), 700);
+                $('gateError').textContent = 'Wrong passcode';
+            }
+        });
+        $('gateInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') $('gateBtn').click();
+        });
+
+        // Auto-unlock with stored passcode
+        if (passcode) {
+            tryUnlock(passcode).then((ok) => {
+                if (!ok) localStorage.removeItem('lm_driver_pass');
+            });
+        }
+    </script>
+</body>
+</html>

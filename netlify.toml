@@ -41,6 +41,32 @@
   to = "/.netlify/functions/track-flight"
   status = 200
 
+[[redirects]]
+  from = "/api/booking-status"
+  to = "/.netlify/functions/booking-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/driver-bookings"
+  to = "/.netlify/functions/driver-bookings"
+  status = 200
+
+[[redirects]]
+  from = "/api/update-booking-status"
+  to = "/.netlify/functions/update-booking-status"
+  status = 200
+
+# Driver dispatch page and passenger trip status page
+[[redirects]]
+  from = "/driver"
+  to = "/driver.html"
+  status = 200
+
+[[redirects]]
+  from = "/trip"
+  to = "/trip.html"
+  status = 200
+
 # Redirect root to landing page
 [[redirects]]
   from = "/"

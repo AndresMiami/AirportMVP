@@ -6,15 +6,15 @@ const getSupabaseConfig = () => {
     // Try to use centralized config first
     if (window.APP_CONFIG) {
         return {
-            url: window.APP_CONFIG.SUPABASE_URL || 'https://hncpybxwblpkyxvskoxd.supabase.co',
-            anonKey: window.APP_CONFIG.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA'
+            url: window.APP_CONFIG.SUPABASE_URL || 'https://qvtqqggtpxesfcmpftej.supabase.co',
+            anonKey: window.APP_CONFIG.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2dHFxZ2d0cHhlc2ZjbXBmdGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MjU1MzMsImV4cCI6MjEwMTEwMTUzM30.lvg0EjbUNz8fZeKeUdUeGwHxMiFM7oogUcthtoZVr38'
         };
     }
     
     // Fallback to direct values
     return {
-        url: 'https://hncpybxwblpkyxvskoxd.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhuY3B5Ynh3Ymxwa3l4dnNrb3hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNDE5MDIsImV4cCI6MjA3MDcxNzkwMn0.aXmiOWS1FVxBaQMXoenoTdUlbOFYuYTLVc-tD3FnheA'
+        url: 'https://qvtqqggtpxesfcmpftej.supabase.co',
+        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2dHFxZ2d0cHhlc2ZjbXBmdGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MjU1MzMsImV4cCI6MjEwMTEwMTUzM30.lvg0EjbUNz8fZeKeUdUeGwHxMiFM7oogUcthtoZVr38'
     };
 };
 
