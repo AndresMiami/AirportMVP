@@ -252,7 +252,7 @@
             </div>
 
             <div class="actions">
-                <button class="btn btn-modify hidden" id="modifyBtn">✏️ Modify your request</button>
+                <button class="btn btn-modify hidden" id="backBtn">← Go back</button>
                 <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
                 <a class="btn btn-modify hidden" id="rebookBtn" href="/" target="_top">🚗 Book another ride</a>
             </div>
@@ -298,8 +298,17 @@
         const bookingId = params.get('id') || localStorage.getItem('lm_last_trip_id');
         const isEmbedded = params.get('embed') === '1';
         let pollTimer = null;
+        let readySignalSent = false;
 
         const $ = (id) => document.getElementById(id);
+
+        // Embedded in the booking page's bottom sheet: the parent panel
+        // provides the background and reveals the sheet once we're rendered,
+        // so no loading text should ever flash.
+        if (isEmbedded) {
+            document.body.style.background = 'transparent';
+            $('loadingMsg').textContent = '';
+        }
 
         function fmtDayTime(iso) {
             if (!iso) return 'ASAP';
@@ -388,7 +397,7 @@
 
             // Actions
             const isPending = b.status === 'pending';
-            $('modifyBtn').classList.toggle('hidden', !isPending);
+            $('backBtn').classList.toggle('hidden', !isPending);
             $('cancelBtn').classList.toggle('hidden', !isPending);
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
 
@@ -397,6 +406,12 @@
             if (TERMINAL.includes(b.status) && pollTimer) {
                 clearInterval(pollTimer);
                 pollTimer = null;
+            }
+
+            // Tell the parent page we're rendered so it can slide the sheet up
+            if (isEmbedded && !readySignalSent) {
+                readySignalSent = true;
+                window.parent.postMessage({ type: 'lm-ready' }, '*');
             }
         }
 
@@ -438,23 +453,14 @@
             }
         });
 
-        $('modifyBtn').addEventListener('click', async () => {
-            if (!confirm('Modify your request? Your current request will be cancelled so you can adjust and rebook.')) return;
-            try {
-                const res = await cancelRequest();
-                if (res.status === 409) {
-                    alert(`Your driver already accepted this ride — call us to change plans: ${SUPPORT_PHONE}`);
-                    fetchStatus();
-                    return;
-                }
-                if (isEmbedded) {
-                    // Slide the sheet away — the booking form underneath still has all selections
-                    window.parent.postMessage({ type: 'lm-modify' }, '*');
-                } else {
-                    window.location.href = '/';
-                }
-            } catch (e) {
-                alert('Could not modify right now. Please try again.');
+        // Go back behaves exactly like the back arrow on the other modals:
+        // just slides the sheet away. The request stays pending — if the
+        // passenger rebooks, the booking page cancels this one automatically.
+        $('backBtn').addEventListener('click', () => {
+            if (isEmbedded) {
+                window.parent.postMessage({ type: 'lm-close' }, '*');
+            } else {
+                window.location.href = '/';
             }
         });
 

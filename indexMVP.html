@@ -1806,6 +1806,19 @@
 
                     localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
 
+                    // If a previous request from this session is still pending
+                    // (user came back via "Go back" to adjust), cancel it so
+                    // rebooking doesn't create a duplicate. Server-side status
+                    // check makes this a no-op if the driver already accepted.
+                    if (this.activeSheetBookingId) {
+                        fetch('/api/booking-status', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: this.activeSheetBookingId, action: 'cancel' })
+                        }).catch(() => {});
+                        this.activeSheetBookingId = null;
+                    }
+
                     // ===== PERSIST TO SUPABASE VIA API =====
                     let supabaseBookingId = null;
                     try {
@@ -1967,53 +1980,87 @@
             }
 
             showTripSheet(bookingUuid) {
-                // Restore the book button so the form is usable if the
-                // passenger comes back via "Modify your request"
-                const bookBtn = document.getElementById('bookBtn');
-                if (bookBtn) {
-                    bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
-                    bookBtn.disabled = false;
+                this.activeSheetBookingId = bookingUuid;
+
+                // Bottom-sheet modal in the same style as the "Who's traveling",
+                // "Add pickup notes" and "Add promotion" modals: dimmed backdrop,
+                // page stays visible, panel slides up from the bottom.
+                const overlay = document.createElement('div');
+                overlay.className = 'trip-sheet-overlay';
+                overlay.innerHTML = `
+                    <div class="trip-sheet-panel">
+                        <iframe src="/trip?id=${bookingUuid}&embed=1" title="Trip status"></iframe>
+                    </div>
+                `;
+
+                if (!document.getElementById('trip-sheet-styles')) {
+                    const sheetStyles = document.createElement('style');
+                    sheetStyles.id = 'trip-sheet-styles';
+                    sheetStyles.textContent = `
+                        .trip-sheet-overlay {
+                            position: fixed;
+                            top: 0; left: 0; right: 0; bottom: 0;
+                            background: rgba(0, 0, 0, 0.7);
+                            z-index: 9999;
+                            display: flex;
+                            justify-content: center;
+                            align-items: flex-end;
+                            opacity: 0;
+                            transition: opacity 0.3s ease-out;
+                        }
+                        .trip-sheet-overlay.active { opacity: 1; }
+                        .trip-sheet-panel {
+                            width: 100%;
+                            max-width: 576px;
+                            height: 88%;
+                            background: #1C1C1E;
+                            border-radius: 20px 20px 0 0;
+                            overflow: hidden;
+                            transform: translateY(100%);
+                            transition: transform 0.3s ease-out;
+                        }
+                        .trip-sheet-overlay.active .trip-sheet-panel { transform: translateY(0); }
+                        .trip-sheet-panel iframe {
+                            width: 100%; height: 100%;
+                            border: none; display: block;
+                            background: transparent;
+                        }
+                    `;
+                    document.head.appendChild(sheetStyles);
                 }
 
-                const sheet = document.createElement('div');
-                sheet.className = 'trip-sheet';
-                sheet.innerHTML = `<iframe src="/trip?id=${bookingUuid}&embed=1" title="Your trip status"></iframe>`;
+                const closeSheet = () => {
+                    overlay.classList.remove('active');
+                    setTimeout(() => overlay.remove(), 350);
+                    window.removeEventListener('message', onMessage);
+                };
 
-                const sheetStyles = document.createElement('style');
-                sheetStyles.textContent = `
-                    .trip-sheet {
-                        position: fixed;
-                        inset: 0;
-                        z-index: 10000;
-                        background: #1C1C1E;
-                        transform: translateY(100%);
-                        transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+                const reveal = () => {
+                    if (overlay.dataset.shown) return;
+                    overlay.dataset.shown = '1';
+                    // Restore the book button so the form is usable after "Go back"
+                    const bookBtn = document.getElementById('bookBtn');
+                    if (bookBtn) {
+                        bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
+                        bookBtn.disabled = false;
                     }
-                    .trip-sheet.open { transform: translateY(0); }
-                    .trip-sheet iframe {
-                        width: 100%; height: 100%;
-                        border: none; display: block;
-                    }
-                `;
-                document.head.appendChild(sheetStyles);
-                document.body.appendChild(sheet);
+                    requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('active')));
+                };
 
-                // Trigger the slide-up on the next frame
-                requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.add('open')));
-
-                // "Modify your request" inside the sheet slides it away —
-                // the booking form underneath still holds all selections
                 const onMessage = (e) => {
-                    if (e.data?.type === 'lm-modify') {
-                        sheet.classList.remove('open');
-                        setTimeout(() => {
-                            sheet.remove();
-                            sheetStyles.remove();
-                        }, 400);
-                        window.removeEventListener('message', onMessage);
-                    }
+                    if (e.data?.type === 'lm-ready') reveal();       // sheet content rendered — slide up now
+                    if (e.data?.type === 'lm-close') closeSheet();   // "Go back" pressed inside the sheet
                 };
                 window.addEventListener('message', onMessage);
+
+                // Tapping the dimmed background closes the sheet, like the other modals
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) closeSheet();
+                });
+
+                document.body.appendChild(overlay);
+                // Fallback: reveal even if the ready signal never arrives
+                setTimeout(reveal, 4000);
             }
 
             showBookingConfirmation(tripId, bookingData, bookingUuid) {
