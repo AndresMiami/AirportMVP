@@ -641,6 +641,9 @@ class PassengerModal {
 
         console.log('✅ User data saved:', this.userData);
 
+        // Reflect the traveler's name on the selector button
+        this.updatePassengerButton();
+
         // Close modal and trigger callback
         this.close();
 
@@ -742,8 +745,13 @@ class PassengerModal {
         
         if (this.guestData) {
             if (iconSpan) iconSpan.textContent = '👥';
-            if (textSpan) textSpan.textContent = this.guestData.fullName;
+            if (textSpan) textSpan.textContent = `Guest: ${this.guestData.fullName}`;
             btn.classList.add('guest-selected');
+        } else if (this.userData) {
+            // Personal touch: show the traveler's own name once we know it
+            if (iconSpan) iconSpan.textContent = '👤';
+            if (textSpan) textSpan.textContent = this.userData.fullName;
+            btn.classList.remove('guest-selected');
         } else {
             if (iconSpan) iconSpan.textContent = '👤';
             if (textSpan) textSpan.textContent = 'For myself';
@@ -800,6 +808,7 @@ class PassengerModal {
             fullName: profile.name
         };
         this.selectedType = 'myself';
+        this.updatePassengerButton();
     }
 
     // Get the contact info for WhatsApp message
