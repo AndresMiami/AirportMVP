@@ -323,62 +323,74 @@
         // Use the supabaseClient already initialized in supabase.js
         // (Avoids duplicate declaration error with the Supabase SDK global)
         
-        // Store user session globally
+        // Optional identity: booking works as guest either way. When a
+        // session exists we prefill "Who's traveling" from the saved profile
+        // and link the booking to the customer record.
         let currentUser = null;
-        
-        // Development mode bypass - set this to true to skip authentication
-        const DEV_MODE = true;  // Change to false for production
-        
-        // Check authentication on page load
+        let currentSession = null;
+        let currentProfile = null;
+
         (async function checkAuth() {
-            // Skip auth check in development mode
-            if (DEV_MODE) {
-                console.log('🔧 Development mode - bypassing authentication');
-                currentUser = {
-                    id: 'dev-user-123',
-                    email: 'dev@example.com',
-                    phone: '+13055551234'
-                };
-                // Add dev mode header
-                addUserHeader(currentUser);
-                // Initialize the app
-                if (window.bookingApp) {
-                    bookingApp.init();
+            try {
+                const { data: { session } } = await window.supabaseClient.auth.getSession();
+                if (!session) {
+                    addAuthPill(false);
+                    return;
                 }
-                return;
+                currentSession = session;
+                currentUser = session.user;
+                console.log('✅ Signed in as:', session.user.email);
+                addAuthPill(true);
+
+                // Load the saved profile and prefill the passenger modal
+                const res = await fetch('/api/profile', {
+                    headers: { 'Authorization': `Bearer ${session.access_token}` }
+                });
+                if (res.ok) {
+                    const { profile } = await res.json();
+                    if (profile) {
+                        currentProfile = profile;
+                        applyProfilePrefill();
+                    }
+                }
+            } catch (e) {
+                console.warn('Auth check failed (continuing as guest):', e);
             }
-            
-            const { data: { session } } = await window.supabaseClient.auth.getSession();
-            if (!session) {
-                // No session - redirect to login page
-                window.location.href = '/dev/templates/LandingLOGIN.html';
-                return;
-            }
-            // User is authenticated
-            currentUser = session.user;
-            console.log('User authenticated:', session.user.id);
-            
-            // Add user info to header
-            addUserHeader(session.user);
         })();
-        
-        // Logout function
-        async function logout() {
-            const { error } = await window.supabaseClient.auth.signOut();
-            if (!error) {
-                window.location.href = '/dev/templates/LandingLOGIN.html';
+
+        // Prefill "Who's traveling" once the modal singleton exists
+        function applyProfilePrefill() {
+            if (!currentProfile) return;
+            const tryApply = () => {
+                if (typeof PassengerModal !== 'undefined' && PassengerModal.getInstance) {
+                    const modal = PassengerModal.getInstance();
+                    if (modal?.prefillFromProfile) {
+                        modal.prefillFromProfile(currentProfile);
+                        console.log('✅ Passenger info prefilled from profile');
+                        return true;
+                    }
+                }
+                return false;
+            };
+            if (!tryApply()) {
+                const timer = setInterval(() => { if (tryApply()) clearInterval(timer); }, 300);
+                setTimeout(() => clearInterval(timer), 10000);
             }
         }
-        
-        // Add user header with logout button
-        function addUserHeader(user) {
-            const headerHTML = `
-                <div id="userHeader" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000;">
-                    <button onclick="logout()" style="background: linear-gradient(135deg, #FF9933, #FF5733); color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);">
-                        Sign Out
-                    </button>
-                </div>
-            `;
+
+        async function logout() {
+            await window.supabaseClient.auth.signOut();
+            window.location.href = '/login.html';
+        }
+
+        // Small pill bottom-right: Sign in (guests) / Sign out (members)
+        function addAuthPill(signedIn) {
+            const existing = document.getElementById('userHeader');
+            if (existing) existing.remove();
+            const inner = signedIn
+                ? `<button onclick="logout()" style="background: rgba(44,44,46,0.9); color: #8E8E93; border: 1px solid rgba(255,255,255,0.15); padding: 8px 14px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 600;">Sign out</button>`
+                : `<a href="/login.html" style="display:inline-block; background: linear-gradient(135deg, #FF9933, #FF5733); color: white; text-decoration: none; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);">Sign in</a>`;
+            const headerHTML = `<div id="userHeader" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000;">${inner}</div>`;
             document.body.insertAdjacentHTML('afterbegin', headerHTML);
         }
     </script>
@@ -1847,9 +1859,17 @@
                             durationMinutes: this.state.route?.duration || null
                         };
 
+                        // Attach the session token when signed in so the
+                        // booking gets linked to the customer's identity
+                        // (currentSession is a page-level global set by checkAuth)
+                        const bookingHeaders = { 'Content-Type': 'application/json' };
+                        if (typeof currentSession !== 'undefined' && currentSession?.access_token) {
+                            bookingHeaders['Authorization'] = `Bearer ${currentSession.access_token}`;
+                        }
+
                         const response = await fetch('/api/create-booking', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: bookingHeaders,
                             body: JSON.stringify(apiPayload)
                         });
 

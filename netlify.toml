@@ -56,6 +56,16 @@
   to = "/.netlify/functions/update-booking-status"
   status = 200
 
+[[redirects]]
+  from = "/api/profile"
+  to = "/.netlify/functions/profile"
+  status = 200
+
+[[redirects]]
+  from = "/login"
+  to = "/login.html"
+  status = 200
+
 # Driver dispatch page and passenger trip status page
 [[redirects]]
   from = "/driver"
