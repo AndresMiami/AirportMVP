@@ -775,6 +775,33 @@ class PassengerModal {
         return !!(this.userData || this.guestData);
     }
 
+    // Prefill from a saved account profile so "Who's traveling" can be
+    // skipped entirely for signed-in passengers. Never overwrites data the
+    // user already entered this session.
+    prefillFromProfile(profile) {
+        if (this.userData || this.guestData) return;
+        if (!profile?.name || !profile?.phone) return;
+
+        const nameParts = profile.name.trim().split(/\s+/);
+        const firstName = nameParts[0];
+        const lastName = nameParts.slice(1).join(' ');
+
+        // Split "+1 3055551234" style phones into code + number when possible
+        const phoneMatch = profile.phone.trim().match(/^(\+\d{1,3})\s*(.*)$/);
+        const countryCode = phoneMatch ? phoneMatch[1] : '+1';
+        const phone = phoneMatch ? phoneMatch[2] : profile.phone.trim();
+
+        this.userData = {
+            firstName,
+            lastName,
+            countryCode,
+            phone,
+            fullPhone: profile.phone,
+            fullName: profile.name
+        };
+        this.selectedType = 'myself';
+    }
+
     // Get the contact info for WhatsApp message
     getContactInfo() {
         if (this.userData) {

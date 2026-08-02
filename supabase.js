@@ -50,7 +50,7 @@ window.auth = {
   signOut: async () => {
     const { error } = await window.supabaseClient.auth.signOut()
     if (error) throw error
-    window.location.href = '/dev/templates/LandingLOGIN.html' // Redirect to landing page
+    window.location.href = '/login.html' // Redirect to login page
   },
 
   // Listen to auth changes

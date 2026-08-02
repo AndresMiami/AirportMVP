@@ -40,6 +40,31 @@ exports.handler = async (event, context) => {
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+  // Optional identity link: when the frontend sends a session token, resolve
+  // it to a customers row so the booking is tied to the account. Failures
+  // here never block the booking — guests book exactly as before.
+  let linkedCustomerId = null;
+  try {
+    const authHeader = event.headers.authorization || event.headers.Authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    if (token && process.env.SUPABASE_ANON_KEY) {
+      const authClient = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
+      const { data: userData } = await authClient.auth.getUser(token);
+      if (userData?.user) {
+        const { data: customer } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('user_id', userData.user.id)
+          .maybeSingle();
+        if (customer) {
+          linkedCustomerId = customer.id;
+        }
+      }
+    }
+  } catch (identityError) {
+    console.warn('⚠️ Identity link skipped:', identityError.message);
+  }
+
   try {
     const booking = JSON.parse(event.body);
 
@@ -114,6 +139,7 @@ exports.handler = async (event, context) => {
       promo_code: booking.promoCode || null,
       booking_mode: booking.mode || null,
       duration_minutes: parseInt(booking.durationMinutes) || null,
+      customer_id: linkedCustomerId,
       source: 'website'
     };
 

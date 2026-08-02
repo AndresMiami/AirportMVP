@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Sign in - LinkMia</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="/supabase.js"></script>
+    <style>
+        :root {
+            --bg: #1C1C1E;
+            --panel-bg: #2C2C2E;
+            --text-primary: #FFFFFF;
+            --text-secondary: #8E8E93;
+            --text-light: #636366;
+            --brand-grad: linear-gradient(135deg, #FF9933, #FF5733);
+            --orange: #FF5733;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 16px;
+        }
+        .brand {
+            font-size: 30px; font-weight: 700; margin-bottom: 4px;
+            background: var(--brand-grad);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .tagline { font-size: 13px; color: var(--text-secondary); margin-bottom: 26px; }
+        .card {
+            background: linear-gradient(135deg, var(--panel-bg) 0%, #262628 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 18px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            width: 100%; max-width: 400px;
+            padding: 24px 20px;
+        }
+        .tabs {
+            display: flex; gap: 8px; margin-bottom: 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px; padding: 4px;
+        }
+        .tab {
+            flex: 1; padding: 10px; border: none; border-radius: 9px;
+            background: transparent; color: var(--text-secondary);
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            font-family: inherit;
+        }
+        .tab.active { background: var(--brand-grad); color: white; }
+        label { display: block; font-size: 12px; color: var(--text-secondary); margin: 12px 0 5px; }
+        input {
+            width: 100%; padding: 13px 14px;
+            background: rgba(255,255,255,0.06);
+            border: 1.5px solid rgba(255,255,255,0.1);
+            border-radius: 11px;
+            color: var(--text-primary);
+            font-size: 15px; font-family: inherit; outline: none;
+        }
+        input:focus { border-color: var(--orange); }
+        .row { display: flex; gap: 10px; }
+        .row > div { flex: 1; }
+        .submit-btn {
+            width: 100%; margin-top: 20px; padding: 15px;
+            background: var(--brand-grad);
+            border: none; border-radius: 13px;
+            color: white; font-size: 16px; font-weight: 700;
+            cursor: pointer; font-family: inherit;
+            box-shadow: 0 4px 16px rgba(255, 87, 51, 0.35);
+            transition: transform 0.15s ease;
+        }
+        .submit-btn:active { transform: scale(0.98); }
+        .submit-btn:disabled { opacity: 0.6; }
+        .error {
+            margin-top: 12px; padding: 10px 12px;
+            background: rgba(255, 69, 58, 0.12);
+            border: 1px solid rgba(255, 69, 58, 0.4);
+            border-radius: 10px;
+            color: #FF6B60; font-size: 13px;
+            display: none;
+        }
+        .error.show { display: block; }
+        .notice {
+            margin-top: 12px; padding: 10px 12px;
+            background: rgba(50, 215, 75, 0.1);
+            border: 1px solid rgba(50, 215, 75, 0.35);
+            border-radius: 10px;
+            color: #4cd964; font-size: 13px;
+            display: none;
+        }
+        .notice.show { display: block; }
+        .guest-link {
+            margin-top: 18px; text-align: center;
+            font-size: 14px; color: var(--text-secondary);
+        }
+        .guest-link a { color: #FF9933; font-weight: 600; text-decoration: none; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="brand">LinkMia</div>
+    <div class="tagline">Miami Airport Transfers</div>
+
+    <div class="card">
+        <div class="tabs">
+            <button class="tab active" id="tabSignIn">Sign in</button>
+            <button class="tab" id="tabSignUp">Create account</button>
+        </div>
+
+        <form id="authForm">
+            <div id="signupFields" class="hidden">
+                <div class="row">
+                    <div>
+                        <label for="firstName">First name</label>
+                        <input type="text" id="firstName" autocomplete="given-name" placeholder="Andres">
+                    </div>
+                    <div>
+                        <label for="lastName">Last name (optional)</label>
+                        <input type="text" id="lastName" autocomplete="family-name" placeholder="Corcoba">
+                    </div>
+                </div>
+                <label for="phone">Mobile phone</label>
+                <div class="row" style="gap: 8px;">
+                    <select id="countryCode" style="flex: 0 0 92px; padding: 13px 8px; background: rgba(255,255,255,0.06); border: 1.5px solid rgba(255,255,255,0.1); border-radius: 11px; color: var(--text-primary); font-size: 15px; font-family: inherit; outline: none;">
+                        <option value="+1">US +1</option>
+                        <option value="+44">UK +44</option>
+                        <option value="+33">FR +33</option>
+                        <option value="+49">DE +49</option>
+                        <option value="+34">ES +34</option>
+                        <option value="+52">MX +52</option>
+                        <option value="+57">CO +57</option>
+                        <option value="+55">BR +55</option>
+                    </select>
+                    <input type="tel" id="phone" autocomplete="tel" placeholder="305 555 0123" style="flex: 1;">
+                </div>
+            </div>
+
+            <label for="email">Email</label>
+            <input type="email" id="email" autocomplete="email" placeholder="you@example.com" required>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" autocomplete="current-password" placeholder="••••••••" required minlength="6">
+
+            <button type="submit" class="submit-btn" id="submitBtn">Sign in</button>
+            <div class="error" id="errorBox"></div>
+            <div class="notice" id="noticeBox"></div>
+        </form>
+
+        <div class="guest-link">
+            In a hurry? <a href="/indexMVP.html?book=1">Continue as guest</a>
+        </div>
+    </div>
+
+    <script>
+        const sb = window.supabaseClient;
+        let mode = 'signin';
+
+        const $ = (id) => document.getElementById(id);
+        const showError = (msg) => { $('errorBox').textContent = msg; $('errorBox').classList.add('show'); $('noticeBox').classList.remove('show'); };
+        const showNotice = (msg) => { $('noticeBox').textContent = msg; $('noticeBox').classList.add('show'); $('errorBox').classList.remove('show'); };
+        const clearMsgs = () => { $('errorBox').classList.remove('show'); $('noticeBox').classList.remove('show'); };
+
+        function setMode(m) {
+            mode = m;
+            $('tabSignIn').classList.toggle('active', m === 'signin');
+            $('tabSignUp').classList.toggle('active', m === 'signup');
+            $('signupFields').classList.toggle('hidden', m === 'signin');
+            $('submitBtn').textContent = m === 'signin' ? 'Sign in' : 'Create account';
+            $('password').autocomplete = m === 'signin' ? 'current-password' : 'new-password';
+            clearMsgs();
+        }
+        $('tabSignIn').addEventListener('click', () => setMode('signin'));
+        $('tabSignUp').addEventListener('click', () => setMode('signup'));
+
+        // Already signed in? Straight to booking.
+        sb.auth.getSession().then(({ data: { session } }) => {
+            if (session) window.location.href = '/indexMVP.html?book=1';
+        });
+
+        async function saveProfile(session, firstName, lastName, phone) {
+            const name = lastName ? `${firstName} ${lastName}` : firstName;
+            const res = await fetch('/api/profile', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({ name, phone, email: session.user.email })
+            });
+            if (!res.ok) console.warn('Profile save failed (non-blocking)');
+        }
+
+        $('authForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearMsgs();
+            const email = $('email').value.trim();
+            const password = $('password').value;
+            const btn = $('submitBtn');
+            btn.disabled = true;
+
+            try {
+                if (mode === 'signin') {
+                    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                    // Flush a profile saved before email confirmation, if any
+                    const pending = localStorage.getItem('lm_pending_profile');
+                    if (pending && data.session) {
+                        try {
+                            const p = JSON.parse(pending);
+                            await saveProfile(data.session, p.firstName, p.lastName, p.phone);
+                            localStorage.removeItem('lm_pending_profile');
+                        } catch (_) {}
+                    }
+                    window.location.href = '/indexMVP.html?book=1';
+                } else {
+                    const firstName = $('firstName').value.trim();
+                    const phoneNumber = $('phone').value.trim();
+                    const phone = phoneNumber ? `${$('countryCode').value} ${phoneNumber}` : '';
+                    if (!firstName || !phoneNumber) {
+                        showError('Please enter your first name and mobile phone.');
+                        btn.disabled = false;
+                        return;
+                    }
+                    const { data, error } = await sb.auth.signUp({ email, password });
+                    if (error) throw error;
+
+                    if (data.session) {
+                        await saveProfile(data.session, firstName, $('lastName').value.trim(), phone);
+                        window.location.href = '/indexMVP.html?book=1';
+                    } else {
+                        // Email confirmation is enabled in the dashboard — the
+                        // profile will be saved on first sign-in instead.
+                        localStorage.setItem('lm_pending_profile', JSON.stringify({
+                            firstName, lastName: $('lastName').value.trim(), phone
+                        }));
+                        showNotice('Check your email to confirm your account, then sign in here.');
+                    }
+                }
+            } catch (err) {
+                const msg = err?.message || 'Something went wrong. Please try again.';
+                showError(msg.includes('Invalid login credentials')
+                    ? 'Wrong email or password.'
+                    : msg);
+            }
+            btn.disabled = false;
+        });
+    </script>
+</body>
+</html>
