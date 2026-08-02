@@ -128,7 +128,19 @@
                     </div>
                 </div>
                 <label for="phone">Mobile phone</label>
-                <input type="tel" id="phone" autocomplete="tel" placeholder="+1 305 555 0123">
+                <div class="row" style="gap: 8px;">
+                    <select id="countryCode" style="flex: 0 0 92px; padding: 13px 8px; background: rgba(255,255,255,0.06); border: 1.5px solid rgba(255,255,255,0.1); border-radius: 11px; color: var(--text-primary); font-size: 15px; font-family: inherit; outline: none;">
+                        <option value="+1">US +1</option>
+                        <option value="+44">UK +44</option>
+                        <option value="+33">FR +33</option>
+                        <option value="+49">DE +49</option>
+                        <option value="+34">ES +34</option>
+                        <option value="+52">MX +52</option>
+                        <option value="+57">CO +57</option>
+                        <option value="+55">BR +55</option>
+                    </select>
+                    <input type="tel" id="phone" autocomplete="tel" placeholder="305 555 0123" style="flex: 1;">
+                </div>
             </div>
 
             <label for="email">Email</label>
@@ -210,8 +222,9 @@
                     window.location.href = '/indexMVP.html?book=1';
                 } else {
                     const firstName = $('firstName').value.trim();
-                    const phone = $('phone').value.trim();
-                    if (!firstName || !phone) {
+                    const phoneNumber = $('phone').value.trim();
+                    const phone = phoneNumber ? `${$('countryCode').value} ${phoneNumber}` : '';
+                    if (!firstName || !phoneNumber) {
                         showError('Please enter your first name and mobile phone.');
                         btn.disabled = false;
                         return;

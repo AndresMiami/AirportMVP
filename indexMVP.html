@@ -351,6 +351,7 @@
                     if (profile) {
                         currentProfile = profile;
                         applyProfilePrefill();
+                        showWelcome(profile);
                     }
                 }
             } catch (e) {
@@ -376,6 +377,20 @@
                 const timer = setInterval(() => { if (tryApply()) clearInterval(timer); }, 300);
                 setTimeout(() => clearInterval(timer), 10000);
             }
+        }
+
+        // Personal greeting for signed-in passengers
+        function showWelcome(profile) {
+            if (document.getElementById('welcomeGreeting')) return;
+            const firstName = (profile.name || '').trim().split(/\s+/)[0];
+            if (!firstName) return;
+            const wherePanel = document.getElementById('wherePanel');
+            if (!wherePanel) return;
+            wherePanel.insertAdjacentHTML('afterbegin', `
+                <div id="welcomeGreeting" style="text-align: center; padding: 10px 16px 2px; font-size: 14px; color: #8E8E93;">
+                    Welcome <span style="font-weight: 700; background: linear-gradient(135deg, #FF9933, #FF5733); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">${firstName}</span> — let's go places
+                </div>
+            `);
         }
 
         async function logout() {
