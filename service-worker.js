@@ -3,7 +3,7 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'linkmia-v1.1.0';
+const CACHE_NAME = 'linkmia-v1.2.0';
 const RUNTIME_CACHE = 'linkmia-runtime';
 
 // Files to cache immediately on install
@@ -29,12 +29,12 @@ const STATIC_CACHE_URLS = [
 // Cache strategies
 const CACHE_STRATEGIES = {
   cacheFirst: [
-    /\.(?:css|js)$/,
     /\.(?:png|jpg|jpeg|svg|gif|webp)$/,
     /fonts\.googleapis\.com/,
     /fonts\.gstatic\.com/
   ],
   networkFirst: [
+    /\.(?:css|js)$/,
     /api\//,
     /\.json$/,
     /maps\.googleapis\.com/
@@ -101,6 +101,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // Never intercept non-GET requests (auth, bookings, profile updates)
+  if (request.method !== 'GET') {
+    return;
+  }
 
   // Skip non-HTTP(S) requests
   if (!url.protocol.startsWith('http')) {

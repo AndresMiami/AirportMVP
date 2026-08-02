@@ -102,6 +102,12 @@
             font-size: 14px; color: var(--text-secondary);
         }
         .guest-link a { color: #FF9933; font-weight: 600; text-decoration: none; }
+        .welcome-back {
+            text-align: center; font-size: 14px; color: var(--text-secondary);
+            margin-bottom: 14px;
+        }
+        .welcome-back #welcomeBackText { color: var(--text-primary); font-weight: 600; }
+        .welcome-back a { color: #FF9933; text-decoration: none; font-size: 13px; }
         .hidden { display: none !important; }
     </style>
 </head>
@@ -110,6 +116,11 @@
     <div class="tagline">Miami Airport Transfers</div>
 
     <div class="card">
+        <div class="welcome-back hidden" id="welcomeBack">
+            <span id="welcomeBackText">Welcome back</span>
+            · <a href="#" id="notYouLink">Not you?</a>
+        </div>
+
         <div class="tabs">
             <button class="tab active" id="tabSignIn">Sign in</button>
             <button class="tab" id="tabSignUp">Create account</button>
@@ -185,17 +196,52 @@
             if (session) window.location.href = '/indexMVP.html?book=1';
         });
 
+        // Returning after session expiry: prefill their email so re-login
+        // is just typing the password.
+        (function prefillReturning() {
+            const lastEmail = localStorage.getItem('lm_last_email');
+            if (!lastEmail) return;
+            $('email').value = lastEmail;
+            const lastName = localStorage.getItem('lm_last_first_name');
+            $('welcomeBackText').textContent = lastName ? `Welcome back, ${lastName}` : 'Welcome back';
+            $('welcomeBack').classList.remove('hidden');
+            setTimeout(() => $('password').focus(), 100);
+        })();
+
+        $('notYouLink').addEventListener('click', (e) => {
+            e.preventDefault();
+            localStorage.removeItem('lm_last_email');
+            localStorage.removeItem('lm_last_first_name');
+            $('email').value = '';
+            $('welcomeBack').classList.add('hidden');
+            $('email').focus();
+        });
+
+        function rememberUser(email, firstName) {
+            localStorage.setItem('lm_last_email', email);
+            if (firstName) localStorage.setItem('lm_last_first_name', firstName);
+        }
+
+        // Never throws: a hiccup saving the profile must not block a freshly
+        // created account. On failure the profile is stashed locally and
+        // flushed on the next sign-in.
         async function saveProfile(session, firstName, lastName, phone) {
-            const name = lastName ? `${firstName} ${lastName}` : firstName;
-            const res = await fetch('/api/profile', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({ name, phone, email: session.user.email })
-            });
-            if (!res.ok) console.warn('Profile save failed (non-blocking)');
+            try {
+                const name = lastName ? `${firstName} ${lastName}` : firstName;
+                const res = await fetch('/api/profile', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                    },
+                    body: JSON.stringify({ name, phone, email: session.user.email })
+                });
+                if (!res.ok) throw new Error('profile save failed');
+                localStorage.removeItem('lm_pending_profile');
+            } catch (e) {
+                console.warn('Profile save failed (will retry on next sign-in):', e);
+                localStorage.setItem('lm_pending_profile', JSON.stringify({ firstName, lastName, phone }));
+            }
         }
 
         $('authForm').addEventListener('submit', async (e) => {
@@ -216,8 +262,17 @@
                         try {
                             const p = JSON.parse(pending);
                             await saveProfile(data.session, p.firstName, p.lastName, p.phone);
-                            localStorage.removeItem('lm_pending_profile');
                         } catch (_) {}
+                    }
+                    // Remember who signed in for next time's prefill
+                    try {
+                        const res = await fetch('/api/profile', {
+                            headers: { 'Authorization': `Bearer ${data.session.access_token}` }
+                        });
+                        const { profile } = res.ok ? await res.json() : { profile: null };
+                        rememberUser(email, profile?.name?.split(/\s+/)[0]);
+                    } catch (_) {
+                        rememberUser(email);
                     }
                     window.location.href = '/indexMVP.html?book=1';
                 } else {
@@ -234,6 +289,7 @@
 
                     if (data.session) {
                         await saveProfile(data.session, firstName, $('lastName').value.trim(), phone);
+                        rememberUser(email, firstName);
                         window.location.href = '/indexMVP.html?book=1';
                     } else {
                         // Email confirmation is enabled in the dashboard — the
@@ -246,9 +302,17 @@
                 }
             } catch (err) {
                 const msg = err?.message || 'Something went wrong. Please try again.';
-                showError(msg.includes('Invalid login credentials')
-                    ? 'Wrong email or password.'
-                    : msg);
+                if (msg.includes('Invalid login credentials')) {
+                    showError('Wrong email or password.');
+                } else if (msg.includes('already registered')) {
+                    setMode('signin');
+                    $('email').value = email;
+                    showError('This email already has an account — enter your password to sign in.');
+                } else if (msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+                    showError('Connection problem — please check your internet and try again.');
+                } else {
+                    showError(msg);
+                }
             }
             btn.disabled = false;
         });
