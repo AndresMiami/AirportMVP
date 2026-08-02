@@ -66,16 +66,18 @@ exports.handler = async (event, context) => {
     const pickupDatetime = tripDate.toISOString();
 
     // Map vehicle name to database enum
+    // Category stored in vehicle_type; exact display name goes to vehicle_name.
+    // All Escalade variants categorize as 'suv' per Andres's preference.
     const vehicleTypeMap = {
       'Sedan': 'sedan',
       'sedan': 'sedan',
       'Tesla Model Y': 'sedan',
       'SUV': 'suv',
       'suv': 'suv',
-      'Escalade': 'escalade',
-      'escalade': 'escalade',
-      'Black Escalade': 'escalade',
-      'Cadillac Escalade': 'escalade',
+      'Escalade': 'suv',
+      'escalade': 'suv',
+      'Black Escalade': 'suv',
+      'Cadillac Escalade': 'suv',
       'Sprinter': 'sprinter',
       'sprinter': 'sprinter',
       'Mercedes Sprinter': 'sprinter'
