@@ -222,17 +222,26 @@
             if (firstName) localStorage.setItem('lm_last_first_name', firstName);
         }
 
+        // Never throws: a hiccup saving the profile must not block a freshly
+        // created account. On failure the profile is stashed locally and
+        // flushed on the next sign-in.
         async function saveProfile(session, firstName, lastName, phone) {
-            const name = lastName ? `${firstName} ${lastName}` : firstName;
-            const res = await fetch('/api/profile', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({ name, phone, email: session.user.email })
-            });
-            if (!res.ok) console.warn('Profile save failed (non-blocking)');
+            try {
+                const name = lastName ? `${firstName} ${lastName}` : firstName;
+                const res = await fetch('/api/profile', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                    },
+                    body: JSON.stringify({ name, phone, email: session.user.email })
+                });
+                if (!res.ok) throw new Error('profile save failed');
+                localStorage.removeItem('lm_pending_profile');
+            } catch (e) {
+                console.warn('Profile save failed (will retry on next sign-in):', e);
+                localStorage.setItem('lm_pending_profile', JSON.stringify({ firstName, lastName, phone }));
+            }
         }
 
         $('authForm').addEventListener('submit', async (e) => {
@@ -253,7 +262,6 @@
                         try {
                             const p = JSON.parse(pending);
                             await saveProfile(data.session, p.firstName, p.lastName, p.phone);
-                            localStorage.removeItem('lm_pending_profile');
                         } catch (_) {}
                     }
                     // Remember who signed in for next time's prefill
@@ -294,9 +302,17 @@
                 }
             } catch (err) {
                 const msg = err?.message || 'Something went wrong. Please try again.';
-                showError(msg.includes('Invalid login credentials')
-                    ? 'Wrong email or password.'
-                    : msg);
+                if (msg.includes('Invalid login credentials')) {
+                    showError('Wrong email or password.');
+                } else if (msg.includes('already registered')) {
+                    setMode('signin');
+                    $('email').value = email;
+                    showError('This email already has an account — enter your password to sign in.');
+                } else if (msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+                    showError('Connection problem — please check your internet and try again.');
+                } else {
+                    showError(msg);
+                }
             }
             btn.disabled = false;
         });
