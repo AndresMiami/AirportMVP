@@ -102,9 +102,45 @@ exports.handler = async (event) => {
     }
 
     console.log(`✅ Booking ${bookingId}: ${action}`);
+
+    // Telegram receipts to the admin: ride started, and a closing receipt
+    // on completion. Informational only — all control stays in the web app.
+    await sendReceipt(action, data[0]);
+
     return { statusCode: 200, headers, body: JSON.stringify({ success: true, booking: data[0] }) };
   } catch (error) {
     console.error('❌ update-booking-status error:', error);
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Internal error' }) };
   }
 };
+
+async function sendReceipt(action, b) {
+  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.ADMIN_TELEGRAM_CHAT_ID) return;
+
+  let text = null;
+  if (action === 'on_my_way') {
+    text = `🚗 Trip ${b.trip_id || b.id.slice(0, 8)} started
+${b.pickup_location} → ${b.dropoff_location}
+👤 ${b.customer_name}`;
+  } else if (action === 'complete') {
+    const commission = parseFloat(b.host_commission) > 0
+      ? `\n★ Ambassador commission: $${b.host_commission}`
+      : '';
+    text = `🏁 Trip ${b.trip_id || b.id.slice(0, 8)} completed — receipt
+${b.pickup_location} → ${b.dropoff_location}
+👤 ${b.customer_name}
+⏱ ${b.duration_minutes ? `~${b.duration_minutes} min ride` : 'duration n/a'}
+💵 $${b.price} · ${b.payment_status === 'unpaid' ? 'NOT yet collected' : 'collected'}${commission}`;
+  }
+  if (!text) return;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: process.env.ADMIN_TELEGRAM_CHAT_ID, text })
+    });
+  } catch (e) {
+    console.warn('⚠️ Receipt send failed:', e.message);
+  }
+}
