@@ -575,6 +575,10 @@ class PassengerModal {
     // Note: User can still close and go back to edit trip details
     openRequired(onComplete) {
         this.open(onComplete);
+        // Ambassadors go straight to the guest form — myself is locked
+        if (this.ambassadorMode) {
+            this.selectBookingType('guest');
+        }
         // Keep close button visible so user can go back to edit trip
     }
 
@@ -590,7 +594,28 @@ class PassengerModal {
     }
 
     // Select booking type
+    // Ambassador accounts book rides for patients/guests only — "For myself"
+    // is visible but locked so a coordinator can never accidentally book a
+    // ride under their own name.
+    setAmbassadorMode() {
+        this.ambassadorMode = true;
+        this.userData = null;
+        const applyLock = () => {
+            const myselfBtn = document.querySelector('.passenger-booking-option-btn[data-type="myself"]');
+            if (!myselfBtn) return false;
+            myselfBtn.style.opacity = '0.4';
+            myselfBtn.style.cursor = 'not-allowed';
+            myselfBtn.title = 'Ambassador accounts book rides for guests';
+            return true;
+        };
+        if (!applyLock()) {
+            const timer = setInterval(() => { if (applyLock()) clearInterval(timer); }, 300);
+            setTimeout(() => clearInterval(timer), 10000);
+        }
+    }
+
     selectBookingType(type) {
+        if (this.ambassadorMode && type === 'myself') return; // locked for ambassadors
         this.selectedType = type;
 
         // Update button states

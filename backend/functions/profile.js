@@ -54,7 +54,25 @@ exports.handler = async (event) => {
         console.error('❌ Profile lookup failed:', error);
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
       }
-      return { statusCode: 200, headers, body: JSON.stringify({ profile: data || null }) };
+
+      // Ambassador status: an active hosts row linked to this account
+      let ambassador = null;
+      const { data: host } = await db
+        .from('hosts')
+        .select('id, name, property_name, referral_code, commission_rate')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (host) {
+        ambassador = {
+          name: host.name,
+          organization: host.property_name,
+          referralCode: host.referral_code,
+          commissionRate: host.commission_rate
+        };
+      }
+
+      return { statusCode: 200, headers, body: JSON.stringify({ profile: data || null, ambassador }) };
     }
 
     if (event.httpMethod === 'POST') {

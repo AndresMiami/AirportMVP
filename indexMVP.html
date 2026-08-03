@@ -329,6 +329,31 @@
         let currentUser = null;
         let currentSession = null;
         let currentProfile = null;
+        let currentAmbassador = null;
+
+        // Referral attribution: a ?ref=CODE visit (QR scan) is remembered for
+        // 30 days and attached to bookings made from this browser.
+        (function captureRefCode() {
+            try {
+                const ref = new URLSearchParams(location.search).get('ref');
+                if (ref) {
+                    localStorage.setItem('lm_ref', JSON.stringify({ code: ref, at: Date.now() }));
+                }
+            } catch (e) { /* non-critical */ }
+        })();
+
+        function getStoredRefCode() {
+            try {
+                const raw = localStorage.getItem('lm_ref');
+                if (!raw) return null;
+                const { code, at } = JSON.parse(raw);
+                if (Date.now() - at > 30 * 24 * 60 * 60 * 1000) {
+                    localStorage.removeItem('lm_ref');
+                    return null;
+                }
+                return code;
+            } catch (e) { return null; }
+        }
 
         (async function checkAuth() {
             try {
@@ -347,8 +372,14 @@
                     headers: { 'Authorization': `Bearer ${session.access_token}` }
                 });
                 if (res.ok) {
-                    const { profile } = await res.json();
-                    if (profile) {
+                    const { profile, ambassador } = await res.json();
+                    if (ambassador) {
+                        // Ambassadors book for guests only — lock "For myself",
+                        // never prefill their own info as the traveler
+                        currentAmbassador = ambassador;
+                        applyAmbassadorMode();
+                        if (profile) showWelcome(profile);
+                    } else if (profile) {
                         currentProfile = profile;
                         applyProfilePrefill();
                         showWelcome(profile);
@@ -358,6 +389,25 @@
                 console.warn('Auth check failed (continuing as guest):', e);
             }
         })();
+
+        // Lock "For myself" for ambassador accounts once the modal exists
+        function applyAmbassadorMode() {
+            const tryApply = () => {
+                if (typeof PassengerModal !== 'undefined' && PassengerModal.getInstance) {
+                    const modal = PassengerModal.getInstance();
+                    if (modal?.setAmbassadorMode) {
+                        modal.setAmbassadorMode();
+                        console.log('★ Ambassador mode active');
+                        return true;
+                    }
+                }
+                return false;
+            };
+            if (!tryApply()) {
+                const timer = setInterval(() => { if (tryApply()) clearInterval(timer); }, 300);
+                setTimeout(() => clearInterval(timer), 10000);
+            }
+        }
 
         // Prefill "Who's traveling" once the modal singleton exists
         function applyProfilePrefill() {
@@ -1871,7 +1921,8 @@
                             pickupSign: bookingData.passenger?.notes?.pickupSign || null,
                             promoCode: bookingData.payment?.promo || null,
                             flightNumber: bookingData.passenger?.notes?.referenceCode || null,
-                            durationMinutes: this.state.route?.duration || null
+                            durationMinutes: this.state.route?.duration || null,
+                            refCode: getStoredRefCode()
                         };
 
                         // Attach the session token when signed in so the
