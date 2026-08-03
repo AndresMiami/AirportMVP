@@ -41,9 +41,11 @@ exports.handler = async (event, context) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   // Optional identity link: when the frontend sends a session token, resolve
-  // it to a customers row so the booking is tied to the account. Failures
-  // here never block the booking — guests book exactly as before.
+  // it to a customers row so the booking is tied to the account. If the
+  // account is an active ambassador, the booking is attributed to them.
+  // Failures here never block the booking — guests book exactly as before.
   let linkedCustomerId = null;
+  let ambassadorHost = null;
   try {
     const authHeader = event.headers.authorization || event.headers.Authorization || '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -58,6 +60,15 @@ exports.handler = async (event, context) => {
           .maybeSingle();
         if (customer) {
           linkedCustomerId = customer.id;
+        }
+        const { data: host } = await supabase
+          .from('hosts')
+          .select('id, commission_rate')
+          .eq('user_id', userData.user.id)
+          .eq('status', 'active')
+          .maybeSingle();
+        if (host) {
+          ambassadorHost = host;
         }
       }
     }
@@ -109,6 +120,31 @@ exports.handler = async (event, context) => {
     };
     const vehicleType = vehicleTypeMap[booking.vehicle] || 'sedan';
 
+    // Referral attribution: a signed-in ambassador wins; otherwise a stored
+    // QR ref code (?ref=...) is honored. Commission is stamped at booking
+    // time but only counts as earned when the ride completes.
+    let referredByHost = null;
+    let hostCommission = 0;
+    try {
+      let host = ambassadorHost;
+      if (!host && booking.refCode) {
+        const { data: refHost } = await supabase
+          .from('hosts')
+          .select('id, commission_rate')
+          .eq('referral_code', String(booking.refCode).trim().toLowerCase())
+          .eq('status', 'active')
+          .maybeSingle();
+        host = refHost || null;
+      }
+      if (host) {
+        referredByHost = host.id;
+        const rate = parseFloat(host.commission_rate) || 0;
+        hostCommission = Math.round((parseFloat(booking.price) || 0) * rate * 100) / 100;
+      }
+    } catch (refError) {
+      console.warn('⚠️ Referral attribution skipped:', refError.message);
+    }
+
     // Booker info is stored only when someone books on behalf of another
     // passenger — customer_* is always the person the driver picks up.
     const isBookerDifferent = booking.bookerName &&
@@ -140,6 +176,8 @@ exports.handler = async (event, context) => {
       booking_mode: booking.mode || null,
       duration_minutes: parseInt(booking.durationMinutes) || null,
       customer_id: linkedCustomerId,
+      referred_by_host: referredByHost,
+      host_commission: hostCommission,
       source: 'website'
     };
 
