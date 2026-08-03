@@ -396,7 +396,7 @@
                 if (typeof PassengerModal !== 'undefined' && PassengerModal.getInstance) {
                     const modal = PassengerModal.getInstance();
                     if (modal?.setAmbassadorMode) {
-                        modal.setAmbassadorMode();
+                        modal.setAmbassadorMode(currentUser?.email);
                         console.log('★ Ambassador mode active');
                         return true;
                     }
