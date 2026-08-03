@@ -37,6 +37,33 @@
             font-size: 14px; font-weight: 700; text-transform: uppercase;
             letter-spacing: 0.5px; color: #888; margin: 18px 0 10px;
         }
+        .view-tabs {
+            display: flex; gap: 8px;
+            background: rgba(0,0,0,0.25);
+            border: 1px solid rgba(0,0,0,0.05);
+            border-radius: 14px; padding: 4px;
+            margin: 4px 0 16px;
+        }
+        .view-tab {
+            flex: 1; padding: 11px; border: none; border-radius: 11px;
+            background: transparent; color: #888;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            font-family: inherit; transition: none;
+        }
+        .view-tab.active {
+            background: linear-gradient(135deg, #FF9933, #FF5733);
+            color: white;
+            box-shadow: 0 2px 8px rgba(255, 87, 51, 0.3);
+        }
+        .view-tab .count {
+            display: inline-block; min-width: 20px; padding: 1px 6px;
+            margin-left: 6px; border-radius: 10px; font-size: 12px;
+            background: rgba(255,255,255,0.25);
+        }
+        .view-tab:not(.active) .count { background: rgba(0,0,0,0.15); color: #666; }
+        .wa-link {
+            color: #25D366 !important; text-decoration: none; font-weight: 600;
+        }
         .card {
             background: white; border-radius: 16px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.07);
@@ -137,10 +164,16 @@
             <div class="refresh-note" id="lastRefresh"></div>
         </header>
         <main>
-            <div class="section-title">New requests</div>
-            <div id="pendingList"></div>
-            <div class="section-title">Active rides</div>
-            <div id="activeList"></div>
+            <div class="view-tabs">
+                <button class="view-tab active" id="tabRequests">Requests</button>
+                <button class="view-tab" id="tabRides">My rides</button>
+            </div>
+            <div id="requestsView">
+                <div id="pendingList"></div>
+            </div>
+            <div id="ridesView" class="hidden">
+                <div id="activeList"></div>
+            </div>
         </main>
     </div>
 
@@ -175,6 +208,14 @@
             return iso && (new Date(iso) - new Date()) < 2 * 60 * 60 * 1000;
         }
 
+        // WhatsApp chat link with the passenger (digits-only number required)
+        function waLink(b) {
+            const digits = String(b.customer_phone || '').replace(/\D/g, '');
+            if (digits.length < 10) return '';
+            const hello = `Hi ${b.customer_name || ''}! This is your LinkMia driver — trip ${b.trip_id || ''}.`;
+            return ` · <a class="wa-link" target="_blank" rel="noopener" href="https://wa.me/${digits}?text=${encodeURIComponent(hello)}">WhatsApp</a>`;
+        }
+
         function rideCard(b, buttonsHtml, badgeHtml) {
             return `
             <div class="card" data-id="${b.id}">
@@ -197,7 +238,7 @@
                     ${b.bags ? `<span>🧳 ${b.bags}</span>` : ''}
                     ${b.flight_number ? `<span>✈️ ${esc(b.flight_number)}</span>` : ''}
                 </div>
-                <div class="contact-row">👤 ${esc(b.customer_name)} — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a></div>
+                <div class="contact-row">👤 ${esc(b.customer_name)} — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a>${waLink(b)}</div>
                 ${b.booker_name && b.booker_name !== b.customer_name ? `<div class="contact-row">📋 Booked by ${esc(b.booker_name)}${b.booker_phone ? ` — <a href="tel:${esc(b.booker_phone)}">${esc(b.booker_phone)}</a>` : ''}</div>` : ''}
                 ${b.pickup_sign ? `<div class="notes">🪧 Sign: ${esc(b.pickup_sign)}</div>` : ''}
                 ${b.notes ? `<div class="notes">📝 ${esc(b.notes)}</div>` : ''}
@@ -236,7 +277,20 @@
                 : '<div class="empty">No active rides.</div>';
 
             $('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+            $('tabRequests').innerHTML = `Requests${pending.length ? ` <span class="count">${pending.length}</span>` : ''}`;
+            $('tabRides').innerHTML = `My rides${active.length ? ` <span class="count">${active.length}</span>` : ''}`;
         }
+
+        // Two-view layout: offers to accept vs rides already accepted
+        function switchView(view) {
+            $('tabRequests').classList.toggle('active', view === 'requests');
+            $('tabRides').classList.toggle('active', view === 'rides');
+            $('requestsView').classList.toggle('hidden', view !== 'requests');
+            $('ridesView').classList.toggle('hidden', view !== 'rides');
+        }
+        $('tabRequests').addEventListener('click', () => switchView('requests'));
+        $('tabRides').addEventListener('click', () => switchView('rides'));
 
         async function fetchBookings(pass) {
             const res = await fetch('/api/driver-bookings', {
@@ -291,7 +345,9 @@
             } catch (e) {
                 alert('Network error. Please try again.');
             }
-            refresh();
+            await refresh();
+            // An accepted offer lives in "My rides" now — follow it there
+            if (action === 'accept') switchView('rides');
         }
 
         document.addEventListener('click', (e) => {

@@ -166,6 +166,10 @@
             color: #FF453A;
             padding: 13px;
         }
+        .btn-whatsapp {
+            background: #25D366;
+            box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
+        }
         .support { font-size: 12px; color: var(--text-light); text-align: center; margin-top: 14px; }
         .hidden { display: none !important; }
         .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
@@ -230,6 +234,7 @@
             </div>
 
             <div class="actions">
+                <a class="btn btn-whatsapp hidden" id="waBtn" target="_blank" rel="noopener">💬 Message your driver on WhatsApp</a>
                 <button class="btn btn-modify hidden" id="backBtn">← Go back</button>
                 <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
                 <a class="btn btn-modify hidden" id="rebookBtn" href="/" target="_top">🚗 Book another ride</a>
@@ -241,6 +246,9 @@
 
     <script>
         const SUPPORT_PHONE = '+1 (305) 509-3955';
+        // MVP: single driver. Once driver accounts land, this comes from
+        // the booking's assigned_driver record instead.
+        const DRIVER = { name: 'Andres', phone: '13055093955' };
         const POLL_MS = 7000;
         const TERMINAL = ['completed', 'cancelled', 'declined'];
         const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'completed'];
@@ -256,8 +264,8 @@
         const STATUS_VIEW = {
             pending:     { color: '',      pulse: true,  text: 'Waiting for driver confirmation',
                            sub: 'We\'ve notified your driver — this usually takes just a few minutes.' },
-            confirmed:   { color: 'green', pulse: false, text: '✅ Driver confirmed!',
-                           sub: 'Andres will pick you up as scheduled.' },
+            confirmed:   { color: 'green', pulse: false, text: '🎉 You\'ve been paired with your driver!',
+                           sub: `${DRIVER.name} will pick you up as scheduled — say hello and coordinate any details on WhatsApp.` },
             on_the_way:  { color: 'green', pulse: true,  text: '🚗 Your driver is on the way',
                            sub: 'Please be ready at your pickup point.' },
             arrived:     { color: 'green', pulse: true,  text: '📍 Your driver has arrived',
@@ -384,6 +392,16 @@
             $('backBtn').classList.toggle('hidden', !isPending);
             $('cancelBtn').classList.toggle('hidden', !isPending);
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
+
+            // Warm human channel once paired: WhatsApp chat with the driver
+            const isActive = ['confirmed', 'on_the_way', 'arrived'].includes(b.status);
+            const waBtn = $('waBtn');
+            waBtn.classList.toggle('hidden', !isActive);
+            if (isActive) {
+                const hello = `Hi ${DRIVER.name}! This is ${b.customer_name || 'your passenger'} — trip ${b.trip_id || ''}.`;
+                waBtn.href = `https://wa.me/${DRIVER.phone}?text=${encodeURIComponent(hello)}`;
+                waBtn.textContent = `💬 Message ${DRIVER.name} on WhatsApp`;
+            }
 
             $('supportText').textContent = `Trip ${b.trip_id || ''} · Questions? Call or text us: ${SUPPORT_PHONE}`;
 
