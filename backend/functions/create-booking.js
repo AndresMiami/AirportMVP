@@ -63,7 +63,7 @@ exports.handler = async (event, context) => {
         }
         const { data: host } = await supabase
           .from('hosts')
-          .select('id, commission_rate')
+          .select('id, name, commission_rate')
           .eq('user_id', userData.user.id)
           .eq('status', 'active')
           .maybeSingle();
@@ -125,12 +125,13 @@ exports.handler = async (event, context) => {
     // time but only counts as earned when the ride completes.
     let referredByHost = null;
     let hostCommission = 0;
+    let ambassadorName = null;
     try {
       let host = ambassadorHost;
       if (!host && booking.refCode) {
         const { data: refHost } = await supabase
           .from('hosts')
-          .select('id, commission_rate')
+          .select('id, name, commission_rate')
           .eq('referral_code', String(booking.refCode).trim().toLowerCase())
           .eq('status', 'active')
           .maybeSingle();
@@ -138,6 +139,7 @@ exports.handler = async (event, context) => {
       }
       if (host) {
         referredByHost = host.id;
+        ambassadorName = host.name || null;
         const rate = parseFloat(host.commission_rate) || 0;
         hostCommission = Math.round((parseFloat(booking.price) || 0) * rate * 100) / 100;
       }
@@ -210,27 +212,40 @@ exports.handler = async (event, context) => {
     // ============================================
     const tripId = booking.tripId || `B${Date.now().toString().slice(-4)}`;
 
-    // Format date and time for display
+    // All display times in Miami local time — the function itself runs in UTC
+    const MIAMI_TZ = 'America/New_York';
     const formattedDate = tripDate.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
+      timeZone: MIAMI_TZ
     });
-    const formattedTime = tripDate.toLocaleTimeString('en-US', {
+    const fmtTime = (d) => d.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
-      hour12: true
+      hour12: true,
+      timeZone: MIAMI_TZ
     });
+    const formattedTime = fmtTime(tripDate);
 
-    // Calculate urgency
-    const isToday = new Date().toDateString() === tripDate.toDateString();
+    // Calculate urgency (date comparison in Miami time, not server time)
+    const isToday = new Date().toLocaleDateString('en-US', { timeZone: MIAMI_TZ })
+      === tripDate.toLocaleDateString('en-US', { timeZone: MIAMI_TZ });
     const isUrgent = (tripDate - new Date()) < (2 * 60 * 60 * 1000); // Less than 2 hours
 
     // Plain-text "doorbell" ping — all dispatch actions happen on the driver page
+    const CAPACITY = { sedan: [4, 4], suv: [7, 8], escalade: [7, 8], sprinter: [12, 15] };
+    const [capPax, capBags] = CAPACITY[vehicleType] || CAPACITY.sedan;
+    const durationMins = parseInt(booking.durationMinutes) || null;
+    const etaLine = durationMins
+      ? `⏱ ~${durationMins} min · est. arrival ${fmtTime(new Date(tripDate.getTime() + durationMins * 60000))}\n`
+      : '';
+    const ambassadorLine = ambassadorName ? `\n★ via Ambassador ${ambassadorName}` : '';
     const siteUrl = process.env.URL || 'https://i-love-miami.netlify.app';
     const doorbell = `🆕 New ride ${tripId} — ${isToday ? 'TODAY' : formattedDate} at ${formattedTime}${isUrgent ? ' (URGENT <2h)' : ''}
 ${booking.pickup} → ${booking.dropoff}
-$${booking.price} | ${booking.vehicle} | ${booking.passengers || 1} pax
+${etaLine}🚘 ${booking.vehicle} · 👥 ${booking.passengers || 1} of ${capPax} · 🧳 ${booking.bags || 0} of ${capBags}
+💵 $${booking.price} · pay driver (cash/Zelle)${ambassadorLine}
 Open driver page: ${siteUrl}/driver`;
 
     let telegramSent = false;
