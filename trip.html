@@ -26,7 +26,7 @@
             flex-direction: column;
             align-items: center;
         }
-        .page { width: 100%; max-width: 440px; padding: 0 14px 32px; }
+        .page { width: 100%; max-width: 540px; padding: 0 16px 26px; }
 
         /* Status strip: the page header */
         .status-strip {
@@ -89,8 +89,15 @@
             margin-bottom: 12px;
         }
 
-        /* Vehicle */
-        .vehicle-image-wrap { position: relative; height: 200px; overflow: hidden; background: var(--panel-bg-2); }
+        /* Vehicle — scales with the container width, keeps proportions */
+        .vehicle-image-wrap {
+            position: relative;
+            aspect-ratio: 16 / 8.5;
+            min-height: 170px;
+            max-height: 280px;
+            overflow: hidden;
+            background: var(--panel-bg-2);
+        }
         .vehicle-image-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .vehicle-image-wrap::after {
             content: ''; position: absolute; inset: 0;
@@ -278,7 +285,17 @@
         // so no loading text should ever flash.
         if (isEmbedded) {
             document.body.style.background = 'transparent';
+            document.body.style.minHeight = '0';
             $('loadingMsg').textContent = '';
+        }
+
+        // Tell the parent sheet how tall the content is so the panel can
+        // hug it instead of using a fixed height with dead space below.
+        function reportHeight(type) {
+            if (!isEmbedded) return;
+            const page = document.querySelector('.page');
+            const height = (page ? page.scrollHeight : document.body.scrollHeight) + 4;
+            window.parent.postMessage({ type, height }, '*');
         }
 
         function fmtDayTime(iso) {
@@ -375,10 +392,15 @@
                 pollTimer = null;
             }
 
-            // Tell the parent page we're rendered so it can slide the sheet up
-            if (isEmbedded && !readySignalSent) {
-                readySignalSent = true;
-                window.parent.postMessage({ type: 'lm-ready' }, '*');
+            // Tell the parent page we're rendered so it can slide the sheet
+            // up sized to the content; later renders re-report the height
+            if (isEmbedded) {
+                if (!readySignalSent) {
+                    readySignalSent = true;
+                    requestAnimationFrame(() => reportHeight('lm-ready'));
+                } else {
+                    requestAnimationFrame(() => reportHeight('lm-resize'));
+                }
             }
         }
 

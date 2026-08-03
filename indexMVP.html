@@ -2170,7 +2170,7 @@
                             border-radius: 20px 20px 0 0;
                             overflow: hidden;
                             transform: translateY(100%);
-                            transition: transform 0.3s ease-out;
+                            transition: transform 0.3s ease-out, height 0.25s ease-out;
                         }
                         .trip-sheet-overlay.active .trip-sheet-panel { transform: translateY(0); }
                         .trip-sheet-panel iframe {
@@ -2200,8 +2200,21 @@
                     requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('active')));
                 };
 
+                // The sheet hugs its content: the trip view reports its
+                // rendered height and the panel sizes to it (capped at 88%)
+                const panel = overlay.querySelector('.trip-sheet-panel');
+                const sizePanel = (contentHeight) => {
+                    if (!contentHeight) return;
+                    const capped = Math.min(contentHeight, Math.round(window.innerHeight * 0.88));
+                    panel.style.height = capped + 'px';
+                };
+
                 const onMessage = (e) => {
-                    if (e.data?.type === 'lm-ready') reveal();       // sheet content rendered — slide up now
+                    if (e.data?.type === 'lm-ready') {               // content rendered — size, then slide up
+                        sizePanel(e.data.height);
+                        reveal();
+                    }
+                    if (e.data?.type === 'lm-resize') sizePanel(e.data.height); // status changed
                     if (e.data?.type === 'lm-close') closeSheet();   // "Go back" pressed inside the sheet
                 };
                 window.addEventListener('message', onMessage);
