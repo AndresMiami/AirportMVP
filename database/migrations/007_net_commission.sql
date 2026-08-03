@@ -7,15 +7,35 @@
 -- Example: $105 ride, 6% ambassador -> driver 78.75, ambassador 6.30,
 -- LinkMia 19.95 (19% of gross). Rows recompute automatically.
 --
--- bookings_with_ambassador is dropped and recreated because it selects
--- host_commission; revenue_summary because it selects linkmia_commission.
+-- Every view that reads the column must be dropped first and recreated
+-- after: revenue_summary and bookings_with_ambassador reference it (or
+-- host_commission) directly, and todays_bookings / pending_assignments
+-- are SELECT * views, so they depend on every bookings column.
 
 DROP VIEW IF EXISTS revenue_summary;
 DROP VIEW IF EXISTS bookings_with_ambassador;
+DROP VIEW IF EXISTS todays_bookings;
+DROP VIEW IF EXISTS pending_assignments;
 
 ALTER TABLE bookings DROP COLUMN IF EXISTS linkmia_commission;
 ALTER TABLE bookings ADD COLUMN linkmia_commission DECIMAL(10,2)
     GENERATED ALWAYS AS (price * 0.25 - COALESCE(host_commission, 0)) STORED;
+
+CREATE OR REPLACE VIEW todays_bookings AS
+SELECT
+    b.*,
+    d.name as driver_name,
+    d.phone as driver_phone
+FROM bookings b
+LEFT JOIN drivers d ON b.assigned_driver = d.id
+WHERE DATE(b.pickup_datetime) = CURRENT_DATE
+ORDER BY b.pickup_datetime;
+
+CREATE OR REPLACE VIEW pending_assignments AS
+SELECT * FROM bookings
+WHERE status IN ('pending', 'confirmed')
+AND assigned_driver IS NULL
+ORDER BY pickup_datetime;
 
 CREATE OR REPLACE VIEW revenue_summary AS
 SELECT
