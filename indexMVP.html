@@ -430,66 +430,54 @@
             }
         }
 
-        // Gold ambassador stamp — fixed top-right through all booking stages,
-        // shown only while an ambassador account is signed in
+        // Gold ambassador signature — a slim in-flow chip, right-aligned at
+        // the top of the booking container. Occupies its own row so it never
+        // overlaps controls on any screen size, and stays visible across all
+        // booking stages (it sits above the panel switcher).
         function showAmbassadorStamp(ambassador) {
             if (document.getElementById('ambassadorStamp')) return;
+            const container = document.querySelector('.app-container');
+            if (!container) return;
 
             const stampStyles = document.createElement('style');
             stampStyles.textContent = `
                 #ambassadorStamp {
-                    position: fixed;
-                    top: 14px;
-                    right: 14px;
-                    z-index: 900;
-                    width: 74px;
-                    height: 74px;
-                    border-radius: 50%;
-                    padding: 2.5px;
-                    background: conic-gradient(from 210deg,
-                        #8a6d1f, #d4af37, #f7e27e, #d4af37, #8a6d1f, #d4af37, #f7e27e, #8a6d1f);
-                    box-shadow: 0 0 14px rgba(212, 175, 55, 0.45), 0 2px 8px rgba(0,0,0,0.5);
-                    animation: ambassadorGlow 3s ease-in-out infinite;
-                    pointer-events: none;
-                }
-                #ambassadorStamp .stamp-inner {
-                    width: 100%;
-                    height: 100%;
-                    border-radius: 50%;
-                    background: radial-gradient(circle at 35% 30%, #33302a 0%, #1C1C1E 70%);
                     display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 1px;
+                    justify-content: flex-end;
+                    padding: 10px 14px 0;
                 }
-                #ambassadorStamp .stamp-star {
-                    font-size: 17px;
+                #ambassadorStamp .amb-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    padding: 5px 12px;
+                    border-radius: 20px;
+                    border: 1px solid rgba(212, 175, 55, 0.55);
+                    background: linear-gradient(135deg, rgba(212,175,55,0.12), rgba(138,109,31,0.08));
+                    box-shadow: 0 0 8px rgba(212, 175, 55, 0.2);
+                    animation: ambassadorGlow 3s ease-in-out infinite;
+                }
+                #ambassadorStamp .amb-star {
+                    font-size: 12px;
                     background: linear-gradient(135deg, #f7e27e, #d4af37);
                     -webkit-background-clip: text;
                     background-clip: text;
                     -webkit-text-fill-color: transparent;
                     line-height: 1;
                 }
-                #ambassadorStamp .stamp-text {
-                    font-size: 7.5px;
+                #ambassadorStamp .amb-text {
+                    font-size: 10px;
                     font-weight: 800;
-                    letter-spacing: 1.3px;
+                    letter-spacing: 1.5px;
                     text-transform: uppercase;
                     background: linear-gradient(135deg, #f7e27e, #d4af37);
                     -webkit-background-clip: text;
                     background-clip: text;
                     -webkit-text-fill-color: transparent;
                 }
-                #ambassadorStamp .stamp-sub {
-                    font-size: 6px;
-                    letter-spacing: 1px;
-                    text-transform: uppercase;
-                    color: #8a7a4a;
-                }
                 @keyframes ambassadorGlow {
-                    0%, 100% { box-shadow: 0 0 10px rgba(212, 175, 55, 0.35), 0 2px 8px rgba(0,0,0,0.5); }
-                    50% { box-shadow: 0 0 20px rgba(212, 175, 55, 0.6), 0 2px 8px rgba(0,0,0,0.5); }
+                    0%, 100% { box-shadow: 0 0 6px rgba(212, 175, 55, 0.15); }
+                    50% { box-shadow: 0 0 12px rgba(212, 175, 55, 0.4); }
                 }
             `;
             document.head.appendChild(stampStyles);
@@ -500,13 +488,12 @@
                 ? `Ambassador · ${ambassador.organization}`
                 : 'Ambassador account';
             stamp.innerHTML = `
-                <div class="stamp-inner">
-                    <span class="stamp-star">★</span>
-                    <span class="stamp-text">Ambassador</span>
-                    <span class="stamp-sub">Account</span>
-                </div>
+                <span class="amb-chip">
+                    <span class="amb-star">★</span>
+                    <span class="amb-text">Ambassador</span>
+                </span>
             `;
-            document.body.appendChild(stamp);
+            container.insertAdjacentElement('afterbegin', stamp);
         }
 
         // Personal greeting for signed-in passengers
