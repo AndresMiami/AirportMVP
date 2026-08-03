@@ -90,7 +90,7 @@
         }
 
         /* Vehicle */
-        .vehicle-image-wrap { position: relative; height: 150px; overflow: hidden; background: var(--panel-bg-2); }
+        .vehicle-image-wrap { position: relative; height: 200px; overflow: hidden; background: var(--panel-bg-2); }
         .vehicle-image-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .vehicle-image-wrap::after {
             content: ''; position: absolute; inset: 0;
@@ -110,7 +110,7 @@
         }
 
         /* Route timeline */
-        .route { padding: 14px 16px 0; }
+        .route { padding: 14px 16px 10px; }
         .route-row { display: flex; gap: 12px; }
         .route-rail { display: flex; flex-direction: column; align-items: center; }
         .route-marker {
@@ -133,23 +133,11 @@
         .route-addr { font-size: 13px; line-height: 1.35; margin-top: 2px; color: var(--text-primary); }
         .route-duration { font-size: 11px; color: var(--text-light); margin: -4px 0 8px 36px; }
 
-        /* Detail chips */
-        .details {
-            display: grid; grid-template-columns: 1fr 1fr;
-            gap: 8px; padding: 2px 16px 16px;
+        /* Flight reference (only when provided) */
+        .flight-line {
+            padding: 0 16px 14px;
+            font-size: 13px; color: var(--text-secondary);
         }
-        .detail-chip {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.07);
-            border-radius: 10px; padding: 8px 11px;
-        }
-        .detail-chip .label {
-            font-size: 10px; color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.5px;
-        }
-        .detail-chip .value { font-size: 13px; font-weight: 600; margin-top: 2px; }
-        .paid-badge { color: #FFB340; }
-        .paid-badge.paid { color: var(--green); }
 
         /* Buttons */
         .actions { display: flex; flex-direction: column; gap: 9px; }
@@ -231,24 +219,7 @@
                     </div>
                 </div>
 
-                <div class="details">
-                    <div class="detail-chip">
-                        <div class="label">Your group</div>
-                        <div class="value" id="chipGroup"></div>
-                    </div>
-                    <div class="detail-chip">
-                        <div class="label">Luggage</div>
-                        <div class="value" id="chipBags"></div>
-                    </div>
-                    <div class="detail-chip">
-                        <div class="label">Payment</div>
-                        <div class="value" id="chipPayment"></div>
-                    </div>
-                    <div class="detail-chip" id="chipFlightWrap">
-                        <div class="label">Flight</div>
-                        <div class="value" id="chipFlight"></div>
-                    </div>
-                </div>
+                <div class="flight-line hidden" id="flightLine"></div>
             </div>
 
             <div class="actions">
@@ -383,19 +354,12 @@
                 $('etaTime').classList.add('hidden');
             }
 
-            // Chips
-            const vCap = VEHICLES[b.vehicle_type] || VEHICLES.sedan;
-            $('chipGroup').textContent = `👥 ${b.passengers || 1} of ${vCap.pax} seats`;
-            $('chipBags').textContent = `🧳 ${b.bags || 0} of ${vCap.bags} bags`;
-            const paid = b.payment_status && b.payment_status !== 'unpaid';
-            $('chipPayment').innerHTML = paid
-                ? '<span class="paid-badge paid">Paid ✓</span>'
-                : '<span class="paid-badge">Pay driver · cash/Zelle</span>';
+            // Flight reference, only when provided
             if (b.flight_number) {
-                $('chipFlight').textContent = `✈️ ${b.flight_number}`;
-                $('chipFlightWrap').classList.remove('hidden');
+                $('flightLine').textContent = `✈️ Flight ${b.flight_number}`;
+                $('flightLine').classList.remove('hidden');
             } else {
-                $('chipFlightWrap').classList.add('hidden');
+                $('flightLine').classList.add('hidden');
             }
 
             // Actions
