@@ -482,17 +482,6 @@ class PassengerModal {
                     <div class="passenger-modal-scrollable-content">
                         <form id="guestForm" onsubmit="PassengerModal.getInstance().saveGuest(event)">
                             <div class="passenger-form-group">
-                                <label for="guestTitle">Title</label>
-                                <select id="guestTitle" class="passenger-form-select">
-                                    <option value="Mx.">Mx.</option>
-                                    <option value="Mr.">Mr.</option>
-                                    <option value="Ms.">Ms.</option>
-                                    <option value="Mrs.">Mrs.</option>
-                                    <option value="Dr.">Dr.</option>
-                                </select>
-                            </div>
-                            
-                            <div class="passenger-form-group">
                                 <label for="guestFirstName">First name</label>
                                 <input type="text" id="guestFirstName" class="passenger-form-input" required>
                             </div>
@@ -597,8 +586,9 @@ class PassengerModal {
     // Ambassador accounts book rides for patients/guests only — "For myself"
     // is visible but locked so a coordinator can never accidentally book a
     // ride under their own name.
-    setAmbassadorMode() {
+    setAmbassadorMode(accountEmail) {
         this.ambassadorMode = true;
+        this.ambassadorEmail = accountEmail || null;
         this.userData = null;
         const applyLock = () => {
             const myselfBtn = document.querySelector('.passenger-booking-option-btn[data-type="myself"]');
@@ -606,6 +596,13 @@ class PassengerModal {
             myselfBtn.style.opacity = '0.4';
             myselfBtn.style.cursor = 'not-allowed';
             myselfBtn.title = 'Ambassador accounts book rides for guests';
+            // If the modal was opened before ambassador status loaded (fast
+            // click on a fresh page), force it over to the guest flow now
+            const selectionModal = document.getElementById('passengerSelectionModal');
+            if (selectionModal?.classList.contains('active') && this.selectedType !== 'guest') {
+                this.selectBookingType('guest');
+            }
+            this.updatePassengerButton();
             return true;
         };
         if (!applyLock()) {
@@ -644,6 +641,13 @@ class PassengerModal {
     // Save user's own information (For Myself)
     saveMyself(event) {
         event.preventDefault();
+
+        // Ambassadors can never book as themselves (covers the case where
+        // the form was filled before ambassador status finished loading)
+        if (this.ambassadorMode) {
+            this.selectBookingType('guest');
+            return;
+        }
 
         const firstName = document.getElementById('userFirstName').value.trim();
         const lastName = document.getElementById('userLastName').value.trim();
@@ -691,6 +695,13 @@ class PassengerModal {
             modal.style.display = 'flex';
             setTimeout(() => modal.classList.add('active'), 10);
         }
+        // Ambassador bookings: receipts go to the ambassador by default
+        if (this.ambassadorMode && this.ambassadorEmail) {
+            const emailInput = document.getElementById('guestEmail');
+            if (emailInput && !emailInput.value) {
+                emailInput.value = this.ambassadorEmail;
+            }
+        }
     }
 
     // Back to passenger selection
@@ -714,7 +725,6 @@ class PassengerModal {
     saveGuest(event) {
         event.preventDefault();
 
-        const title = document.getElementById('guestTitle').value;
         const firstName = document.getElementById('guestFirstName').value;
         const lastName = document.getElementById('guestLastName').value;
         const email = document.getElementById('guestEmail').value;
@@ -722,13 +732,12 @@ class PassengerModal {
         const phone = document.getElementById('guestPhone').value;
 
         this.guestData = {
-            title,
             firstName,
             lastName,
             email,
             countryCode,
             phone,
-            fullName: `${title} ${firstName} ${lastName}`
+            fullName: `${firstName} ${lastName}`
         };
 
         this.selectedType = 'guest';
@@ -772,6 +781,11 @@ class PassengerModal {
             if (iconSpan) iconSpan.textContent = '👥';
             if (textSpan) textSpan.textContent = `Guest: ${this.guestData.fullName}`;
             btn.classList.add('guest-selected');
+        } else if (this.ambassadorMode) {
+            // Ambassadors always book for a passenger, never themselves
+            if (iconSpan) iconSpan.textContent = '👥';
+            if (textSpan) textSpan.textContent = '＋ Add passenger';
+            btn.classList.remove('guest-selected');
         } else if (this.userData) {
             // Personal touch: show the traveler's own name once we know it
             if (iconSpan) iconSpan.textContent = '👤';
