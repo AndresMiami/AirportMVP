@@ -2721,7 +2721,10 @@
         }
         
         // PWA Service Worker Registration
-        if ('serviceWorker' in navigator) {
+        // Skip the service worker during local development — cached files
+        // would mask fresh edits and make changes appear not to work
+        const IS_LOCAL_DEV = ['localhost', '127.0.0.1'].includes(location.hostname);
+        if ('serviceWorker' in navigator && !IS_LOCAL_DEV) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js')
                     .then((registration) => {
