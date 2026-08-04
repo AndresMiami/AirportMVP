@@ -181,6 +181,7 @@
         const POLL_MS = 10000;
         let passcode = localStorage.getItem('lm_driver_pass') || '';
         let pollTimer = null;
+        let lastBookings = [];
 
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -247,6 +248,7 @@
         }
 
         function render(bookings) {
+            lastBookings = bookings;
             const pending = bookings.filter(b => b.status === 'pending');
             const active = bookings.filter(b => ['confirmed', 'on_the_way', 'arrived'].includes(b.status));
 
@@ -325,6 +327,20 @@
             if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
 
+        // On my way → the passenger chat opens itself with a message that
+        // commits the driver to sharing live location. Two taps remain
+        // (attach → share live location) because Meta requires the human
+        // to switch that on — the app removes the remembering, not the taps.
+        function whatsappHandoffUrl(bookingId) {
+            const b = lastBookings.find(x => x.id === bookingId);
+            if (!b) return null;
+            const digits = String(b.customer_phone || '').replace(/\D/g, '');
+            if (digits.length < 10) return null;
+            const firstName = String(b.customer_name || '').trim().split(/\s+/)[0] || 'there';
+            const msg = `Hi ${firstName}! I'm on my way in the ${b.vehicle_name || 'car'} — sharing my live location now so you can watch me arrive 🚗 (trip ${b.trip_id || ''})`;
+            return `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
+        }
+
         async function doAction(action, bookingId) {
             let paymentMethod;
             if (action === 'payment_collected') {
@@ -332,12 +348,21 @@
             }
             if (action === 'decline' && !confirm('Decline this ride?')) return;
 
+            // Must open synchronously within the tap or popup blockers eat it;
+            // the URL is filled in after the status update succeeds
+            let waWindow = null;
+            if (action === 'on_my_way' && whatsappHandoffUrl(bookingId)) {
+                waWindow = window.open('', '_blank');
+            }
+
+            let ok = false;
             try {
                 const res = await fetch('/api/update-booking-status', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
                     body: JSON.stringify({ bookingId, action, paymentMethod })
                 });
+                ok = res.ok;
                 // 409 means the booking already moved on — just refresh
                 if (!res.ok && res.status !== 409) {
                     alert('Action failed. Please try again.');
@@ -345,6 +370,13 @@
             } catch (e) {
                 alert('Network error. Please try again.');
             }
+
+            if (waWindow) {
+                const url = ok ? whatsappHandoffUrl(bookingId) : null;
+                if (url) waWindow.location.href = url;
+                else waWindow.close();
+            }
+
             await refresh();
             // An accepted offer lives in "My rides" now — follow it there
             if (action === 'accept') switchView('rides');
