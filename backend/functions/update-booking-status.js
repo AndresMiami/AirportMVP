@@ -69,6 +69,13 @@ exports.handler = async (event) => {
       updates = { ...TRANSITIONS[action].set };
       if (action === 'complete') {
         updates.completed_at = new Date().toISOString();
+        // Privacy: wipe the driver's last stored position when the ride
+        // ends. `complete` is the only terminal transition reachable from
+        // the active tracking window (cancel/decline are pending-only), so
+        // this fully covers coordinate cleanup.
+        updates.driver_lat = null;
+        updates.driver_lng = null;
+        updates.driver_location_at = null;
       }
     } else {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unknown action' }) };

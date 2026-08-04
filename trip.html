@@ -353,10 +353,27 @@
         // loaded lazily, only once a ride is actually active.
         const MAPS_SCRIPT_URL = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
         let mapsRequested = false;
+        let mapsReady = false;
+        let mapsFailed = false;
         let liveMap = null;
         let carMarker = null;
         let routeRequested = false;
         let pendingMapBooking = null;
+
+        // The maps proxy serves Google's loader configured to invoke a global
+        // `initGoogleMaps` callback (indexMVP defines its own). This page must
+        // define it too, and must build the map ONLY after the callback fires
+        // — script.onload can precede library readiness, which caused
+        // "initGoogleMaps is not a function" / "google.maps.Map is not a
+        // constructor" in the field.
+        window.initGoogleMaps = function() {
+            mapsReady = true;
+            if (pendingMapBooking) {
+                const b = pendingMapBooking;
+                pendingMapBooking = null;
+                updateLiveMap(b);
+            }
+        };
 
         function loadMapsScript() {
             if (mapsRequested) return;
@@ -364,8 +381,7 @@
             const s = document.createElement('script');
             s.src = MAPS_SCRIPT_URL;
             s.async = true;
-            s.onload = () => { if (pendingMapBooking) updateLiveMap(pendingMapBooking); };
-            s.onerror = () => { $('mapCard').classList.add('hidden'); };
+            s.onerror = () => { mapsFailed = true; $('mapCard').classList.add('hidden'); };
             document.head.appendChild(s);
         }
 
@@ -409,16 +425,16 @@
         }
 
         function updateLiveMap(b) {
-            const showMap = TRACKING_STATUSES.includes(b.status);
+            const showMap = TRACKING_STATUSES.includes(b.status) && !mapsFailed;
             $('mapCard').classList.toggle('hidden', !showMap);
             if (!showMap) return;
 
-            if (!window.google || !window.google.maps) {
+            // Build only after the loader's callback confirmed readiness
+            if (!mapsReady) {
                 pendingMapBooking = b;
                 loadMapsScript();
                 return;
             }
-            pendingMapBooking = null;
             if (!liveMap) initLiveMap(b);
 
             const freshness = $('mapFreshness');
