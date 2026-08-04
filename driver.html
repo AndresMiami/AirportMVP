@@ -179,9 +179,7 @@
     </div>
 
     <script>
-        const POLL_MS = 10000;
         let passcode = localStorage.getItem('lm_driver_pass') || '';
-        let pollTimer = null;
         let lastBookings = [];
 
         const $ = (id) => document.getElementById(id);
@@ -311,27 +309,72 @@
             return bookings;
         }
 
-        async function refresh() {
-            try {
-                render(await fetchBookings(passcode));
-            } catch (e) {
-                if (e.message === 'unauthorized') {
-                    // Passcode revoked/changed — back to the gate
-                    localStorage.removeItem('lm_driver_pass');
-                    stopPolling();
-                    $('app').classList.add('hidden');
-                    $('gate').classList.remove('hidden');
-                }
-                // transient errors: keep the current list, retry on next poll
-            }
+        // ===== Adaptive bookings poller (self-scheduling, visibility-aware) =====
+        // Replaces the fixed 10s setInterval. Delay adapts to workload,
+        // visibility, and failures; hidden pages don't poll at all (Telegram
+        // doorbell covers new-request awareness; return = instant refresh).
+        let pollTimeout = null;
+        let isRefreshing = false;
+        let failStreak = 0;
+        let idlePolls = 0;
+        let pollingEnabled = false; // only after the passcode gate opens
+
+        function hasWorkNow(bookings) {
+            return (bookings || []).some(b =>
+                b.status === 'pending' || ACTIVE_STATUSES.includes(b.status));
         }
 
-        function startPolling() {
-            refresh();
-            pollTimer = setInterval(refresh, POLL_MS);
+        function computeDelay() {
+            if (document.visibilityState !== 'visible') return null; // paused
+            if (failStreak > 0) {
+                return Math.min(15000 * Math.pow(2, failStreak - 1), 120000);
+            }
+            if (hasWorkNow(lastBookings)) return 12000;   // responsive while working
+            return idlePolls >= 2 ? 60000 : 30000;        // idle backoff 30s → 60s
         }
-        function stopPolling() {
-            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+        function scheduleNext() {
+            clearTimeout(pollTimeout);
+            pollTimeout = null;
+            if (!pollingEnabled) return;
+            const delay = computeDelay();
+            if (delay === null) return; // hidden — visibilitychange resumes us
+            pollTimeout = setTimeout(refresh, delay);
+        }
+
+        async function refresh() {
+            if (!pollingEnabled || isRefreshing) return;
+            isRefreshing = true;
+            try {
+                const bookings = await fetchBookings(passcode);
+                failStreak = 0;
+                idlePolls = hasWorkNow(bookings) ? 0 : idlePolls + 1;
+                render(bookings);
+            } catch (e) {
+                if (e.message === 'unauthorized') {
+                    // Passcode revoked/changed — back to the gate, stop everything
+                    localStorage.removeItem('lm_driver_pass');
+                    pollingEnabled = false;
+                    stopWatcher();
+                    $('app').classList.add('hidden');
+                    $('gate').classList.remove('hidden');
+                    isRefreshing = false;
+                    return;
+                }
+                failStreak++; // transient: keep current list, back off
+            } finally {
+                isRefreshing = false;
+            }
+            scheduleNext();
+        }
+
+        // Immediate refresh + backoff reset (unlock, actions, visibility)
+        function kickPolling() {
+            failStreak = 0;
+            idlePolls = 0;
+            clearTimeout(pollTimeout);
+            pollTimeout = null;
+            refresh();
         }
 
         // ===== Live location broadcaster (adaptive, visibility-gated) =====
@@ -467,10 +510,15 @@
             });
         }
 
-        // Return-from-Maps recovery: fresh coordinate immediately (throttle
-        // bypassed), watcher restarted if needed, bookings refreshed.
+        // Visibility: hidden pauses polling entirely; visible = GPS recovery
+        // (fresh coordinate, throttle bypassed, watcher restarted) + instant
+        // bookings refresh with backoff reset.
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState !== 'visible') return;
+            if (document.visibilityState !== 'visible') {
+                clearTimeout(pollTimeout);
+                pollTimeout = null;
+                return;
+            }
             if (trackedRide()) {
                 startWatcher();
                 lastSentAt = 0; // bypass throttle for the recovery ping
@@ -478,7 +526,7 @@
                     if (coord) { latestCoord = coord; maybeSendLocation(); }
                 });
             }
-            refresh();
+            kickPolling();
         });
 
         // Uber-style navigation handoff: On my way opens turn-by-turn to the
@@ -568,8 +616,10 @@
                 localStorage.setItem('lm_driver_pass', pass);
                 $('gate').classList.add('hidden');
                 $('app').classList.remove('hidden');
+                pollingEnabled = true;
+                idlePolls = hasWorkNow(bookings) ? 0 : 1;
                 render(bookings);
-                pollTimer = setInterval(refresh, POLL_MS);
+                scheduleNext();
                 return true;
             } catch (e) {
                 return false;

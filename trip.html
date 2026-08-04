@@ -634,6 +634,18 @@
         } else {
             fetchStatus();
             pollTimer = setInterval(fetchStatus, POLL_MS);
+
+            // Hidden tab = zero requests; returning = instant fetch + resume.
+            // Never restarts after a terminal status (poller already stopped).
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'visible') {
+                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    return;
+                }
+                if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
+                fetchStatus();
+                if (!pollTimer) pollTimer = setInterval(fetchStatus, POLL_MS);
+            });
         }
     </script>
 </body>
