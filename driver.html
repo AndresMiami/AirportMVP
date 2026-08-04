@@ -82,9 +82,10 @@
         .status-badge {
             font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px;
         }
-        .status-confirmed  { background: #e6f7ec; color: #1eaa5c; }
-        .status-on_the_way { background: #e8f1ff; color: #2668d9; }
-        .status-arrived    { background: #fff3e0; color: #cc7000; }
+        .status-confirmed   { background: #e6f7ec; color: #1eaa5c; }
+        .status-on_the_way  { background: #e8f1ff; color: #2668d9; }
+        .status-arrived     { background: #fff3e0; color: #cc7000; }
+        .status-in_progress { background: #efe8ff; color: #7b4dd6; }
         .route { margin: 12px 0; }
         .route-point { display: flex; gap: 10px; align-items: flex-start; }
         .route-marker {
@@ -190,13 +191,17 @@
 
         // Next dispatch action for each active status
         const NEXT_ACTION = {
-            confirmed:  { action: 'on_my_way', label: '🚗 On my way' },
-            on_the_way: { action: 'arrived',   label: '📍 Arrived' },
-            arrived:    { action: 'complete',  label: '✅ Complete trip' }
+            confirmed:   { action: 'on_my_way',  label: '🚗 On my way' },
+            on_the_way:  { action: 'arrived',    label: '📍 Arrived' },
+            arrived:     { action: 'start_trip', label: '▶️ Start trip' },
+            in_progress: { action: 'complete',   label: '✅ Complete trip' }
         };
         const STATUS_LABEL = {
-            confirmed: 'Accepted', on_the_way: 'On the way', arrived: 'At pickup'
+            confirmed: 'Accepted', on_the_way: 'On the way',
+            arrived: 'At pickup', in_progress: 'In transit'
         };
+        const ACTIVE_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_progress'];
+        const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
 
         function fmtWhen(iso) {
             if (!iso) return 'ASAP';
@@ -250,7 +255,7 @@
         function render(bookings) {
             lastBookings = bookings;
             const pending = bookings.filter(b => b.status === 'pending');
-            const active = bookings.filter(b => ['confirmed', 'on_the_way', 'arrived'].includes(b.status));
+            const active = bookings.filter(b => ACTIVE_STATUSES.includes(b.status));
 
             $('pendingList').innerHTML = pending.length
                 ? pending.map(b => rideCard(b, `
@@ -282,6 +287,8 @@
 
             $('tabRequests').innerHTML = `Requests${pending.length ? ` <span class="count">${pending.length}</span>` : ''}`;
             $('tabRides').innerHTML = `My rides${active.length ? ` <span class="count">${active.length}</span>` : ''}`;
+
+            syncLocationBroadcast();
         }
 
         // Two-view layout: offers to accept vs rides already accepted
@@ -327,18 +334,65 @@
             if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
 
-        // On my way → the passenger chat opens itself with a message that
-        // commits the driver to sharing live location. Two taps remain
-        // (attach → share live location) because Meta requires the human
-        // to switch that on — the app removes the remembering, not the taps.
-        function whatsappHandoffUrl(bookingId) {
+        // ===== Live location broadcaster =====
+        // While a ride is on_the_way/arrived/in_progress, browser geolocation
+        // streams to Supabase (throttled) so the passenger's map shows the
+        // car approaching. Pings pause if this page is backgrounded — the
+        // passenger view shows freshness instead of a frozen marker.
+        let geoWatchId = null;
+        let lastPingAt = 0;
+        const PING_MS = 10000;
+
+        function trackedRide() {
+            return lastBookings.find(b => TRACKING_STATUSES.includes(b.status)) || null;
+        }
+
+        function syncLocationBroadcast() {
+            const ride = trackedRide();
+            if (ride && geoWatchId === null && 'geolocation' in navigator) {
+                geoWatchId = navigator.geolocation.watchPosition(
+                    (pos) => {
+                        const now = Date.now();
+                        if (now - lastPingAt < PING_MS) return;
+                        const active = trackedRide();
+                        if (!active) return;
+                        lastPingAt = now;
+                        fetch('/api/driver-location', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
+                            body: JSON.stringify({
+                                bookingId: active.id,
+                                lat: pos.coords.latitude,
+                                lng: pos.coords.longitude
+                            })
+                        }).catch(() => {});
+                    },
+                    (err) => {
+                        console.warn('Location unavailable:', err.message);
+                        if (err.code === 1 && !document.getElementById('geoBanner')) {
+                            document.querySelector('main')?.insertAdjacentHTML('afterbegin',
+                                `<div id="geoBanner" style="background:#fff3e0;color:#cc7000;border:1px solid #f0b060;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;">📍 Enable location access so passengers can see you coming.</div>`);
+                        }
+                    },
+                    { enableHighAccuracy: true, maximumAge: 5000 }
+                );
+            } else if (!ride && geoWatchId !== null) {
+                navigator.geolocation.clearWatch(geoWatchId);
+                geoWatchId = null;
+            }
+        }
+
+        // Uber-style navigation handoff: On my way opens turn-by-turn to the
+        // pickup, Start trip opens it to the dropoff. WhatsApp stays as the
+        // manual chat link on each ride card.
+        function navigationUrl(action, bookingId) {
             const b = lastBookings.find(x => x.id === bookingId);
             if (!b) return null;
-            const digits = String(b.customer_phone || '').replace(/\D/g, '');
-            if (digits.length < 10) return null;
-            const firstName = String(b.customer_name || '').trim().split(/\s+/)[0] || 'there';
-            const msg = `Hi ${firstName}! I'm on my way in the ${b.vehicle_name || 'car'} — sharing my live location now so you can watch me arrive 🚗 (trip ${b.trip_id || ''})`;
-            return `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
+            const destination = action === 'on_my_way' ? b.pickup_location
+                              : action === 'start_trip' ? b.dropoff_location
+                              : null;
+            if (!destination) return null;
+            return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
         }
 
         async function doAction(action, bookingId) {
@@ -350,9 +404,9 @@
 
             // Must open synchronously within the tap or popup blockers eat it;
             // the URL is filled in after the status update succeeds
-            let waWindow = null;
-            if (action === 'on_my_way' && whatsappHandoffUrl(bookingId)) {
-                waWindow = window.open('', '_blank');
+            let navWindow = null;
+            if (navigationUrl(action, bookingId)) {
+                navWindow = window.open('', '_blank');
             }
 
             let ok = false;
@@ -371,10 +425,10 @@
                 alert('Network error. Please try again.');
             }
 
-            if (waWindow) {
-                const url = ok ? whatsappHandoffUrl(bookingId) : null;
-                if (url) waWindow.location.href = url;
-                else waWindow.close();
+            if (navWindow) {
+                const url = ok ? navigationUrl(action, bookingId) : null;
+                if (url) navWindow.location.href = url;
+                else navWindow.close();
             }
 
             await refresh();
