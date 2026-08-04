@@ -146,6 +146,15 @@
             font-size: 13px; color: var(--text-secondary);
         }
 
+        /* Live tracking map (active rides only) */
+        #liveMap { height: 220px; background: var(--panel-bg-2); }
+        .map-freshness {
+            padding: 8px 14px;
+            font-size: 11px; color: var(--text-light);
+            text-align: center;
+        }
+        .map-freshness.live { color: var(--green); }
+
         /* Buttons */
         .actions { display: flex; flex-direction: column; gap: 9px; }
         .btn {
@@ -192,7 +201,13 @@
                 <div class="step" data-step="confirmed"><div class="step-dot"></div><div class="step-label">Confirmed</div></div>
                 <div class="step" data-step="on_the_way"><div class="step-dot"></div><div class="step-label">On the way</div></div>
                 <div class="step" data-step="arrived"><div class="step-dot"></div><div class="step-label">Arrived</div></div>
+                <div class="step" data-step="in_progress"><div class="step-dot"></div><div class="step-label">In ride</div></div>
                 <div class="step" data-step="completed"><div class="step-dot"></div><div class="step-label">Done</div></div>
+            </div>
+
+            <div class="card hidden" id="mapCard">
+                <div id="liveMap"></div>
+                <div class="map-freshness" id="mapFreshness"></div>
             </div>
 
             <div class="card">
@@ -251,7 +266,8 @@
         const DRIVER = { name: 'Andres', phone: '17865093955' };
         const POLL_MS = 7000;
         const TERMINAL = ['completed', 'cancelled', 'declined'];
-        const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'completed'];
+        const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
+        const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
 
         // Vehicle catalog: image + capacity per database vehicle_type
         const VEHICLES = {
@@ -265,7 +281,7 @@
             pending:     { color: '',      pulse: true,  text: 'Waiting for driver confirmation',
                            sub: 'We\'ve notified your driver — this usually takes just a few minutes.' },
             confirmed:   { color: 'green', pulse: false, text: '🎉 You\'ve been paired with your driver!',
-                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp; they'll share their live location when heading your way.` },
+                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp. You'll see them live on the map when they head your way.` },
             on_the_way:  { color: 'green', pulse: true,  text: '🚗 Your driver is on the way',
                            sub: 'Please be ready at your pickup point.' },
             arrived:     { color: 'green', pulse: true,  text: '📍 Your driver has arrived',
@@ -321,6 +337,94 @@
 
         function fmtTime(d) {
             return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+
+        // ===== Live tracking map =====
+        // Same Google Maps loader as the booking page (Railway proxy) —
+        // loaded lazily, only once a ride is actually active.
+        const MAPS_SCRIPT_URL = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
+        let mapsRequested = false;
+        let liveMap = null;
+        let carMarker = null;
+        let routeRequested = false;
+        let pendingMapBooking = null;
+
+        function loadMapsScript() {
+            if (mapsRequested) return;
+            mapsRequested = true;
+            const s = document.createElement('script');
+            s.src = MAPS_SCRIPT_URL;
+            s.async = true;
+            s.onload = () => { if (pendingMapBooking) updateLiveMap(pendingMapBooking); };
+            s.onerror = () => { $('mapCard').classList.add('hidden'); };
+            document.head.appendChild(s);
+        }
+
+        function initLiveMap(b) {
+            liveMap = new google.maps.Map($('liveMap'), {
+                zoom: 12,
+                center: { lat: 25.7743, lng: -80.1937 }, // Miami fallback
+                disableDefaultUI: true,
+                gestureHandling: 'greedy'
+            });
+            carMarker = new google.maps.Marker({
+                map: liveMap,
+                visible: false,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 9,
+                    fillColor: '#FF5733',
+                    fillOpacity: 1,
+                    strokeColor: '#FFFFFF',
+                    strokeWeight: 2.5
+                },
+                zIndex: 10
+            });
+            // Draw the trip route once (same DirectionsRenderer pattern as
+            // the booking page's vehicle map)
+            if (!routeRequested && b.pickup_location && b.dropoff_location) {
+                routeRequested = true;
+                const renderer = new google.maps.DirectionsRenderer({
+                    map: liveMap,
+                    suppressMarkers: false,
+                    polylineOptions: { strokeColor: '#FF5733', strokeWeight: 4 }
+                });
+                new google.maps.DirectionsService().route({
+                    origin: b.pickup_location,
+                    destination: b.dropoff_location,
+                    travelMode: google.maps.TravelMode.DRIVING
+                }, (result, status) => {
+                    if (status === 'OK') renderer.setDirections(result);
+                });
+            }
+        }
+
+        function updateLiveMap(b) {
+            const showMap = TRACKING_STATUSES.includes(b.status);
+            $('mapCard').classList.toggle('hidden', !showMap);
+            if (!showMap) return;
+
+            if (!window.google || !window.google.maps) {
+                pendingMapBooking = b;
+                loadMapsScript();
+                return;
+            }
+            pendingMapBooking = null;
+            if (!liveMap) initLiveMap(b);
+
+            const freshness = $('mapFreshness');
+            const ageMs = b.driver_location_at ? (Date.now() - new Date(b.driver_location_at).getTime()) : Infinity;
+            if (b.driver_lat != null && b.driver_lng != null && ageMs < 90000) {
+                carMarker.setPosition({ lat: b.driver_lat, lng: b.driver_lng });
+                carMarker.setVisible(true);
+                const secs = Math.max(0, Math.round(ageMs / 1000));
+                freshness.textContent = `🚗 ${DRIVER.name}'s live location · updated ${secs}s ago`;
+                freshness.className = 'map-freshness live';
+            } else {
+                carMarker.setVisible(false);
+                freshness.textContent = `Waiting for ${DRIVER.name}'s live location…`;
+                freshness.className = 'map-freshness';
+            }
         }
 
         function showNoTrip() {
@@ -379,6 +483,9 @@
                 $('etaTime').classList.add('hidden');
             }
 
+            // Live tracking map (appears once the driver heads out)
+            updateLiveMap(b);
+
             // Flight reference, only when provided
             if (b.flight_number) {
                 $('flightLine').textContent = `✈️ Flight ${b.flight_number}`;
@@ -394,7 +501,7 @@
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
 
             // Warm human channel once paired: WhatsApp chat with the driver
-            const isActive = ['confirmed', 'on_the_way', 'arrived'].includes(b.status);
+            const isActive = ['confirmed', 'on_the_way', 'arrived', 'in_progress'].includes(b.status);
             const waBtn = $('waBtn');
             waBtn.classList.toggle('hidden', !isActive);
             if (isActive) {

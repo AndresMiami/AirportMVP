@@ -8,15 +8,16 @@ const { createClient } = require('@supabase/supabase-js');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TRANSITIONS = {
-  accept:    { from: ['pending'],               set: { status: 'confirmed' } },
-  decline:   { from: ['pending'],               set: { status: 'declined' } },
-  on_my_way: { from: ['confirmed'],             set: { status: 'on_the_way' } },
-  arrived:   { from: ['on_the_way'],            set: { status: 'arrived' } },
-  complete:  { from: ['arrived', 'on_the_way'], set: { status: 'completed' } }
+  accept:     { from: ['pending'],                              set: { status: 'confirmed' } },
+  decline:    { from: ['pending'],                              set: { status: 'declined' } },
+  on_my_way:  { from: ['confirmed'],                            set: { status: 'on_the_way' } },
+  arrived:    { from: ['on_the_way'],                           set: { status: 'arrived' } },
+  start_trip: { from: ['arrived'],                              set: { status: 'in_progress' } },
+  complete:   { from: ['in_progress', 'arrived', 'on_the_way'], set: { status: 'completed' } }
 };
 
 // payment_collected doesn't touch status — allowed on any live/finished ride
-const PAYMENT_ALLOWED_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'completed'];
+const PAYMENT_ALLOWED_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
 exports.handler = async (event) => {
   const headers = {

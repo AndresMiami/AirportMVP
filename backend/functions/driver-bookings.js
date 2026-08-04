@@ -38,7 +38,7 @@ exports.handler = async (event) => {
     const { data, error } = await supabase
       .from('bookings')
       .select('*')
-      .in('status', ['pending', 'confirmed', 'on_the_way', 'arrived'])
+      .in('status', ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress'])
       .order('pickup_datetime', { ascending: true });
 
     if (error) {
