@@ -308,6 +308,10 @@
             in_progress: 4 * 3600000
         };
         const CONFIRMED_NEAR_MS = 30 * 60000; // "near pickup" polling window
+        // Failure budget: after this many consecutive failed attempts the
+        // page goes silent until it next becomes visible — an unreachable
+        // or erroring server must never sustain an endless retry loop.
+        const MAX_POLL_FAILURES = 5;
         const TERMINAL = ['completed', 'cancelled', 'declined'];
         const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
         const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
@@ -686,10 +690,14 @@
         }
 
         function computeDelay(b) {
-            if (!b || TERMINAL.includes(b.status)) return null;
+            if (b && TERMINAL.includes(b.status)) return null;
             if (failStreak > 0) {
+                // Backoff runs even before the first booking ever loads
+                // (b may be null); a spent budget stops scheduling entirely.
+                if (failStreak >= MAX_POLL_FAILURES) return null;
                 return Math.min(15000 * Math.pow(2, failStreak - 1), 120000);
             }
+            if (!b) return null;
             return POLL_DELAY_MS[b.status] || 60000;
         }
 
@@ -833,9 +841,12 @@
         } else {
             fetchStatus(); // self-scheduling from here on
 
-            // Hidden tab = zero requests; returning = one instant fetch +
-            // resume. Never restarts after a terminal status, and never
-            // bypasses a pause — the manual button is the only way out.
+            // Hidden tab = zero requests; returning = one instant check,
+            // always — including on a paused page (a return is a human
+            // looking; if the status advanced, bounded polling resumes; if
+            // unchanged, the page pauses again after that single request).
+            // The reset also grants a fresh failure budget per visit.
+            // Never restarts after a terminal status.
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState !== 'visible') {
                     clearTimeout(pollTimer);
@@ -843,7 +854,6 @@
                     return;
                 }
                 if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
-                if (pollPaused) return;
                 failStreak = 0;
                 fetchStatus();
             });
