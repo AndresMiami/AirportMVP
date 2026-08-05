@@ -62,11 +62,6 @@
   status = 200
 
 [[redirects]]
-  from = "/api/driver-location"
-  to = "/.netlify/functions/driver-location"
-  status = 200
-
-[[redirects]]
   from = "/login"
   to = "/login.html"
   status = 200
