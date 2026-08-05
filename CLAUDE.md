@@ -101,10 +101,43 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 5. Escalade categorizes as `suv`; display names preserved in `vehicle_name`.
 6. Support/driver phone: +1 (786) 509-3955.
 
+## Recently landed (stabilization round, reviewed by a second engineer)
+
+Three commits on the working branch (PR-1/2/3 pattern — merge + field-test):
+1. Trip sheet is dismiss-proof (no backdrop close); confirmed cancellation →
+   sessionStorage notice → targeted storage cleanup → reload → one-time
+   "Booking cancelled" banner on the Where screen. All sheet postMessages
+   validated (origin + iframe source + bookingId match).
+2. GPS reliability: one-shot location warm-up at Accept (memory-only during
+   confirmed); On-my-way/Start-trip run position-fix concurrently with the
+   status POST, send the first coordinate (2.5s bound), THEN navigate
+   same-tab to Google Maps — navigation is guaranteed after status success.
+   Adaptive send tiers (12/45/60/20/60s by status+movement, 30m haversine
+   threshold), explicit visible-only gating, single-watcher invariant,
+   instant recovery ping on visibility return. trip.html live map now
+   initializes via its own window.initGoogleMaps callback (fixes
+   "initGoogleMaps is not a function"). Completing a ride wipes stored
+   coordinates (privacy).
+3. Adaptive polling: driver 12s-with-work / 30→60s idle / paused hidden or
+   locked / exponential failure backoff; passenger poll paused while hidden,
+   instant on return, 7s while visible. SW cache bumped per PR (v1.3.x).
+
+Driver flow: Requests/My rides tabs; Accept → On my way (nav to pickup) →
+Arrived → Start trip (nav to dropoff) → Complete; payment toggle; WhatsApp
+links per card. Passenger trip sheet: live map with driver dot + freshness,
+WhatsApp pairing button, Go back / Cancel. Telegram doorbell + receipts are
+CONFIGURED AND LIVE (env vars set; bot @LinkMiamiBot, send-only).
+
 ## Known gaps / next up
 
-- Driver identity (auth accounts, `assigned_driver` stamping) — next build.
+- Field-run the stabilization test matrix (plan file / recent session) after
+  merging the three stabilization commits.
+- Driver identity (admin-provisioned accounts, `assigned_driver` stamping,
+  retire shared passcode) — NEXT BUILD, agreed.
 - Ambassador dashboard (mock approved; all queries exist as views).
 - Pending-request timeout rule; RLS lockdown (anon key currently open via
   admin.html); SMS/WhatsApp notifications with return links; in-app chat +
   web push (parked).
+- Collaboration pattern: Andres relays between Claude and a second AI
+  reviewer (Codex); diagnostics and plans are reviewed before
+  implementation is authorized. Respect that gate.
