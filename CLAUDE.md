@@ -133,23 +133,28 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 8. Supabase Realtime is DEFERRED until the RLS lockdown + guest
    authorization make subscriptions safe (browser + public anon key would
    bypass the functions/service-key boundary). Long-term push channel is
-   SMS/WhatsApp milestone notifications (Blacklane pattern), not sockets.
+   SMS milestone notifications (Blacklane pattern), not sockets — WhatsApp
+   stays a human-only conversation link (see decision 2), never automated.
 
 ## Known gaps / next up
 
 - PR-B: two-ETA model (Codex-outlined) — booking-time estimate must use the
-  scheduled pickup as `departure_time` (Railway proxy currently uses `now`
+  scheduled pickup as departure time (Railway proxy currently uses `now`
   and its route cache ignores time-of-day); fresh driver→pickup ETA at
-  On-my-way and pickup→dropoff at Start-trip (one Directions call per leg,
-  stored via migration 009); rounded, timestamped snapshot presentation.
+  On-my-way and pickup→dropoff at Start-trip (one route call per leg,
+  stored via the next numbered migration). Use Google's current Routes API
+  (`computeRoutes`, `departureTime` + TRAFFIC_AWARE), not more of the
+  legacy Directions endpoint; review Google's storage/attribution policies
+  before persisting ETAs. Rounded, timestamped snapshot presentation.
 - Driver identity (auth accounts, `assigned_driver` stamping, retire the
   shared passcode) — the agreed next build; natural moment for the RLS
   lockdown, which then unblocks Supabase Realtime.
 - Ambassador dashboard (mock approved; all queries exist as views).
 - Pending-request timeout rule (the trip page already pauses pending
   displays at 10 min — the server-side rule is still open); RLS lockdown
-  (anon key currently open via admin.html); SMS/WhatsApp notifications with
-  return links; in-app chat + web push (parked).
+  (anon key currently open via admin.html); SMS milestone notifications
+  with return links (WhatsApp stays human-only); in-app chat + web push
+  (parked).
 - Collaboration pattern: Andres relays between Claude and a second AI
   reviewer (Codex); diagnostics and plans get reviewed before
   implementation is authorized. Respect that gate.
