@@ -199,7 +199,6 @@
             arrived: 'At pickup', in_progress: 'In transit'
         };
         const ACTIVE_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_progress'];
-        const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
 
         function fmtWhen(iso) {
             if (!iso) return 'ASAP';
@@ -271,11 +270,17 @@
                     const payBtn = b.payment_status === 'unpaid'
                         ? `<button class="btn-payment" data-action="payment_collected" data-id="${b.id}">💵 Payment collected</button>`
                         : '<span class="paid-badge">PAID ✓</span>';
+                    // Static explanation rendered BEFORE the first permission
+                    // prompt can appear: On my way is where location is first
+                    // requested (never at Accept).
+                    const geoNote = b.status === 'confirmed'
+                        ? `<div style="color:#8e8e93;font-size:12px;margin-top:8px;">📍 On my way captures your location once, so the passenger sees your verified departure point.</div>`
+                        : '';
                     return rideCard(b, `
                         <div class="btn-row">
                             ${payBtn}
                             <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
-                        </div>`,
+                        </div>${geoNote}`,
                         `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
                     );
                 }).join('')
@@ -285,8 +290,6 @@
 
             $('tabRequests').innerHTML = `Requests${pending.length ? ` <span class="count">${pending.length}</span>` : ''}`;
             $('tabRides').innerHTML = `My rides${active.length ? ` <span class="count">${active.length}</span>` : ''}`;
-
-            syncLocationBroadcast();
         }
 
         // Two-view layout: offers to accept vs rides already accepted
@@ -355,7 +358,6 @@
                     // Passcode revoked/changed — back to the gate, stop everything
                     localStorage.removeItem('lm_driver_pass');
                     pollingEnabled = false;
-                    stopWatcher();
                     $('app').classList.add('hidden');
                     $('gate').classList.remove('hidden');
                     isRefreshing = false;
@@ -377,128 +379,32 @@
             refresh();
         }
 
-        // ===== Live location broadcaster (adaptive, visibility-gated) =====
-        // A one-shot warm-up at Accept fires the permission prompt while the
-        // page is guaranteed foreground; the coordinate is cached in memory
-        // only — nothing is transmitted or stored while merely `confirmed`.
-        // The continuous watcher runs only during on_the_way/arrived/
-        // in_progress. Send frequency adapts to status and movement, and
-        // transmissions are EXPLICITLY blocked while the page is hidden.
-        let geoWatchId = null;          // single-watcher invariant
-        let warmCoord = null;           // {lat, lng, at} — memory only
-        let latestCoord = null;         // freshest fix from the watcher
-        let lastSentCoord = null;
-        let lastSentAt = 0;
-        let gpsSendInFlight = false;
-
-        function trackedRide() {
-            return lastBookings.find(b => TRACKING_STATUSES.includes(b.status)) || null;
-        }
-
-        function metersBetween(a, b) {
-            const R = 6371000, rad = Math.PI / 180;
-            const dLat = (b.lat - a.lat) * rad;
-            const dLng = (b.lng - a.lng) * rad;
-            const s = Math.sin(dLat / 2) ** 2 +
-                Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
-            return 2 * R * Math.asin(Math.sqrt(s));
-        }
-
+        // ===== Checkpoint location capture =====
+        // No continuous tracking and no warm-up at Accept: a mobile browser
+        // cannot broadcast while Google Maps has the foreground, so the
+        // product model is three verified checkpoints — On my way, Arrived,
+        // Start trip — each captured fresh inside the tap and sent WITH the
+        // status change in a single request. Location permission is asked at
+        // the first checkpoint, never when merely accepting a ride that may
+        // be hours away.
         function showGeoBanner() {
             if (document.getElementById('geoBanner')) return;
             document.querySelector('main')?.insertAdjacentHTML('afterbegin',
                 `<div id="geoBanner" style="background:#fff3e0;color:#cc7000;border:1px solid #f0b060;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;">📍 Enable location access so passengers can see you coming.</div>`);
         }
 
-        // One-shot warm-up, called on successful Accept
-        function warmUpLocation() {
-            if (!('geolocation' in navigator)) return;
-            navigator.geolocation.getCurrentPosition(
-                (pos) => { warmCoord = { lat: pos.coords.latitude, lng: pos.coords.longitude, at: Date.now() }; },
-                (err) => { if (err.code === 1) showGeoBanner(); },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-            );
-        }
-
-        function startWatcher() {
-            if (geoWatchId !== null || !('geolocation' in navigator)) return;
-            geoWatchId = navigator.geolocation.watchPosition(
-                (pos) => {
-                    latestCoord = { lat: pos.coords.latitude, lng: pos.coords.longitude, at: Date.now() };
-                    maybeSendLocation();
-                },
-                (err) => { if (err.code === 1) showGeoBanner(); },
-                { enableHighAccuracy: true, maximumAge: 5000 }
-            );
-        }
-        function stopWatcher() {
-            if (geoWatchId !== null) {
-                navigator.geolocation.clearWatch(geoWatchId);
-                geoWatchId = null;
-            }
-        }
-
-        // Required gap between sends, by status and movement
-        function requiredGapMs(status, movedMeters) {
-            if (status === 'on_the_way')  return movedMeters >= 30 ? 12000 : 45000;
-            if (status === 'arrived')     return 60000;
-            if (status === 'in_progress') return movedMeters >= 30 ? 20000 : 60000;
-            return Infinity;
-        }
-
-        function maybeSendLocation() {
-            if (document.visibilityState !== 'visible') return; // explicit gating
-            const ride = trackedRide();
-            if (!ride || !latestCoord) return;
-            const moved = lastSentCoord ? metersBetween(lastSentCoord, latestCoord) : Infinity;
-            if (Date.now() - lastSentAt < requiredGapMs(ride.status, moved)) return;
-            sendLocation(ride.id, latestCoord);
-        }
-
-        async function sendLocation(rideId, coord, timeoutMs) {
-            if (gpsSendInFlight) return false;
-            gpsSendInFlight = true;
-            lastSentAt = Date.now(); // throttle applies even if the send fails
-            try {
-                const ctrl = timeoutMs ? new AbortController() : null;
-                const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
-                const res = await fetch('/api/driver-location', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
-                    body: JSON.stringify({ bookingId: rideId, lat: coord.lat, lng: coord.lng }),
-                    signal: ctrl ? ctrl.signal : undefined
-                });
-                if (timer) clearTimeout(timer);
-                if (res.ok) {
-                    lastSentCoord = { lat: coord.lat, lng: coord.lng };
-                    const data = await res.json().catch(() => null);
-                    if (data && data.active === false) stopWatcher(); // ride ended elsewhere
-                    return true;
-                }
-            } catch (e) { /* silent — next tick retries */ }
-            finally { gpsSendInFlight = false; }
-            return false;
-        }
-
-        function syncLocationBroadcast() {
-            if (trackedRide()) startWatcher();
-            else stopWatcher();
-        }
-
-        // First usable fix for the navigation handoff: a fresh cached
-        // coordinate (≤30s) short-circuits the wait; otherwise a bounded
-        // getCurrentPosition. Always resolves (null on timeout/denial).
-        function getFirstFix(timeoutMs) {
-            const fresh = (c) => c && Date.now() - c.at <= 30000;
-            if (fresh(warmCoord)) return Promise.resolve(warmCoord);
-            if (fresh(latestCoord)) return Promise.resolve(latestCoord);
+        // One fresh bounded position fix. Always resolves — null on timeout,
+        // denial, or missing geolocation support; a checkpoint without a fix
+        // still transitions (the server then clears the stored location so a
+        // stale coordinate is never relabeled as this checkpoint).
+        function getCheckpointFix(timeoutMs) {
             return new Promise((resolve) => {
                 if (!('geolocation' in navigator)) return resolve(null);
                 const timer = setTimeout(() => resolve(null), timeoutMs);
                 navigator.geolocation.getCurrentPosition(
                     (pos) => {
                         clearTimeout(timer);
-                        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, at: Date.now() });
+                        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
                     },
                     (err) => {
                         clearTimeout(timer);
@@ -510,21 +416,13 @@
             });
         }
 
-        // Visibility: hidden pauses polling entirely; visible = GPS recovery
-        // (fresh coordinate, throttle bypassed, watcher restarted) + instant
+        // Visibility: hidden pauses polling entirely; visible = instant
         // bookings refresh with backoff reset.
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState !== 'visible') {
                 clearTimeout(pollTimeout);
                 pollTimeout = null;
                 return;
-            }
-            if (trackedRide()) {
-                startWatcher();
-                lastSentAt = 0; // bypass throttle for the recovery ping
-                getFirstFix(8000).then((coord) => {
-                    if (coord) { latestCoord = coord; maybeSendLocation(); }
-                });
             }
             kickPolling();
         });
@@ -542,6 +440,23 @@
             return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
         }
 
+        // Checkpoint actions and the status each one produces on success.
+        // A retried request that lands on 409 with exactly this status is a
+        // DUPLICATE SUCCESS (the first request committed, its response was
+        // lost) — not a conflict.
+        const CHECKPOINT_ACTIONS = ['on_my_way', 'arrived', 'start_trip'];
+        const RESULTING_STATUS = { on_my_way: 'on_the_way', arrived: 'arrived', start_trip: 'in_progress' };
+
+        async function postAction(body) {
+            const res = await fetch('/api/update-booking-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => null);
+            return { ok: res.ok, status: res.status, data };
+        }
+
         async function doAction(action, bookingId) {
             let paymentMethod;
             if (action === 'payment_collected') {
@@ -549,50 +464,49 @@
             }
             if (action === 'decline' && !confirm('Decline this ride?')) return;
 
-            // Navigation handoffs (On my way / Start trip): the position fix
-            // starts synchronously inside the tap and runs concurrently with
-            // the status update. Navigation is SAME-TAB and happens only
-            // after the status succeeds — no blank tab can steal the
-            // foreground before the first coordinate is on its way.
-            const navUrl = navigationUrl(action, bookingId);
-            const fixPromise = navUrl ? getFirstFix(7000) : null;
-
-            let ok = false;
-            try {
-                const res = await fetch('/api/update-booking-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
-                    body: JSON.stringify({ bookingId, action, paymentMethod })
-                });
-                ok = res.ok;
-                // 409 means the booking already moved on — just refresh
-                if (!res.ok && res.status !== 409) {
-                    alert('Action failed. Please try again.');
-                }
-            } catch (e) {
-                alert('Network error. Please try again.');
+            // Checkpoint actions capture ONE fresh position inside the tap
+            // and send it WITH the status change. The GPS wait is bounded;
+            // the status request itself is never aborted — a request that
+            // may have committed must not be abandoned ambiguously.
+            const body = { bookingId, action, paymentMethod };
+            if (CHECKPOINT_ACTIONS.includes(action)) {
+                const coord = await getCheckpointFix(6000);
+                if (coord) { body.lat = coord.lat; body.lng = coord.lng; }
             }
 
-            // Permission prompt + warm coordinate while guaranteed foreground
-            if (ok && action === 'accept') warmUpLocation();
+            let result = null;
+            try {
+                result = await postAction(body);
+            } catch (e) {
+                // Response never received — the server may have committed
+                // anyway. One retry; the 409 reconciliation below recognizes
+                // a duplicate success.
+                try { result = await postAction(body); } catch (e2) { /* result stays null */ }
+            }
 
+            let success = false;
+            if (!result) {
+                alert('Network error. Please try again.');
+            } else if (result.ok) {
+                success = true;
+            } else if (result.status === 409 && RESULTING_STATUS[action] &&
+                       result.data && result.data.currentStatus === RESULTING_STATUS[action]) {
+                success = true; // duplicate success — booking is exactly where this action puts it
+            } else if (result.status !== 409) {
+                alert('Action failed. Please try again.');
+            } // other 409: booking moved elsewhere — silent refresh reconciles
+
+            if (!success) {
+                await refresh();
+                return;
+            }
+
+            // Same-tab navigation handoff, ONLY after confirmed status
+            // success. GPS problems never block navigation, and navigation
+            // unloads this page — no refresh needed before it.
+            const navUrl = navigationUrl(action, bookingId);
             if (navUrl) {
-                if (!ok) {
-                    // Status failed: stay on the page, send nothing, go nowhere
-                    await refresh();
-                    return;
-                }
-                // First coordinate (bounded) → quick POST (2.5s cap) → Maps.
-                // GUARANTEE: after status success, GPS/POST problems never
-                // block navigation.
-                const coord = await fixPromise;
-                if (coord) {
-                    latestCoord = coord;
-                    lastSentAt = 0; // first ping of the tracking window
-                    await sendLocation(bookingId, coord, 2500);
-                }
-                refresh().catch(() => {}); // fire-and-forget UI update
-                window.location.href = navUrl; // same-tab handoff
+                window.location.href = navUrl;
                 return;
             }
 
