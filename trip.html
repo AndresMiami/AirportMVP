@@ -289,7 +289,7 @@
             pending:     { color: '',      pulse: true,  text: 'Waiting for driver confirmation',
                            sub: 'We\'ve notified your driver — this usually takes just a few minutes.' },
             confirmed:   { color: 'green', pulse: false, text: '🎉 You\'ve been paired with your driver!',
-                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp. You'll see them live on the map when they head your way.` },
+                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp.` },
             on_the_way:  { color: 'green', pulse: true,  text: '🚗 Your driver is on the way',
                            sub: 'Please be ready at your pickup point.' },
             arrived:     { color: 'green', pulse: true,  text: '📍 Your driver has arrived',
@@ -437,17 +437,27 @@
             }
             if (!liveMap) initLiveMap(b);
 
+            // Static verified checkpoint — not live tracking. The marker is
+            // the driver's last verified position (captured at a status
+            // action) and only moves when a new checkpoint arrives. A
+            // checkpoint whose capture failed clears the coordinates
+            // server-side, so an old point is never relabeled as current.
             const freshness = $('mapFreshness');
-            const ageMs = b.driver_location_at ? (Date.now() - new Date(b.driver_location_at).getTime()) : Infinity;
-            if (b.driver_lat != null && b.driver_lng != null && ageMs < 90000) {
+            const CHECKPOINT_LABEL = {
+                on_the_way: 'departure point',
+                arrived: 'arrived at pickup',
+                in_progress: 'trip start'
+            };
+            if (b.driver_lat != null && b.driver_lng != null) {
                 carMarker.setPosition({ lat: b.driver_lat, lng: b.driver_lng });
                 carMarker.setVisible(true);
-                const secs = Math.max(0, Math.round(ageMs / 1000));
-                freshness.textContent = `🚗 ${DRIVER.name}'s live location · updated ${secs}s ago`;
+                const label = CHECKPOINT_LABEL[b.status] || 'checkpoint';
+                const at = b.driver_location_at ? ` · ${fmtTime(new Date(b.driver_location_at))}` : '';
+                freshness.textContent = `📍 Last verified: ${label}${at}`;
                 freshness.className = 'map-freshness live';
             } else {
                 carMarker.setVisible(false);
-                freshness.textContent = `Waiting for ${DRIVER.name}'s live location…`;
+                freshness.textContent = 'No verified location for this checkpoint';
                 freshness.className = 'map-freshness';
             }
         }
@@ -466,7 +476,19 @@
             strip.className = 'status-strip ' + view.color;
             $('statusText').textContent = view.text;
             $('pulseDot').classList.toggle('hidden', !view.pulse);
-            $('statusSub').textContent = view.sub;
+
+            // Checkpoint attribution: each active status corresponds to one
+            // verified driver checkpoint; when it carries a timestamp, lead
+            // the sub-line with it. No checkpoint → the generic copy alone —
+            // never imply a location we don't have.
+            let sub = view.sub;
+            const checkTime = b.driver_location_at ? fmtTime(new Date(b.driver_location_at)) : null;
+            if (checkTime) {
+                if (b.status === 'on_the_way') sub = `${DRIVER.name} departed at ${checkTime}. ${view.sub}`;
+                else if (b.status === 'arrived') sub = `${DRIVER.name} arrived at ${checkTime}. ${view.sub}`;
+                else if (b.status === 'in_progress') sub = `Trip started at ${checkTime}. ${view.sub}`;
+            }
+            $('statusSub').textContent = sub;
 
             // Stepper (hidden for declined/cancelled)
             const showSteps = !['declined', 'cancelled'].includes(b.status);

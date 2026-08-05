@@ -3,7 +3,7 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'linkmia-v1.3.2';
+const CACHE_NAME = 'linkmia-v1.3.3';
 const RUNTIME_CACHE = 'linkmia-runtime';
 
 // Files to cache immediately on install
