@@ -312,6 +312,16 @@
         // page goes silent until it next becomes visible — an unreachable
         // or erroring server must never sustain an endless retry loop.
         const MAX_POLL_FAILURES = 5;
+        // Financial seals (centralized in blockReason):
+        // - any non-terminal status WITHOUT an explicit cutoff (legacy
+        //   'assigned', malformed data, future surprises) gets a short leash;
+        // - nothing polls past an absolute boundary 6h after pickup (or
+        //   first sight when pickup is missing/invalid);
+        // - a persistent per-booking request budget caps EVERYTHING —
+        //   scheduled polls, failures, visibility returns, and manual taps.
+        const DEFAULT_CUTOFF_MS = 30 * 60000;
+        const ABSOLUTE_MAX_MS = 6 * 3600000;
+        const REQUEST_BUDGET = 500;
         const TERMINAL = ['completed', 'cancelled', 'declined'];
         const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
         const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
@@ -351,6 +361,7 @@
         let failStreak = 0;        // exponential backoff on failures
         let pollPaused = false;    // cutoff reached; manual button only
         let memAnchor = null;      // {status, at} fallback if storage unavailable
+        let memSpent = 0;          // request-budget fallback if storage unavailable
         let readySignalSent = false;
         let lastBooking = null;
 
@@ -634,6 +645,7 @@
                 pollPaused = false;
                 $('pausedCard').classList.add('hidden');
                 clearAnchor();
+                clearSpent();
             }
 
             // Tell the parent page we're rendered so it can slide the sheet
@@ -674,19 +686,78 @@
             try { localStorage.removeItem('lm_poll_anchor:' + bookingId); } catch (e) {}
         }
 
-        function msToPickup(b) {
-            return b.pickup_datetime ? new Date(b.pickup_datetime).getTime() - Date.now() : 0;
+        // Timestamp safety: a malformed date must read as ABSENT, never as
+        // NaN silently defeating every cutoff comparison.
+        function tsMs(iso) {
+            if (!iso) return null;
+            const t = new Date(iso).getTime();
+            return Number.isFinite(t) ? t : null;
         }
 
-        // Hard safety cutoff: no unchanged status may poll forever.
+        function msToPickup(b) {
+            const t = tsMs(b && b.pickup_datetime);
+            return t === null ? null : t - Date.now();
+        }
+
+        // Persistent per-booking request budget — survives reloads, counts
+        // every request this page makes (polls, failures, returns, taps).
+        function spentCount() {
+            try {
+                const v = parseInt(localStorage.getItem('lm_poll_spent:' + bookingId), 10);
+                if (Number.isFinite(v)) return Math.max(v, memSpent);
+            } catch (e) { /* storage unavailable */ }
+            return memSpent;
+        }
+        function recordSpend() {
+            memSpent = spentCount() + 1;
+            try { localStorage.setItem('lm_poll_spent:' + bookingId, String(memSpent)); } catch (e) {}
+        }
+        function clearSpent() {
+            memSpent = 0;
+            try { localStorage.removeItem('lm_poll_spent:' + bookingId); } catch (e) {}
+        }
+
+        // Hard safety cutoff: no unchanged status may poll forever — and a
+        // status this page doesn't recognize, or a booking with malformed
+        // timestamps, gets the short DEFAULT leash rather than a free pass.
         function cutoffPassed(b) {
             if (!b || TERMINAL.includes(b.status)) return false;
             if (b.status === 'confirmed') {
-                const base = b.pickup_datetime ? new Date(b.pickup_datetime).getTime() : anchorFor(b);
-                return Date.now() > base + POLL_CUTOFF_MS.confirmed;
+                const pickup = tsMs(b.pickup_datetime);
+                if (pickup !== null) return Date.now() > pickup + POLL_CUTOFF_MS.confirmed;
+                return Date.now() > anchorFor(b) + DEFAULT_CUTOFF_MS;
             }
-            const limit = POLL_CUTOFF_MS[b.status];
-            return limit ? Date.now() > anchorFor(b) + limit : false;
+            const limit = POLL_CUTOFF_MS[b.status] || DEFAULT_CUTOFF_MS;
+            return Date.now() > anchorFor(b) + limit;
+        }
+
+        // Absolute boundary: 6h past pickup (or past first sight when the
+        // pickup time is missing/invalid), nothing automatic runs — any
+        // status, any code path.
+        function absolutePassed(b) {
+            if (!b || TERMINAL.includes(b.status)) return false;
+            const pickup = tsMs(b.pickup_datetime);
+            const base = pickup !== null ? pickup : anchorFor(b);
+            return Date.now() > base + ABSOLUTE_MAX_MS;
+        }
+
+        // THE centralized guard — every fetch and every schedule consults
+        // this. Order matters: terminal beats budget beats time boundaries.
+        function blockReason(b) {
+            if (b && TERMINAL.includes(b.status)) return 'terminal';
+            if (spentCount() >= REQUEST_BUDGET) return 'budget';
+            if (absolutePassed(b)) return 'absolute';
+            if (cutoffPassed(b)) return 'cutoff';
+            return null;
+        }
+
+        function updateCheckBtn() {
+            const spent = spentCount() >= REQUEST_BUDGET;
+            $('checkBtn').disabled = spent;
+            if (spent) {
+                $('pausedNote').textContent = `Update limit reached for this booking — call or text us: ${SUPPORT_PHONE}`;
+                $('pausedNote').classList.remove('hidden');
+            }
         }
 
         function computeDelay(b) {
@@ -698,6 +769,9 @@
                 return Math.min(15000 * Math.pow(2, failStreak - 1), 120000);
             }
             if (!b) return null;
+            // Malformed pickup time on a confirmed ride: slow leash, no
+            // far-future sleep (its math needs a valid timestamp).
+            if (b.status === 'confirmed' && tsMs(b.pickup_datetime) === null) return 60000;
             return POLL_DELAY_MS[b.status] || 60000;
         }
 
@@ -705,10 +779,11 @@
             clearTimeout(pollTimer);
             pollTimer = null;
             if (pollPaused || document.visibilityState !== 'visible') return;
+            if (blockReason(b)) return; // centralized guard — never schedule while blocked
             // Scheduled ride still far from pickup: sleep LOCALLY — zero
             // network — re-evaluating at most hourly until the 30-min window.
-            const farMs = b && b.status === 'confirmed' && failStreak === 0
-                ? msToPickup(b) - CONFIRMED_NEAR_MS : -1;
+            const mtp = b && b.status === 'confirmed' && failStreak === 0 ? msToPickup(b) : null;
+            const farMs = mtp === null ? -1 : mtp - CONFIRMED_NEAR_MS;
             if (farMs > 0) {
                 pollTimer = setTimeout(() => { pollTimer = null; scheduleNext(lastBooking); }, Math.min(farMs, 3600000));
                 return;
@@ -734,14 +809,29 @@
             $('pausedNote').classList.add('hidden');
         }
 
-        async function fetchStatus(manual) {
+        // kind: undefined = scheduled poll · 'return' = human-initiated
+        // (visibility return, cancel-flow refresh) · 'manual' = the paused-
+        // card button. Human-initiated requests may look past a time-based
+        // pause (that's the agreed one-check-on-return behavior); NOTHING
+        // gets past a spent request budget except the initial render fetch
+        // of a fresh page load (itself a single human-bounded request).
+        async function fetchStatus(kind) {
             if (isFetching) return;
+            if (lastBooking) {
+                const r = blockReason(lastBooking);
+                if (r === 'terminal') return;
+                if (r === 'budget') { showPaused(lastBooking, false); updateCheckBtn(); return; }
+                if (r && !kind) { showPaused(lastBooking, false); return; }
+            }
+            recordSpend();
             isFetching = true;
             try {
                 const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
                 if (res.status === 404) {
                     clearTimeout(pollTimer);
                     pollTimer = null;
+                    clearAnchor();
+                    clearSpent();
                     showNoTrip();
                     return;
                 }
@@ -753,9 +843,11 @@
                 const { booking } = await res.json();
                 failStreak = 0;
                 render(booking);
-                if (TERMINAL.includes(booking.status)) return; // render stopped everything
-                if (cutoffPassed(booking)) {
-                    showPaused(booking, manual === true);
+                const reason = blockReason(booking);
+                if (reason === 'terminal') return; // render stopped everything
+                if (reason) {
+                    showPaused(booking, kind === 'manual');
+                    updateCheckBtn();
                     return;
                 }
                 hidePaused();
@@ -802,12 +894,12 @@
                         }, location.origin);
                         return;
                     }
-                    fetchStatus(); // standalone: show the cancelled state
+                    fetchStatus('return'); // standalone: show the cancelled state
                     return;
                 }
                 if (res.status === 409) {
                     showActionError(`Your driver already accepted this ride — call or text us to change plans: ${SUPPORT_PHONE}`);
-                    fetchStatus();
+                    fetchStatus('return');
                     return;
                 }
                 showActionError('Cancellation didn\'t go through. Please try again.');
@@ -833,7 +925,8 @@
         $('checkBtn').addEventListener('click', async () => {
             const btn = $('checkBtn');
             btn.disabled = true;
-            try { await fetchStatus(true); } finally { btn.disabled = false; }
+            try { await fetchStatus('manual'); }
+            finally { updateCheckBtn(); if (spentCount() < REQUEST_BUDGET) btn.disabled = false; }
         });
 
         if (!bookingId) {
@@ -855,7 +948,7 @@
                 }
                 if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
                 failStreak = 0;
-                fetchStatus();
+                fetchStatus('return');
             });
         }
     </script>
