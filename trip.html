@@ -345,7 +345,9 @@
         }
 
         function fmtTime(d) {
-            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            // Checkpoint timestamps are server-stamped UTC; passengers can be
+            // anywhere (booking from abroad) — always display Miami time.
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
         }
 
         // ===== Live tracking map =====
