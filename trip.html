@@ -334,14 +334,19 @@
         function fmtDayTime(iso) {
             if (!iso) return 'ASAP';
             const d = new Date(iso);
-            const now = new Date();
-            const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+            // All calendar math in Miami time: "Today"/"Tomorrow" must mean
+            // the ride's day there, not the viewer's — a passenger booking
+            // from another timezone would otherwise see the wrong day label.
+            const etDate = (x) => x.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+            const todayET = etDate(new Date());
+            const [y, m, dd] = todayET.split('-').map(Number);
+            const tomorrowET = new Date(Date.UTC(y, m - 1, dd + 1)).toISOString().slice(0, 10);
+            const targetET = etDate(d);
             let day;
-            if (d.toDateString() === now.toDateString()) day = 'Today';
-            else if (d.toDateString() === tomorrow.toDateString()) day = 'Tomorrow';
-            else day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-            return `${day} · ${time}`;
+            if (targetET === todayET) day = 'Today';
+            else if (targetET === tomorrowET) day = 'Tomorrow';
+            else day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+            return `${day} · ${fmtTime(d)}`;
         }
 
         function fmtTime(d) {
