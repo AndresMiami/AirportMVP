@@ -1,11 +1,27 @@
 // Driver actions on a booking (header x-driver-secret required).
-//   POST /api/update-booking-status {bookingId, action, paymentMethod?}
+//   POST /api/update-booking-status {bookingId, action, paymentMethod?, lat?, lng?}
 // Transitions are enforced server-side; a stale click (booking already moved
 // on) matches 0 rows and returns 409 instead of clobbering state.
+//
+// Checkpoint model: on_my_way / arrived / start_trip may carry the driver's
+// verified location, stamped in the SAME atomic update as the status — one
+// request per checkpoint, no separate location endpoint to coordinate with.
+// A transition never fails because of missing or bad coordinates — but a
+// checkpoint WITHOUT fresh valid coordinates CLEARS the stored location.
+// The passenger label derives from the current status, so preserving an
+// older coordinate would relabel it as this checkpoint (e.g. the departure
+// point shown as "arrived at pickup"). Honest absence beats a stale lie.
 
 const { createClient } = require('@supabase/supabase-js');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const CHECKPOINT_ACTIONS = ['on_my_way', 'arrived', 'start_trip'];
+
+function validCoords(lat, lng) {
+  return typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+         typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180;
+}
 
 const TRANSITIONS = {
   accept:     { from: ['pending'],                              set: { status: 'confirmed' } },
@@ -49,7 +65,7 @@ exports.handler = async (event) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    const { bookingId, action, paymentMethod } = JSON.parse(event.body || '{}');
+    const { bookingId, action, paymentMethod, lat, lng } = JSON.parse(event.body || '{}');
 
     if (!bookingId || !UUID_RE.test(bookingId)) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid bookingId' }) };
@@ -67,6 +83,12 @@ exports.handler = async (event) => {
     } else if (TRANSITIONS[action]) {
       fromStatuses = TRANSITIONS[action].from;
       updates = { ...TRANSITIONS[action].set };
+      if (CHECKPOINT_ACTIONS.includes(action)) {
+        const fresh = validCoords(lat, lng);
+        updates.driver_lat = fresh ? lat : null;
+        updates.driver_lng = fresh ? lng : null;
+        updates.driver_location_at = fresh ? new Date().toISOString() : null;
+      }
       if (action === 'complete') {
         updates.completed_at = new Date().toISOString();
         // Privacy: wipe the driver's last stored position when the ride
