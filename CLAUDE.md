@@ -138,17 +138,19 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 
 ## Known gaps / next up
 
-- PR-B: two-ETA model (Codex-outlined) — booking-time estimate must use the
-  scheduled pickup as departure time (Railway proxy currently uses `now`
-  and its route cache ignores time-of-day); fresh driver→pickup ETA at
-  On-my-way and pickup→dropoff at Start-trip (one route call per leg,
-  stored via the next numbered migration). Use Google's current Routes API
-  (`computeRoutes`, `departureTime` + TRAFFIC_AWARE), not more of the
-  legacy Directions endpoint; review Google's storage/attribution policies
-  before persisting ETAs. Rounded, timestamped snapshot presentation.
-- Driver identity (auth accounts, `assigned_driver` stamping, retire the
-  shared passcode) — the agreed next build; natural moment for the RLS
-  lockdown, which then unblocks Supabase Realtime.
+- Driver identity + RLS foundation — THE NEXT BUILD (decided Aug 2026,
+  ahead of the two-ETA model): admin-provisioned driver accounts
+  (CreditEngine pattern), real login on /driver, `assigned_driver` stamped
+  at Accept, retire the shared passcode; bundled RLS lockdown protects
+  passenger data and later unblocks Supabase Realtime.
+- Two-ETA model (Codex-outlined, follows identity) — booking-time estimate
+  must use the scheduled pickup as departure time (Railway proxy currently
+  uses `now` and its route cache ignores time-of-day); fresh driver→pickup
+  ETA at On-my-way and pickup→dropoff at Start-trip (one route call per
+  leg, stored via the next numbered migration). Use Google's current
+  Routes API (`computeRoutes`, `departureTime` + TRAFFIC_AWARE), not more
+  of the legacy Directions endpoint; review Google's storage/attribution
+  policies before persisting ETAs. Rounded, timestamped snapshots.
 - Ambassador dashboard (mock approved; all queries exist as views).
 - Pending-request timeout rule (the trip page already pauses pending
   displays at 10 min — the server-side rule is still open); RLS lockdown
