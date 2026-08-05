@@ -195,8 +195,6 @@
         }
         .paused-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
         .paused-note { font-size: 12px; color: var(--text-light); margin-top: 8px; }
-        .btn-check { background: var(--brand-grad); padding: 12px; font-size: 14px; }
-        .btn-check:disabled { opacity: 0.6; }
         .hidden { display: none !important; }
         .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
         .center-msg a { color: var(--orange); font-weight: 600; text-decoration: none; }
@@ -214,8 +212,7 @@
             <div class="status-sub" id="statusSub"></div>
 
             <div class="paused-card hidden" id="pausedCard">
-                <div class="paused-text">Automatic updates paused. Your booking is still active. Tap below to check the latest status.</div>
-                <button class="btn btn-check" id="checkBtn">Check latest status</button>
+                <div class="paused-text">Automatic updates paused. Your booking is still active — the status checks again when you come back to this page.</div>
                 <div class="paused-note hidden" id="pausedNote"></div>
             </div>
 
@@ -751,14 +748,6 @@
             return null;
         }
 
-        function updateCheckBtn() {
-            const spent = spentCount() >= REQUEST_BUDGET;
-            $('checkBtn').disabled = spent;
-            if (spent) {
-                $('pausedNote').textContent = `Update limit reached for this booking — call or text us: ${SUPPORT_PHONE}`;
-                $('pausedNote').classList.remove('hidden');
-            }
-        }
 
         function computeDelay(b) {
             if (b && TERMINAL.includes(b.status)) return null;
@@ -793,13 +782,13 @@
             pollTimer = setTimeout(fetchStatus, delay);
         }
 
-        function showPaused(b, fromManual) {
+        function showPaused() {
             pollPaused = true;
             clearTimeout(pollTimer);
             pollTimer = null;
             $('pausedCard').classList.remove('hidden');
-            if (fromManual) {
-                $('pausedNote').textContent = `Status unchanged · last checked ${fmtTime(new Date())}`;
+            if (spentCount() >= REQUEST_BUDGET) {
+                $('pausedNote').textContent = `Update limit reached for this booking — call or text us: ${SUPPORT_PHONE}`;
                 $('pausedNote').classList.remove('hidden');
             }
         }
@@ -810,18 +799,18 @@
         }
 
         // kind: undefined = scheduled poll · 'return' = human-initiated
-        // (visibility return, cancel-flow refresh) · 'manual' = the paused-
-        // card button. Human-initiated requests may look past a time-based
-        // pause (that's the agreed one-check-on-return behavior); NOTHING
-        // gets past a spent request budget except the initial render fetch
-        // of a fresh page load (itself a single human-bounded request).
+        // (visibility return, cancel-flow refresh). Human-initiated checks
+        // may look past a time-based pause (the agreed one-check-on-return
+        // behavior — there is no manual button; updates stay automatic);
+        // NOTHING gets past a spent request budget except the initial
+        // render fetch of a fresh page load (one human-bounded request).
         async function fetchStatus(kind) {
             if (isFetching) return;
             if (lastBooking) {
                 const r = blockReason(lastBooking);
                 if (r === 'terminal') return;
-                if (r === 'budget') { showPaused(lastBooking, false); updateCheckBtn(); return; }
-                if (r && !kind) { showPaused(lastBooking, false); return; }
+                if (r === 'budget') { showPaused(); return; }
+                if (r && !kind) { showPaused(); return; }
             }
             recordSpend();
             isFetching = true;
@@ -846,8 +835,7 @@
                 const reason = blockReason(booking);
                 if (reason === 'terminal') return; // render stopped everything
                 if (reason) {
-                    showPaused(booking, kind === 'manual');
-                    updateCheckBtn();
+                    showPaused();
                     return;
                 }
                 hidePaused();
@@ -917,16 +905,6 @@
             } else {
                 window.location.href = '/';
             }
-        });
-
-        // Manual check while paused: exactly one request per tap. Unchanged
-        // status stays paused; an advanced status resumes bounded polling
-        // (its fresh anchor restarts the budget for the new status).
-        $('checkBtn').addEventListener('click', async () => {
-            const btn = $('checkBtn');
-            btn.disabled = true;
-            try { await fetchStatus('manual'); }
-            finally { updateCheckBtn(); if (spentCount() < REQUEST_BUDGET) btn.disabled = false; }
         });
 
         if (!bookingId) {
