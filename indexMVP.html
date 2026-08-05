@@ -331,6 +331,32 @@
         let currentProfile = null;
         let currentAmbassador = null;
 
+        // Post-cancellation notice: after a confirmed cancellation the page
+        // reloads to a clean Where screen; this one-time banner explains why.
+        (function showCancelNotice() {
+            let tripCode = null;
+            try {
+                tripCode = sessionStorage.getItem('lm_cancel_notice');
+                if (tripCode === null) return;
+                sessionStorage.removeItem('lm_cancel_notice'); // never shows twice
+            } catch (e) { return; }
+
+            const show = () => {
+                const banner = document.createElement('div');
+                banner.id = 'cancelNotice';
+                banner.style.cssText = 'position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 10001; background: #2C2C2E; color: #fff; border: 1px solid rgba(255,69,58,0.5); border-radius: 12px; padding: 12px 18px; font-size: 14px; font-weight: 600; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 10px; max-width: 92vw;';
+                banner.innerHTML = `<span>🚫 Booking ${tripCode || ''} was cancelled</span><button style="background:none;border:none;color:#8E8E93;font-size:16px;cursor:pointer;padding:0 2px;" aria-label="Dismiss">✕</button>`;
+                banner.querySelector('button').addEventListener('click', () => banner.remove());
+                document.body.appendChild(banner);
+                setTimeout(() => { banner.style.transition = 'opacity 0.5s'; banner.style.opacity = '0'; setTimeout(() => banner.remove(), 600); }, 6000);
+            };
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', show);
+            } else {
+                show();
+            }
+        })();
+
         // Referral attribution: a ?ref=CODE visit (QR scan) is remembered for
         // 30 days and attached to bookings made from this browser.
         (function captureRefCode() {
@@ -2132,6 +2158,25 @@
                 document.body.appendChild(errorModal);
             }
 
+            // Server-confirmed cancellation: the only reset that provably
+            // clears every booking subsystem (app state, modals, carousel
+            // iframe, map, DOM) is a reload. A sessionStorage notice explains
+            // the reset on the fresh Where screen. Session, profile, and
+            // referral attribution live in preserved storage and survive.
+            resetBookingFlow(bookingId, tripCode) {
+                try {
+                    sessionStorage.setItem('lm_cancel_notice', tripCode || '');
+                    if (tripCode) localStorage.removeItem(`trip_${tripCode}`);
+                    // Only clear the active-booking pointer if it still points
+                    // at the booking being cancelled
+                    if (localStorage.getItem('lm_last_trip_id') === bookingId) {
+                        localStorage.removeItem('lm_last_trip_id');
+                    }
+                } catch (e) { /* storage failures must not block the reset */ }
+                this.activeSheetBookingId = null;
+                window.location.reload();
+            }
+
             showTripSheet(bookingUuid) {
                 this.activeSheetBookingId = bookingUuid;
 
@@ -2209,20 +2254,32 @@
                     panel.style.height = capped + 'px';
                 };
 
+                const tripFrame = overlay.querySelector('iframe');
                 const onMessage = (e) => {
+                    // Only trust messages from our own trip iframe
+                    if (e.origin !== location.origin) return;
+                    if (e.source !== tripFrame?.contentWindow) return;
+
                     if (e.data?.type === 'lm-ready') {               // content rendered — size, then slide up
                         sizePanel(e.data.height);
                         reveal();
                     }
                     if (e.data?.type === 'lm-resize') sizePanel(e.data.height); // status changed
                     if (e.data?.type === 'lm-close') closeSheet();   // "Go back" pressed inside the sheet
+                    if (e.data?.type === 'lm-cancelled') {
+                        // Server-confirmed cancellation: full booking-state reset.
+                        // Guard: only for the booking this sheet was opened for.
+                        if (e.data.bookingId === this.activeSheetBookingId) {
+                            this.resetBookingFlow(e.data.bookingId, e.data.tripCode);
+                        }
+                    }
                 };
                 window.addEventListener('message', onMessage);
 
-                // Tapping the dimmed background closes the sheet, like the other modals
-                overlay.addEventListener('click', (e) => {
-                    if (e.target === overlay) closeSheet();
-                });
+                // NOTE: no backdrop-dismiss. Once a booking exists, this sheet
+                // is the active ride experience — it closes only via "Go back"
+                // (pending) or a confirmed cancellation. Accidental taps on the
+                // dimmed area must never hide a live ride.
 
                 document.body.appendChild(overlay);
                 // Fallback: reveal even if the ready signal never arrives
@@ -2721,7 +2778,10 @@
         }
         
         // PWA Service Worker Registration
-        if ('serviceWorker' in navigator) {
+        // Skip the service worker during local development — cached files
+        // would mask fresh edits and make changes appear not to work
+        const IS_LOCAL_DEV = ['localhost', '127.0.0.1'].includes(location.hostname);
+        if ('serviceWorker' in navigator && !IS_LOCAL_DEV) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js')
                     .then((registration) => {

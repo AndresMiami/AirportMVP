@@ -179,6 +179,13 @@
             background: #25D366;
             box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
         }
+        .action-error {
+            padding: 10px 12px;
+            background: rgba(255, 69, 58, 0.12);
+            border: 1px solid rgba(255, 69, 58, 0.4);
+            border-radius: 10px;
+            color: #FF6B60; font-size: 13px; text-align: center; line-height: 1.5;
+        }
         .support { font-size: 12px; color: var(--text-light); text-align: center; margin-top: 14px; }
         .hidden { display: none !important; }
         .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
@@ -253,6 +260,7 @@
                 <button class="btn btn-modify hidden" id="backBtn">← Go back</button>
                 <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
                 <a class="btn btn-modify hidden" id="rebookBtn" href="/" target="_top">🚗 Book another ride</a>
+                <div class="action-error hidden" id="actionError"></div>
             </div>
 
             <div class="support" id="supportText"></div>
@@ -301,6 +309,7 @@
         const isEmbedded = params.get('embed') === '1';
         let pollTimer = null;
         let readySignalSent = false;
+        let lastBooking = null;
 
         const $ = (id) => document.getElementById(id);
 
@@ -344,10 +353,27 @@
         // loaded lazily, only once a ride is actually active.
         const MAPS_SCRIPT_URL = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
         let mapsRequested = false;
+        let mapsReady = false;
+        let mapsFailed = false;
         let liveMap = null;
         let carMarker = null;
         let routeRequested = false;
         let pendingMapBooking = null;
+
+        // The maps proxy serves Google's loader configured to invoke a global
+        // `initGoogleMaps` callback (indexMVP defines its own). This page must
+        // define it too, and must build the map ONLY after the callback fires
+        // — script.onload can precede library readiness, which caused
+        // "initGoogleMaps is not a function" / "google.maps.Map is not a
+        // constructor" in the field.
+        window.initGoogleMaps = function() {
+            mapsReady = true;
+            if (pendingMapBooking) {
+                const b = pendingMapBooking;
+                pendingMapBooking = null;
+                updateLiveMap(b);
+            }
+        };
 
         function loadMapsScript() {
             if (mapsRequested) return;
@@ -355,8 +381,7 @@
             const s = document.createElement('script');
             s.src = MAPS_SCRIPT_URL;
             s.async = true;
-            s.onload = () => { if (pendingMapBooking) updateLiveMap(pendingMapBooking); };
-            s.onerror = () => { $('mapCard').classList.add('hidden'); };
+            s.onerror = () => { mapsFailed = true; $('mapCard').classList.add('hidden'); };
             document.head.appendChild(s);
         }
 
@@ -400,16 +425,16 @@
         }
 
         function updateLiveMap(b) {
-            const showMap = TRACKING_STATUSES.includes(b.status);
+            const showMap = TRACKING_STATUSES.includes(b.status) && !mapsFailed;
             $('mapCard').classList.toggle('hidden', !showMap);
             if (!showMap) return;
 
-            if (!window.google || !window.google.maps) {
+            // Build only after the loader's callback confirmed readiness
+            if (!mapsReady) {
                 pendingMapBooking = b;
                 loadMapsScript();
                 return;
             }
-            pendingMapBooking = null;
             if (!liveMap) initLiveMap(b);
 
             const freshness = $('mapFreshness');
@@ -432,6 +457,7 @@
         }
 
         function render(b) {
+            lastBooking = b;
             $('loadingMsg').classList.add('hidden');
             $('tripView').classList.remove('hidden');
 
@@ -554,16 +580,41 @@
             return res;
         }
 
+        function showActionError(msg) {
+            $('actionError').textContent = msg;
+            $('actionError').classList.remove('hidden');
+        }
+        function clearActionError() {
+            $('actionError').classList.add('hidden');
+        }
+
         $('cancelBtn').addEventListener('click', async () => {
             if (!confirm('Cancel this booking?')) return;
+            clearActionError();
             try {
                 const res = await cancelRequest();
-                if (res.status === 409) {
-                    alert(`Your driver already accepted this ride — call us to change plans: ${SUPPORT_PHONE}`);
+                if (res.ok) {
+                    if (isEmbedded) {
+                        // Server confirmed — hand off to the parent for the
+                        // full booking-flow reset + post-reload notice
+                        window.parent.postMessage({
+                            type: 'lm-cancelled',
+                            bookingId: bookingId,
+                            tripCode: lastBooking?.trip_id || ''
+                        }, location.origin);
+                        return;
+                    }
+                    fetchStatus(); // standalone: show the cancelled state
+                    return;
                 }
-                fetchStatus();
+                if (res.status === 409) {
+                    showActionError(`Your driver already accepted this ride — call or text us to change plans: ${SUPPORT_PHONE}`);
+                    fetchStatus();
+                    return;
+                }
+                showActionError('Cancellation didn\'t go through. Please try again.');
             } catch (e) {
-                alert('Could not cancel right now. Please try again.');
+                showActionError('Connection problem — the booking was NOT cancelled. Please try again.');
             }
         });
 
@@ -583,6 +634,18 @@
         } else {
             fetchStatus();
             pollTimer = setInterval(fetchStatus, POLL_MS);
+
+            // Hidden tab = zero requests; returning = instant fetch + resume.
+            // Never restarts after a terminal status (poller already stopped).
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'visible') {
+                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    return;
+                }
+                if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
+                fetchStatus();
+                if (!pollTimer) pollTimer = setInterval(fetchStatus, POLL_MS);
+            });
         }
     </script>
 </body>
