@@ -2,7 +2,7 @@
 
 Chat-free, web-app-centric ride dispatch platform. Owner (Andres) is currently
 admin + the only driver. Passengers book on the web; dispatch, statuses, and
-live tracking all live in the web app backed by Supabase.
+verified checkpoint locations all live in the web app backed by Supabase.
 
 ## Architecture (one path, one database)
 
@@ -25,11 +25,26 @@ live tracking all live in the web app backed by Supabase.
 - `indexMVP.html` — booking flow (Where → When → Vehicle → Who's traveling).
   Optional auth: session prefills the passenger modal; guests book freely.
   On success the live trip sheet slides up (iframe of `/trip?embed=1`).
-- `trip.html` — passenger live status page (polls `/api/booking-status` 7s):
-  stepper, vehicle hero, ETA, live driver map, WhatsApp button, Go back/Cancel.
+- `trip.html` — passenger status page: stepper, vehicle hero, booking-time
+  ETA, static verified-checkpoint map marker (honest labels, Miami-time
+  stamps, never a moving dot), WhatsApp button, Go back/Cancel. SEALED smart
+  polling of `/api/booking-status`: cadence by status (pending 15s /
+  confirmed 30s only within 30 min of pickup — farther out sleeps locally
+  with zero network / on_the_way 30s / arrived 15s / in_progress 60s),
+  hard per-status cutoffs, absolute pickup+6h boundary, persistent
+  500-request/booking budget, 5-failure budget per visit, default 30-min
+  leash for unknown statuses or malformed timestamps. Paused card is
+  notice-only (NO manual refresh button — deliberate); hidden tab = zero
+  requests; one automatic check on visibility return is the resume path.
 - `driver.html` — GetTransfer-style driver app behind `DRIVER_PASSCODE`
-  (sent as `x-driver-secret`): Requests/My rides tabs, status progression,
-  Google Maps navigation handoffs, GPS broadcaster (watchPosition → 10s).
+  (sent as `x-driver-secret`): Requests/My rides tabs, adaptive polling,
+  CHECKPOINT capture — On my way / Arrived / Start trip each grab one fresh
+  GPS fix (6s bound, maximumAge 0) inside the tap and send it WITH the
+  status POST; no continuous tracking (a mobile browser can't broadcast
+  while Google Maps is foreground). Location permission is first requested
+  at On my way, never at Accept. Same-tab Maps handoffs only after status
+  success; lost responses retry once with 409-duplicate-success
+  reconciliation.
 - `login.html` — passenger email+password (self-service signUp). Drivers will
   be admin-provisioned (CreditEngine pattern) — no driver signup ever.
 - `admin.html` — legacy dashboard reading Supabase directly with anon key.
@@ -39,7 +54,14 @@ live tracking all live in the web app backed by Supabase.
 `pending → confirmed → on_the_way → arrived → in_progress → completed`
 Terminals: `declined` (driver), `cancelled` (passenger, pending-only).
 Transitions are server-enforced in `update-booking-status.js` (stale action →
-409). Legacy statuses `assigned` kept for old rows.
+409, body carries `currentStatus`). Legacy status `assigned` kept for old rows.
+
+Checkpoint model (5 statuses, 3 verified locations, 1 cleanup): `on_my_way`,
+`arrived`, `start_trip` may carry `lat`/`lng`, stamped atomically with the
+status into `bookings.driver_lat/lng/location_at`. A checkpoint WITHOUT fresh
+valid coords CLEARS the stored location (an old point must never be relabeled
+as the current checkpoint). `complete` erases coordinates (privacy). Accept
+captures nothing.
 
 ## Identity & roles
 
@@ -96,15 +118,38 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    channels, not infrastructure.
 3. Passengers: self-service email+password + guest checkout preserved.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
-4. In-app GPS (browser geolocation → Supabase → trip-page map) is the
-   tracking backbone; WhatsApp live-location is a manual premium layer.
+4. Checkpoint locations (browser geolocation at status taps → Supabase →
+   trip-page map) are the tracking backbone; WhatsApp live-location is a
+   manual premium layer. Continuous browser GPS was tried and deliberately
+   removed (PR #45) — it cannot survive the Google Maps handoff. If real
+   background tracking ever becomes a business need, the only door is a
+   small native driver shell (Capacitor + background-geolocation, ~$99/yr).
 5. Escalade categorizes as `suv`; display names preserved in `vehicle_name`.
 6. Support/driver phone: +1 (786) 509-3955.
+7. Passenger polling is SEALED (PR #46): status-tuned cadences, hard
+   cutoffs, absolute pickup+6h boundary, persistent 500-request/booking
+   budget. No code path polls indefinitely — keep it that way. The paused
+   page is automatic-only: no manual refresh button (product decision).
+8. Supabase Realtime is DEFERRED until the RLS lockdown + guest
+   authorization make subscriptions safe (browser + public anon key would
+   bypass the functions/service-key boundary). Long-term push channel is
+   SMS/WhatsApp milestone notifications (Blacklane pattern), not sockets.
 
 ## Known gaps / next up
 
-- Driver identity (auth accounts, `assigned_driver` stamping) — next build.
+- PR-B: two-ETA model (Codex-outlined) — booking-time estimate must use the
+  scheduled pickup as `departure_time` (Railway proxy currently uses `now`
+  and its route cache ignores time-of-day); fresh driver→pickup ETA at
+  On-my-way and pickup→dropoff at Start-trip (one Directions call per leg,
+  stored via migration 009); rounded, timestamped snapshot presentation.
+- Driver identity (auth accounts, `assigned_driver` stamping, retire the
+  shared passcode) — the agreed next build; natural moment for the RLS
+  lockdown, which then unblocks Supabase Realtime.
 - Ambassador dashboard (mock approved; all queries exist as views).
-- Pending-request timeout rule; RLS lockdown (anon key currently open via
-  admin.html); SMS/WhatsApp notifications with return links; in-app chat +
-  web push (parked).
+- Pending-request timeout rule (the trip page already pauses pending
+  displays at 10 min — the server-side rule is still open); RLS lockdown
+  (anon key currently open via admin.html); SMS/WhatsApp notifications with
+  return links; in-app chat + web push (parked).
+- Collaboration pattern: Andres relays between Claude and a second AI
+  reviewer (Codex); diagnostics and plans get reviewed before
+  implementation is authorized. Respect that gate.
