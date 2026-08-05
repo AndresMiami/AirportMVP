@@ -289,7 +289,7 @@
             pending:     { color: '',      pulse: true,  text: 'Waiting for driver confirmation',
                            sub: 'We\'ve notified your driver — this usually takes just a few minutes.' },
             confirmed:   { color: 'green', pulse: false, text: '🎉 You\'ve been paired with your driver!',
-                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp. You'll see them live on the map when they head your way.` },
+                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp.` },
             on_the_way:  { color: 'green', pulse: true,  text: '🚗 Your driver is on the way',
                            sub: 'Please be ready at your pickup point.' },
             arrived:     { color: 'green', pulse: true,  text: '📍 Your driver has arrived',
@@ -334,18 +334,25 @@
         function fmtDayTime(iso) {
             if (!iso) return 'ASAP';
             const d = new Date(iso);
-            const now = new Date();
-            const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+            // All calendar math in Miami time: "Today"/"Tomorrow" must mean
+            // the ride's day there, not the viewer's — a passenger booking
+            // from another timezone would otherwise see the wrong day label.
+            const etDate = (x) => x.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+            const todayET = etDate(new Date());
+            const [y, m, dd] = todayET.split('-').map(Number);
+            const tomorrowET = new Date(Date.UTC(y, m - 1, dd + 1)).toISOString().slice(0, 10);
+            const targetET = etDate(d);
             let day;
-            if (d.toDateString() === now.toDateString()) day = 'Today';
-            else if (d.toDateString() === tomorrow.toDateString()) day = 'Tomorrow';
-            else day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-            return `${day} · ${time}`;
+            if (targetET === todayET) day = 'Today';
+            else if (targetET === tomorrowET) day = 'Tomorrow';
+            else day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+            return `${day} · ${fmtTime(d)}`;
         }
 
         function fmtTime(d) {
-            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            // Checkpoint timestamps are server-stamped UTC; passengers can be
+            // anywhere (booking from abroad) — always display Miami time.
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
         }
 
         // ===== Live tracking map =====
@@ -381,7 +388,12 @@
             const s = document.createElement('script');
             s.src = MAPS_SCRIPT_URL;
             s.async = true;
-            s.onerror = () => { mapsFailed = true; $('mapCard').classList.add('hidden'); };
+            // Maps failing must not silence the checkpoint message: hide only
+            // the unusable canvas, keep the card and its honest state line.
+            s.onerror = () => {
+                mapsFailed = true;
+                $('liveMap').classList.add('hidden');
+            };
             document.head.appendChild(s);
         }
 
@@ -425,9 +437,34 @@
         }
 
         function updateLiveMap(b) {
-            const showMap = TRACKING_STATUSES.includes(b.status) && !mapsFailed;
-            $('mapCard').classList.toggle('hidden', !showMap);
-            if (!showMap) return;
+            const showCard = TRACKING_STATUSES.includes(b.status);
+            $('mapCard').classList.toggle('hidden', !showCard);
+            if (!showCard) return;
+
+            // Static verified checkpoint — not live tracking. The text state
+            // renders FIRST: it depends only on booking fields and must never
+            // wait on (or be silenced by) Google Maps loading. A checkpoint
+            // whose capture failed clears the coordinates server-side, so an
+            // old point is never relabeled as current.
+            const freshness = $('mapFreshness');
+            const hasCoords = b.driver_lat != null && b.driver_lng != null;
+            const CHECKPOINT_LABEL = {
+                on_the_way: 'departure point',
+                arrived: 'arrived at pickup',
+                in_progress: 'trip start'
+            };
+            if (hasCoords) {
+                const label = CHECKPOINT_LABEL[b.status] || 'checkpoint';
+                const at = b.driver_location_at ? ` · ${fmtTime(new Date(b.driver_location_at))}` : '';
+                freshness.textContent = `📍 Last verified: ${label}${at}`;
+                freshness.className = 'map-freshness live';
+            } else {
+                freshness.textContent = 'No verified location for this checkpoint';
+                freshness.className = 'map-freshness';
+            }
+
+            // Maps failed: the message above stands; only the canvas goes
+            if ($('liveMap').classList.toggle('hidden', mapsFailed)) return;
 
             // Build only after the loader's callback confirmed readiness
             if (!mapsReady) {
@@ -437,18 +474,11 @@
             }
             if (!liveMap) initLiveMap(b);
 
-            const freshness = $('mapFreshness');
-            const ageMs = b.driver_location_at ? (Date.now() - new Date(b.driver_location_at).getTime()) : Infinity;
-            if (b.driver_lat != null && b.driver_lng != null && ageMs < 90000) {
+            if (hasCoords) {
                 carMarker.setPosition({ lat: b.driver_lat, lng: b.driver_lng });
                 carMarker.setVisible(true);
-                const secs = Math.max(0, Math.round(ageMs / 1000));
-                freshness.textContent = `🚗 ${DRIVER.name}'s live location · updated ${secs}s ago`;
-                freshness.className = 'map-freshness live';
             } else {
                 carMarker.setVisible(false);
-                freshness.textContent = `Waiting for ${DRIVER.name}'s live location…`;
-                freshness.className = 'map-freshness';
             }
         }
 
@@ -466,7 +496,24 @@
             strip.className = 'status-strip ' + view.color;
             $('statusText').textContent = view.text;
             $('pulseDot').classList.toggle('hidden', !view.pulse);
-            $('statusSub').textContent = view.sub;
+
+            // Checkpoint attribution: each active status corresponds to one
+            // verified driver checkpoint. With coordinates, lead the sub-line
+            // with the verified time; without them, say so HERE — the top
+            // sub-line is always visible, unlike the note under the map, and
+            // must never depend on Google Maps loading.
+            let sub = view.sub;
+            const hasCheckpointCoords = b.driver_lat != null && b.driver_lng != null;
+            const checkTime = hasCheckpointCoords && b.driver_location_at
+                ? fmtTime(new Date(b.driver_location_at)) : null;
+            if (checkTime) {
+                if (b.status === 'on_the_way') sub = `${DRIVER.name} departed at ${checkTime}. ${view.sub}`;
+                else if (b.status === 'arrived') sub = `${DRIVER.name} arrived at ${checkTime}. ${view.sub}`;
+                else if (b.status === 'in_progress') sub = `Trip started at ${checkTime}. ${view.sub}`;
+            } else if (TRACKING_STATUSES.includes(b.status)) {
+                sub = `${view.sub} No verified location for this checkpoint.`;
+            }
+            $('statusSub').textContent = sub;
 
             // Stepper (hidden for declined/cancelled)
             const showSteps = !['declined', 'cancelled'].includes(b.status);
