@@ -388,7 +388,12 @@
             const s = document.createElement('script');
             s.src = MAPS_SCRIPT_URL;
             s.async = true;
-            s.onerror = () => { mapsFailed = true; $('mapCard').classList.add('hidden'); };
+            // Maps failing must not silence the checkpoint message: hide only
+            // the unusable canvas, keep the card and its honest state line.
+            s.onerror = () => {
+                mapsFailed = true;
+                $('liveMap').classList.add('hidden');
+            };
             document.head.appendChild(s);
         }
 
@@ -432,9 +437,34 @@
         }
 
         function updateLiveMap(b) {
-            const showMap = TRACKING_STATUSES.includes(b.status) && !mapsFailed;
-            $('mapCard').classList.toggle('hidden', !showMap);
-            if (!showMap) return;
+            const showCard = TRACKING_STATUSES.includes(b.status);
+            $('mapCard').classList.toggle('hidden', !showCard);
+            if (!showCard) return;
+
+            // Static verified checkpoint — not live tracking. The text state
+            // renders FIRST: it depends only on booking fields and must never
+            // wait on (or be silenced by) Google Maps loading. A checkpoint
+            // whose capture failed clears the coordinates server-side, so an
+            // old point is never relabeled as current.
+            const freshness = $('mapFreshness');
+            const hasCoords = b.driver_lat != null && b.driver_lng != null;
+            const CHECKPOINT_LABEL = {
+                on_the_way: 'departure point',
+                arrived: 'arrived at pickup',
+                in_progress: 'trip start'
+            };
+            if (hasCoords) {
+                const label = CHECKPOINT_LABEL[b.status] || 'checkpoint';
+                const at = b.driver_location_at ? ` · ${fmtTime(new Date(b.driver_location_at))}` : '';
+                freshness.textContent = `📍 Last verified: ${label}${at}`;
+                freshness.className = 'map-freshness live';
+            } else {
+                freshness.textContent = 'No verified location for this checkpoint';
+                freshness.className = 'map-freshness';
+            }
+
+            // Maps failed: the message above stands; only the canvas goes
+            if ($('liveMap').classList.toggle('hidden', mapsFailed)) return;
 
             // Build only after the loader's callback confirmed readiness
             if (!mapsReady) {
@@ -444,28 +474,11 @@
             }
             if (!liveMap) initLiveMap(b);
 
-            // Static verified checkpoint — not live tracking. The marker is
-            // the driver's last verified position (captured at a status
-            // action) and only moves when a new checkpoint arrives. A
-            // checkpoint whose capture failed clears the coordinates
-            // server-side, so an old point is never relabeled as current.
-            const freshness = $('mapFreshness');
-            const CHECKPOINT_LABEL = {
-                on_the_way: 'departure point',
-                arrived: 'arrived at pickup',
-                in_progress: 'trip start'
-            };
-            if (b.driver_lat != null && b.driver_lng != null) {
+            if (hasCoords) {
                 carMarker.setPosition({ lat: b.driver_lat, lng: b.driver_lng });
                 carMarker.setVisible(true);
-                const label = CHECKPOINT_LABEL[b.status] || 'checkpoint';
-                const at = b.driver_location_at ? ` · ${fmtTime(new Date(b.driver_location_at))}` : '';
-                freshness.textContent = `📍 Last verified: ${label}${at}`;
-                freshness.className = 'map-freshness live';
             } else {
                 carMarker.setVisible(false);
-                freshness.textContent = 'No verified location for this checkpoint';
-                freshness.className = 'map-freshness';
             }
         }
 
@@ -485,15 +498,20 @@
             $('pulseDot').classList.toggle('hidden', !view.pulse);
 
             // Checkpoint attribution: each active status corresponds to one
-            // verified driver checkpoint; when it carries a timestamp, lead
-            // the sub-line with it. No checkpoint → the generic copy alone —
-            // never imply a location we don't have.
+            // verified driver checkpoint. With coordinates, lead the sub-line
+            // with the verified time; without them, say so HERE — the top
+            // sub-line is always visible, unlike the note under the map, and
+            // must never depend on Google Maps loading.
             let sub = view.sub;
-            const checkTime = b.driver_location_at ? fmtTime(new Date(b.driver_location_at)) : null;
+            const hasCheckpointCoords = b.driver_lat != null && b.driver_lng != null;
+            const checkTime = hasCheckpointCoords && b.driver_location_at
+                ? fmtTime(new Date(b.driver_location_at)) : null;
             if (checkTime) {
                 if (b.status === 'on_the_way') sub = `${DRIVER.name} departed at ${checkTime}. ${view.sub}`;
                 else if (b.status === 'arrived') sub = `${DRIVER.name} arrived at ${checkTime}. ${view.sub}`;
                 else if (b.status === 'in_progress') sub = `Trip started at ${checkTime}. ${view.sub}`;
+            } else if (TRACKING_STATUSES.includes(b.status)) {
+                sub = `${view.sub} No verified location for this checkpoint.`;
             }
             $('statusSub').textContent = sub;
 

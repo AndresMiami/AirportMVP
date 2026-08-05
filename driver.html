@@ -411,7 +411,9 @@
                         if (err.code === 1) showGeoBanner();
                         resolve(null);
                     },
-                    { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 15000 }
+                    // maximumAge 0: a checkpoint is an action-time position —
+                    // never a coordinate cached from an earlier action
+                    { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
                 );
             });
         }
