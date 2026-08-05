@@ -187,6 +187,16 @@
             color: #FF6B60; font-size: 13px; text-align: center; line-height: 1.5;
         }
         .support { font-size: 12px; color: var(--text-light); text-align: center; margin-top: 14px; }
+        .paused-card {
+            background: rgba(255, 153, 51, 0.10);
+            border: 1px solid rgba(255, 153, 51, 0.35);
+            border-radius: 13px; padding: 14px; margin-bottom: 14px;
+            text-align: center;
+        }
+        .paused-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+        .paused-note { font-size: 12px; color: var(--text-light); margin-top: 8px; }
+        .btn-check { background: var(--brand-grad); padding: 12px; font-size: 14px; }
+        .btn-check:disabled { opacity: 0.6; }
         .hidden { display: none !important; }
         .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
         .center-msg a { color: var(--orange); font-weight: 600; text-decoration: none; }
@@ -202,6 +212,12 @@
                 <span id="statusText"></span>
             </div>
             <div class="status-sub" id="statusSub"></div>
+
+            <div class="paused-card hidden" id="pausedCard">
+                <div class="paused-text">Automatic updates paused. Your booking is still active. Tap below to check the latest status.</div>
+                <button class="btn btn-check" id="checkBtn">Check latest status</button>
+                <div class="paused-note hidden" id="pausedNote"></div>
+            </div>
 
             <div class="steps" id="steps">
                 <div class="step" data-step="pending"><div class="step-dot"></div><div class="step-label">Requested</div></div>
@@ -272,7 +288,26 @@
         // MVP: single driver. Once driver accounts land, this comes from
         // the booking's assigned_driver record instead.
         const DRIVER = { name: 'Andres', phone: '17865093955' };
-        const POLL_MS = 7000;
+        // ===== Smart polling (checkpoint-aware, hard-capped) =====
+        // The booking only changes at driver checkpoint taps, so the page
+        // polls at each status's real rhythm — and never forever: every
+        // status has a hard cutoff, after which automatic updates pause
+        // behind a manual "check latest status" button.
+        const POLL_DELAY_MS = {
+            pending: 15000,
+            confirmed: 30000,      // only within 30 min of pickup; farther out = local sleep
+            on_the_way: 30000,
+            arrived: 15000,
+            in_progress: 60000
+        };
+        const POLL_CUTOFF_MS = {
+            pending: 10 * 60000,          // from first sight of the booking
+            confirmed: 2 * 3600000,       // past the scheduled pickup time
+            on_the_way: 2 * 3600000,      // from the checkpoint (or first sight)
+            arrived: 45 * 60000,
+            in_progress: 4 * 3600000
+        };
+        const CONFIRMED_NEAR_MS = 30 * 60000; // "near pickup" polling window
         const TERMINAL = ['completed', 'cancelled', 'declined'];
         const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
         const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
@@ -307,7 +342,11 @@
         const params = new URLSearchParams(location.search);
         const bookingId = params.get('id') || localStorage.getItem('lm_last_trip_id');
         const isEmbedded = params.get('embed') === '1';
-        let pollTimer = null;
+        let pollTimer = null;      // self-scheduling setTimeout — never an interval
+        let isFetching = false;    // polls can never overlap
+        let failStreak = 0;        // exponential backoff on failures
+        let pollPaused = false;    // cutoff reached; manual button only
+        let memAnchor = null;      // {status, at} fallback if storage unavailable
         let readySignalSent = false;
         let lastBooking = null;
 
@@ -585,9 +624,12 @@
 
             $('supportText').textContent = `Trip ${b.trip_id || ''} · Questions? Call or text us: ${SUPPORT_PHONE}`;
 
-            if (TERMINAL.includes(b.status) && pollTimer) {
-                clearInterval(pollTimer);
+            if (TERMINAL.includes(b.status)) {
+                clearTimeout(pollTimer);
                 pollTimer = null;
+                pollPaused = false;
+                $('pausedCard').classList.add('hidden');
+                clearAnchor();
             }
 
             // Tell the parent page we're rendered so it can slide the sheet
@@ -602,19 +644,120 @@
             }
         }
 
-        async function fetchStatus() {
+        // First-seen time for the CURRENT (booking, status) pair. The server
+        // checkpoint stamp wins when it exists (reload-proof by construction);
+        // otherwise localStorage keeps a reload from restarting an expired
+        // budget, with an in-memory fallback if storage is unavailable.
+        function anchorFor(b) {
+            if (TRACKING_STATUSES.includes(b.status) && b.driver_location_at) {
+                return new Date(b.driver_location_at).getTime();
+            }
+            if (!memAnchor || memAnchor.status !== b.status) {
+                memAnchor = null;
+                try {
+                    const rec = JSON.parse(localStorage.getItem('lm_poll_anchor:' + bookingId) || 'null');
+                    if (rec && rec.status === b.status) memAnchor = rec;
+                } catch (e) { /* storage unavailable */ }
+                if (!memAnchor) {
+                    memAnchor = { status: b.status, at: Date.now() };
+                    try { localStorage.setItem('lm_poll_anchor:' + bookingId, JSON.stringify(memAnchor)); } catch (e) {}
+                }
+            }
+            return memAnchor.at;
+        }
+        function clearAnchor() {
+            memAnchor = null;
+            try { localStorage.removeItem('lm_poll_anchor:' + bookingId); } catch (e) {}
+        }
+
+        function msToPickup(b) {
+            return b.pickup_datetime ? new Date(b.pickup_datetime).getTime() - Date.now() : 0;
+        }
+
+        // Hard safety cutoff: no unchanged status may poll forever.
+        function cutoffPassed(b) {
+            if (!b || TERMINAL.includes(b.status)) return false;
+            if (b.status === 'confirmed') {
+                const base = b.pickup_datetime ? new Date(b.pickup_datetime).getTime() : anchorFor(b);
+                return Date.now() > base + POLL_CUTOFF_MS.confirmed;
+            }
+            const limit = POLL_CUTOFF_MS[b.status];
+            return limit ? Date.now() > anchorFor(b) + limit : false;
+        }
+
+        function computeDelay(b) {
+            if (!b || TERMINAL.includes(b.status)) return null;
+            if (failStreak > 0) {
+                return Math.min(15000 * Math.pow(2, failStreak - 1), 120000);
+            }
+            return POLL_DELAY_MS[b.status] || 60000;
+        }
+
+        function scheduleNext(b) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+            if (pollPaused || document.visibilityState !== 'visible') return;
+            // Scheduled ride still far from pickup: sleep LOCALLY — zero
+            // network — re-evaluating at most hourly until the 30-min window.
+            const farMs = b && b.status === 'confirmed' && failStreak === 0
+                ? msToPickup(b) - CONFIRMED_NEAR_MS : -1;
+            if (farMs > 0) {
+                pollTimer = setTimeout(() => { pollTimer = null; scheduleNext(lastBooking); }, Math.min(farMs, 3600000));
+                return;
+            }
+            const delay = computeDelay(b);
+            if (delay === null) return;
+            pollTimer = setTimeout(fetchStatus, delay);
+        }
+
+        function showPaused(b, fromManual) {
+            pollPaused = true;
+            clearTimeout(pollTimer);
+            pollTimer = null;
+            $('pausedCard').classList.remove('hidden');
+            if (fromManual) {
+                $('pausedNote').textContent = `Status unchanged · last checked ${fmtTime(new Date())}`;
+                $('pausedNote').classList.remove('hidden');
+            }
+        }
+        function hidePaused() {
+            pollPaused = false;
+            $('pausedCard').classList.add('hidden');
+            $('pausedNote').classList.add('hidden');
+        }
+
+        async function fetchStatus(manual) {
+            if (isFetching) return;
+            isFetching = true;
             try {
                 const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
                 if (res.status === 404) {
-                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    clearTimeout(pollTimer);
+                    pollTimer = null;
                     showNoTrip();
                     return;
                 }
-                if (!res.ok) return; // transient — keep polling
+                if (!res.ok) {
+                    failStreak++;
+                    scheduleNext(lastBooking);
+                    return;
+                }
                 const { booking } = await res.json();
+                failStreak = 0;
                 render(booking);
+                if (TERMINAL.includes(booking.status)) return; // render stopped everything
+                if (cutoffPassed(booking)) {
+                    showPaused(booking, manual === true);
+                    return;
+                }
+                hidePaused();
+                scheduleNext(booking);
             } catch (e) {
                 console.warn('Status fetch failed:', e);
+                failStreak++;
+                scheduleNext(lastBooking);
+            } finally {
+                isFetching = false;
             }
         }
 
@@ -676,22 +819,33 @@
             }
         });
 
+        // Manual check while paused: exactly one request per tap. Unchanged
+        // status stays paused; an advanced status resumes bounded polling
+        // (its fresh anchor restarts the budget for the new status).
+        $('checkBtn').addEventListener('click', async () => {
+            const btn = $('checkBtn');
+            btn.disabled = true;
+            try { await fetchStatus(true); } finally { btn.disabled = false; }
+        });
+
         if (!bookingId) {
             showNoTrip();
         } else {
-            fetchStatus();
-            pollTimer = setInterval(fetchStatus, POLL_MS);
+            fetchStatus(); // self-scheduling from here on
 
-            // Hidden tab = zero requests; returning = instant fetch + resume.
-            // Never restarts after a terminal status (poller already stopped).
+            // Hidden tab = zero requests; returning = one instant fetch +
+            // resume. Never restarts after a terminal status, and never
+            // bypasses a pause — the manual button is the only way out.
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState !== 'visible') {
-                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    clearTimeout(pollTimer);
+                    pollTimer = null;
                     return;
                 }
                 if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
+                if (pollPaused) return;
+                failStreak = 0;
                 fetchStatus();
-                if (!pollTimer) pollTimer = setInterval(fetchStatus, POLL_MS);
             });
         }
     </script>
