@@ -174,8 +174,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   merging, then security probes + full smoke test.
 - Driver PWA (plan approved): mobile-first LinkMia Driver app shell —
   bottom nav, payout-primary ride cards, Settings, dedicated manifest +
-  icons, SW privacy fixes (networkOnly for all /api/, no-store headers,
-  runtime-cache purge), Home-Screen install flow. My Rides keeps
+  icons (the SW/API-cache privacy work already SHIPPED in Phase B),
+  Home-Screen install flow. My Rides keeps
   COMPLETED rides visible (last 7 days, own rides only) as the driver's
   work record — with passenger contact/notes REDACTED after completion
   (Andres, Aug 2026: contact exists only while the ride is live, same
@@ -199,10 +199,9 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   policies before persisting ETAs. Rounded, timestamped snapshots.
 - Ambassador dashboard (mock approved; all queries exist as views).
 - Pending-request timeout rule (the trip page already pauses pending
-  displays at 10 min — the server-side rule is still open); RLS lockdown
-  (anon key currently open via admin.html); SMS milestone notifications
-  with return links (WhatsApp stays human-only); in-app chat + web push
-  (parked).
+  displays at 10 min — the server-side rule is still open); SMS milestone
+  notifications with return links (WhatsApp stays human-only); in-app
+  chat + web push (parked).
 - Collaboration pattern: Andres relays between Claude and a second AI
   reviewer (Codex); diagnostics and plans get reviewed before
   implementation is authorized. Respect that gate.

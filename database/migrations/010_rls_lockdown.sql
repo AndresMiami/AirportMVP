@@ -58,6 +58,7 @@ DROP POLICY IF EXISTS "Allow all access to passengers"   ON passengers;
 
 REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
 -- ============================================================
 -- STEP 3: FUTURE objects created by postgres (the SQL Editor / dashboard
@@ -72,6 +73,14 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   REVOKE ALL ON SEQUENCES FROM PUBLIC, anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   REVOKE ALL ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+
+-- PostgreSQL grants EXECUTE to PUBLIC on every NEW function via a built-in
+-- GLOBAL default. A schema-scoped default-privilege revoke cannot cancel
+-- that built-in — only a global one (no IN SCHEMA) can. The schema-scoped
+-- revocations above still handle the explicit anon/authenticated default
+-- ACL entries.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+  REVOKE ALL ON FUNCTIONS FROM PUBLIC;
 
 -- ============================================================
 -- STEP 4: the six reporting views become security_invoker so they can
@@ -145,14 +154,17 @@ BEGIN
     RAISE EXCEPTION 'ASSERTION FAILED: % policies still present', n;
   END IF;
 
-  -- 6c: anon/authenticated hold no privilege on ANY public table or view
+  -- 6c: anon/authenticated hold NO privilege of ANY type on any public
+  -- table or view (all seven types validated queryable on views).
+  -- has_table_privilege also sees PUBLIC-inherited grants.
   FOR rec IN
     SELECT c.relname FROM pg_class c
     JOIN pg_namespace ns ON ns.oid = c.relnamespace
     WHERE ns.nspname = 'public' AND c.relkind IN ('r','v')
   LOOP
     FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
-      FOREACH priv IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE'] LOOP
+      FOREACH priv IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE',
+                                  'TRUNCATE','REFERENCES','TRIGGER'] LOOP
         IF has_table_privilege(role_name, format('public.%I', rec.relname), priv) THEN
           RAISE EXCEPTION 'ASSERTION FAILED: % still has % on %',
             role_name, priv, rec.relname;
@@ -196,6 +208,35 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- 6h: no client role can EXECUTE any public function
+  -- (has_function_privilege sees PUBLIC-inherited grants too)
+  FOR rec IN
+    SELECT p.oid AS foid, p.proname FROM pg_proc p
+    JOIN pg_namespace ns ON ns.oid = p.pronamespace
+    WHERE ns.nspname = 'public'
+  LOOP
+    FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
+      IF has_function_privilege(role_name, rec.foid, 'EXECUTE') THEN
+        RAISE EXCEPTION 'ASSERTION FAILED: % can still EXECUTE %',
+          role_name, rec.proname;
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  -- 6i: no COLUMN-level privileges remain for PUBLIC, anon, or
+  -- authenticated on any public relation
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute att
+    JOIN pg_class c ON c.oid = att.attrelid
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    CROSS JOIN LATERAL aclexplode(att.attacl) a
+    WHERE ns.nspname = 'public' AND c.relkind IN ('r','v')
+      AND att.attacl IS NOT NULL
+      AND (a.grantee = 0 OR a.grantee::regrole::text IN ('anon','authenticated'))
+  ) THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: column-level client privileges remain';
+  END IF;
+
   -- 6g: postgres-creator default ACLs in public no longer grant to client
   -- roles (supabase_admin's default ACL is out of postgres's authority —
   -- see the documented limitation in the header)
@@ -209,7 +250,7 @@ BEGIN
     RAISE EXCEPTION 'ASSERTION FAILED: postgres default privileges still grant to client roles';
   END IF;
 
-  RAISE NOTICE 'RLS LOCKDOWN VERIFIED: 7 tables default-deny with RLS on, no client or PUBLIC privileges on any public relation, 6 invoker views, postgres default privileges stripped.';
+  RAISE NOTICE 'RLS LOCKDOWN VERIFIED: 7 tables default-deny with RLS on; no client or PUBLIC privilege of any type (table, column, sequence, function) on any public object; 6 invoker views; postgres default privileges stripped incl. the global function default.';
 END $$;
 
 COMMIT;
@@ -223,6 +264,7 @@ COMMIT;
 -- BEGIN;
 -- GRANT ALL ON ALL TABLES    IN SCHEMA public TO anon, authenticated;
 -- GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+-- GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated;
 -- CREATE POLICY "Allow all access to customers"    ON customers    FOR ALL USING (true);
 -- CREATE POLICY "Allow all access to drivers"      ON drivers      FOR ALL USING (true);
 -- CREATE POLICY "Allow all access to bookings"     ON bookings     FOR ALL USING (true);
@@ -242,4 +284,8 @@ COMMIT;
 --   GRANT ALL ON SEQUENCES TO anon, authenticated;
 -- ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 --   GRANT ALL ON FUNCTIONS TO anon, authenticated;
+-- -- Restores PostgreSQL's built-in global default (PUBLIC EXECUTE on new
+-- -- functions created by postgres):
+-- ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+--   GRANT ALL ON FUNCTIONS TO PUBLIC;
 -- COMMIT;

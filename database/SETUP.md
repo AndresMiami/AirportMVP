@@ -1,4 +1,4 @@
-# LinkMia Database & Admin Dashboard Setup
+# LinkMia Database Setup
 
 ## Quick Start (15 minutes)
 
@@ -56,7 +56,6 @@ now returns a 404 retirement notice.
 Administration happens in the **Supabase Dashboard** (Table Editor + SQL
 Editor) until the LinkMia admin portal ships. All application data access
 flows through the Netlify functions' service key.
-- Update in real-time when bookings change
 
 ---
 
@@ -73,34 +72,6 @@ flows through the Netlify functions' service key.
 
 ---
 
-## Admin Dashboard Features
-
-### Today Tab
-- Shows all bookings for today
-- Quick status overview
-
-### All Bookings Tab
-- Complete booking history
-- Click any booking to edit status, assign driver, update price
-
-### Drivers Tab
-- Your driver network
-- See availability status
-
-### Customers Tab
-- Customer database
-- VIP and repeat customer tracking
-
-### Revenue Tab
-- Total revenue and commission
-- Monthly breakdown
-
-### Quick Add (+)
-- Floating button to add bookings fast
-- Use this when you get a WhatsApp request
-
----
-
 ## Workflow: WhatsApp → Dashboard (LEGACY — admin.html retired)
 
 1. **Guest texts you** on WhatsApp
@@ -112,32 +83,17 @@ flows through the Netlify functions' service key.
 
 ---
 
-## Real-Time Updates
-
-The dashboard uses Supabase real-time subscriptions. When a booking status changes:
-- Dashboard updates automatically
-- No need to refresh
-
----
-
 ## Troubleshooting
 
 ### "No rows returned" when running schema
 This is normal! It means the tables were created successfully.
 
-### Dashboard shows demo data
-The dashboard falls back to demo data if:
-- Tables don't exist yet
-- Tables are empty
-- Connection to Supabase fails
-
-Once you add real data, it will show that instead.
-
 ### Can't see my bookings
-Check that:
-1. Tables were created (check Table Editor in Supabase)
-2. Your Supabase URL and key are correct in the dashboard
-3. RLS policies are allowing access
+Check in the Supabase **Table Editor** (which uses your dashboard login,
+not the locked-down public keys). Note: since migration 010 the public
+anon key can read NOTHING by design — the app reads data only through
+the Netlify functions' service key. A permission error from a client
+key is the lockdown working, not a bug.
 
 ### How to reset and start fresh
 ```sql
