@@ -8,7 +8,9 @@ const { createClient } = require('@supabase/supabase-js');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Never expose phone numbers or internal fields to the public status page
+// Whitelisted booking fields exclude private contact data and internal ids.
+// The assigned driver's PUBLIC contact (name + phone) is intentionally
+// returned separately for the pairing message and WhatsApp button.
 const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, driver_lat, driver_lng, driver_location_at';
 
 exports.handler = async (event) => {
@@ -43,7 +45,7 @@ exports.handler = async (event) => {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select(PASSENGER_FIELDS)
+        .select(PASSENGER_FIELDS + ', assigned_driver')
         .eq('id', id)
         .single();
 
@@ -51,7 +53,21 @@ exports.handler = async (event) => {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
       }
 
-      return { statusCode: 200, headers, body: JSON.stringify({ booking: data }) };
+      // Personalization: resolve the assigned driver's public identity
+      // (name + phone only — never internal fields). Absent or failed
+      // lookup -> no driver key; the page falls back to its defaults.
+      let driverInfo;
+      if (data.assigned_driver) {
+        const { data: drv } = await supabase
+          .from('drivers')
+          .select('name, phone')
+          .eq('id', data.assigned_driver)
+          .single();
+        if (drv && drv.name) driverInfo = { name: drv.name, phone: drv.phone || '' };
+      }
+      delete data.assigned_driver; // internal id — not for the public payload
+
+      return { statusCode: 200, headers, body: JSON.stringify({ booking: data, driver: driverInfo }) };
     }
 
     if (event.httpMethod === 'POST') {

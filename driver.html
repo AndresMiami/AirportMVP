@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Driver - LinkMia</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="/supabase.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -113,7 +115,6 @@
         button:active { transform: scale(0.98); }
         button:disabled { opacity: 0.5; }
         .btn-accept { background: #28A745; color: white; }
-        .btn-decline { background: white; color: #d33; border: 1.5px solid #d33; }
         .btn-next { background: #1a1a2e; color: white; }
         .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
         .paid-badge {
@@ -154,14 +155,16 @@
 <body>
     <div id="gate">
         <div class="brand">LinkMia Driver</div>
-        <input type="password" id="gateInput" placeholder="Passcode" inputmode="text" autocomplete="current-password">
-        <button id="gateBtn">Enter</button>
+        <input type="email" id="gateEmail" placeholder="Email" inputmode="email" autocomplete="username">
+        <input type="password" id="gateInput" placeholder="Password" autocomplete="current-password">
+        <button id="gateBtn">Sign in</button>
         <div id="gateError"></div>
     </div>
 
     <div id="app" class="hidden">
         <header>
             <div class="brand">LinkMia Driver</div>
+            <div class="refresh-note"><span id="driverName"></span> · <a href="#" id="signOutLink" style="color:inherit;">Sign out</a></div>
             <div class="refresh-note" id="lastRefresh"></div>
         </header>
         <main>
@@ -179,8 +182,15 @@
     </div>
 
     <script>
-        let passcode = localStorage.getItem('lm_driver_pass') || '';
+        // Identity: Supabase session (admin-provisioned driver accounts —
+        // no signup path exists). The old shared-passcode key is retired.
+        localStorage.removeItem('lm_driver_pass');
         let lastBookings = [];
+
+        async function authToken() {
+            const { data: { session } } = await window.supabaseClient.auth.getSession();
+            return session ? session.access_token : null;
+        }
 
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -241,7 +251,7 @@
                     ${b.bags ? `<span>🧳 ${b.bags}</span>` : ''}
                     ${b.flight_number ? `<span>✈️ ${esc(b.flight_number)}</span>` : ''}
                 </div>
-                <div class="contact-row">👤 ${esc(b.customer_name)} — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a>${waLink(b)}</div>
+                ${b.customer_name || b.customer_phone ? `<div class="contact-row">👤 ${esc(b.customer_name)}${b.customer_phone ? ` — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a>` : ''}${waLink(b)}</div>` : `<div class="contact-row">👤 Passenger details shown after you accept</div>`}
                 ${b.booker_name && b.booker_name !== b.customer_name ? `<div class="contact-row">📋 Booked by ${esc(b.booker_name)}${b.booker_phone ? ` — <a href="tel:${esc(b.booker_phone)}">${esc(b.booker_phone)}</a>` : ''}</div>` : ''}
                 ${b.pickup_sign ? `<div class="notes">🪧 Sign: ${esc(b.pickup_sign)}</div>` : ''}
                 ${b.notes ? `<div class="notes">📝 ${esc(b.notes)}</div>` : ''}
@@ -254,10 +264,12 @@
             const pending = bookings.filter(b => b.status === 'pending');
             const active = bookings.filter(b => ACTIVE_STATUSES.includes(b.status));
 
+            // No Decline: pending requests are shared across drivers, so
+            // declining would kill the offer for everyone. Not accepting IS
+            // the per-driver decline.
             $('pendingList').innerHTML = pending.length
                 ? pending.map(b => rideCard(b, `
                     <div class="btn-row">
-                        <button class="btn-decline" data-action="decline" data-id="${b.id}">Decline</button>
                         <button class="btn-accept" data-action="accept" data-id="${b.id}">Accept ride</button>
                     </div>`,
                     isUrgent(b.pickup_datetime) ? '<span class="urgent-badge">URGENT</span>' : ''
@@ -302,13 +314,16 @@
         $('tabRequests').addEventListener('click', () => switchView('requests'));
         $('tabRides').addEventListener('click', () => switchView('rides'));
 
-        async function fetchBookings(pass) {
+        async function fetchBookings() {
+            const token = await authToken();
+            if (!token) throw new Error('unauthorized');
             const res = await fetch('/api/driver-bookings', {
-                headers: { 'x-driver-secret': pass }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (res.status === 401) throw new Error('unauthorized');
+            if (res.status === 401 || res.status === 403) throw new Error('unauthorized');
             if (!res.ok) throw new Error('server');
-            const { bookings } = await res.json();
+            const { bookings, driver } = await res.json();
+            if (driver && driver.name) $('driverName').textContent = driver.name;
             return bookings;
         }
 
@@ -320,7 +335,7 @@
         let isRefreshing = false;
         let failStreak = 0;
         let idlePolls = 0;
-        let pollingEnabled = false; // only after the passcode gate opens
+        let pollingEnabled = false; // only after the login gate opens
 
         function hasWorkNow(bookings) {
             return (bookings || []).some(b =>
@@ -349,14 +364,15 @@
             if (!pollingEnabled || isRefreshing) return;
             isRefreshing = true;
             try {
-                const bookings = await fetchBookings(passcode);
+                const bookings = await fetchBookings();
                 failStreak = 0;
                 idlePolls = hasWorkNow(bookings) ? 0 : idlePolls + 1;
                 render(bookings);
             } catch (e) {
                 if (e.message === 'unauthorized') {
-                    // Passcode revoked/changed — back to the gate, stop everything
-                    localStorage.removeItem('lm_driver_pass');
+                    // Session expired or account deactivated — back to the
+                    // gate, stop everything, clear the dead session
+                    window.supabaseClient?.auth.signOut().catch(() => {});
                     pollingEnabled = false;
                     $('app').classList.add('hidden');
                     $('gate').classList.remove('hidden');
@@ -442,17 +458,13 @@
             return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
         }
 
-        // Checkpoint actions and the status each one produces on success.
-        // A retried request that lands on 409 with exactly this status is a
-        // DUPLICATE SUCCESS (the first request committed, its response was
-        // lost) — not a conflict.
         const CHECKPOINT_ACTIONS = ['on_my_way', 'arrived', 'start_trip'];
-        const RESULTING_STATUS = { on_my_way: 'on_the_way', arrived: 'arrived', start_trip: 'in_progress' };
 
         async function postAction(body) {
+            const token = await authToken();
             const res = await fetch('/api/update-booking-status', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-driver-secret': passcode },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` },
                 body: JSON.stringify(body)
             });
             const data = await res.json().catch(() => null);
@@ -464,7 +476,6 @@
             if (action === 'payment_collected') {
                 paymentMethod = confirm('Paid by Zelle? (Cancel = cash)') ? 'zelle' : 'cash';
             }
-            if (action === 'decline' && !confirm('Decline this ride?')) return;
 
             // Checkpoint actions capture ONE fresh position inside the tap
             // and send it WITH the status change. The GPS wait is bounded;
@@ -481,8 +492,10 @@
                 result = await postAction(body);
             } catch (e) {
                 // Response never received — the server may have committed
-                // anyway. One retry; the 409 reconciliation below recognizes
-                // a duplicate success.
+                // anyway. One retry; the BACKEND recognizes a verified
+                // duplicate (same status AND same owner) and answers 200
+                // idempotent. The client never interprets a 409 as success —
+                // a non-owner's conflict must never open navigation.
                 try { result = await postAction(body); } catch (e2) { /* result stays null */ }
             }
 
@@ -491,12 +504,9 @@
                 alert('Network error. Please try again.');
             } else if (result.ok) {
                 success = true;
-            } else if (result.status === 409 && RESULTING_STATUS[action] &&
-                       result.data && result.data.currentStatus === RESULTING_STATUS[action]) {
-                success = true; // duplicate success — booking is exactly where this action puts it
             } else if (result.status !== 409) {
                 alert('Action failed. Please try again.');
-            } // other 409: booking moved elsewhere — silent refresh reconciles
+            } // 409: booking moved on or isn't ours — silent refresh reconciles
 
             if (!success) {
                 await refresh();
@@ -524,12 +534,16 @@
             doAction(btn.dataset.action, btn.dataset.id).finally(() => { btn.disabled = false; });
         });
 
-        // ---- Passcode gate ----
-        async function tryUnlock(pass) {
+        // ---- Login gate (admin-provisioned driver accounts, no signup) ----
+        // Pass credentials to sign in fresh; pass null to reuse a session
+        // already stored by the Supabase client (page reload path).
+        async function tryUnlock(email, password) {
             try {
-                const bookings = await fetchBookings(pass);
-                passcode = pass;
-                localStorage.setItem('lm_driver_pass', pass);
+                if (email !== null) {
+                    const { error } = await window.supabaseClient.auth.signInWithPassword({ email, password });
+                    if (error) return false;
+                }
+                const bookings = await fetchBookings(); // also verifies the drivers row
                 $('gate').classList.add('hidden');
                 $('app').classList.remove('hidden');
                 pollingEnabled = true;
@@ -543,24 +557,43 @@
         }
 
         $('gateBtn').addEventListener('click', async () => {
-            const pass = $('gateInput').value.trim();
-            if (!pass) return;
+            const email = $('gateEmail').value.trim();
+            const pass = $('gateInput').value;
+            if (!email || !pass) return;
             $('gateError').textContent = '';
-            const ok = await tryUnlock(pass);
+            $('gateBtn').disabled = true;
+            const ok = await tryUnlock(email, pass);
+            $('gateBtn').disabled = false;
             if (!ok) {
+                // A valid login without an active drivers row also lands here
+                window.supabaseClient?.auth.signOut().catch(() => {});
                 $('gateInput').classList.add('shake');
                 setTimeout(() => $('gateInput').classList.remove('shake'), 700);
-                $('gateError').textContent = 'Wrong passcode';
+                $('gateError').textContent = 'Sign-in failed — check your email and password.';
             }
         });
         $('gateInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') $('gateBtn').click();
         });
 
-        // Auto-unlock with stored passcode
-        if (passcode) {
-            tryUnlock(passcode).then((ok) => {
-                if (!ok) localStorage.removeItem('lm_driver_pass');
+        $('signOutLink').addEventListener('click', async (e) => {
+            e.preventDefault();
+            pollingEnabled = false;
+            clearTimeout(pollTimeout);
+            pollTimeout = null;
+            await window.supabaseClient?.auth.signOut().catch(() => {});
+            $('app').classList.add('hidden');
+            $('gate').classList.remove('hidden');
+        });
+
+        // Auto-unlock with a stored session (Supabase persists + refreshes)
+        if (window.supabaseClient) {
+            window.supabaseClient.auth.getSession().then(({ data: { session } }) => {
+                if (session) {
+                    tryUnlock(null).then((ok) => {
+                        if (!ok) window.supabaseClient.auth.signOut().catch(() => {});
+                    });
+                }
             });
         }
     </script>

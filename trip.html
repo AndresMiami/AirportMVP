@@ -282,8 +282,8 @@
 
     <script>
         const SUPPORT_PHONE = '+1 (786) 509-3955';
-        // MVP: single driver. Once driver accounts land, this comes from
-        // the booking's assigned_driver record instead.
+        // Defaults for legacy/unassigned bookings; overwritten from the
+        // booking's assigned driver as soon as /api/booking-status says so.
         const DRIVER = { name: 'Andres', phone: '17865093955' };
         // ===== Smart polling (checkpoint-aware, hard-capped) =====
         // The booking only changes at driver checkpoint taps, so the page
@@ -335,7 +335,7 @@
             pending:     { color: '',      pulse: true,  text: 'Waiting for driver confirmation',
                            sub: 'We\'ve notified your driver — this usually takes just a few minutes.' },
             confirmed:   { color: 'green', pulse: false, text: '🎉 You\'ve been paired with your driver!',
-                           sub: `${DRIVER.name} will pick you up as scheduled — say hello on WhatsApp.` },
+                           sub: '{driver} will pick you up as scheduled — say hello on WhatsApp.' },
             on_the_way:  { color: 'green', pulse: true,  text: '🚗 Your driver is on the way',
                            sub: 'Please be ready at your pickup point.' },
             arrived:     { color: 'green', pulse: true,  text: '📍 Your driver has arrived',
@@ -564,7 +564,7 @@
             } else if (TRACKING_STATUSES.includes(b.status)) {
                 sub = `${view.sub} No verified location for this checkpoint.`;
             }
-            $('statusSub').textContent = sub;
+            $('statusSub').textContent = sub.replace('{driver}', DRIVER.name);
 
             // Stepper (hidden for declined/cancelled)
             const showSteps = !['declined', 'cancelled'].includes(b.status);
@@ -624,11 +624,15 @@
             $('cancelBtn').classList.toggle('hidden', !isPending);
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
 
-            // Warm human channel once paired: WhatsApp chat with the driver
+            // Warm human channel once paired: WhatsApp chat with the driver.
+            // Hidden when the assigned driver has no valid phone — never
+            // route the passenger to a different person's number; the
+            // LinkMia support line below stays either way.
             const isActive = ['confirmed', 'on_the_way', 'arrived', 'in_progress'].includes(b.status);
+            const showWa = isActive && !!DRIVER.phone;
             const waBtn = $('waBtn');
-            waBtn.classList.toggle('hidden', !isActive);
-            if (isActive) {
+            waBtn.classList.toggle('hidden', !showWa);
+            if (showWa) {
                 const hello = `Hi ${DRIVER.name}! This is ${b.customer_name || 'your passenger'} — trip ${b.trip_id || ''}.`;
                 waBtn.href = `https://wa.me/${DRIVER.phone}?text=${encodeURIComponent(hello)}`;
                 waBtn.textContent = `💬 Message ${DRIVER.name} on WhatsApp`;
@@ -829,7 +833,16 @@
                     scheduleNext(lastBooking);
                     return;
                 }
-                const { booking } = await res.json();
+                const { booking, driver } = await res.json();
+                // Personalization: the assigned driver's real name + phone.
+                // A KNOWN driver with a missing/malformed phone gets phone
+                // null — the WhatsApp button hides rather than ever routing
+                // the passenger to a different person's number.
+                if (driver && driver.name) {
+                    DRIVER.name = driver.name;
+                    const digits = String(driver.phone || '').replace(/\D/g, '');
+                    DRIVER.phone = digits.length >= 10 ? digits : null;
+                }
                 failStreak = 0;
                 render(booking);
                 const reason = blockReason(booking);
