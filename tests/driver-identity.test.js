@@ -1,0 +1,234 @@
+// Driver-identity test harness — two-driver authorization coverage.
+//
+// Run (after `npm install` per LOCAL_DEVELOPMENT.md):
+//   node tests/driver-identity.test.js
+// Exits 0 with "ALL n CHECKS PASS" on success, nonzero with the first
+// failing assertion otherwise. No framework: mocks @supabase/supabase-js
+// via require.cache and runs the REAL function handlers, asserting the
+// exact update payloads and query filters they produce.
+
+const path = require('path');
+const assert = require('assert');
+
+process.env.SUPABASE_URL = 'https://example.supabase.co';
+process.env.SUPABASE_SERVICE_KEY = 'service-key';
+process.env.SUPABASE_ANON_KEY = 'anon-key';
+delete process.env.TELEGRAM_BOT_TOKEN; // silence receipts
+
+// ---------- mock state ----------
+const TOKENS = {
+  'tok-andres': { id: 'auth-a' },
+  'tok-carlos': { id: 'auth-c' },
+  'tok-busy':   { id: 'auth-b' },
+  'tok-nodrv':  { id: 'auth-x' }
+};
+const DRIVERS_BY_USER = {
+  'auth-a': { id: 'drv-a', name: 'Andres',    phone: '+17865093955', status: 'active' },
+  'auth-c': { id: 'drv-c', name: 'Carlos M.', phone: '+13055551212', status: 'active' },
+  'auth-b': { id: 'drv-b', name: 'Busy Bee',  phone: '+13055550000', status: 'busy' }
+};
+const DRIVERS_BY_ID = {};
+Object.values(DRIVERS_BY_USER).forEach((d) => { DRIVERS_BY_ID[d.id] = d; });
+
+let lastUpdate = null;         // captured update payload
+let lastFilters = null;        // captured eq/in filters on the update chain
+let lastIsFilter = null;       // captured .is() on the update chain
+let capturedListOr = null;     // captured .or() on the list query
+let updateResult = { data: [], error: null };
+let listResult = [];
+let currentBookingResult = { data: null, error: { message: 'none' } };
+
+const supabaseMock = {
+  createClient: () => ({
+    auth: {
+      getUser: async (token) => TOKENS[token]
+        ? { data: { user: TOKENS[token] }, error: null }
+        : { data: { user: null }, error: { message: 'bad token' } }
+    },
+    from: (table) => {
+      if (table === 'drivers') {
+        return {
+          select: () => ({
+            eq: (col, val) => ({
+              single: () => {
+                const row = col === 'user_id' ? DRIVERS_BY_USER[val] : DRIVERS_BY_ID[val];
+                return Promise.resolve(row
+                  ? { data: row, error: null }
+                  : { data: null, error: { message: 'none' } });
+              }
+            })
+          })
+        };
+      }
+      // bookings
+      return {
+        update(payload) {
+          lastUpdate = payload;
+          const chain = {
+            _f: {},
+            eq(col, val) { chain._f[col] = val; lastFilters = chain._f; return chain; },
+            in(col, val) { chain._f[col] = val; lastFilters = chain._f; return chain; },
+            is(col, val) { lastIsFilter = { col, val }; return chain; },
+            or() { throw new Error('update .or() must not be used post-corrections'); },
+            select() { return Promise.resolve(updateResult); }
+          };
+          return chain;
+        },
+        select() {
+          const chain = {
+            or(expr) { capturedListOr = expr; return chain; },
+            order() { return Promise.resolve({ data: listResult, error: null }); },
+            eq() { return chain; },
+            single() { return Promise.resolve(currentBookingResult); }
+          };
+          return chain;
+        }
+      };
+    }
+  })
+};
+
+const repoRoot = path.resolve(__dirname, '..');
+const mockPath = require.resolve('@supabase/supabase-js', { paths: [repoRoot] });
+require.cache[mockPath] = { id: mockPath, filename: mockPath, loaded: true, exports: supabaseMock };
+
+const upd = require(path.join(repoRoot, 'backend/functions/update-booking-status.js'));
+const list = require(path.join(repoRoot, 'backend/functions/driver-bookings.js'));
+const stat = require(path.join(repoRoot, 'backend/functions/booking-status.js'));
+
+const BID = '123e4567-e89b-42d3-a456-426614174000';
+const post = (body, token) => upd.handler({
+  httpMethod: 'POST',
+  headers: token ? { authorization: `Bearer ${token}` } : {},
+  body: JSON.stringify(body)
+});
+const getList = (token) => list.handler({
+  httpMethod: 'GET',
+  headers: token ? { authorization: `Bearer ${token}` } : {}
+});
+
+let passed = 0;
+function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
+
+(async () => {
+  // ---------- authentication ----------
+  let r = await post({ bookingId: BID, action: 'accept' });
+  check('no token -> 401', () => assert.strictEqual(r.statusCode, 401));
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-invalid');
+  check('invalid token -> 401', () => assert.strictEqual(r.statusCode, 401));
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-nodrv');
+  check('no drivers row -> 403', () => assert.strictEqual(r.statusCode, 403));
+  DRIVERS_BY_USER['auth-c'].status = 'inactive';
+  r = await post({ bookingId: BID, action: 'on_my_way' }, 'tok-carlos');
+  check('inactive driver -> 403', () => assert.strictEqual(r.statusCode, 403));
+  r = await getList('tok-carlos');
+  check('inactive driver -> 403 on list too', () => assert.strictEqual(r.statusCode, 403));
+  DRIVERS_BY_USER['auth-c'].status = 'active';
+
+  // ---------- visibility ----------
+  capturedListOr = null;
+  r = await getList('tok-andres');
+  check('active: shared unassigned pending + OWN active rides only', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedListOr,
+      'and(status.eq.pending,assigned_driver.is.null),and(status.in.(confirmed,on_the_way,arrived,in_progress),assigned_driver.eq.drv-a)');
+    assert.deepStrictEqual(JSON.parse(r.body).driver, { id: 'drv-a', name: 'Andres', status: 'active' });
+  });
+  capturedListOr = null;
+  r = await getList('tok-carlos');
+  check('second active driver: same shared pending, own rides scoped to drv-c', () => {
+    assert.ok(capturedListOr.includes('status.eq.pending,assigned_driver.is.null'));
+    assert.ok(capturedListOr.includes('assigned_driver.eq.drv-c'));
+    assert.ok(!capturedListOr.includes('drv-a'));
+  });
+  capturedListOr = null;
+  r = await getList('tok-busy');
+  check('busy: own active rides ONLY, no pending clause', () => {
+    assert.strictEqual(capturedListOr,
+      'and(status.in.(confirmed,on_the_way,arrived,in_progress),assigned_driver.eq.drv-b)');
+  });
+
+  // ---------- accept ----------
+  lastUpdate = null; lastIsFilter = null; lastFilters = null;
+  updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  check('accept: stamps assigned_driver atomically, requires UNASSIGNED pending', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(lastUpdate.status, 'confirmed');
+    assert.strictEqual(lastUpdate.assigned_driver, 'drv-a');
+    assert.deepStrictEqual(lastIsFilter, { col: 'assigned_driver', val: null });
+    assert.deepStrictEqual(lastFilters.status, ['pending']);
+  });
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-busy');
+  check('busy driver cannot accept -> 403', () => assert.strictEqual(r.statusCode, 403));
+
+  // ---------- ownership on later actions ----------
+  lastUpdate = null; lastIsFilter = null; lastFilters = null;
+  updateResult = { data: [{ id: BID, status: 'on_the_way' }], error: null };
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
+  check('checkpoint: EXACT ownership filter, atomic coords, NO re-stamp', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(lastFilters.assigned_driver, 'drv-a');
+    assert.strictEqual(lastIsFilter, null);
+    assert.strictEqual(lastUpdate.driver_lat, 25.7);
+    assert.ok(!('assigned_driver' in lastUpdate));
+  });
+  lastFilters = null;
+  updateResult = { data: [{ id: BID, status: 'on_the_way' }], error: null };
+  r = await post({ bookingId: BID, action: 'payment_collected', paymentMethod: 'cash' }, 'tok-andres');
+  check('payment_collected: exact ownership filter applies', () =>
+    assert.strictEqual(lastFilters.assigned_driver, 'drv-a'));
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'completed' }], error: null };
+  r = await post({ bookingId: BID, action: 'complete' }, 'tok-andres');
+  check('complete: coordinates wiped (regression)', () => {
+    assert.strictEqual(lastUpdate.driver_lat, null);
+    assert.strictEqual(lastUpdate.driver_location_at, null);
+  });
+
+  // ---------- idempotency: backend-verified, owner-only ----------
+  updateResult = { data: [], error: null }; // 0 rows matched
+  currentBookingResult = { data: { status: 'on_the_way', assigned_driver: 'drv-a' }, error: null };
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
+  check('owner duplicate resend -> 200 idempotent', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(JSON.parse(r.body).idempotent, true);
+  });
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-carlos');
+  check('NON-owner conflict on matching status -> 409, never success', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(JSON.parse(r.body).currentStatus, 'on_the_way');
+  });
+  r = await post({ bookingId: BID, action: 'complete' }, 'tok-carlos');
+  check('non-owner complete -> 409', () => assert.strictEqual(r.statusCode, 409));
+  r = await post({ bookingId: BID, action: 'payment_collected', paymentMethod: 'cash' }, 'tok-carlos');
+  check('non-owner payment -> 409 (payment has no idempotent path)', () =>
+    assert.strictEqual(r.statusCode, 409));
+
+  // ---------- decline removed ----------
+  r = await post({ bookingId: BID, action: 'decline' }, 'tok-andres');
+  check('decline -> 400 Unknown action', () => assert.strictEqual(r.statusCode, 400));
+
+  // ---------- passenger-facing driver exposure ----------
+  currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-c' }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('booking-status: driver name+phone exposed, internal id stripped', () => {
+    const body = JSON.parse(r.body);
+    assert.deepStrictEqual(body.driver, { name: 'Carlos M.', phone: '+13055551212' });
+    assert.ok(!('assigned_driver' in body.booking));
+  });
+  DRIVERS_BY_ID['drv-c'].phone = null;
+  // fresh fixture: the handler deletes assigned_driver from the row object
+  currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-c' }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('phoneless driver: name exposed with empty phone (client hides WhatsApp)', () => {
+    const body = JSON.parse(r.body);
+    assert.deepStrictEqual(body.driver, { name: 'Carlos M.', phone: '' });
+  });
+  DRIVERS_BY_ID['drv-c'].phone = '+13055551212';
+
+  console.log(`\nALL ${passed} CHECKS PASS`);
+})().catch((e) => {
+  console.error('\nFAIL:', e.message);
+  process.exit(1);
+});

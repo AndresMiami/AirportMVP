@@ -36,8 +36,13 @@ verified checkpoint locations all live in the web app backed by Supabase.
   leash for unknown statuses or malformed timestamps. Paused card is
   notice-only (NO manual refresh button — deliberate); hidden tab = zero
   requests; one automatic check on visibility return is the resume path.
-- `driver.html` — GetTransfer-style driver app behind `DRIVER_PASSCODE`
-  (sent as `x-driver-secret`): Requests/My rides tabs, adaptive polling,
+- `driver.html` — GetTransfer-style driver app behind a real login
+  (admin-provisioned Supabase accounts, `Authorization: Bearer` session
+  JWT — the shared passcode is retired): Requests/My rides tabs show
+  unassigned pending requests + ONLY this driver's own rides (busy
+  drivers see just their rides and cannot accept; inactive is rejected).
+  No driver-side Decline (shared requests — not accepting IS declining).
+  Adaptive polling,
   CHECKPOINT capture — On my way / Arrived / Start trip each grab one fresh
   GPS fix (6s bound, maximumAge 0) inside the tap and send it WITH the
   status POST; no continuous tracking (a mobile browser can't broadcast
@@ -45,16 +50,21 @@ verified checkpoint locations all live in the web app backed by Supabase.
   at On my way, never at Accept. Same-tab Maps handoffs only after status
   success; lost responses retry once with 409-duplicate-success
   reconciliation.
-- `login.html` — passenger email+password (self-service signUp). Drivers will
-  be admin-provisioned (CreditEngine pattern) — no driver signup ever.
+- `login.html` — passenger email+password (self-service signUp). Drivers ARE
+  admin-provisioned (CreditEngine pattern, migration 009) — no signup ever.
 - `admin.html` — legacy dashboard reading Supabase directly with anon key.
 
 ## Booking lifecycle
 
 `pending → confirmed → on_the_way → arrived → in_progress → completed`
-Terminals: `declined` (driver), `cancelled` (passenger, pending-only).
-Transitions are server-enforced in `update-booking-status.js` (stale action →
-409, body carries `currentStatus`). Legacy status `assigned` kept for old rows.
+Terminals: `declined` (legacy/admin-only — driver-side decline was removed),
+`cancelled` (passenger, pending-only). Transitions are server-enforced in
+`update-booking-status.js`: Accept wins only an UNASSIGNED pending request
+and stamps `assigned_driver` atomically; every later action requires an
+EXACT ownership match. A stale/foreign action matches 0 rows → the backend
+answers 200 `{idempotent:true}` ONLY when status AND owner both match
+(verified duplicate), else 409 with `currentStatus` — the client never
+interprets a 409 as success. Legacy status `assigned` kept for old rows.
 
 Checkpoint model (5 statuses, 3 verified locations, 1 cleanup): `on_my_way`,
 `arrived`, `start_trip` may carry `lat`/`lng`, stamped atomically with the
@@ -106,9 +116,10 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 - Branch → commit → push → PR → Andres merges → Netlify/Railway deploy from
   `main`. Never push to main directly.
 - Local dev: see `LOCAL_DEVELOPMENT.md` (`netlify dev` on :3001, linked env).
-- Test harness for booking data-mapping exists in session scratchpads —
-  pattern: mock `@supabase/supabase-js` via require.cache, run the real
-  `create-booking.handler`, assert inserted record fields.
+- Committed tests live in `tests/` — run `node tests/driver-identity.test.js`
+  (needs `npm install`; exits nonzero on failure). Pattern: mock
+  `@supabase/supabase-js` via require.cache, run the real handlers, assert
+  payloads/filters. Same pattern works ad hoc in session scratchpads.
 - Verify inline-script syntax by extracting `<script>` blocks → `node --check`.
 
 ## Decisions log (do not relitigate casually)
@@ -135,14 +146,24 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    bypass the functions/service-key boundary). Long-term push channel is
    SMS milestone notifications (Blacklane pattern), not sockets — WhatsApp
    stays a human-only conversation link (see decision 2), never automated.
+9. Driver identity (PR #49): admin-provisioned Supabase accounts only,
+   `assigned_driver` stamped at Accept ONLY (unassigned requests, active
+   drivers; busy = finish own rides, no new accepts), exact-match
+   ownership on all later actions, idempotent success declared ONLY by
+   the backend after verifying status + owner, no driver-side Decline,
+   and a passenger WhatsApp button that hides rather than falling back
+   to another driver's number.
 
 ## Known gaps / next up
 
-- Driver identity + RLS foundation — THE NEXT BUILD (decided Aug 2026,
-  ahead of the two-ETA model): admin-provisioned driver accounts
-  (CreditEngine pattern), real login on /driver, `assigned_driver` stamped
-  at Accept, retire the shared passcode; bundled RLS lockdown protects
-  passenger data and later unblocks Supabase Realtime.
+- Phase B: RLS lockdown — IMMEDIATELY after PR #49 field-tests clean,
+  before any real second driver and before two-ETA (allow-all policies
+  still exist; auth alone is not the security boundary). Unblocks
+  Supabase Realtime afterwards.
+- Driver PWA (plan approved): mobile-first LinkMia Driver app shell —
+  bottom nav, payout-primary ride cards, Settings, dedicated manifest +
+  icons, SW privacy fixes (networkOnly for all /api/, no-store headers,
+  runtime-cache purge), Home-Screen install flow.
 - Two-ETA model (Codex-outlined, follows identity) — booking-time estimate
   must use the scheduled pickup as departure time (Railway proxy currently
   uses `now` and its route cache ignores time-of-day); fresh driver→pickup
