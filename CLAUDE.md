@@ -164,7 +164,11 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 - Driver PWA (plan approved): mobile-first LinkMia Driver app shell —
   bottom nav, payout-primary ride cards, Settings, dedicated manifest +
   icons, SW privacy fixes (networkOnly for all /api/, no-store headers,
-  runtime-cache purge), Home-Screen install flow.
+  runtime-cache purge), Home-Screen install flow. My Rides keeps
+  COMPLETED rides visible (last 7 days, own rides only) as the driver's
+  work record — with passenger contact/notes REDACTED after completion
+  (Andres, Aug 2026: contact exists only while the ride is live, same
+  principle as pending-offer redaction).
 - Approved, NOT yet built: "Release ride" — a driver returns an accepted
   ride to the shared pool instead of any driver-side decline. Rules:
   CONFIRMED-only (after On my way, releasing requires dispatch/admin
