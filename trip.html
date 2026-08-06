@@ -310,6 +310,8 @@
         const isEmbedded = params.get('embed') === '1';
         let pollTimer = null; // setTimeout id — self-scheduling, driver-style
         let failStreak = 0;   // consecutive poll failures; reset on success
+        let pollingStopped = false; // set by every permanent stop path
+                                    // (terminal status, 404, failure ceiling)
         let readySignalSent = false;
         let lastBooking = null;
 
@@ -325,8 +327,8 @@
         function schedulePoll() {
             clearTimeout(pollTimer);
             pollTimer = null;
+            if (pollingStopped) return;
             if (document.visibilityState !== 'visible') return;
-            if (failStreak >= POLL_MAX_FAILURES) return;
             pollTimer = setTimeout(pollTick, pollDelay());
         }
 
@@ -338,6 +340,7 @@
         function recordPollFailure() {
             failStreak++;
             if (failStreak >= POLL_MAX_FAILURES) {
+                pollingStopped = true;
                 clearTimeout(pollTimer);
                 pollTimer = null;
                 showUpdatesPaused();
@@ -580,9 +583,9 @@
 
             $('supportText').textContent = `Trip ${b.trip_id || ''} · Questions? Call or text us: ${SUPPORT_PHONE}`;
 
-            if (TERMINAL.includes(b.status) && pollTimer) {
-                clearTimeout(pollTimer);
-                pollTimer = null;
+            if (TERMINAL.includes(b.status)) {
+                pollingStopped = true;
+                if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
             }
 
             // Tell the parent page we're rendered so it can slide the sheet
@@ -601,6 +604,7 @@
             try {
                 const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
                 if (res.status === 404) {
+                    pollingStopped = true;
                     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
                     showNoTrip();
                     return;
@@ -679,15 +683,16 @@
             pollTick();
 
             // Hidden tab = zero requests; returning = instant fetch + resume.
-            // Never restarts after a terminal status (poller already stopped)
-            // or after the failure ceiling has permanently paused updates.
+            // The explicit pollingStopped flag (terminal, 404, failure
+            // ceiling) is the single source of stop-state — no inference
+            // from lastBooking, which is null when a 404 precedes any
+            // successful render.
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState !== 'visible') {
                     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
                     return;
                 }
-                if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
-                if (failStreak >= POLL_MAX_FAILURES) return;
+                if (pollingStopped) return;
                 pollTick();
             });
         }
