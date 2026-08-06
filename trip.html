@@ -624,11 +624,15 @@
             $('cancelBtn').classList.toggle('hidden', !isPending);
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
 
-            // Warm human channel once paired: WhatsApp chat with the driver
+            // Warm human channel once paired: WhatsApp chat with the driver.
+            // Hidden when the assigned driver has no valid phone — never
+            // route the passenger to a different person's number; the
+            // LinkMia support line below stays either way.
             const isActive = ['confirmed', 'on_the_way', 'arrived', 'in_progress'].includes(b.status);
+            const showWa = isActive && !!DRIVER.phone;
             const waBtn = $('waBtn');
-            waBtn.classList.toggle('hidden', !isActive);
-            if (isActive) {
+            waBtn.classList.toggle('hidden', !showWa);
+            if (showWa) {
                 const hello = `Hi ${DRIVER.name}! This is ${b.customer_name || 'your passenger'} — trip ${b.trip_id || ''}.`;
                 waBtn.href = `https://wa.me/${DRIVER.phone}?text=${encodeURIComponent(hello)}`;
                 waBtn.textContent = `💬 Message ${DRIVER.name} on WhatsApp`;
@@ -830,12 +834,14 @@
                     return;
                 }
                 const { booking, driver } = await res.json();
-                // Personalization: the assigned driver's real name + phone
-                // (name-only fallback keeps the default support number).
+                // Personalization: the assigned driver's real name + phone.
+                // A KNOWN driver with a missing/malformed phone gets phone
+                // null — the WhatsApp button hides rather than ever routing
+                // the passenger to a different person's number.
                 if (driver && driver.name) {
                     DRIVER.name = driver.name;
                     const digits = String(driver.phone || '').replace(/\D/g, '');
-                    if (digits.length >= 10) DRIVER.phone = digits;
+                    DRIVER.phone = digits.length >= 10 ? digits : null;
                 }
                 failStreak = 0;
                 render(booking);

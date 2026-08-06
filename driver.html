@@ -265,10 +265,12 @@
             const pending = bookings.filter(b => b.status === 'pending');
             const active = bookings.filter(b => ACTIVE_STATUSES.includes(b.status));
 
+            // No Decline: pending requests are shared across drivers, so
+            // declining would kill the offer for everyone. Not accepting IS
+            // the per-driver decline.
             $('pendingList').innerHTML = pending.length
                 ? pending.map(b => rideCard(b, `
                     <div class="btn-row">
-                        <button class="btn-decline" data-action="decline" data-id="${b.id}">Decline</button>
                         <button class="btn-accept" data-action="accept" data-id="${b.id}">Accept ride</button>
                     </div>`,
                     isUrgent(b.pickup_datetime) ? '<span class="urgent-badge">URGENT</span>' : ''
@@ -457,12 +459,7 @@
             return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
         }
 
-        // Checkpoint actions and the status each one produces on success.
-        // A retried request that lands on 409 with exactly this status is a
-        // DUPLICATE SUCCESS (the first request committed, its response was
-        // lost) — not a conflict.
         const CHECKPOINT_ACTIONS = ['on_my_way', 'arrived', 'start_trip'];
-        const RESULTING_STATUS = { on_my_way: 'on_the_way', arrived: 'arrived', start_trip: 'in_progress' };
 
         async function postAction(body) {
             const token = await authToken();
@@ -480,7 +477,6 @@
             if (action === 'payment_collected') {
                 paymentMethod = confirm('Paid by Zelle? (Cancel = cash)') ? 'zelle' : 'cash';
             }
-            if (action === 'decline' && !confirm('Decline this ride?')) return;
 
             // Checkpoint actions capture ONE fresh position inside the tap
             // and send it WITH the status change. The GPS wait is bounded;
@@ -497,8 +493,10 @@
                 result = await postAction(body);
             } catch (e) {
                 // Response never received — the server may have committed
-                // anyway. One retry; the 409 reconciliation below recognizes
-                // a duplicate success.
+                // anyway. One retry; the BACKEND recognizes a verified
+                // duplicate (same status AND same owner) and answers 200
+                // idempotent. The client never interprets a 409 as success —
+                // a non-owner's conflict must never open navigation.
                 try { result = await postAction(body); } catch (e2) { /* result stays null */ }
             }
 
@@ -507,12 +505,9 @@
                 alert('Network error. Please try again.');
             } else if (result.ok) {
                 success = true;
-            } else if (result.status === 409 && RESULTING_STATUS[action] &&
-                       result.data && result.data.currentStatus === RESULTING_STATUS[action]) {
-                success = true; // duplicate success — booking is exactly where this action puts it
             } else if (result.status !== 409) {
                 alert('Action failed. Please try again.');
-            } // other 409: booking moved elsewhere — silent refresh reconciles
+            } // 409: booking moved on or isn't ours — silent refresh reconciles
 
             if (!success) {
                 await refresh();
