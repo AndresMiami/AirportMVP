@@ -153,9 +153,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   // ---------- pre-accept privacy ----------
   listResult = [
     { id: 'p1', status: 'pending', customer_name: 'Pat', customer_phone: '+15551234567',
-      booker_name: 'Booker', booker_phone: '+15559876543', pickup_sign: 'SIGN', notes: 'gate code 1234', price: 80 },
+      booker_name: 'Booker', booker_phone: '+15559876543', pickup_sign: 'SIGN', notes: 'gate code 1234',
+      payment_status: 'unpaid', flight_number: 'AA123', assigned_driver: null, price: 80 },
     { id: 'a1', status: 'on_the_way', customer_name: 'Pat', customer_phone: '+15551234567',
-      notes: 'gate code 1234', price: 80 }
+      notes: 'gate code 1234', payment_status: 'unpaid', flight_number: 'AA123',
+      assigned_driver: 'drv-a', price: 80 }
   ];
   r = await getList('tok-andres');
   check('driver query uses an explicit whitelist, never *', () => {
@@ -164,16 +166,21 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(!capturedListCols.includes('referred_by_host'), 'ambassador internals leaked');
     assert.ok(!capturedListCols.includes('linkmia_commission'), 'commission internals leaked');
     assert.ok(!capturedListCols.includes('customer_email'), 'customer email leaked');
+    assert.ok(!capturedListCols.includes('assigned_driver'), 'assigned_driver should be filter-only');
   });
-  check('pending offers redacted; own accepted rides keep full details', () => {
+  check('pending offers fully redacted; own rides keep operational details', () => {
     const rows = JSON.parse(r.body).bookings;
     const offer = rows.find((x) => x.id === 'p1');
     const mine = rows.find((x) => x.id === 'a1');
-    ['customer_name', 'customer_phone', 'booker_name', 'booker_phone', 'pickup_sign', 'notes']
+    ['customer_name', 'customer_phone', 'booker_name', 'booker_phone', 'pickup_sign', 'notes',
+     'payment_status', 'flight_number']
       .forEach((f) => assert.ok(!(f in offer), f + ' leaked on a pending offer'));
     assert.strictEqual(offer.price, 80); // operational fields survive
     assert.strictEqual(mine.customer_phone, '+15551234567');
     assert.strictEqual(mine.notes, 'gate code 1234');
+    assert.strictEqual(mine.payment_status, 'unpaid');   // assigned ride keeps these
+    assert.strictEqual(mine.flight_number, 'AA123');
+    rows.forEach((x) => assert.ok(!('assigned_driver' in x), 'assigned_driver returned to client'));
   });
   listResult = [];
 

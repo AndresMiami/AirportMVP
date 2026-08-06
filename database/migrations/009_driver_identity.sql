@@ -45,18 +45,22 @@ ALTER TABLE drivers
 --   WHERE status IN ('confirmed','on_the_way','arrived','in_progress')
 --     AND assigned_driver IS NULL;
 --
--- Safety: the block below REFUSES to run against a UUID that is not an
--- existing drivers row (and the unreplaced placeholder is not a valid
--- UUID, so forgetting to paste fails immediately, touching nothing).
--- It reports how many rides it assigned; safe to re-run (matches only
--- still-unassigned rows).
+-- Safety: this whole file runs cleanly as-is — STEP 1 completes and the
+-- cutover below SKIPS with a NOTICE until you replace the NULL with a
+-- real driver UUID. The block refuses any UUID that is not an existing
+-- drivers row, reports how many rides it assigned, and is safe to re-run
+-- (matches only still-unassigned rows).
 -- ============================================================
 
 DO $$
 DECLARE
-  andres_driver UUID := '<andres-driver-row-uuid>';  -- paste from: SELECT id, name FROM drivers;
+  andres_driver UUID := NULL;  -- REPLACE with Andres's driver UUID from: SELECT id, name FROM drivers;
   assigned_count INTEGER;
 BEGIN
+  IF andres_driver IS NULL THEN
+    RAISE NOTICE 'Cutover SKIPPED: replace the NULL above with Andres''s driver UUID and re-run this block.';
+    RETURN;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM drivers WHERE id = andres_driver) THEN
     RAISE EXCEPTION 'No drivers row with id % — paste the correct driver UUID', andres_driver;
   END IF;

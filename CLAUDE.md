@@ -48,8 +48,9 @@ verified checkpoint locations all live in the web app backed by Supabase.
   status POST; no continuous tracking (a mobile browser can't broadcast
   while Google Maps is foreground). Location permission is first requested
   at On my way, never at Accept. Same-tab Maps handoffs only after status
-  success; lost responses retry once with 409-duplicate-success
-  reconciliation.
+  success; lost responses retry once, and only the BACKEND declares a
+  verified idempotent duplicate (status + owner both match) — the client
+  never treats a 409 as success.
 - `login.html` — passenger email+password (self-service signUp). Drivers ARE
   admin-provisioned (CreditEngine pattern, migration 009) — no signup ever.
 - `admin.html` — legacy dashboard reading Supabase directly with anon key.
@@ -164,6 +165,11 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   bottom nav, payout-primary ride cards, Settings, dedicated manifest +
   icons, SW privacy fixes (networkOnly for all /api/, no-store headers,
   runtime-cache purge), Home-Screen install flow.
+- Approved, NOT yet built: "Release ride" — a driver returns an accepted
+  ride to the shared pool (with admin notification) instead of any
+  driver-side decline; and invitation-only driver onboarding — emailed
+  invite / password-set flow replacing admin-set passwords. Record only;
+  implement post-RLS.
 - Two-ETA model (Codex-outlined, follows identity) — booking-time estimate
   must use the scheduled pickup as departure time (Railway proxy currently
   uses `now` and its route cache ignores time-of-day); fresh driver→pickup

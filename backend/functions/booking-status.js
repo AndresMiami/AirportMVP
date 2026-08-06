@@ -8,7 +8,9 @@ const { createClient } = require('@supabase/supabase-js');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Never expose phone numbers or internal fields to the public status page
+// Whitelisted booking fields exclude private contact data and internal ids.
+// The assigned driver's PUBLIC contact (name + phone) is intentionally
+// returned separately for the pairing message and WhatsApp button.
 const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, driver_lat, driver_lng, driver_location_at';
 
 exports.handler = async (event) => {
