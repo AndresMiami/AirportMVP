@@ -273,6 +273,7 @@
         // the booking's assigned_driver record instead.
         const DRIVER = { name: 'Andres', phone: '17865093955' };
         const POLL_MS = 7000;
+        const POLL_MAX_FAILURES = 10;
         const TERMINAL = ['completed', 'cancelled', 'declined'];
         const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
         const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
@@ -307,9 +308,50 @@
         const params = new URLSearchParams(location.search);
         const bookingId = params.get('id') || localStorage.getItem('lm_last_trip_id');
         const isEmbedded = params.get('embed') === '1';
-        let pollTimer = null;
+        let pollTimer = null; // setTimeout id — self-scheduling, driver-style
+        let failStreak = 0;   // consecutive poll failures; reset on success
         let readySignalSent = false;
         let lastBooking = null;
+
+        // Mirrors the driver page's backoff pattern: exponential delay on
+        // consecutive failures, permanent stop at the ceiling.
+        function pollDelay() {
+            if (failStreak > 0) {
+                return Math.min(POLL_MS * Math.pow(2, failStreak - 1), 120000);
+            }
+            return POLL_MS;
+        }
+
+        function schedulePoll() {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+            if (document.visibilityState !== 'visible') return;
+            if (failStreak >= POLL_MAX_FAILURES) return;
+            pollTimer = setTimeout(pollTick, pollDelay());
+        }
+
+        async function pollTick() {
+            await fetchStatus();
+            schedulePoll();
+        }
+
+        function recordPollFailure() {
+            failStreak++;
+            if (failStreak >= POLL_MAX_FAILURES) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+                showUpdatesPaused();
+            }
+        }
+
+        function showUpdatesPaused() {
+            const msg = 'Updates paused — we\'ll text you.';
+            if ($('tripView').classList.contains('hidden')) {
+                $('loadingMsg').textContent = msg;
+            } else {
+                $('statusSub').textContent = msg;
+            }
+        }
 
         const $ = (id) => document.getElementById(id);
 
@@ -539,7 +581,7 @@
             $('supportText').textContent = `Trip ${b.trip_id || ''} · Questions? Call or text us: ${SUPPORT_PHONE}`;
 
             if (TERMINAL.includes(b.status) && pollTimer) {
-                clearInterval(pollTimer);
+                clearTimeout(pollTimer);
                 pollTimer = null;
             }
 
@@ -559,15 +601,17 @@
             try {
                 const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
                 if (res.status === 404) {
-                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
                     showNoTrip();
                     return;
                 }
-                if (!res.ok) return; // transient — keep polling
+                if (!res.ok) { recordPollFailure(); return; } // backoff, stop at ceiling
                 const { booking } = await res.json();
+                failStreak = 0; // any success fully resets the backoff
                 render(booking);
             } catch (e) {
                 console.warn('Status fetch failed:', e);
+                recordPollFailure();
             }
         }
 
@@ -632,19 +676,19 @@
         if (!bookingId) {
             showNoTrip();
         } else {
-            fetchStatus();
-            pollTimer = setInterval(fetchStatus, POLL_MS);
+            pollTick();
 
             // Hidden tab = zero requests; returning = instant fetch + resume.
-            // Never restarts after a terminal status (poller already stopped).
+            // Never restarts after a terminal status (poller already stopped)
+            // or after the failure ceiling has permanently paused updates.
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState !== 'visible') {
-                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
                     return;
                 }
                 if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
-                fetchStatus();
-                if (!pollTimer) pollTimer = setInterval(fetchStatus, POLL_MS);
+                if (failStreak >= POLL_MAX_FAILURES) return;
+                pollTick();
             });
         }
     </script>
