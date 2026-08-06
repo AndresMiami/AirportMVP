@@ -34,6 +34,7 @@ let lastUpdate = null;         // captured update payload
 let lastFilters = null;        // captured eq/in filters on the update chain
 let lastIsFilter = null;       // captured .is() on the update chain
 let capturedListOr = null;     // captured .or() on the list query
+let capturedListCols = null;   // captured column list on select()
 let updateResult = { data: [], error: null };
 let listResult = [];
 let currentBookingResult = { data: null, error: { message: 'none' } };
@@ -74,7 +75,8 @@ const supabaseMock = {
           };
           return chain;
         },
-        select() {
+        select(cols) {
+          capturedListCols = cols;
           const chain = {
             or(expr) { capturedListOr = expr; return chain; },
             order() { return Promise.resolve({ data: listResult, error: null }); },
@@ -147,6 +149,33 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(capturedListOr,
       'and(status.in.(confirmed,on_the_way,arrived,in_progress),assigned_driver.eq.drv-b)');
   });
+
+  // ---------- pre-accept privacy ----------
+  listResult = [
+    { id: 'p1', status: 'pending', customer_name: 'Pat', customer_phone: '+15551234567',
+      booker_name: 'Booker', booker_phone: '+15559876543', pickup_sign: 'SIGN', notes: 'gate code 1234', price: 80 },
+    { id: 'a1', status: 'on_the_way', customer_name: 'Pat', customer_phone: '+15551234567',
+      notes: 'gate code 1234', price: 80 }
+  ];
+  r = await getList('tok-andres');
+  check('driver query uses an explicit whitelist, never *', () => {
+    assert.ok(typeof capturedListCols === 'string' && capturedListCols !== '*');
+    assert.ok(!capturedListCols.includes('host_commission'), 'commission internals leaked');
+    assert.ok(!capturedListCols.includes('referred_by_host'), 'ambassador internals leaked');
+    assert.ok(!capturedListCols.includes('linkmia_commission'), 'commission internals leaked');
+    assert.ok(!capturedListCols.includes('customer_email'), 'customer email leaked');
+  });
+  check('pending offers redacted; own accepted rides keep full details', () => {
+    const rows = JSON.parse(r.body).bookings;
+    const offer = rows.find((x) => x.id === 'p1');
+    const mine = rows.find((x) => x.id === 'a1');
+    ['customer_name', 'customer_phone', 'booker_name', 'booker_phone', 'pickup_sign', 'notes']
+      .forEach((f) => assert.ok(!(f in offer), f + ' leaked on a pending offer'));
+    assert.strictEqual(offer.price, 80); // operational fields survive
+    assert.strictEqual(mine.customer_phone, '+15551234567');
+    assert.strictEqual(mine.notes, 'gate code 1234');
+  });
+  listResult = [];
 
   // ---------- accept ----------
   lastUpdate = null; lastIsFilter = null; lastFilters = null;

@@ -39,10 +39,33 @@ ALTER TABLE drivers
 -- no claim-on-first-touch), so any booking mid-lifecycle at deploy time
 -- must be assigned here, once, deliberately. Identify Andres by his exact
 -- driver-row UUID (never by name — names are not unique).
--- Backfills ONLY unassigned, currently-active rides.
+--
+-- Preview what the cutover will touch first:
+--   SELECT id, trip_id, status, pickup_datetime FROM bookings
+--   WHERE status IN ('confirmed','on_the_way','arrived','in_progress')
+--     AND assigned_driver IS NULL;
+--
+-- Safety: the block below REFUSES to run against a UUID that is not an
+-- existing drivers row (and the unreplaced placeholder is not a valid
+-- UUID, so forgetting to paste fails immediately, touching nothing).
+-- It reports how many rides it assigned; safe to re-run (matches only
+-- still-unassigned rows).
 -- ============================================================
 
-UPDATE bookings
-SET assigned_driver = '<andres-driver-row-uuid>'  -- paste from: SELECT id, name FROM drivers;
-WHERE status IN ('confirmed', 'on_the_way', 'arrived', 'in_progress')
-  AND assigned_driver IS NULL;
+DO $$
+DECLARE
+  andres_driver UUID := '<andres-driver-row-uuid>';  -- paste from: SELECT id, name FROM drivers;
+  assigned_count INTEGER;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM drivers WHERE id = andres_driver) THEN
+    RAISE EXCEPTION 'No drivers row with id % — paste the correct driver UUID', andres_driver;
+  END IF;
+
+  UPDATE bookings
+  SET assigned_driver = andres_driver
+  WHERE status IN ('confirmed', 'on_the_way', 'arrived', 'in_progress')
+    AND assigned_driver IS NULL;
+
+  GET DIAGNOSTICS assigned_count = ROW_COUNT;
+  RAISE NOTICE 'Cutover: assigned % legacy active ride(s) to driver %', assigned_count, andres_driver;
+END $$;

@@ -13,6 +13,14 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+// What a driver may ever see. Never `*`: no ambassador/commission internals
+// (referred_by_host, host_commission, linkmia_commission), no customer
+// email, no other drivers' data.
+const DRIVER_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, dropoff_location, vehicle_type, vehicle_name, passengers, bags, price, driver_payout, payment_status, flight_number, duration_minutes, customer_name, customer_phone, booker_name, booker_phone, pickup_sign, notes, assigned_driver';
+
+// Additionally hidden on UNACCEPTED (pending) offers — revealed at accept.
+const PENDING_PRIVATE_FIELDS = ['customer_name', 'customer_phone', 'booker_name', 'booker_phone', 'pickup_sign', 'notes'];
+
 async function requireDriver(event, supabaseUrl, anonKey, db) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -72,7 +80,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from('bookings')
-      .select('*')
+      .select(DRIVER_FIELDS)
       .or(visibility)
       .order('pickup_datetime', { ascending: true });
 
@@ -81,11 +89,22 @@ exports.handler = async (event) => {
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to load bookings' }) };
     }
 
+    // Pre-accept privacy: a shared pending request is an OFFER, not a
+    // relationship — passenger identity, contact, and ride notes are
+    // revealed only to the driver who accepts. Strip them from pending
+    // rows before they leave the server.
+    const bookings = (data || []).map((b) => {
+      if (b.status !== 'pending') return b;
+      const offer = { ...b };
+      for (const f of PENDING_PRIVATE_FIELDS) delete offer[f];
+      return offer;
+    });
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        bookings: data || [],
+        bookings,
         driver: { id: auth.driver.id, name: auth.driver.name, status: auth.driver.status }
       })
     };
