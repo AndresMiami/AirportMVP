@@ -16,6 +16,7 @@ const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'private, no-store',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
   };

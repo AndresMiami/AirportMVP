@@ -77,6 +77,19 @@
   to = "/trip.html"
   status = 200
 
+# Legacy admin dashboard retired (Phase B RLS lockdown) — explicit 404s so
+# the catch-all below can never serve the booking page at these paths.
+# Netlify documents custom 404 responses; 410 is not a documented option.
+[[redirects]]
+  from = "/admin"
+  to = "/admin-retired.html"
+  status = 404
+
+[[redirects]]
+  from = "/admin.html"
+  to = "/admin-retired.html"
+  status = 404
+
 # Redirect root to landing page
 [[redirects]]
   from = "/"

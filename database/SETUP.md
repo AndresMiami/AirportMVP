@@ -1,4 +1,4 @@
-# LinkMia Database & Admin Dashboard Setup
+# LinkMia Database Setup
 
 ## Quick Start (15 minutes)
 
@@ -47,16 +47,15 @@ VALUES
     ('Cruise Port Lady', '+1-555-234-5678', 'repeat', 'Regular cruise pickup');
 ```
 
-### Step 5: Access the Admin Dashboard
+### Step 5: Administration (LEGACY SECTION — admin.html is RETIRED)
 
-1. Deploy your site to Netlify (if not already)
-2. Go to: `https://your-site.netlify.app/admin.html`
-3. Or locally: Open `admin.html` in your browser
+The legacy `admin.html` dashboard was retired in the Phase B RLS lockdown
+(it read production tables directly with the public anon key). `/admin`
+now returns a 404 retirement notice.
 
-The dashboard will:
-- Show demo data if tables are empty
-- Auto-sync with Supabase once you add real data
-- Update in real-time when bookings change
+Administration happens in the **Supabase Dashboard** (Table Editor + SQL
+Editor) until the LinkMia admin portal ships. All application data access
+flows through the Netlify functions' service key.
 
 ---
 
@@ -73,50 +72,14 @@ The dashboard will:
 
 ---
 
-## Admin Dashboard Features
-
-### Today Tab
-- Shows all bookings for today
-- Quick status overview
-
-### All Bookings Tab
-- Complete booking history
-- Click any booking to edit status, assign driver, update price
-
-### Drivers Tab
-- Your driver network
-- See availability status
-
-### Customers Tab
-- Customer database
-- VIP and repeat customer tracking
-
-### Revenue Tab
-- Total revenue and commission
-- Monthly breakdown
-
-### Quick Add (+)
-- Floating button to add bookings fast
-- Use this when you get a WhatsApp request
-
----
-
-## Workflow: WhatsApp → Dashboard
+## Workflow: WhatsApp → Dashboard (LEGACY — admin.html retired)
 
 1. **Guest texts you** on WhatsApp
 2. **You respond** with quick reply template
-3. **Tap the + button** on admin dashboard
-4. **Enter booking details** (30 seconds)
-5. **Assign yourself or another driver**
-6. **Send confirmation** via WhatsApp
-
----
-
-## Real-Time Updates
-
-The dashboard uses Supabase real-time subscriptions. When a booking status changes:
-- Dashboard updates automatically
-- No need to refresh
+3. **Add the booking** in the Supabase Table Editor (or have the guest
+   book at linkmia.com — the normal path)
+4. **Assign the driver** via the booking's `assigned_driver` column
+5. **Send confirmation** via WhatsApp
 
 ---
 
@@ -125,19 +88,12 @@ The dashboard uses Supabase real-time subscriptions. When a booking status chang
 ### "No rows returned" when running schema
 This is normal! It means the tables were created successfully.
 
-### Dashboard shows demo data
-The dashboard falls back to demo data if:
-- Tables don't exist yet
-- Tables are empty
-- Connection to Supabase fails
-
-Once you add real data, it will show that instead.
-
 ### Can't see my bookings
-Check that:
-1. Tables were created (check Table Editor in Supabase)
-2. Your Supabase URL and key are correct in the dashboard
-3. RLS policies are allowing access
+Check in the Supabase **Table Editor** (which uses your dashboard login,
+not the locked-down public keys). Note: since migration 010 the public
+anon key can read NOTHING by design — the app reads data only through
+the Netlify functions' service key. A permission error from a client
+key is the lockdown working, not a bug.
 
 ### How to reset and start fresh
 ```sql
@@ -170,5 +126,5 @@ DROP TABLE IF EXISTS customers CASCADE;
 ├── linkmia-schema.sql    # Full database schema
 └── SETUP.md              # This file
 
-/admin.html               # Admin dashboard (deploy to Netlify)
+/admin-retired.html       # Retirement notice (legacy admin.html removed)
 ```

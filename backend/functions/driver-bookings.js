@@ -47,6 +47,7 @@ async function requireDriver(event, supabaseUrl, anonKey, db) {
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'private, no-store',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, OPTIONS'
   };

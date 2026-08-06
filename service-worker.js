@@ -3,8 +3,10 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'linkmia-v1.3.5';
-const RUNTIME_CACHE = 'linkmia-runtime';
+const CACHE_NAME = 'linkmia-v1.3.6';
+// Versioned so activation provably deletes older runtime caches — including
+// any API responses stored by pre-lockdown service workers.
+const RUNTIME_CACHE = 'linkmia-runtime-v2';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
@@ -26,7 +28,9 @@ const STATIC_CACHE_URLS = [
   '/images/vip-sprinter.jpg'
 ];
 
-// Cache strategies
+// Cache strategies — STATIC ASSETS ONLY. Data APIs are never intercepted
+// at all (see the fetch handler): no /api/*, no /.netlify/functions/*, no
+// Railway proxy, no cross-origin data API may ever enter Cache Storage.
 const CACHE_STRATEGIES = {
   cacheFirst: [
     /\.(?:png|jpg|jpeg|svg|gif|webp)$/,
@@ -35,14 +39,7 @@ const CACHE_STRATEGIES = {
   ],
   networkFirst: [
     /\.(?:css|js)$/,
-    /api\//,
-    /\.json$/,
-    /maps\.googleapis\.com/
-  ],
-  networkOnly: [
-    /\/api\/booking/,
-    /\/api\/payment/,
-    /stripe\.com/
+    /\.json$/
   ]
 };
 
@@ -81,7 +78,11 @@ self.addEventListener('activate', (event) => {
         return Promise.all(
           cacheNames
             .filter((cacheName) => {
-              return (cacheName.startsWith('linkmia-') || cacheName.startsWith('luxeride-')) && cacheName !== CACHE_NAME;
+              // Deletes every older cache — including the unversioned
+              // 'linkmia-runtime' where pre-lockdown workers stored API
+              // responses on existing installs.
+              return (cacheName.startsWith('linkmia-') || cacheName.startsWith('luxeride-'))
+                && cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE;
             })
             .map((cacheName) => {
               console.log('[Service Worker] Deleting old cache:', cacheName);
@@ -112,14 +113,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip cross-origin requests (except allowed ones)
+  // PRIVACY: never intercept data APIs. Same-origin /api/* and
+  // /.netlify/functions/* responses carry booking, profile, and driver
+  // data — they must never enter Cache Storage, so the browser talks to
+  // the network directly with no service-worker involvement.
+  if (url.origin === self.location.origin &&
+      (url.pathname.startsWith('/api/') || url.pathname.startsWith('/.netlify/functions/'))) {
+    return;
+  }
+
+  // Cross-origin: only static font assets are ever intercepted/cached.
+  // Everything else (the Railway maps/address proxy — whose URLs contain
+  // typed addresses — Google Maps runtime, Stripe, any data API) is left
+  // entirely to the browser.
   const allowedOrigins = [
     'fonts.googleapis.com',
-    'fonts.gstatic.com',
-    'maps.googleapis.com',
-    'reliable-warmth-production-d382.up.railway.app'
+    'fonts.gstatic.com'
   ];
-  
+
   if (url.origin !== self.location.origin && !allowedOrigins.some(origin => url.hostname.includes(origin))) {
     return;
   }
@@ -146,14 +157,7 @@ self.addEventListener('fetch', (event) => {
 // Determine caching strategy based on request
 function getStrategy(request) {
   const url = request.url;
-  
-  // Check network-only patterns
-  for (const pattern of CACHE_STRATEGIES.networkOnly) {
-    if (pattern.test(url)) {
-      return 'network-only';
-    }
-  }
-  
+
   // Check network-first patterns
   for (const pattern of CACHE_STRATEGIES.networkFirst) {
     if (pattern.test(url)) {
@@ -179,8 +183,6 @@ async function handleRequest(request, strategy) {
       return cacheFirst(request);
     case 'network-first':
       return networkFirst(request);
-    case 'network-only':
-      return networkOnly(request);
     default:
       return networkFirst(request);
   }
@@ -222,11 +224,6 @@ async function networkFirst(request) {
     }
     throw error;
   }
-}
-
-// Network-only strategy
-async function networkOnly(request) {
-  return fetch(request);
 }
 
 // Handle background sync for offline bookings

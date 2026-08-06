@@ -10,7 +10,10 @@ verified checkpoint locations all live in the web app backed by Supabase.
   `backend/functions/`, routes in `netlify.toml`. Deploys from `main`.
 - **Database**: Supabase project `qvtqqggtpxesfcmpftej` (paid org). Single
   source of truth: `bookings` is the dispatch table. Anon key is public
-  (hardcoded in `supabase.js`); the service key lives ONLY in Netlify env.
+  (hardcoded in `supabase.js`) but AUTH-ONLY since the RLS lockdown
+  (migration 010): default-deny policies + zero client-role grants on all
+  tables and views. ALL data access flows through `backend/functions/`
+  with the service key (Netlify env only).
 - **Railway** (`reliable-warmth-production-d382.up.railway.app`): Google Maps
   proxy ONLY (`backend/api-proxy/server.js`). No booking logic lives there.
 - **Telegram**: send-only "bookkeeper" — new-request doorbell, trip-started
@@ -53,7 +56,9 @@ verified checkpoint locations all live in the web app backed by Supabase.
   never treats a 409 as success.
 - `login.html` — passenger email+password (self-service signUp). Drivers ARE
   admin-provisioned (CreditEngine pattern, migration 009) — no signup ever.
-- `admin.html` — legacy dashboard reading Supabase directly with anon key.
+- `admin.html` — RETIRED (Phase B): `/admin` + `/admin.html` 404 to a
+  static notice. Supabase Dashboard is the interim admin tool until the
+  LinkMia admin portal ships.
 
 ## Booking lifecycle
 
@@ -107,7 +112,7 @@ captures nothing.
 ## Env vars (Netlify)
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY` (secret),
-`DRIVER_PASSCODE`, `TELEGRAM_BOT_TOKEN` (secret), `ADMIN_TELEGRAM_CHAT_ID`,
+`TELEGRAM_BOT_TOKEN` (secret), `ADMIN_TELEGRAM_CHAT_ID`,
 `GOOGLE_MAPS_API_KEY`, Stripe keys (Stripe currently disabled,
 `REQUIRE_PAYMENT=false` in indexMVP; payment = cash/Zelle to driver).
 Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
@@ -147,7 +152,14 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    bypass the functions/service-key boundary). Long-term push channel is
    SMS milestone notifications (Blacklane pattern), not sockets — WhatsApp
    stays a human-only conversation link (see decision 2), never automated.
-9. Driver identity (PR #49): admin-provisioned Supabase accounts only,
+9. RLS lockdown (Phase B, migration 010): seven tables default-deny with
+   zero client-role grants (PUBLIC included), six reporting views forced
+   to security_invoker, postgres-creator default privileges stripped, and
+   the service worker never intercepts any data API (no /api/*, no
+   /.netlify/functions/*, no Railway; private, no-store on every function).
+   This is a safe FOUNDATION for Realtime — not an unblock: Realtime would
+   still need deliberately scoped SELECT grants + per-row policies.
+10. Driver identity (PR #49): admin-provisioned Supabase accounts only,
    `assigned_driver` stamped at Accept ONLY (unassigned requests, active
    drivers; busy = finish own rides, no new accepts), exact-match
    ownership on all later actions, idempotent success declared ONLY by
@@ -157,14 +169,13 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 
 ## Known gaps / next up
 
-- Phase B: RLS lockdown — IMMEDIATELY after PR #49 field-tests clean,
-  before any real second driver and before two-ETA (allow-all policies
-  still exist; auth alone is not the security boundary). Unblocks
-  Supabase Realtime afterwards.
+- Phase B RLS lockdown SHIPPED as code — run `database/migrations/`
+  010_rls_lockdown.sql (atomic, self-verifying, unedited) right after
+  merging, then security probes + full smoke test.
 - Driver PWA (plan approved): mobile-first LinkMia Driver app shell —
   bottom nav, payout-primary ride cards, Settings, dedicated manifest +
-  icons, SW privacy fixes (networkOnly for all /api/, no-store headers,
-  runtime-cache purge), Home-Screen install flow. My Rides keeps
+  icons (the SW/API-cache privacy work already SHIPPED in Phase B),
+  Home-Screen install flow. My Rides keeps
   COMPLETED rides visible (last 7 days, own rides only) as the driver's
   work record — with passenger contact/notes REDACTED after completion
   (Andres, Aug 2026: contact exists only while the ride is live, same
@@ -188,10 +199,9 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   policies before persisting ETAs. Rounded, timestamped snapshots.
 - Ambassador dashboard (mock approved; all queries exist as views).
 - Pending-request timeout rule (the trip page already pauses pending
-  displays at 10 min — the server-side rule is still open); RLS lockdown
-  (anon key currently open via admin.html); SMS milestone notifications
-  with return links (WhatsApp stays human-only); in-app chat + web push
-  (parked).
+  displays at 10 min — the server-side rule is still open); SMS milestone
+  notifications with return links (WhatsApp stays human-only); in-app
+  chat + web push (parked).
 - Collaboration pattern: Andres relays between Claude and a second AI
   reviewer (Codex); diagnostics and plans get reviewed before
   implementation is authorized. Respect that gate.

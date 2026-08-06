@@ -132,6 +132,8 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   r = await getList('tok-andres');
   check('active: shared unassigned pending + OWN active rides only', () => {
     assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(r.headers['Cache-Control'], 'private, no-store',
+      'driver data must never be browser/proxy-cacheable');
     assert.strictEqual(capturedListOr,
       'and(status.eq.pending,assigned_driver.is.null),and(status.in.(confirmed,on_the_way,arrived,in_progress),assigned_driver.eq.drv-a)');
     assert.deepStrictEqual(JSON.parse(r.body).driver, { id: 'drv-a', name: 'Andres', status: 'active' });
@@ -252,6 +254,8 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     const body = JSON.parse(r.body);
     assert.deepStrictEqual(body.driver, { name: 'Carlos M.', phone: '+13055551212' });
     assert.ok(!('assigned_driver' in body.booking));
+    assert.strictEqual(r.headers['Cache-Control'], 'private, no-store',
+      'passenger booking data must never be browser/proxy-cacheable');
   });
   DRIVERS_BY_ID['drv-c'].phone = null;
   // fresh fixture: the handler deletes assigned_driver from the row object
