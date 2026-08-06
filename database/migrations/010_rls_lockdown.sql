@@ -208,7 +208,7 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 6h: no client role can EXECUTE any public function
+  -- 6g: no client role can EXECUTE any public function
   -- (has_function_privilege sees PUBLIC-inherited grants too)
   FOR rec IN
     SELECT p.oid AS foid, p.proname FROM pg_proc p
@@ -223,7 +223,7 @@ BEGIN
     END LOOP;
   END LOOP;
 
-  -- 6i: no COLUMN-level privileges remain for PUBLIC, anon, or
+  -- 6h: no COLUMN-level privileges remain for PUBLIC, anon, or
   -- authenticated on any public relation
   IF EXISTS (
     SELECT 1 FROM pg_attribute att
@@ -237,17 +237,33 @@ BEGIN
     RAISE EXCEPTION 'ASSERTION FAILED: column-level client privileges remain';
   END IF;
 
-  -- 6g: postgres-creator default ACLs in public no longer grant to client
-  -- roles (supabase_admin's default ACL is out of postgres's authority —
-  -- see the documented limitation in the header)
+  -- 6i: postgres-creator SCHEMA-scoped default ACLs in public no longer
+  -- grant to PUBLIC or the client roles (supabase_admin's default ACL is
+  -- out of postgres's authority — see the documented limitation above)
   IF EXISTS (
     SELECT 1 FROM pg_default_acl d
     CROSS JOIN LATERAL aclexplode(d.defaclacl) a
     WHERE d.defaclnamespace = 'public'::regnamespace
       AND pg_get_userbyid(d.defaclrole) = 'postgres'
-      AND a.grantee::regrole::text IN ('anon','authenticated')
+      AND (a.grantee = 0 OR a.grantee::regrole::text IN ('anon','authenticated'))
   ) THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: postgres default privileges still grant to client roles';
+    RAISE EXCEPTION 'ASSERTION FAILED: postgres default privileges still grant to PUBLIC or client roles';
+  END IF;
+
+  -- 6j: the GLOBAL (namespace 0) function default for creator postgres
+  -- must exist and must no longer grant EXECUTE to PUBLIC — this is what
+  -- verifies the no-IN-SCHEMA revoke against PostgreSQL's built-in
+  -- default. An absent row means the built-in PUBLIC EXECUTE still applies.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_default_acl d
+    WHERE d.defaclrole = 'postgres'::regrole
+      AND d.defaclnamespace = 0
+      AND d.defaclobjtype = 'f'
+      AND NOT EXISTS (
+        SELECT 1 FROM aclexplode(d.defaclacl) a WHERE a.grantee = 0
+      )
+  ) THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: global function default still grants EXECUTE to PUBLIC';
   END IF;
 
   RAISE NOTICE 'RLS LOCKDOWN VERIFIED: 7 tables default-deny with RLS on; no client or PUBLIC privilege of any type (table, column, sequence, function) on any public object; 6 invoker views; postgres default privileges stripped incl. the global function default.';
@@ -264,7 +280,7 @@ COMMIT;
 -- BEGIN;
 -- GRANT ALL ON ALL TABLES    IN SCHEMA public TO anon, authenticated;
 -- GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
--- GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated;
+-- GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO PUBLIC, anon, authenticated;
 -- CREATE POLICY "Allow all access to customers"    ON customers    FOR ALL USING (true);
 -- CREATE POLICY "Allow all access to drivers"      ON drivers      FOR ALL USING (true);
 -- CREATE POLICY "Allow all access to bookings"     ON bookings     FOR ALL USING (true);
