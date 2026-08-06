@@ -1,5 +1,12 @@
-// Driver actions on a booking (header x-driver-secret required).
+// Driver actions on a booking (Authorization: Bearer <supabase session JWT>).
 //   POST /api/update-booking-status {bookingId, action, paymentMethod?, lat?, lng?}
+//
+// Identity: CreditEngine requireDriver pattern — JWT verified with the
+// anon-key client, then a matching ACTIVE drivers row is required. Accept
+// stamps assigned_driver atomically with the transition (the existing
+// status race guard means only one driver can ever win a pending ride);
+// every later action on the ride is restricted to its assigned driver
+// (legacy rows with a null assignment are claimed on first touch).
 // Transitions are enforced server-side; a stale click (booking already moved
 // on) matches 0 rows and returns 409 instead of clobbering state.
 //
@@ -23,6 +30,26 @@ function validCoords(lat, lng) {
          typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180;
 }
 
+async function requireDriver(event, supabaseUrl, anonKey, db) {
+  const authHeader = event.headers.authorization || event.headers.Authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (!token) return { status: 401, error: 'Not authenticated' };
+
+  const authClient = createClient(supabaseUrl, anonKey);
+  const { data: userData, error: userError } = await authClient.auth.getUser(token);
+  if (userError || !userData?.user) return { status: 401, error: 'Invalid session' };
+
+  const { data: driver, error: driverError } = await db
+    .from('drivers')
+    .select('id, name, phone, status')
+    .eq('user_id', userData.user.id)
+    .single();
+  if (driverError || !driver) return { status: 403, error: 'No driver account' };
+  if (driver.status !== 'active') return { status: 403, error: 'Driver account inactive' };
+
+  return { driver };
+}
+
 const TRANSITIONS = {
   accept:     { from: ['pending'],                              set: { status: 'confirmed' } },
   decline:    { from: ['pending'],                              set: { status: 'declined' } },
@@ -38,7 +65,7 @@ const PAYMENT_ALLOWED_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_prog
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, x-driver-secret',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
@@ -50,19 +77,20 @@ exports.handler = async (event) => {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
-  const passcode = process.env.DRIVER_PASSCODE;
-  const provided = event.headers['x-driver-secret'];
-  if (!passcode || !provided || provided !== passcode) {
-    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
-
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
-  if (!supabaseUrl || !supabaseServiceKey) {
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseServiceKey || !anonKey) {
     console.error('❌ Missing Supabase configuration');
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  const auth = await requireDriver(event, supabaseUrl, anonKey, supabase);
+  if (!auth.driver) {
+    return { statusCode: auth.status, headers, body: JSON.stringify({ error: auth.error }) };
+  }
+  const driver = auth.driver;
 
   try {
     const { bookingId, action, paymentMethod, lat, lng } = JSON.parse(event.body || '{}');
@@ -83,6 +111,11 @@ exports.handler = async (event) => {
     } else if (TRANSITIONS[action]) {
       fromStatuses = TRANSITIONS[action].from;
       updates = { ...TRANSITIONS[action].set };
+      // Accept claims the ride; checkpoint/complete actions re-stamp it
+      // (claiming legacy rows whose assignment predates driver identity).
+      if (action !== 'decline') {
+        updates.assigned_driver = driver.id;
+      }
       if (CHECKPOINT_ACTIONS.includes(action)) {
         const fresh = validCoords(lat, lng);
         updates.driver_lat = fresh ? lat : null;
@@ -103,12 +136,18 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unknown action' }) };
     }
 
-    const { data, error } = await supabase
+    // Ownership: anything beyond accept/decline may only touch a ride that
+    // is this driver's (or unassigned legacy). Enforced in the same guarded
+    // UPDATE as the status race check — a non-owner matches 0 rows -> 409.
+    let query = supabase
       .from('bookings')
       .update(updates)
       .eq('id', bookingId)
-      .in('status', fromStatuses)
-      .select();
+      .in('status', fromStatuses);
+    if (action !== 'accept' && action !== 'decline') {
+      query = query.or(`assigned_driver.eq.${driver.id},assigned_driver.is.null`);
+    }
+    const { data, error } = await query.select();
 
     if (error) {
       console.error(`❌ ${action} failed:`, error);

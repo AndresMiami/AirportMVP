@@ -43,7 +43,7 @@ exports.handler = async (event) => {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select(PASSENGER_FIELDS)
+        .select(PASSENGER_FIELDS + ', assigned_driver')
         .eq('id', id)
         .single();
 
@@ -51,7 +51,21 @@ exports.handler = async (event) => {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
       }
 
-      return { statusCode: 200, headers, body: JSON.stringify({ booking: data }) };
+      // Personalization: resolve the assigned driver's public identity
+      // (name + phone only — never internal fields). Absent or failed
+      // lookup -> no driver key; the page falls back to its defaults.
+      let driverInfo;
+      if (data.assigned_driver) {
+        const { data: drv } = await supabase
+          .from('drivers')
+          .select('name, phone')
+          .eq('id', data.assigned_driver)
+          .single();
+        if (drv && drv.name) driverInfo = { name: drv.name, phone: drv.phone || '' };
+      }
+      delete data.assigned_driver; // internal id — not for the public payload
+
+      return { statusCode: 200, headers, body: JSON.stringify({ booking: data, driver: driverInfo }) };
     }
 
     if (event.httpMethod === 'POST') {
