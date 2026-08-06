@@ -1,11 +1,14 @@
 // Driver-facing booking list.
 //   GET /api/driver-bookings  (Authorization: Bearer <supabase session JWT>)
-// Returns all actionable bookings: pending requests + active rides, plus
-// the authenticated driver's identity for the page header.
+// Visibility by driver status:
+//   active -> shared UNASSIGNED pending requests + this driver's own active
+//             rides ("My rides" never contains another driver's work)
+//   busy   -> own active rides ONLY (finish current work, no new offers)
+//   inactive/other -> rejected by requireDriver
 // Also serves as the login-verification endpoint for the driver page gate.
 //
 // Auth = CreditEngine requireDriver pattern: verify the caller's JWT with
-// the anon-key client, then require a matching ACTIVE drivers row
+// the anon-key client, then require a matching drivers row
 // (drivers.user_id -> auth.users). Drivers are admin-provisioned only.
 
 const { createClient } = require('@supabase/supabase-js');
@@ -25,7 +28,9 @@ async function requireDriver(event, supabaseUrl, anonKey, db) {
     .eq('user_id', userData.user.id)
     .single();
   if (driverError || !driver) return { status: 403, error: 'No driver account' };
-  if (driver.status !== 'active') return { status: 403, error: 'Driver account inactive' };
+  if (driver.status !== 'active' && driver.status !== 'busy') {
+    return { status: 403, error: 'Driver account inactive' };
+  }
 
   return { driver };
 }
@@ -60,10 +65,15 @@ exports.handler = async (event) => {
   }
 
   try {
+    const ownActive = `and(status.in.(confirmed,on_the_way,arrived,in_progress),assigned_driver.eq.${auth.driver.id})`;
+    const visibility = auth.driver.status === 'active'
+      ? `and(status.eq.pending,assigned_driver.is.null),${ownActive}`
+      : ownActive;
+
     const { data, error } = await supabase
       .from('bookings')
       .select('*')
-      .in('status', ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress'])
+      .or(visibility)
       .order('pickup_datetime', { ascending: true });
 
     if (error) {
@@ -76,7 +86,7 @@ exports.handler = async (event) => {
       headers,
       body: JSON.stringify({
         bookings: data || [],
-        driver: { id: auth.driver.id, name: auth.driver.name }
+        driver: { id: auth.driver.id, name: auth.driver.name, status: auth.driver.status }
       })
     };
   } catch (error) {

@@ -2,11 +2,15 @@
 //   POST /api/update-booking-status {bookingId, action, paymentMethod?, lat?, lng?}
 //
 // Identity: CreditEngine requireDriver pattern — JWT verified with the
-// anon-key client, then a matching ACTIVE drivers row is required. Accept
-// stamps assigned_driver atomically with the transition (the existing
-// status race guard means only one driver can ever win a pending ride);
-// every later action on the ride is restricted to its assigned driver
-// (legacy rows with a null assignment are claimed on first touch).
+// anon-key client, then a matching drivers row is required (active or
+// busy; busy drivers may finish their own rides but cannot accept new
+// ones). Accept — and only accept — stamps assigned_driver, atomically
+// with the transition and only on an UNASSIGNED pending request, so one
+// driver can ever win a ride. Every later action requires an EXACT
+// ownership match; legacy rows are assigned by the migration-009 cutover,
+// never by opportunistic claiming. A retried request whose first attempt
+// committed is recognized as success ONLY here, after verifying both the
+// resulting status and ownership (client 409s are never success).
 // Transitions are enforced server-side; a stale click (booking already moved
 // on) matches 0 rows and returns 409 instead of clobbering state.
 //
@@ -45,14 +49,19 @@ async function requireDriver(event, supabaseUrl, anonKey, db) {
     .eq('user_id', userData.user.id)
     .single();
   if (driverError || !driver) return { status: 403, error: 'No driver account' };
-  if (driver.status !== 'active') return { status: 403, error: 'Driver account inactive' };
+  if (driver.status !== 'active' && driver.status !== 'busy') {
+    return { status: 403, error: 'Driver account inactive' };
+  }
 
   return { driver };
 }
 
+// No driver-side decline: with shared pending requests, one driver
+// declining would kill the offer for the whole company. Not accepting IS
+// the per-driver decline; the `declined` status remains in the DB for
+// legacy rows and future admin tooling.
 const TRANSITIONS = {
   accept:     { from: ['pending'],                              set: { status: 'confirmed' } },
-  decline:    { from: ['pending'],                              set: { status: 'declined' } },
   on_my_way:  { from: ['confirmed'],                            set: { status: 'on_the_way' } },
   arrived:    { from: ['on_the_way'],                           set: { status: 'arrived' } },
   start_trip: { from: ['arrived'],                              set: { status: 'in_progress' } },
@@ -109,11 +118,14 @@ exports.handler = async (event) => {
         payment_method: paymentMethod === 'zelle' ? 'zelle' : 'cash'
       };
     } else if (TRANSITIONS[action]) {
+      if (action === 'accept' && driver.status !== 'active') {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Busy drivers cannot accept new rides' }) };
+      }
       fromStatuses = TRANSITIONS[action].from;
       updates = { ...TRANSITIONS[action].set };
-      // Accept claims the ride; checkpoint/complete actions re-stamp it
-      // (claiming legacy rows whose assignment predates driver identity).
-      if (action !== 'decline') {
+      // Accept — and only accept — claims the ride. Legacy rows are
+      // assigned explicitly by the migration-009 cutover, never claimed.
+      if (action === 'accept') {
         updates.assigned_driver = driver.id;
       }
       if (CHECKPOINT_ACTIONS.includes(action)) {
@@ -136,16 +148,19 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unknown action' }) };
     }
 
-    // Ownership: anything beyond accept/decline may only touch a ride that
-    // is this driver's (or unassigned legacy). Enforced in the same guarded
-    // UPDATE as the status race check — a non-owner matches 0 rows -> 409.
+    // Ownership: accept only ever wins an UNASSIGNED pending request;
+    // everything else requires an EXACT ownership match. Enforced in the
+    // same guarded UPDATE as the status race check — a non-owner matches
+    // 0 rows and falls through to the 409/idempotency logic below.
     let query = supabase
       .from('bookings')
       .update(updates)
       .eq('id', bookingId)
       .in('status', fromStatuses);
-    if (action !== 'accept' && action !== 'decline') {
-      query = query.or(`assigned_driver.eq.${driver.id},assigned_driver.is.null`);
+    if (action === 'accept') {
+      query = query.is('assigned_driver', null);
+    } else {
+      query = query.eq('assigned_driver', driver.id);
     }
     const { data, error } = await query.select();
 
@@ -157,9 +172,20 @@ exports.handler = async (event) => {
     if (!data || data.length === 0) {
       const { data: current } = await supabase
         .from('bookings')
-        .select('status')
+        .select('status, assigned_driver')
         .eq('id', bookingId)
         .single();
+      // VERIFIED idempotent success — only the backend may declare it, and
+      // only when the booking already sits at exactly this action's result
+      // AND belongs to exactly this driver (a retried request whose first
+      // attempt committed but whose response was lost). A non-owner's
+      // conflict is never success.
+      if (current && TRANSITIONS[action] &&
+          current.status === TRANSITIONS[action].set.status &&
+          current.assigned_driver === driver.id) {
+        console.log(`✅ Booking ${bookingId}: ${action} (idempotent duplicate)`);
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true, idempotent: true }) };
+      }
       return {
         statusCode: 409,
         headers,
