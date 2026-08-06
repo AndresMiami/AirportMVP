@@ -47,15 +47,15 @@ VALUES
     ('Cruise Port Lady', '+1-555-234-5678', 'repeat', 'Regular cruise pickup');
 ```
 
-### Step 5: Access the Admin Dashboard
+### Step 5: Administration (LEGACY SECTION — admin.html is RETIRED)
 
-1. Deploy your site to Netlify (if not already)
-2. Go to: `https://your-site.netlify.app/admin.html`
-3. Or locally: Open `admin.html` in your browser
+The legacy `admin.html` dashboard was retired in the Phase B RLS lockdown
+(it read production tables directly with the public anon key). `/admin`
+now returns a 404 retirement notice.
 
-The dashboard will:
-- Show demo data if tables are empty
-- Auto-sync with Supabase once you add real data
+Administration happens in the **Supabase Dashboard** (Table Editor + SQL
+Editor) until the LinkMia admin portal ships. All application data access
+flows through the Netlify functions' service key.
 - Update in real-time when bookings change
 
 ---
@@ -101,14 +101,14 @@ The dashboard will:
 
 ---
 
-## Workflow: WhatsApp → Dashboard
+## Workflow: WhatsApp → Dashboard (LEGACY — admin.html retired)
 
 1. **Guest texts you** on WhatsApp
 2. **You respond** with quick reply template
-3. **Tap the + button** on admin dashboard
-4. **Enter booking details** (30 seconds)
-5. **Assign yourself or another driver**
-6. **Send confirmation** via WhatsApp
+3. **Add the booking** in the Supabase Table Editor (or have the guest
+   book at linkmia.com — the normal path)
+4. **Assign the driver** via the booking's `assigned_driver` column
+5. **Send confirmation** via WhatsApp
 
 ---
 
@@ -170,5 +170,5 @@ DROP TABLE IF EXISTS customers CASCADE;
 ├── linkmia-schema.sql    # Full database schema
 └── SETUP.md              # This file
 
-/admin.html               # Admin dashboard (deploy to Netlify)
+/admin-retired.html       # Retirement notice (legacy admin.html removed)
 ```

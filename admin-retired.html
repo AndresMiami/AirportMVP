@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Admin retired - LinkMia</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1C1C1E; color: #fff;
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            padding: 24px; text-align: center;
+        }
+        .card { max-width: 420px; }
+        h1 {
+            font-size: 22px; margin-bottom: 12px;
+            background: linear-gradient(135deg, #FF9933, #FF5733);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        p { font-size: 15px; line-height: 1.6; color: #b0b0b5; }
+    </style>
+</head>
+<body>
+    <!-- Deliberately static: no scripts, no Supabase client, no data access.
+         The legacy dashboard read production tables with the public key and
+         was retired in the Phase B RLS lockdown. -->
+    <div class="card">
+        <h1>LinkMia admin has moved</h1>
+        <p>The legacy admin dashboard has been retired. Administration happens
+        in the Supabase Dashboard until the LinkMia admin portal ships.</p>
+    </div>
+</body>
+</html>
