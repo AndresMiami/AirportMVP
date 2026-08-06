@@ -166,10 +166,14 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   icons, SW privacy fixes (networkOnly for all /api/, no-store headers,
   runtime-cache purge), Home-Screen install flow.
 - Approved, NOT yet built: "Release ride" — a driver returns an accepted
-  ride to the shared pool (with admin notification) instead of any
-  driver-side decline; and invitation-only driver onboarding — emailed
-  invite / password-set flow replacing admin-set passwords. Record only;
-  implement post-RLS.
+  ride to the shared pool instead of any driver-side decline. Rules:
+  CONFIRMED-only (after On my way, releasing requires dispatch/admin
+  intervention — the passenger has been told someone is coming); records
+  the releasing driver + reason as history; the re-pooled request is NOT
+  offered back to the releasing driver; the passenger is informed of the
+  driver change; admin is notified on every release. Also approved:
+  invitation-only driver onboarding — emailed invite / password-set flow
+  replacing admin-set passwords. Record only; implement post-RLS.
 - Two-ETA model (Codex-outlined, follows identity) — booking-time estimate
   must use the scheduled pickup as departure time (Railway proxy currently
   uses `now` and its route cache ignores time-of-day); fresh driver→pickup
