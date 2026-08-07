@@ -133,6 +133,15 @@
             border-radius: 20px 20px 0 0;
             padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
             z-index: 51; animation: sheetUp 0.3s ease;
+            /* Defensive mobile containment: the sheet scrolls internally
+               instead of growing past the (keyboard-shrunk) viewport.
+               CSS alone cannot guarantee iPhone keyboard behavior — the
+               physical test still decides. */
+            max-height: 85vh;
+            max-height: 85dvh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
         @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .msg-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
@@ -172,6 +181,13 @@
         .msg-meta { font-size: 12px; color: #6b6b76; text-align: right; margin: 4px 2px 8px; }
         .msg-safety { font-size: 12px; color: #6b6b76; text-align: center; margin-top: 8px; }
         #msgCustomSend:disabled { opacity: 0.5; cursor: default; }
+        .msg-back {
+            display: block; width: 100%; padding: 12px;
+            min-height: 44px; margin-top: 8px;
+            background: none; border: none; color: #2668d9;
+            font-size: 14px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+        }
         .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
         .paid-badge {
             display: inline-block; background: #e6f7ec; color: #1eaa5c;
@@ -236,6 +252,7 @@
                 <div class="msg-meta" id="msgCharCount">0 / 500</div>
                 <button class="btn-message" id="msgCustomSend" type="button" disabled>Open in WhatsApp</button>
                 <div class="msg-safety" id="msgSafety">Use messaging only when safely parked.</div>
+                <button class="msg-back" id="msgCustomBack" type="button">← Back to templates</button>
             </div>
             <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
         </div>
@@ -338,13 +355,30 @@
             $('msgCustomSend').disabled = true;
         }
 
+        // Two mutually exclusive sheet views — templates OR composer, never
+        // stacked. Keeps the sheet short enough for a keyboard-shrunk
+        // iPhone viewport; every fresh open starts in template view.
+        function showTemplateView() {
+            $('msgTitle').textContent = 'Message passenger';
+            $('msgOptions').classList.remove('hidden');
+            $('msgCustomToggle').classList.remove('hidden');
+            resetCustomMessage(); // collapse composer + clear draft/counter/disabled
+        }
+        function showComposerView() {
+            $('msgTitle').textContent = 'Custom message';
+            $('msgOptions').classList.add('hidden');
+            $('msgCustomToggle').classList.add('hidden');
+            $('msgCustomArea').classList.remove('hidden');
+            $('msgCustomText').focus();
+        }
+
         function openMessageSheet(bookingId) {
             const b = lastBookings.find((x) => x.id === bookingId);
             const digits = validPhoneDigits(b);
             if (!b || !digits || !MESSAGE_STATUSES.includes(b.status)) return;
             messageReturnFocus = document.activeElement;
             currentMessageDigits = digits;
-            resetCustomMessage(); // every open starts with a clean composer
+            showTemplateView(); // every open starts on templates, composer cleared
             const passengerFirst = String(b.customer_name || 'there').trim().split(/\s+/)[0] || 'there';
             const driverName = $('driverName').textContent || 'your LinkMia driver';
             const options = $('msgOptions');
@@ -376,9 +410,10 @@
         // Custom message composer — typing or the iPhone keyboard's own
         // dictation mic (no Web Speech / recording / LinkMia microphone
         // permission anywhere). Static listeners, registered once.
-        $('msgCustomToggle').addEventListener('click', () => {
-            $('msgCustomArea').classList.remove('hidden');
-            $('msgCustomText').focus();
+        $('msgCustomToggle').addEventListener('click', showComposerView);
+        $('msgCustomBack').addEventListener('click', () => {
+            showTemplateView();
+            $('msgCustomToggle').focus();
         });
         $('msgCustomText').addEventListener('input', () => {
             const ta = $('msgCustomText');
