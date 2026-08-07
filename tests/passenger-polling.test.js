@@ -128,10 +128,21 @@ function createHarness(responses) {
     timers,
     get fetchCount() { return fetchCount; },
     async settle() { await settle(); await settle(); },
+    async runNextTimer() {
+      assert.ok(timers.size > 0, 'expected a scheduled timer');
+      const [id, timer] = timers.entries().next().value;
+      timers.delete(id);
+      await timer.fn();
+      await this.settle();
+      return timer.delay;
+    },
     async setVisible(visible) {
       document.visibilityState = visible ? 'visible' : 'hidden';
       visibilityListeners.forEach((fn) => fn());
       await this.settle();
+    },
+    evaluate(source) {
+      return vm.runInContext(source, context);
     }
   };
 }
@@ -166,6 +177,96 @@ function check(name, fn) {
     assert.strictEqual(h.fetchCount, 1);
     assert.strictEqual(h.timers.size, 0);
   });
+
+  const pendingBooking = {
+    id: 'test-booking', trip_id: 'LM-TEST', status: 'pending',
+    pickup_datetime: new Date(Date.now() + 60 * 60000).toISOString(),
+    pickup_location: 'Pickup', dropoff_location: 'MIA',
+    vehicle_type: 'sedan', vehicle_name: 'Tesla Model Y', price: 85
+  };
+  const failures = createHarness([
+    response(500), response(500), response(500), response(500), response(500),
+    response(500), response(200, { booking: pendingBooking, driver: null })
+  ]);
+  await failures.settle();
+
+  const failureDelays = [];
+  for (let attempt = 1; attempt < 5; attempt++) {
+    failureDelays.push(await failures.runNextTimer());
+  }
+
+  check('five consecutive failures stop all automatic requests', () => {
+    assert.strictEqual(failures.fetchCount, 5);
+    assert.strictEqual(failures.timers.size, 0);
+    assert.deepStrictEqual(failureDelays, [15000, 30000, 60000, 120000]);
+    assert.match(failures.element('loadingMsg').textContent, /updates paused because we couldn\'t reach the server/i);
+  });
+
+  await failures.settle();
+  check('remaining visible after the failure ceiling stays silent', () => {
+    assert.strictEqual(failures.fetchCount, 5);
+    assert.strictEqual(failures.timers.size, 0);
+  });
+
+  await failures.setVisible(false);
+  await failures.setVisible(true); // queued 500: exactly one recovery request
+  check('failed visibility recovery remains paused after one request', () => {
+    assert.strictEqual(failures.fetchCount, 6);
+    assert.strictEqual(failures.timers.size, 0);
+  });
+
+  await failures.setVisible(false);
+  await failures.setVisible(true); // queued success: normal scheduler resumes
+  check('successful visibility recovery resumes the healthy cadence', () => {
+    assert.strictEqual(failures.fetchCount, 7);
+    assert.strictEqual(failures.timers.size, 1);
+    assert.strictEqual([...failures.timers.values()][0].delay, 15000);
+    assert.ok(!failures.element('tripView').classList.contains('hidden'));
+    assert.ok(failures.element('pausedCard').classList.contains('hidden'));
+  });
+  await failures.setVisible(false);
+  check('hiding the page clears the healthy polling timer', () => {
+    assert.strictEqual(failures.fetchCount, 7);
+    assert.strictEqual(failures.timers.size, 0);
+  });
+
+  const farFuture = {
+    ...pendingBooking,
+    status: 'confirmed',
+    pickup_datetime: new Date(Date.now() + 7 * 24 * 3600000).toISOString()
+  };
+  const sleeping = createHarness([response(200, { booking: farFuture, driver: null })]);
+  await sleeping.settle();
+  const requestsBeforeWake = sleeping.fetchCount;
+  const localWakeDelay = await sleeping.runNextTimer();
+  check('far-future confirmed ride wakes locally without a network request', () => {
+    assert.strictEqual(requestsBeforeWake, 1);
+    assert.strictEqual(sleeping.fetchCount, 1);
+    assert.strictEqual(localWakeDelay, 3600000);
+    assert.strictEqual(sleeping.timers.size, 1);
+  });
+
+  const terminalBooking = { ...pendingBooking, status: 'completed' };
+  const terminal = createHarness([response(200, { booking: terminalBooking, driver: null })]);
+  await terminal.settle();
+  await terminal.setVisible(false);
+  await terminal.setVisible(true);
+  check('terminal status never restarts on visibility return', () => {
+    assert.strictEqual(terminal.fetchCount, 1);
+    assert.strictEqual(terminal.timers.size, 0);
+  });
+
+  let finishSlowRequest;
+  const slowResponse = new Promise((resolve) => { finishSlowRequest = resolve; });
+  const overlap = createHarness([slowResponse]);
+  await overlap.settle();
+  overlap.evaluate('fetchStatus()');
+  await overlap.settle();
+  check('in-flight guard rejects an overlapping status request', () => {
+    assert.strictEqual(overlap.fetchCount, 1);
+  });
+  finishSlowRequest(response(200, { booking: pendingBooking, driver: null }));
+  await overlap.settle();
 
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {

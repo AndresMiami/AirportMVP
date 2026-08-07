@@ -35,10 +35,12 @@ verified checkpoint locations all live in the web app backed by Supabase.
   confirmed 30s only within 30 min of pickup — farther out sleeps locally
   with zero network / on_the_way 30s / arrived 15s / in_progress 60s),
   hard per-status cutoffs, absolute pickup+6h boundary, persistent
-  500-request/booking budget, 5-failure budget per visit, default 30-min
-  leash for unknown statuses or malformed timestamps. Paused card is
-  notice-only (NO manual refresh button — deliberate); hidden tab = zero
-  requests; one automatic check on visibility return is the resume path.
+  500-request/booking budget, 5-failure initial budget followed by one
+  recovery check per visibility return, and a default 30-min leash for
+  unknown statuses or malformed timestamps. A 404 permanently stops that
+  page session instead of restarting on later visibility returns. Paused
+  card is notice-only (NO manual refresh button — deliberate); hidden tab =
+  zero requests; one automatic check on visibility return is the resume path.
 - `driver.html` — GetTransfer-style driver app behind a real login
   (admin-provisioned Supabase accounts, `Authorization: Bearer` session
   JWT — the shared passcode is retired): Requests/My rides tabs show
