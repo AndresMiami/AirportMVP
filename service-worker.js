@@ -3,7 +3,7 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'linkmia-v1.3.8';
+const CACHE_NAME = 'linkmia-v1.3.11';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

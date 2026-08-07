@@ -129,11 +129,22 @@
         }
         #msgSheet {
             position: fixed; left: 0; right: 0; bottom: 0; margin: 0 auto;
-            max-width: 576px; background: white;
+            width: 100%; max-width: 576px; background: white;
             border-radius: 20px 20px 0 0;
             padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
             z-index: 51; animation: sheetUp 0.3s ease;
+            /* Defensive mobile containment: the sheet scrolls internally
+               instead of growing past the (keyboard-shrunk) viewport.
+               CSS alone cannot guarantee iPhone keyboard behavior — the
+               physical test still decides. */
+            max-height: 85vh;
+            max-height: 85dvh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
+        #msgSheet, #msgSheet * { box-sizing: border-box; }
         @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .msg-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
         .msg-option {
@@ -149,6 +160,40 @@
             min-height: 44px;
             background: none; border: none; color: #6b6b76;
             font-size: 14px; cursor: pointer; font-family: inherit;
+        }
+        .msg-custom-toggle {
+            display: block; width: 100%; text-align: left;
+            padding: 13px 14px; margin-bottom: 8px;
+            min-height: 44px;
+            background: white; border: 1.5px dashed #c9c9d4; border-radius: 12px;
+            font-size: 14px; color: #1a1a2e;
+            cursor: pointer; font-family: inherit;
+        }
+        .msg-label {
+            display: block; font-size: 13px; font-weight: 600;
+            margin: 4px 0 6px; color: #1a1a2e;
+        }
+        #msgCustomText {
+            width: 100%; box-sizing: border-box;
+            min-height: 72px; padding: 12px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            /* 16px prevents iOS Safari from auto-zooming on focus, which
+               otherwise crops the sheet sides and character counter. */
+            font-size: 16px; font-family: inherit; color: #1a1a2e;
+            resize: vertical;
+        }
+        .msg-meta { font-size: 12px; color: #6b6b76; text-align: right; margin: 4px 2px 8px; }
+        .msg-safety { font-size: 12px; color: #6b6b76; text-align: center; margin-top: 8px; }
+        #msgCustomSend:disabled { opacity: 0.5; cursor: default; }
+        .msg-composer-nav {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; margin-bottom: 8px;
+        }
+        .msg-nav {
+            flex: 0 0 auto; min-height: 44px; padding: 10px 12px;
+            background: none; border: none; color: #2668d9;
+            font-size: 14px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
         }
         .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
         .paid-badge {
@@ -205,6 +250,20 @@
         <div id="msgSheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="msgTitle">
             <div class="msg-title" id="msgTitle">Message passenger</div>
             <div id="msgOptions"></div>
+            <button class="msg-custom-toggle" id="msgCustomToggle" type="button">✏️ Write a custom message</button>
+            <div id="msgCustomArea" class="hidden">
+                <div class="msg-composer-nav">
+                    <button class="msg-nav" id="msgCustomBack" type="button">← Templates</button>
+                    <button class="msg-nav" id="msgCustomClose" type="button" aria-label="Close message sheet">Close</button>
+                </div>
+                <label class="msg-label" for="msgCustomText">Message</label>
+                <textarea id="msgCustomText" rows="3" maxlength="500"
+                    placeholder="Type or use your keyboard microphone to dictate…"
+                    aria-describedby="msgCharCount msgSafety"></textarea>
+                <div class="msg-meta" id="msgCharCount">0 / 500</div>
+                <button class="btn-message" id="msgCustomSend" type="button" disabled>Open in WhatsApp</button>
+                <div class="msg-safety" id="msgSafety">Use messaging only when safely parked.</div>
+            </div>
             <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
         </div>
         <main>
@@ -294,12 +353,44 @@
         // template selection) so keyboard/VoiceOver users land back on the
         // button that opened the sheet.
         let messageReturnFocus = null;
+        // Phone for the ride the sheet is currently open for — set from the
+        // already-validated booking on open, cleared on close. The custom
+        // composer reads it so no phone number ever rides through the DOM.
+        let currentMessageDigits = null;
+
+        function resetCustomMessage() {
+            $('msgCustomArea').classList.add('hidden');
+            $('msgCustomText').value = '';
+            $('msgCharCount').textContent = '0 / 500';
+            $('msgCustomSend').disabled = true;
+        }
+
+        // Two mutually exclusive sheet views — templates OR composer, never
+        // stacked. Keeps the sheet short enough for a keyboard-shrunk
+        // iPhone viewport; every fresh open starts in template view.
+        function showTemplateView() {
+            $('msgTitle').textContent = 'Message passenger';
+            $('msgOptions').classList.remove('hidden');
+            $('msgCustomToggle').classList.remove('hidden');
+            $('msgCancel').classList.remove('hidden');
+            resetCustomMessage(); // collapse composer + clear draft/counter/disabled
+        }
+        function showComposerView() {
+            $('msgTitle').textContent = 'Custom message';
+            $('msgOptions').classList.add('hidden');
+            $('msgCustomToggle').classList.add('hidden');
+            $('msgCancel').classList.add('hidden');
+            $('msgCustomArea').classList.remove('hidden');
+            $('msgCustomText').focus();
+        }
 
         function openMessageSheet(bookingId) {
             const b = lastBookings.find((x) => x.id === bookingId);
             const digits = validPhoneDigits(b);
             if (!b || !digits || !MESSAGE_STATUSES.includes(b.status)) return;
             messageReturnFocus = document.activeElement;
+            currentMessageDigits = digits;
+            showTemplateView(); // every open starts on templates, composer cleared
             const passengerFirst = String(b.customer_name || 'there').trim().split(/\s+/)[0] || 'there';
             const driverName = $('driverName').textContent || 'your LinkMia driver';
             const options = $('msgOptions');
@@ -323,9 +414,31 @@
         function closeMessageSheet() {
             $('msgBackdrop').classList.add('hidden');
             $('msgSheet').classList.add('hidden');
+            currentMessageDigits = null;
             if (messageReturnFocus && messageReturnFocus.isConnected) messageReturnFocus.focus();
             messageReturnFocus = null;
         }
+
+        // Custom message composer — typing or the iPhone keyboard's own
+        // dictation mic (no Web Speech / recording / LinkMia microphone
+        // permission anywhere). Static listeners, registered once.
+        $('msgCustomToggle').addEventListener('click', showComposerView);
+        $('msgCustomBack').addEventListener('click', () => {
+            showTemplateView();
+            $('msgCustomToggle').focus();
+        });
+        $('msgCustomClose').addEventListener('click', closeMessageSheet);
+        $('msgCustomText').addEventListener('input', () => {
+            const ta = $('msgCustomText');
+            $('msgCharCount').textContent = `${ta.value.length} / 500`;
+            $('msgCustomSend').disabled = ta.value.trim() === '';
+        });
+        $('msgCustomSend').addEventListener('click', () => {
+            const text = $('msgCustomText').value.trim();
+            if (!text || !currentMessageDigits) return; // empty/whitespace refused
+            window.open(`https://wa.me/${currentMessageDigits}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+            closeMessageSheet();
+        });
         // Single listener registered once — repeated sheet opens never
         // stack duplicates. Escape closes only while the sheet is visible.
         document.addEventListener('keydown', (e) => {
