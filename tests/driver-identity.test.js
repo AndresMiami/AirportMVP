@@ -247,6 +247,91 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   r = await post({ bookingId: BID, action: 'decline' }, 'tok-andres');
   check('decline -> 400 Unknown action', () => assert.strictEqual(r.statusCode, 400));
 
+  // ---------- durable transition timestamps + readiness (PR 1) ----------
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 10 * 3600e3).toISOString() },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  check('accept stamps accepted_at; far pickup -> NO recent-accept readiness', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.ok(lastUpdate.accepted_at, 'accepted_at anchor missing');
+    assert.ok(!('driver_ready_source' in lastUpdate), 'readiness must not stamp on far accepts');
+  });
+  lastUpdate = null;
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  check('accept at/after T-180 IS readiness: recent_accept stamped in the SAME update', () => {
+    assert.strictEqual(lastUpdate.driver_ready_source, 'recent_accept');
+    assert.strictEqual(lastUpdate.driver_ready_by, 'drv-a');
+    assert.ok(lastUpdate.driver_ready_at);
+    assert.ok(lastUpdate.accepted_at);
+  });
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'on_the_way' }], error: null };
+  currentBookingResult = { data: { driver_ready_at: null }, error: null };
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
+  check('on_my_way: on_the_way_at + at-risk clear + implicit readiness in ONE payload', () => {
+    assert.ok(lastUpdate.on_the_way_at, 'on_the_way_at anchor missing');
+    assert.strictEqual(lastUpdate.at_risk_at, null, 'On my way must clear at_risk_at');
+    assert.strictEqual(lastUpdate.driver_ready_source, 'implicit');
+    assert.strictEqual(lastUpdate.driver_ready_by, 'drv-a');
+  });
+  lastUpdate = null;
+  currentBookingResult = { data: { driver_ready_at: '2026-08-07T10:00:00Z' }, error: null };
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
+  check('on_my_way never overwrites an existing readiness confirmation', () => {
+    assert.ok(!('driver_ready_source' in lastUpdate), 'web readiness overwritten by implicit');
+    assert.ok(!('driver_ready_at' in lastUpdate));
+    assert.strictEqual(lastUpdate.at_risk_at, null); // at-risk still cleared
+  });
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'arrived' }], error: null };
+  r = await post({ bookingId: BID, action: 'arrived' }, 'tok-andres');
+  check('arrived stamps arrived_at (durable milestone anchor)', () =>
+    assert.ok(lastUpdate.arrived_at));
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'in_progress' }], error: null };
+  r = await post({ bookingId: BID, action: 'start_trip' }, 'tok-andres');
+  check('start_trip stamps started_at (durable milestone anchor)', () =>
+    assert.ok(lastUpdate.started_at));
+
+  // ---------- ready action ----------
+  lastUpdate = null; lastFilters = null; lastIsFilter = null;
+  updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready: confirmed-only + owner-guarded + first-confirm-wins; records WHO; clears at-risk', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.deepStrictEqual(lastFilters.status, ['confirmed']);
+    assert.strictEqual(lastFilters.assigned_driver, 'drv-a');
+    assert.deepStrictEqual(lastIsFilter, { col: 'driver_ready_at', val: null });
+    assert.strictEqual(lastUpdate.driver_ready_by, 'drv-a');
+    assert.strictEqual(lastUpdate.driver_ready_source, 'web');
+    assert.ok(lastUpdate.driver_ready_at);
+    assert.strictEqual(lastUpdate.at_risk_at, null);
+    assert.ok(!('status' in lastUpdate), 'ready must never change the passenger lifecycle status');
+    assert.ok(!('driver_lat' in lastUpdate), 'ready must never capture location');
+  });
+  updateResult = { data: [], error: null }; // 0 rows: already ready
+  currentBookingResult = {
+    data: { status: 'confirmed', assigned_driver: 'drv-a',
+            driver_ready_at: '2026-08-07T10:00:00Z', driver_ready_by: 'drv-a' },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready duplicate by the SAME owner -> 200 idempotent', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(JSON.parse(r.body).idempotent, true);
+  });
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-carlos');
+  check('ready by a NON-owner -> 409, never success', () =>
+    assert.strictEqual(r.statusCode, 409));
+
   // ---------- passenger-facing driver exposure ----------
   currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-c' }, error: null };
   r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
