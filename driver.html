@@ -150,6 +150,28 @@
             background: none; border: none; color: #6b6b76;
             font-size: 14px; cursor: pointer; font-family: inherit;
         }
+        .msg-custom-toggle {
+            display: block; width: 100%; text-align: left;
+            padding: 13px 14px; margin-bottom: 8px;
+            min-height: 44px;
+            background: white; border: 1.5px dashed #c9c9d4; border-radius: 12px;
+            font-size: 14px; color: #1a1a2e;
+            cursor: pointer; font-family: inherit;
+        }
+        .msg-label {
+            display: block; font-size: 13px; font-weight: 600;
+            margin: 4px 0 6px; color: #1a1a2e;
+        }
+        #msgCustomText {
+            width: 100%; box-sizing: border-box;
+            min-height: 72px; padding: 12px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            font-size: 14px; font-family: inherit; color: #1a1a2e;
+            resize: vertical;
+        }
+        .msg-meta { font-size: 12px; color: #6b6b76; text-align: right; margin: 4px 2px 8px; }
+        .msg-safety { font-size: 12px; color: #6b6b76; text-align: center; margin-top: 8px; }
+        #msgCustomSend:disabled { opacity: 0.5; cursor: default; }
         .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
         .paid-badge {
             display: inline-block; background: #e6f7ec; color: #1eaa5c;
@@ -205,6 +227,16 @@
         <div id="msgSheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="msgTitle">
             <div class="msg-title" id="msgTitle">Message passenger</div>
             <div id="msgOptions"></div>
+            <button class="msg-custom-toggle" id="msgCustomToggle" type="button">✏️ Write a custom message</button>
+            <div id="msgCustomArea" class="hidden">
+                <label class="msg-label" for="msgCustomText">Custom message</label>
+                <textarea id="msgCustomText" rows="3" maxlength="500"
+                    placeholder="Type or use your keyboard microphone to dictate…"
+                    aria-describedby="msgCharCount msgSafety"></textarea>
+                <div class="msg-meta" id="msgCharCount">0 / 500</div>
+                <button class="btn-message" id="msgCustomSend" type="button" disabled>Open in WhatsApp</button>
+                <div class="msg-safety" id="msgSafety">Use messaging only when safely parked.</div>
+            </div>
             <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
         </div>
         <main>
@@ -294,12 +326,25 @@
         // template selection) so keyboard/VoiceOver users land back on the
         // button that opened the sheet.
         let messageReturnFocus = null;
+        // Phone for the ride the sheet is currently open for — set from the
+        // already-validated booking on open, cleared on close. The custom
+        // composer reads it so no phone number ever rides through the DOM.
+        let currentMessageDigits = null;
+
+        function resetCustomMessage() {
+            $('msgCustomArea').classList.add('hidden');
+            $('msgCustomText').value = '';
+            $('msgCharCount').textContent = '0 / 500';
+            $('msgCustomSend').disabled = true;
+        }
 
         function openMessageSheet(bookingId) {
             const b = lastBookings.find((x) => x.id === bookingId);
             const digits = validPhoneDigits(b);
             if (!b || !digits || !MESSAGE_STATUSES.includes(b.status)) return;
             messageReturnFocus = document.activeElement;
+            currentMessageDigits = digits;
+            resetCustomMessage(); // every open starts with a clean composer
             const passengerFirst = String(b.customer_name || 'there').trim().split(/\s+/)[0] || 'there';
             const driverName = $('driverName').textContent || 'your LinkMia driver';
             const options = $('msgOptions');
@@ -323,9 +368,29 @@
         function closeMessageSheet() {
             $('msgBackdrop').classList.add('hidden');
             $('msgSheet').classList.add('hidden');
+            currentMessageDigits = null;
             if (messageReturnFocus && messageReturnFocus.isConnected) messageReturnFocus.focus();
             messageReturnFocus = null;
         }
+
+        // Custom message composer — typing or the iPhone keyboard's own
+        // dictation mic (no Web Speech / recording / LinkMia microphone
+        // permission anywhere). Static listeners, registered once.
+        $('msgCustomToggle').addEventListener('click', () => {
+            $('msgCustomArea').classList.remove('hidden');
+            $('msgCustomText').focus();
+        });
+        $('msgCustomText').addEventListener('input', () => {
+            const ta = $('msgCustomText');
+            $('msgCharCount').textContent = `${ta.value.length} / 500`;
+            $('msgCustomSend').disabled = ta.value.trim() === '';
+        });
+        $('msgCustomSend').addEventListener('click', () => {
+            const text = $('msgCustomText').value.trim();
+            if (!text || !currentMessageDigits) return; // empty/whitespace refused
+            window.open(`https://wa.me/${currentMessageDigits}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+            closeMessageSheet();
+        });
         // Single listener registered once — repeated sheet opens never
         // stack duplicates. Escape closes only while the sheet is visible.
         document.addEventListener('keydown', (e) => {
