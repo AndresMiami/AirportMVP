@@ -357,6 +357,7 @@
         let isFetching = false;    // polls can never overlap
         let failStreak = 0;        // exponential backoff on failures
         let pollPaused = false;    // cutoff reached; manual button only
+        let tripNotFound = false;  // 404 is permanent for this page session
         let memAnchor = null;      // {status, at} fallback if storage unavailable
         let memSpent = 0;          // request-budget fallback if storage unavailable
         let readySignalSent = false;
@@ -534,6 +535,8 @@
         }
 
         function showNoTrip() {
+            $('tripView').classList.add('hidden');
+            $('loadingMsg').classList.remove('hidden');
             $('loadingMsg').innerHTML = 'We couldn\'t find a booking to track.<br><br><a href="/" target="_top">Book a ride</a>';
         }
 
@@ -771,6 +774,7 @@
         function scheduleNext(b) {
             clearTimeout(pollTimer);
             pollTimer = null;
+            if (tripNotFound) return;
             if (pollPaused || document.visibilityState !== 'visible') return;
             if (blockReason(b)) return; // centralized guard — never schedule while blocked
             // Scheduled ride still far from pickup: sleep LOCALLY — zero
@@ -809,7 +813,7 @@
         // NOTHING gets past a spent request budget except the initial
         // render fetch of a fresh page load (one human-bounded request).
         async function fetchStatus(kind) {
-            if (isFetching) return;
+            if (isFetching || tripNotFound) return;
             if (lastBooking) {
                 const r = blockReason(lastBooking);
                 if (r === 'terminal') return;
@@ -821,6 +825,7 @@
             try {
                 const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
                 if (res.status === 404) {
+                    tripNotFound = true;
                     clearTimeout(pollTimer);
                     pollTimer = null;
                     clearAnchor();
@@ -937,6 +942,7 @@
                     pollTimer = null;
                     return;
                 }
+                if (tripNotFound) return;
                 if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
                 failStreak = 0;
                 fetchStatus('return');
