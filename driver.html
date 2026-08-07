@@ -63,9 +63,6 @@
             background: rgba(255,255,255,0.25);
         }
         .view-tab:not(.active) .count { background: rgba(0,0,0,0.15); color: #666; }
-        .wa-link {
-            color: #25D366 !important; text-decoration: none; font-weight: 600;
-        }
         .card {
             background: white; border-radius: 16px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.07);
@@ -116,6 +113,40 @@
         button:disabled { opacity: 0.5; }
         .btn-accept { background: #28A745; color: white; }
         .btn-next { background: #1a1a2e; color: white; }
+        /* Secondary message action — visually subordinate to status buttons */
+        .btn-message {
+            width: 100%; margin-top: 8px; padding: 11px;
+            background: white; color: #1a1a2e;
+            border: 1.5px solid #c9c9d4; border-radius: 10px;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            font-family: inherit;
+        }
+        /* Quick-message bottom sheet (house convention: dimmed backdrop,
+           576px panel, top radius 20px, slideUp) */
+        #msgBackdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50;
+        }
+        #msgSheet {
+            position: fixed; left: 0; right: 0; bottom: 0; margin: 0 auto;
+            max-width: 576px; background: white;
+            border-radius: 20px 20px 0 0;
+            padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+            z-index: 51; animation: sheetUp 0.3s ease;
+        }
+        @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .msg-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+        .msg-option {
+            display: block; width: 100%; text-align: left;
+            padding: 13px 14px; margin-bottom: 8px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            font-size: 14px; line-height: 1.45; color: #1a1a2e;
+            cursor: pointer; font-family: inherit;
+        }
+        .msg-cancel {
+            display: block; width: 100%; padding: 13px;
+            background: none; border: none; color: #6b6b76;
+            font-size: 14px; cursor: pointer; font-family: inherit;
+        }
         .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
         .paid-badge {
             display: inline-block; background: #e6f7ec; color: #1eaa5c;
@@ -167,6 +198,12 @@
             <div class="refresh-note"><span id="driverName"></span> · <a href="#" id="signOutLink" style="color:inherit;">Sign out</a></div>
             <div class="refresh-note" id="lastRefresh"></div>
         </header>
+        <div id="msgBackdrop" class="hidden"></div>
+        <div id="msgSheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="msgTitle">
+            <div class="msg-title" id="msgTitle">Message passenger</div>
+            <div id="msgOptions"></div>
+            <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
+        </div>
         <main>
             <div class="view-tabs">
                 <button class="view-tab active" id="tabRequests">Requests</button>
@@ -221,12 +258,60 @@
             return iso && (new Date(iso) - new Date()) < 2 * 60 * 60 * 1000;
         }
 
-        // WhatsApp chat link with the passenger (digits-only number required)
-        function waLink(b) {
-            const digits = String(b.customer_phone || '').replace(/\D/g, '');
-            if (digits.length < 10) return '';
-            const hello = `Hi ${b.customer_name || ''}! This is your LinkMia driver — trip ${b.trip_id || ''}.`;
-            return ` · <a class="wa-link" target="_blank" rel="noopener" href="https://wa.me/${digits}?text=${encodeURIComponent(hello)}">WhatsApp</a>`;
+        // ---- WhatsApp quick messages ----
+        // WhatsApp stays the human conversation channel: templates are
+        // prefilled into wa.me and SENT from WhatsApp by the driver — no
+        // LinkMia API is involved. Pure + self-contained so the same logic
+        // carries into the LinkMia Driver PWA unchanged.
+        const MESSAGE_STATUSES = ['confirmed', 'on_the_way', 'arrived'];
+
+        function validPhoneDigits(b) {
+            const digits = String((b && b.customer_phone) || '').replace(/\D/g, '');
+            return digits.length >= 10 ? digits : null;
+        }
+
+        function waTemplates(status, passengerFirst, driverName, tripId) {
+            if (status === 'confirmed') return [
+                `Hi ${passengerFirst}, I'm ${driverName}, your LinkMia driver for trip ${tripId}. I'll see you at the scheduled pickup time.`
+            ];
+            if (status === 'on_the_way') return [
+                `Hi ${passengerFirst}, I'm on my way to your pickup location. Please be ready and I'll message you when I arrive.`
+            ];
+            if (status === 'arrived') return [
+                `Hi ${passengerFirst}, I've arrived at the pickup point. Please let me know when you're coming out.`,
+                `I had to move from the pickup point, but I'm circling back now. I'll message you when I'm outside again.`
+            ];
+            return [];
+        }
+
+        // The sheet receives only a booking ID and looks the ride up in
+        // memory; template text reaches the DOM via textContent only —
+        // passenger data is never injected as HTML.
+        function openMessageSheet(bookingId) {
+            const b = lastBookings.find((x) => x.id === bookingId);
+            const digits = validPhoneDigits(b);
+            if (!b || !digits || !MESSAGE_STATUSES.includes(b.status)) return;
+            const passengerFirst = String(b.customer_name || 'there').trim().split(/\s+/)[0] || 'there';
+            const driverName = $('driverName').textContent || 'your LinkMia driver';
+            const options = $('msgOptions');
+            options.textContent = '';
+            waTemplates(b.status, passengerFirst, driverName, b.trip_id || '').forEach((text) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'msg-option';
+                btn.textContent = text;
+                btn.addEventListener('click', () => {
+                    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+                    closeMessageSheet();
+                });
+                options.appendChild(btn);
+            });
+            $('msgBackdrop').classList.remove('hidden');
+            $('msgSheet').classList.remove('hidden');
+        }
+        function closeMessageSheet() {
+            $('msgBackdrop').classList.add('hidden');
+            $('msgSheet').classList.add('hidden');
         }
 
         function rideCard(b, buttonsHtml, badgeHtml) {
@@ -251,7 +336,7 @@
                     ${b.bags ? `<span>🧳 ${b.bags}</span>` : ''}
                     ${b.flight_number ? `<span>✈️ ${esc(b.flight_number)}</span>` : ''}
                 </div>
-                ${b.customer_name || b.customer_phone ? `<div class="contact-row">👤 ${esc(b.customer_name)}${b.customer_phone ? ` — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a>` : ''}${waLink(b)}</div>` : `<div class="contact-row">👤 Passenger details shown after you accept</div>`}
+                ${b.customer_name || b.customer_phone ? `<div class="contact-row">👤 ${esc(b.customer_name)}${b.customer_phone ? ` — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a>` : ''}</div>` : `<div class="contact-row">👤 Passenger details shown after you accept</div>`}
                 ${b.booker_name && b.booker_name !== b.customer_name ? `<div class="contact-row">📋 Booked by ${esc(b.booker_name)}${b.booker_phone ? ` — <a href="tel:${esc(b.booker_phone)}">${esc(b.booker_phone)}</a>` : ''}</div>` : ''}
                 ${b.pickup_sign ? `<div class="notes">🪧 Sign: ${esc(b.pickup_sign)}</div>` : ''}
                 ${b.notes ? `<div class="notes">📝 ${esc(b.notes)}</div>` : ''}
@@ -288,11 +373,17 @@
                     const geoNote = b.status === 'confirmed'
                         ? `<div style="color:#8e8e93;font-size:12px;margin-top:8px;">📍 On my way captures your location once, so the passenger sees your verified departure point.</div>`
                         : '';
+                    // ONE secondary message action, accepted rides only,
+                    // hidden without a valid passenger phone; never rendered
+                    // during in_progress (passenger is in the car)
+                    const msgBtn = MESSAGE_STATUSES.includes(b.status) && validPhoneDigits(b)
+                        ? `<button class="btn-message" data-message-id="${esc(b.id)}">💬 Message passenger</button>`
+                        : '';
                     return rideCard(b, `
                         <div class="btn-row">
                             ${payBtn}
                             <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
-                        </div>${geoNote}`,
+                        </div>${msgBtn}${geoNote}`,
                         `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
                     );
                 }).join('')
@@ -528,11 +619,15 @@
         }
 
         document.addEventListener('click', (e) => {
+            const msg = e.target.closest('button[data-message-id]');
+            if (msg) { openMessageSheet(msg.dataset.messageId); return; }
             const btn = e.target.closest('button[data-action]');
             if (!btn) return;
             btn.disabled = true;
             doAction(btn.dataset.action, btn.dataset.id).finally(() => { btn.disabled = false; });
         });
+        $('msgCancel').addEventListener('click', closeMessageSheet);
+        $('msgBackdrop').addEventListener('click', closeMessageSheet);
 
         // ---- Login gate (admin-provisioned driver accounts, no signup) ----
         // Pass credentials to sign in fresh; pass null to reuse a session
