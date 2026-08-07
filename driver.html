@@ -129,7 +129,7 @@
         }
         #msgSheet {
             position: fixed; left: 0; right: 0; bottom: 0; margin: 0 auto;
-            max-width: 576px; background: white;
+            width: 100%; max-width: 576px; background: white;
             border-radius: 20px 20px 0 0;
             padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
             z-index: 51; animation: sheetUp 0.3s ease;
@@ -140,9 +140,11 @@
             max-height: 85vh;
             max-height: 85dvh;
             overflow-y: auto;
+            overflow-x: hidden;
             overscroll-behavior: contain;
             -webkit-overflow-scrolling: touch;
         }
+        #msgSheet, #msgSheet * { box-sizing: border-box; }
         @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .msg-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
         .msg-option {
@@ -175,15 +177,20 @@
             width: 100%; box-sizing: border-box;
             min-height: 72px; padding: 12px;
             background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
-            font-size: 14px; font-family: inherit; color: #1a1a2e;
+            /* 16px prevents iOS Safari from auto-zooming on focus, which
+               otherwise crops the sheet sides and character counter. */
+            font-size: 16px; font-family: inherit; color: #1a1a2e;
             resize: vertical;
         }
         .msg-meta { font-size: 12px; color: #6b6b76; text-align: right; margin: 4px 2px 8px; }
         .msg-safety { font-size: 12px; color: #6b6b76; text-align: center; margin-top: 8px; }
         #msgCustomSend:disabled { opacity: 0.5; cursor: default; }
-        .msg-back {
-            display: block; width: 100%; padding: 12px;
-            min-height: 44px; margin-top: 8px;
+        .msg-composer-nav {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; margin-bottom: 8px;
+        }
+        .msg-nav {
+            flex: 0 0 auto; min-height: 44px; padding: 10px 12px;
             background: none; border: none; color: #2668d9;
             font-size: 14px; font-weight: 600;
             cursor: pointer; font-family: inherit;
@@ -245,14 +252,17 @@
             <div id="msgOptions"></div>
             <button class="msg-custom-toggle" id="msgCustomToggle" type="button">✏️ Write a custom message</button>
             <div id="msgCustomArea" class="hidden">
-                <label class="msg-label" for="msgCustomText">Custom message</label>
+                <div class="msg-composer-nav">
+                    <button class="msg-nav" id="msgCustomBack" type="button">← Templates</button>
+                    <button class="msg-nav" id="msgCustomClose" type="button" aria-label="Close message sheet">Close</button>
+                </div>
+                <label class="msg-label" for="msgCustomText">Message</label>
                 <textarea id="msgCustomText" rows="3" maxlength="500"
                     placeholder="Type or use your keyboard microphone to dictate…"
                     aria-describedby="msgCharCount msgSafety"></textarea>
                 <div class="msg-meta" id="msgCharCount">0 / 500</div>
                 <button class="btn-message" id="msgCustomSend" type="button" disabled>Open in WhatsApp</button>
                 <div class="msg-safety" id="msgSafety">Use messaging only when safely parked.</div>
-                <button class="msg-back" id="msgCustomBack" type="button">← Back to templates</button>
             </div>
             <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
         </div>
@@ -362,12 +372,14 @@
             $('msgTitle').textContent = 'Message passenger';
             $('msgOptions').classList.remove('hidden');
             $('msgCustomToggle').classList.remove('hidden');
+            $('msgCancel').classList.remove('hidden');
             resetCustomMessage(); // collapse composer + clear draft/counter/disabled
         }
         function showComposerView() {
             $('msgTitle').textContent = 'Custom message';
             $('msgOptions').classList.add('hidden');
             $('msgCustomToggle').classList.add('hidden');
+            $('msgCancel').classList.add('hidden');
             $('msgCustomArea').classList.remove('hidden');
             $('msgCustomText').focus();
         }
@@ -415,6 +427,7 @@
             showTemplateView();
             $('msgCustomToggle').focus();
         });
+        $('msgCustomClose').addEventListener('click', closeMessageSheet);
         $('msgCustomText').addEventListener('input', () => {
             const ta = $('msgCustomText');
             $('msgCharCount').textContent = `${ta.value.length} / 500`;
