@@ -212,7 +212,7 @@
             <div class="status-sub" id="statusSub"></div>
 
             <div class="paused-card hidden" id="pausedCard">
-                <div class="paused-text">Automatic updates paused. Your booking is still active — the status checks again when you come back to this page.</div>
+                <div class="paused-text" id="pausedText">Automatic updates paused. Your booking is still active — the status checks again when you come back to this page.</div>
                 <div class="paused-note hidden" id="pausedNote"></div>
             </div>
 
@@ -309,6 +309,8 @@
         // page goes silent until it next becomes visible — an unreachable
         // or erroring server must never sustain an endless retry loop.
         const MAX_POLL_FAILURES = 5;
+        const DEFAULT_PAUSED_MESSAGE = 'Automatic updates paused. Your booking is still active — the status checks again when you come back to this page.';
+        const FAILURE_PAUSED_MESSAGE = `Automatic updates paused because we couldn\'t reach the server. Reopen this page to check again, or call or text LinkMia: ${SUPPORT_PHONE}.`;
         // Financial seals (centralized in blockReason):
         // - any non-terminal status WITHOUT an explicit cutoff (legacy
         //   'assigned', malformed data, future surprises) gets a short leash;
@@ -356,7 +358,9 @@
         let pollTimer = null;      // self-scheduling setTimeout — never an interval
         let isFetching = false;    // polls can never overlap
         let failStreak = 0;        // exponential backoff on failures
-        let pollPaused = false;    // cutoff reached; manual button only
+        let pollPaused = false;    // automatic updates paused by a hard seal
+        let tripNotFound = false;  // 404 is permanent for this page session
+        let failurePaused = false; // visibility return gets one recovery fetch
         let memAnchor = null;      // {status, at} fallback if storage unavailable
         let memSpent = 0;          // request-budget fallback if storage unavailable
         let readySignalSent = false;
@@ -534,6 +538,8 @@
         }
 
         function showNoTrip() {
+            $('tripView').classList.add('hidden');
+            $('loadingMsg').classList.remove('hidden');
             $('loadingMsg').innerHTML = 'We couldn\'t find a booking to track.<br><br><a href="/" target="_top">Book a ride</a>';
         }
 
@@ -771,6 +777,7 @@
         function scheduleNext(b) {
             clearTimeout(pollTimer);
             pollTimer = null;
+            if (tripNotFound) return;
             if (pollPaused || document.visibilityState !== 'visible') return;
             if (blockReason(b)) return; // centralized guard — never schedule while blocked
             // Scheduled ride still far from pickup: sleep LOCALLY — zero
@@ -786,14 +793,17 @@
             pollTimer = setTimeout(fetchStatus, delay);
         }
 
-        function showPaused() {
+        function showPaused(message = DEFAULT_PAUSED_MESSAGE) {
             pollPaused = true;
             clearTimeout(pollTimer);
             pollTimer = null;
+            $('pausedText').textContent = message;
             $('pausedCard').classList.remove('hidden');
             if (spentCount() >= REQUEST_BUDGET) {
                 $('pausedNote').textContent = `Update limit reached for this booking — call or text us: ${SUPPORT_PHONE}`;
                 $('pausedNote').classList.remove('hidden');
+            } else {
+                $('pausedNote').classList.add('hidden');
             }
         }
         function hidePaused() {
@@ -802,14 +812,37 @@
             $('pausedNote').classList.add('hidden');
         }
 
+        function showFailurePaused() {
+            failurePaused = true;
+            showPaused(FAILURE_PAUSED_MESSAGE);
+            // Before the first successful response the trip view is still
+            // hidden, so put the same honest message in the loading area.
+            if (!lastBooking) {
+                $('loadingMsg').textContent = FAILURE_PAUSED_MESSAGE;
+                $('loadingMsg').classList.remove('hidden');
+            }
+        }
+
+        function recordPollFailure(kind) {
+            failStreak++;
+            // A foreground return after a failure pause is deliberately one
+            // recovery request, not a fresh five-request retry sequence.
+            if (kind === 'failure-recovery' || failStreak >= MAX_POLL_FAILURES) {
+                showFailurePaused();
+                return;
+            }
+            scheduleNext(lastBooking);
+        }
+
         // kind: undefined = scheduled poll · 'return' = human-initiated
-        // (visibility return, cancel-flow refresh). Human-initiated checks
+        // check · 'failure-recovery' = one check after a failure pause.
+        // Human-initiated checks
         // may look past a time-based pause (the agreed one-check-on-return
         // behavior — there is no manual button; updates stay automatic);
         // NOTHING gets past a spent request budget except the initial
         // render fetch of a fresh page load (one human-bounded request).
         async function fetchStatus(kind) {
-            if (isFetching) return;
+            if (isFetching || tripNotFound) return;
             if (lastBooking) {
                 const r = blockReason(lastBooking);
                 if (r === 'terminal') return;
@@ -821,6 +854,7 @@
             try {
                 const res = await fetch(`/api/booking-status?id=${encodeURIComponent(bookingId)}`);
                 if (res.status === 404) {
+                    tripNotFound = true;
                     clearTimeout(pollTimer);
                     pollTimer = null;
                     clearAnchor();
@@ -829,8 +863,7 @@
                     return;
                 }
                 if (!res.ok) {
-                    failStreak++;
-                    scheduleNext(lastBooking);
+                    recordPollFailure(kind);
                     return;
                 }
                 const { booking, driver } = await res.json();
@@ -844,6 +877,7 @@
                     DRIVER.phone = digits.length >= 10 ? digits : null;
                 }
                 failStreak = 0;
+                failurePaused = false;
                 render(booking);
                 const reason = blockReason(booking);
                 if (reason === 'terminal') return; // render stopped everything
@@ -855,8 +889,7 @@
                 scheduleNext(booking);
             } catch (e) {
                 console.warn('Status fetch failed:', e);
-                failStreak++;
-                scheduleNext(lastBooking);
+                recordPollFailure(kind);
             } finally {
                 isFetching = false;
             }
@@ -929,7 +962,8 @@
             // always — including on a paused page (a return is a human
             // looking; if the status advanced, bounded polling resumes; if
             // unchanged, the page pauses again after that single request).
-            // The reset also grants a fresh failure budget per visit.
+            // A normal return resets the failure budget; after a failure
+            // pause, a return gets exactly one recovery request instead.
             // Never restarts after a terminal status.
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState !== 'visible') {
@@ -937,9 +971,12 @@
                     pollTimer = null;
                     return;
                 }
+                if (tripNotFound) return;
                 if (lastBooking && TERMINAL.includes(lastBooking.status)) return;
+                const kind = failurePaused ? 'failure-recovery' : 'return';
+                if (failurePaused) pollPaused = false; // permit one recovery fetch
                 failStreak = 0;
-                fetchStatus('return');
+                fetchStatus(kind);
             });
         }
     </script>
