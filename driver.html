@@ -116,6 +116,7 @@
         /* Secondary message action — visually subordinate to status buttons */
         .btn-message {
             width: 100%; margin-top: 8px; padding: 11px;
+            min-height: 44px;
             background: white; color: #1a1a2e;
             border: 1.5px solid #c9c9d4; border-radius: 10px;
             font-size: 14px; font-weight: 600; cursor: pointer;
@@ -138,12 +139,14 @@
         .msg-option {
             display: block; width: 100%; text-align: left;
             padding: 13px 14px; margin-bottom: 8px;
+            min-height: 44px;
             background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
             font-size: 14px; line-height: 1.45; color: #1a1a2e;
             cursor: pointer; font-family: inherit;
         }
         .msg-cancel {
             display: block; width: 100%; padding: 13px;
+            min-height: 44px;
             background: none; border: none; color: #6b6b76;
             font-size: 14px; cursor: pointer; font-family: inherit;
         }
@@ -286,11 +289,17 @@
 
         // The sheet receives only a booking ID and looks the ride up in
         // memory; template text reaches the DOM via textContent only —
-        // passenger data is never injected as HTML.
+        // passenger data is never injected as HTML. Focus is captured on
+        // open and restored on ANY close path (cancel, backdrop, Escape,
+        // template selection) so keyboard/VoiceOver users land back on the
+        // button that opened the sheet.
+        let messageReturnFocus = null;
+
         function openMessageSheet(bookingId) {
             const b = lastBookings.find((x) => x.id === bookingId);
             const digits = validPhoneDigits(b);
             if (!b || !digits || !MESSAGE_STATUSES.includes(b.status)) return;
+            messageReturnFocus = document.activeElement;
             const passengerFirst = String(b.customer_name || 'there').trim().split(/\s+/)[0] || 'there';
             const driverName = $('driverName').textContent || 'your LinkMia driver';
             const options = $('msgOptions');
@@ -308,11 +317,20 @@
             });
             $('msgBackdrop').classList.remove('hidden');
             $('msgSheet').classList.remove('hidden');
+            const first = options.querySelector('.msg-option');
+            if (first) first.focus();
         }
         function closeMessageSheet() {
             $('msgBackdrop').classList.add('hidden');
             $('msgSheet').classList.add('hidden');
+            if (messageReturnFocus && messageReturnFocus.isConnected) messageReturnFocus.focus();
+            messageReturnFocus = null;
         }
+        // Single listener registered once — repeated sheet opens never
+        // stack duplicates. Escape closes only while the sheet is visible.
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !$('msgSheet').classList.contains('hidden')) closeMessageSheet();
+        });
 
         function rideCard(b, buttonsHtml, badgeHtml) {
             return `
