@@ -1,6 +1,17 @@
 // Secure Booking Creation with Supabase Persistence + Telegram doorbell ping
 // IMPORTANT: Supabase insert happens FIRST, the doorbell only fires on success.
 // All dispatch actions (accept/decline/status) happen on the driver page.
+//
+// ACCOUNT GATE: new bookings are AUTHENTICATED-ONLY. The disabled
+// "Guest checkout — coming later" UI is convenience; THIS is the
+// enforcement: 401 for a missing/invalid/expired token, 403 when the
+// authenticated identity cannot be resolved to a customers row, 500 on
+// auth-verification or database failure. There is no anonymous insert
+// path — every new booking is stamped with customer_id. Legacy guest
+// bookings (customer_id NULL) and their /trip links are untouched; the
+// guest columns (customer_*/booker_*) are still written exactly as
+// before, because "book for someone else" remains a signed-in booker
+// arranging a ride for another passenger.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -8,7 +19,7 @@ exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'private, no-store',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
@@ -39,42 +50,42 @@ exports.handler = async (event, context) => {
     };
   }
 
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!anonKey) {
+    console.error('❌ Missing SUPABASE_ANON_KEY — cannot verify sessions');
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Server configuration error' })
+    };
+  }
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  // Optional identity link: when the frontend sends a session token, resolve
-  // it to a customers row so the booking is tied to the account. If the
-  // account is an active ambassador, the booking is attributed to them.
-  // Failures here never block the booking — guests book exactly as before.
-  let linkedCustomerId = null;
-  let ambassadorHost = null;
+  // ============================================
+  // ACCOUNT GATE: require a valid session (CreditEngine requireAuth
+  // pattern — checks BOTH the auth error and the missing user; the old
+  // optional-identity block checked neither and silently fell through
+  // to an anonymous insert).
+  //   missing token           -> 401
+  //   invalid/expired token   -> 401
+  //   verification unreachable -> 500 (never guess)
+  // ============================================
+  const authHeader = event.headers.authorization || event.headers.Authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (!token) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Not authenticated' }) };
+  }
+  let user;
   try {
-    const authHeader = event.headers.authorization || event.headers.Authorization || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    if (token && process.env.SUPABASE_ANON_KEY) {
-      const authClient = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
-      const { data: userData } = await authClient.auth.getUser(token);
-      if (userData?.user) {
-        const { data: customer } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('user_id', userData.user.id)
-          .maybeSingle();
-        if (customer) {
-          linkedCustomerId = customer.id;
-        }
-        const { data: host } = await supabase
-          .from('hosts')
-          .select('id, name, commission_rate')
-          .eq('user_id', userData.user.id)
-          .eq('status', 'active')
-          .maybeSingle();
-        if (host) {
-          ambassadorHost = host;
-        }
-      }
+    const authClient = createClient(supabaseUrl, anonKey);
+    const { data: userData, error: userError } = await authClient.auth.getUser(token);
+    if (userError || !userData?.user) {
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
     }
-  } catch (identityError) {
-    console.warn('⚠️ Identity link skipped:', identityError.message);
+    user = userData.user;
+  } catch (authError) {
+    console.error('❌ Auth verification failed:', authError.message);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify sign-in' }) };
   }
 
   try {
@@ -120,6 +131,74 @@ exports.handler = async (event, context) => {
       'Mercedes Sprinter': 'sprinter'
     };
     const vehicleType = vehicleTypeMap[booking.vehicle] || 'sedan';
+
+    // ============================================
+    // RESOLVE THE CUSTOMER IDENTITY — every new booking is stamped.
+    //   customers row exists      -> use it
+    //   no row                    -> create it (profile.js ensure-row
+    //     pattern) from the BOOKER identity in this payload. This branch
+    //     exists because admin-provisioned accounts (e.g. ambassadors)
+    //     may have no customers row and there is no profile UI to heal a
+    //     hard 403 — flagged for Codex as a deliberate softening of the
+    //     "403 on missing profile" contract. 403 remains the fail-closed
+    //     answer when no usable identity exists; DB failures are 500.
+    // ============================================
+    let customerId = null;
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (customerError) {
+      console.error('❌ Customer lookup failed:', customerError.message);
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+    }
+    if (customer) {
+      customerId = customer.id;
+    } else {
+      const identityName = booking.bookerName || booking.customerName;
+      const identityPhone = booking.bookerPhone || booking.phone;
+      if (!identityName || !identityPhone) {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({ error: 'Account profile incomplete — sign in again to finish setting up your account' })
+        };
+      }
+      const { data: created, error: createError } = await supabase
+        .from('customers')
+        .insert([{
+          user_id: user.id,
+          name: identityName,
+          phone: identityPhone,
+          email: booking.email || user.email || null,
+          type: 'guest',
+          source: 'website'
+        }])
+        .select('id')
+        .single();
+      if (createError || !created) {
+        console.error('❌ Customer profile creation failed:', createError?.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not create account profile' }) };
+      }
+      customerId = created.id;
+    }
+
+    // Ambassador attribution: an ACTIVE hosts row on this account wins
+    // over any stored ref code. Lookup failure is non-fatal (attribution
+    // is optional; identity above is not).
+    let ambassadorHost = null;
+    try {
+      const { data: host } = await supabase
+        .from('hosts')
+        .select('id, name, commission_rate')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (host) ambassadorHost = host;
+    } catch (hostError) {
+      console.warn('⚠️ Ambassador lookup skipped:', hostError.message);
+    }
 
     // Referral attribution: a signed-in ambassador wins; otherwise a stored
     // QR ref code (?ref=...) is honored. Commission is stamped at booking
@@ -178,7 +257,7 @@ exports.handler = async (event, context) => {
       promo_code: booking.promoCode || null,
       booking_mode: booking.mode || null,
       duration_minutes: parseInt(booking.durationMinutes) || null,
-      customer_id: linkedCustomerId,
+      customer_id: customerId,
       referred_by_host: referredByHost,
       host_commission: hostCommission,
       source: 'website'
