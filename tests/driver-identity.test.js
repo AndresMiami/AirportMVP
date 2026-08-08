@@ -333,6 +333,18 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(r.statusCode, 500);
     assert.strictEqual(lastUpdate, null);
   });
+  currentBookingResult = { data: { pickup_datetime: 'not-a-date' }, error: null };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready with an UNPARSEABLE pickup time: fails CLOSED (409), no readiness recorded', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(lastUpdate, null, 'invalid timing must never reach the update');
+  });
+  currentBookingResult = { data: {}, error: null }; // booking exists, pickup missing
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready with a MISSING pickup time: fails CLOSED (409), no readiness recorded', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(lastUpdate, null);
+  });
   lastUpdate = null; lastFilters = null; lastIsFilter = null;
   currentBookingResult = {
     data: { pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },

@@ -12,12 +12,12 @@
 // Kill switch: WATCHDOG_DISABLED=1.
 //
 // One invocation:
-//   B. SWEEP      one bounded bookings query, EARLIEST PICKUP FIRST so the
-//                 row limit can never repeatedly starve imminent rides
-//   A. HEARTBEAT  ride-day-only admin summary — sealed claim/finalize
-//                 state machine in system_state (see maybeHeartbeat):
-//                 bounded retries, terminal definitive/ambiguous, one
-//                 global attempt counter
+//   B. SWEEP      one bounded bookings query, EARLIEST PICKUP FIRST and
+//                 LEAN: confirmed rides from now to +3h (readiness only
+//                 applies to upcoming confirmed rides — pending rows and
+//                 already-past confirmed rows are excluded so abandoned
+//                 records can never crowd the 50-row limit ahead of an
+//                 imminent ride) plus active statuses for suppression.
 //   C. AT-RISK    stamp bookings.at_risk_at at T-105 — a conditional
 //                 UPDATE that is INDEPENDENT of Telegram delivery.
 //                 Telegram is the alert channel; the DB is the truth.
@@ -26,11 +26,20 @@
 //                 state, so it must come FROM the DB state.
 //   E. SUPPRESS   moot chains (ready / advanced / reassigned), BATCHED
 //   F. RECOVER    expired claims -> ambiguous (uniform, never resent)
+//   A. HEARTBEAT  AFTER the operational database phases, so "alive" is a
+//                 claim about the WHOLE cycle: a broken database cycle
+//                 never sends a green heartbeat. Sealed claim/finalize
+//                 state machine in system_state (see maybeHeartbeat):
+//                 bounded retries, terminal definitive/ambiguous, one
+//                 global attempt counter.
 //   G. DISPATCH   claim-by-insert, send Telegram, roll events up.
-//                 SKIPPED ENTIRELY when any database work failed this
-//                 cycle (summary.dbErrors > 0): a cycle that cannot trust
-//                 its own writes must not talk to the outside world —
-//                 the next cycle retries from database truth.
+//                 GATED TWICE (after F and after A) and STOPPED MID-LOOP:
+//                 whenever any database work fails (summary.dbErrors>0),
+//                 no further notification is sent this cycle — a cycle
+//                 that cannot trust its own writes must not talk to the
+//                 outside world; the next cycle retries from DB truth.
+//                 A provider call that already happened cannot be
+//                 undone, but nothing follows it on a broken cycle.
 //
 // Every step is an ON CONFLICT insert, a conditional UPDATE, or a
 // unique-arbitrated row creation — overlapping invocations degrade to
@@ -106,13 +115,18 @@ exports.handler = async () => {
   };
 
   try {
-    // ---- B. SWEEP: one bounded query, earliest pickups first ----
-    const low = new Date(nowMs - 6 * 3600e3).toISOString();
+    // ---- B. SWEEP: one bounded LEAN query, earliest pickups first ----
+    // Readiness only ever applies to UPCOMING confirmed rides: pending
+    // rows have no assigned driver to remind and past confirmed rows can
+    // no longer need reminders (every chain event carries not_after =
+    // pickup) — excluding both keeps abandoned records from filling the
+    // 50-row limit ahead of imminent rides. Active statuses stay in for
+    // suppression/recovery bookkeeping.
     const high = new Date(nowMs + 3 * 3600e3).toISOString();
     const { data: sweptRows, error: sweepError } = await db
       .from('bookings')
       .select(SWEEP_FIELDS)
-      .or(`and(status.in.(pending,confirmed),pickup_datetime.gte.${low},pickup_datetime.lte.${high}),status.in.(on_the_way,arrived,in_progress)`)
+      .or(`and(status.eq.confirmed,pickup_datetime.gte.${nowIso},pickup_datetime.lte.${high}),status.in.(on_the_way,arrived,in_progress)`)
       .order('pickup_datetime', { ascending: true })
       .limit(MAX_BOOKINGS);
     if (sweepError) {
@@ -121,11 +135,6 @@ exports.handler = async () => {
     }
     const bookings = sweptRows || [];
     summary.swept = bookings.length;
-
-    // ---- A. HEARTBEAT (budget-checked; counts against the global cap) ----
-    if (!outOfBudget()) {
-      summary.heartbeat = await maybeHeartbeat(db, nowMs, summary, dbFail);
-    }
 
     // ---- C. OPERATIONAL STATE FIRST: at-risk stamp at T-105 ----
     for (const b of bookings) {
@@ -254,14 +263,30 @@ exports.handler = async () => {
       else summary.recovered = (expired || []).length;
     }
 
-    // ---- DISPATCH GATE: no external sends on a broken database cycle ----
+    // ---- OPERATIONAL GATE: broken cycle -> no heartbeat, no dispatch ----
     // If ANY database work failed above, this cycle's view of the truth
-    // is suspect — a send could claim state that was never stored (e.g.
-    // an at-risk mark). Skip dispatch entirely; the next cycle re-derives
-    // everything idempotently from database truth.
+    // is suspect — a green "alive" heartbeat would be a lie and a
+    // reminder could claim state that was never stored (e.g. an at-risk
+    // mark). Send NOTHING; the next cycle retries from database truth
+    // (the un-finalized heartbeat day stays claimable).
     if (summary.dbErrors > 0) {
       summary.dispatchSkipped = true;
-      console.error('❌ Watchdog: skipping dispatch — database failures this cycle');
+      console.error('❌ Watchdog: skipping heartbeat + dispatch — database failures this cycle');
+      return finish();
+    }
+
+    // ---- A. HEARTBEAT: after operational truth is established ----
+    // "Watchdog alive" is a claim about the whole cycle, so it runs only
+    // once the database phases succeeded. Budget-checked; its provider
+    // call counts against the global MAX_ATTEMPTS cap.
+    if (!outOfBudget()) {
+      summary.heartbeat = await maybeHeartbeat(db, nowMs, summary, dbFail);
+    }
+    if (summary.dbErrors > 0) {
+      // Heartbeat bookkeeping itself hit the database and failed — same
+      // rule: nothing further is sent on a broken cycle.
+      summary.dispatchSkipped = true;
+      console.error('❌ Watchdog: skipping dispatch — heartbeat database failure');
       return finish();
     }
 
@@ -319,6 +344,15 @@ exports.handler = async () => {
         if (summary.attempts >= MAX_ATTEMPTS) break;
         if (outOfBudget()) break;
         await dispatchOne(db, ev, nowMs, summary, dbFail);
+        if (summary.dbErrors > 0) {
+          // A DB failure INSIDE dispatch breaks the cycle's trust the
+          // same as one before it. The provider call that may already
+          // have happened cannot be undone — but no subsequent event may
+          // send from this broken cycle.
+          summary.dispatchSkipped = true;
+          console.error('❌ Watchdog: stopping dispatch — database failure during dispatch');
+          break;
+        }
       }
     }
 

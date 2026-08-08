@@ -146,22 +146,33 @@ exports.handler = async (event) => {
       // at-risk mark in the same atomic update.
       //
       // The T-180 window is enforced HERE, server-side — the UI gate is
-      // convenience, not security. A read failure is a real 500, never a
-      // silent pass-through; an unparseable/missing pickup falls through
-      // to the guarded update, which still enforces status + ownership.
+      // convenience, not security. FAIL CLOSED: a read failure is a real
+      // 500; a booking whose pickup time is missing or unparseable gets
+      // 409 (readiness timing cannot be verified, so readiness is never
+      // recorded). Only a MISSING booking falls through to the guarded
+      // update, which yields the normal not-found/conflict response.
       const { data: pre, error: preError } = await supabase
         .from('bookings').select('pickup_datetime').eq('id', bookingId).maybeSingle();
       if (preError) {
         console.error('❌ ready: pickup window read failed:', preError.message || preError);
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Readiness check failed' }) };
       }
-      const readyPickupMs = pre ? Date.parse(pre.pickup_datetime) : NaN;
-      if (Number.isFinite(readyPickupMs) && readyPickupMs - Date.now() > RECENT_ACCEPT_MS) {
-        return {
-          statusCode: 409,
-          headers,
-          body: JSON.stringify({ error: 'Too early — readiness confirmation opens 3 hours before pickup' })
-        };
+      if (pre) {
+        const readyPickupMs = Date.parse(pre.pickup_datetime);
+        if (!Number.isFinite(readyPickupMs)) {
+          return {
+            statusCode: 409,
+            headers,
+            body: JSON.stringify({ error: 'Booking has no valid pickup time — readiness unavailable' })
+          };
+        }
+        if (readyPickupMs - Date.now() > RECENT_ACCEPT_MS) {
+          return {
+            statusCode: 409,
+            headers,
+            body: JSON.stringify({ error: 'Too early — readiness confirmation opens 3 hours before pickup' })
+          };
+        }
       }
       fromStatuses = ['confirmed'];
       updates = {

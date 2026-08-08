@@ -531,6 +531,69 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   });
   delete process.env.WATCHDOG_BUDGET_MS;
 
+  // ---------- sweep shape: lean query, no pending, no past confirmed ----------
+  freshState();
+  const capturedOr = [];
+  state.beforeOp = (op, table, q) => {
+    if (op === 'select' && table === 'bookings' && q.orExpr) capturedOr.push(q.orExpr);
+  };
+  const sweepFloor = new Date(Date.now() - 1000).toISOString();
+  r = await wd.handler({});
+  check('sweep excludes pending and past-confirmed rows; keeps active statuses', () => {
+    assert.strictEqual(capturedOr.length, 1, 'exactly one bookings query on a quiet cycle');
+    const expr = capturedOr[0];
+    assert.ok(/and\(status\.eq\.confirmed,pickup_datetime\.gte\./.test(expr),
+      'sweep must be confirmed-only with a lower time bound');
+    assert.ok(!/pending/.test(expr), 'pending rows must never be swept');
+    assert.ok(/status\.in\.\(on_the_way,arrived,in_progress\)/.test(expr),
+      'active rides must stay in for suppression/recovery');
+    const m = expr.match(/pickup_datetime\.gte\.([^,]+),/);
+    assert.ok(m && m[1] >= sweepFloor,
+      'lower bound must be now — past confirmed rows cannot need readiness reminders');
+  });
+  state.beforeOp = null;
+
+  // ---------- in-dispatch DB failure stops the loop ----------
+  freshState();
+  const bFirst = mkBooking({ pickup_datetime: iso(139) });  // due earlier -> dispatched first
+  const bSecond = mkBooking({ pickup_datetime: iso(141) }); // must never send
+  state.bookings.push(bFirst, bSecond);
+  // skip:0 would hit stale recovery; skip past it so the injection lands
+  // on the FIRST event's finalizeDelivery, after its send.
+  state.inject.push({ op: 'update', table: 'notification_deliveries', times: 1, skip: 1 });
+  r = await wd.handler({});
+  check('DB failure INSIDE dispatch: loop stops — the second event makes zero provider calls', () => {
+    assert.strictEqual(r.statusCode, 500);
+    const s = JSON.parse(r.body);
+    assert.ok(s.dbErrors >= 1);
+    assert.strictEqual(s.dispatchSkipped, true);
+    assert.strictEqual(fetchCalls.length, 1,
+      'the first send already happened; nothing may follow on a broken cycle');
+    const evSecond = events().find((e) => e.booking_id === bSecond.id);
+    assert.strictEqual(evSecond.state, 'pending', 'second event must be untouched');
+    assert.strictEqual(deliveries().length, 1, 'no delivery row for the second event');
+  });
+
+  // ---------- heartbeat is truthful about the WHOLE cycle ----------
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(mkBooking({ pickup_datetime: iso(100) })); // ride day + at-risk due
+  state.inject.push({ op: 'update', table: 'bookings', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('at-risk DB failure on a ride day: NO green heartbeat, day not finalized, 500', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(fetchCalls.length, 0, 'a broken cycle must not claim to be alive');
+    assert.strictEqual(heartbeatValue(), null, 'heartbeat day must stay claimable');
+    assert.strictEqual(JSON.parse(r.body).dispatchSkipped, true);
+  });
+  r = await wd.handler({}); // injection consumed — next cycle is healthy
+  check('next healthy cycle: heartbeat sends and finalizes; reminders resume', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(heartbeatValue(), todayET());
+    // heartbeat + urgent + admin escalation + at-risk mark
+    assert.strictEqual(fetchCalls.length, 4);
+    assert.ok(state.bookings[0].at_risk_at, 'at-risk retried from database truth');
+  });
+
   // ---------- budget expiring MID-RUN, inside chain collapse ----------
   freshState();
   state.bookings.push(mkBooking({ pickup_datetime: iso(100) })); // whole chain due
