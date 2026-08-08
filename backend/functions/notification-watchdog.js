@@ -4,37 +4,43 @@
 //
 // Runs ONLY on published production deploys and is not exposed as a URL
 // endpoint. Documented platform limit is 30 s; this handler enforces an
-// 8 s soft budget ACROSS EVERY PHASE (not just dispatch) with hard caps
-// (50 bookings, 15 notification ATTEMPTS — failed and ambiguous sends
-// consume time and provider calls exactly like successes, so the cap
-// counts attempts, and successes are tracked separately as 'submitted').
-// Kill switch: WATCHDOG_DISABLED=1. Budget override for tests:
-// WATCHDOG_BUDGET_MS.
+// 8 s soft budget across EVERY phase and inside every sequential DB loop
+// (WATCHDOG_BUDGET_MS override for tests), plus hard caps: 50 bookings
+// and ONE GLOBAL provider-call ceiling — MAX_ATTEMPTS (15) counts every
+// Telegram call this invocation makes, heartbeat included, success or
+// failure ('submitted' successes are tracked separately).
+// Kill switch: WATCHDOG_DISABLED=1.
 //
 // One invocation:
 //   B. SWEEP      one bounded bookings query, EARLIEST PICKUP FIRST so the
 //                 row limit can never repeatedly starve imminent rides
-//   A. HEARTBEAT  ride-day-only admin summary — claim/finalize state
-//                 machine in system_state; the day is finalized ONLY after
-//                 Telegram accepts the submission (see maybeHeartbeat)
+//   A. HEARTBEAT  ride-day-only admin summary — sealed claim/finalize
+//                 state machine in system_state (see maybeHeartbeat):
+//                 bounded retries, terminal definitive/ambiguous, one
+//                 global attempt counter
 //   C. AT-RISK    stamp bookings.at_risk_at at T-105 — a conditional
 //                 UPDATE that is INDEPENDENT of Telegram delivery.
 //                 Telegram is the alert channel; the DB is the truth.
-//   D. DERIVE     idempotent event inserts (unique identity arbitrates)
-//   E. SUPPRESS   moot chains (ready / advanced / reassigned), BATCHED —
-//                 grouped updates, no per-booking query loops
+//   D. DERIVE     idempotent event inserts. at_risk_mark derives ONLY
+//                 from a stamped at_risk_at — the message claims the DB
+//                 state, so it must come FROM the DB state.
+//   E. SUPPRESS   moot chains (ready / advanced / reassigned), BATCHED
 //   F. RECOVER    expired claims -> ambiguous (uniform, never resent)
-//   G. DISPATCH   claim-by-insert, send Telegram, roll events up
+//   G. DISPATCH   claim-by-insert, send Telegram, roll events up.
+//                 SKIPPED ENTIRELY when any database work failed this
+//                 cycle (summary.dbErrors > 0): a cycle that cannot trust
+//                 its own writes must not talk to the outside world —
+//                 the next cycle retries from database truth.
 //
 // Every step is an ON CONFLICT insert, a conditional UPDATE, or a
 // unique-arbitrated row creation — overlapping invocations degrade to
-// wasted work, never duplicate sends. No exactly-once from the platform
-// is assumed.
+// wasted work, never duplicate sends. A LOST event-state CAS means
+// another process changed the event: dispatch stops for that event
+// without sending. No exactly-once from the platform is assumed.
 //
 // Database failures are never swallowed: only unique-violation 23505 is
 // an expected outcome (a lost claim race). Every real failure increments
-// summary.dbErrors, is logged with its site, and forces a 500 response —
-// a watchdog run whose database work failed is NOT reported as clean.
+// summary.dbErrors, is logged with its site, and forces a 500 response.
 //
 // PR 1 scope: readiness chain only, Telegram only. Web Push (Driver PWA,
 // then authenticated-passenger PWA) plugs into the same ledger later
@@ -49,14 +55,16 @@ const SWEEP_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, ' +
 
 const SOFT_BUDGET_MS = 8000;
 const MAX_BOOKINGS = 50;
-const MAX_ATTEMPTS = 15;
+const MAX_ATTEMPTS = 15;          // global provider-call cap, heartbeat included
+const HEARTBEAT_MAX_ATTEMPTS = 3; // per-day cap for RETRYABLE heartbeat failures
 const AT_RISK_OFFSET_MS = 105 * 60 * 1000;
 const HEARTBEAT_KEY = 'last_heartbeat_date';
 
 exports.handler = async () => {
   const summary = {
     swept: 0, atRisk: 0, derived: 0, suppressed: 0, recovered: 0,
-    attempts: 0, submitted: 0, dbErrors: 0, budgetStopped: false, heartbeat: false
+    attempts: 0, submitted: 0, dbErrors: 0, budgetStopped: false,
+    dispatchSkipped: false, heartbeat: false
   };
 
   if (process.env.WATCHDOG_DISABLED === '1' || process.env.WATCHDOG_DISABLED === 'true') {
@@ -114,9 +122,9 @@ exports.handler = async () => {
     const bookings = sweptRows || [];
     summary.swept = bookings.length;
 
-    // ---- A. HEARTBEAT (budget-checked like every other phase) ----
+    // ---- A. HEARTBEAT (budget-checked; counts against the global cap) ----
     if (!outOfBudget()) {
-      summary.heartbeat = await maybeHeartbeat(db, nowMs, dbFail);
+      summary.heartbeat = await maybeHeartbeat(db, nowMs, summary, dbFail);
     }
 
     // ---- C. OPERATIONAL STATE FIRST: at-risk stamp at T-105 ----
@@ -131,6 +139,9 @@ exports.handler = async () => {
           .eq('id', b.id).eq('status', 'confirmed').is('at_risk_at', null)
           .select();
         if (error) {
+          // The at_risk_mark message claims the DB state — a failed stamp
+          // means no such claim may be made (also enforced in D and by the
+          // dbErrors dispatch gate before G).
           dbFail('at-risk stamp', error);
           continue;
         }
@@ -150,6 +161,9 @@ exports.handler = async () => {
         const pickupMs = Date.parse(b.pickup_datetime);
         if (!Number.isFinite(pickupMs)) continue;
         for (const spec of notify.READINESS_CHAIN) {
+          // at_risk_mark says "marked in the database" — it derives ONLY
+          // from a booking whose at_risk_at is actually stamped.
+          if (spec.type === 'at_risk_mark' && !b.at_risk_at) continue;
           const dueMs = pickupMs - spec.offsetMin * 60e3;
           if (nowMs >= dueMs && nowMs < pickupMs) {
             eventRows.push({
@@ -176,7 +190,7 @@ exports.handler = async () => {
       }
     }
 
-    // ---- E. SUPPRESSION: batched grouped updates, no per-booking loops ----
+    // ---- E. SUPPRESSION: batched grouped updates, budget between each ----
     if (!outOfBudget()) {
       const readyIds = [];
       const activeIds = [];
@@ -189,15 +203,17 @@ exports.handler = async () => {
       const ready = await notify.suppressEvents(db, readyIds, notify.CHAIN_TYPES, 'driver_ready');
       if (ready.error) dbFail('suppress driver_ready', ready.error);
       summary.suppressed += ready.count;
-      // On my way is the strongest possible readiness signal
-      const active = await notify.suppressEvents(db, activeIds, notify.CHAIN_TYPES, 'driver_active');
-      if (active.error) dbFail('suppress driver_active', active.error);
-      summary.suppressed += active.count;
+      if (!outOfBudget()) {
+        // On my way is the strongest possible readiness signal
+        const active = await notify.suppressEvents(db, activeIds, notify.CHAIN_TYPES, 'driver_active');
+        if (active.error) dbFail('suppress driver_active', active.error);
+        summary.suppressed += active.count;
+      }
 
       // Recipient-keyed identity: a replacement driver gets their OWN
       // events; the old driver's pending rows are retired in ONE update.
       const assignedIds = bookings.filter((b) => b.assigned_driver).map((b) => b.id);
-      if (assignedIds.length) {
+      if (assignedIds.length && !outOfBudget()) {
         const { data: pendingDriverEvents, error: pendError } = await db
           .from('notification_events')
           .select('id, booking_id, recipient_key')
@@ -227,9 +243,6 @@ exports.handler = async () => {
     }
 
     // ---- F. RECOVER: expired claims -> ambiguous (uniform, no resend) ----
-    // A worker that died mid-send is indistinguishable from a lost
-    // response after transmission began — terminal disposition, never an
-    // automatic resend. Escalation events cover the gap.
     if (!outOfBudget()) {
       const staleIso = new Date(nowMs - notify.CLAIM_EXPIRY_MS).toISOString();
       const { data: expired, error } = await db.from('notification_deliveries')
@@ -239,6 +252,17 @@ exports.handler = async () => {
         .select();
       if (error) dbFail('stale-claim recovery', error);
       else summary.recovered = (expired || []).length;
+    }
+
+    // ---- DISPATCH GATE: no external sends on a broken database cycle ----
+    // If ANY database work failed above, this cycle's view of the truth
+    // is suspect — a send could claim state that was never stored (e.g.
+    // an at-risk mark). Skip dispatch entirely; the next cycle re-derives
+    // everything idempotently from database truth.
+    if (summary.dbErrors > 0) {
+      summary.dispatchSkipped = true;
+      console.error('❌ Watchdog: skipping dispatch — database failures this cycle');
+      return finish();
     }
 
     // ---- G. DISPATCH: due events -> claim-by-insert -> Telegram ----
@@ -256,7 +280,8 @@ exports.handler = async () => {
       let due = dueRows || [];
 
       // Chain collapse: several driver asks due at once (watchdog was
-      // down) -> keep only the most urgent, suppress the rest.
+      // down) -> keep only the most urgent, suppress the rest. Budget-
+      // checked inside the loop like every other sequential DB loop.
       const byBooking = new Map();
       for (const ev of due) {
         if (ev.state === 'pending' && notify.DRIVER_ASKS.includes(ev.event_type)) {
@@ -265,11 +290,13 @@ exports.handler = async () => {
         }
       }
       const superseded = new Set();
+      let collapseStopped = false;
       for (const asks of byBooking.values()) {
-        if (asks.length < 2) continue;
+        if (collapseStopped || asks.length < 2) continue;
         asks.sort((a, b) =>
           notify.DRIVER_ASKS.indexOf(a.event_type) - notify.DRIVER_ASKS.indexOf(b.event_type));
         for (const ev of asks.slice(0, -1)) {
+          if (outOfBudget()) { collapseStopped = true; break; }
           const { row, error } = await notify.setEventState(db, ev.id, ['pending'],
             { state: 'suppressed', suppress_reason: 'superseded' });
           if (error) dbFail('chain collapse', error);
@@ -280,6 +307,13 @@ exports.handler = async () => {
         }
       }
       due = due.filter((ev) => !superseded.has(ev.id));
+      if (summary.dbErrors > 0) {
+        // A collapse failure means a stale ask may still look pending —
+        // same rule as the gate above: no sends on a broken cycle.
+        summary.dispatchSkipped = true;
+        console.error('❌ Watchdog: skipping dispatch — database failures during collapse');
+        return finish();
+      }
 
       for (const ev of due) {
         if (summary.attempts >= MAX_ATTEMPTS) break;
@@ -296,20 +330,26 @@ exports.handler = async () => {
   }
 };
 
-// Ride-day heartbeat with a truthful claim/finalize state machine.
+// Ride-day heartbeat — SEALED claim/finalize state machine.
 // system_state.last_heartbeat_date value grammar:
 //   '<date>'                 finalized — Telegram ACCEPTED today's summary
 //   'claimed:<date>:<iso>'   a worker is sending (expired claims turn
 //                            ambiguous, mirroring the delivery rule)
-//   'failed:<date>'          pre-transmission/definitive failure —
-//                            eligible to retry on the next cycle
+//   'failed:<date>:<n>'      n retryable attempts so far — eligible to
+//                            retry until HEARTBEAT_MAX_ATTEMPTS (3)
+//   'exhausted:<date>'       terminal for the day: a DEFINITIVE provider
+//                            rejection (one call, no 288-calls-a-day
+//                            loop on a misconfigured chat id) or the
+//                            retry cap was reached
 //   'ambiguous:<date>'       transmission may have happened — NEVER
-//                            blindly resent; surfaced in logs every cycle
-// The date is finalized only AFTER a submitted outcome — a failed send
-// never permanently consumes the day.
-async function maybeHeartbeat(db, nowMs, dbFail) {
+//                            blindly resent; surfaced in logs
+// The date is finalized only AFTER a submitted outcome, every provider
+// call here counts against the invocation's global MAX_ATTEMPTS cap, and
+// the CAS claim keeps concurrent workers to a single attempt.
+async function maybeHeartbeat(db, nowMs, summary, dbFail) {
   const adminChat = process.env.ADMIN_TELEGRAM_CHAT_ID;
   if (!adminChat || !process.env.TELEGRAM_BOT_TOKEN) return false;
+  if (summary.attempts >= MAX_ATTEMPTS) return false;
 
   const today = new Date(nowMs).toLocaleDateString('en-CA', { timeZone: notify.MIAMI_TZ });
   const { data: row, error: readError } = await db.from('system_state')
@@ -325,6 +365,10 @@ async function maybeHeartbeat(db, nowMs, dbFail) {
     console.warn('⚠️ Heartbeat ambiguous for today — not resending (check Telegram manually)');
     return false;
   }
+  if (v === `exhausted:${today}`) {
+    console.warn('⚠️ Heartbeat terminally failed for today — not retrying (check Telegram config)');
+    return false;
+  }
   if (v && v.startsWith(`claimed:${today}:`)) {
     const ts = Date.parse(v.split(':').slice(2).join(':'));
     if (!Number.isFinite(ts) || nowMs - ts >= notify.CLAIM_EXPIRY_MS) {
@@ -338,7 +382,14 @@ async function maybeHeartbeat(db, nowMs, dbFail) {
     return false; // in flight or just resolved — never a second send now
   }
 
-  // Claimable: absent row, an old day's value, or failed:<today> (retry).
+  let priorAttempts = 0;
+  const failedPrefix = `failed:${today}:`;
+  if (v && v.startsWith(failedPrefix)) {
+    priorAttempts = parseInt(v.slice(failedPrefix.length), 10) || 0;
+    if (priorAttempts >= HEARTBEAT_MAX_ATTEMPTS) return false; // defensive
+  }
+
+  // Claimable: absent row, an old day's value, or failed:<today>:<n<cap>.
   const nowIsoLocal = new Date(nowMs).toISOString();
   const dayHigh = new Date(nowMs + 24 * 3600e3).toISOString();
   const { data: rideRows, error: rideError } = await db.from('bookings')
@@ -377,18 +428,26 @@ async function maybeHeartbeat(db, nowMs, dbFail) {
   }
   if (!won) return false; // a concurrent run owns today's heartbeat
 
+  summary.attempts++; // heartbeat counts against the GLOBAL provider cap
   const result = await notify.sendTelegram(adminChat,
     `🟢 LinkMia watchdog: alive — ${rideCount} upcoming/active ride${rideCount === 1 ? '' : 's'} today.`);
 
   let finalVal;
   if (result.outcome === 'submitted') {
     finalVal = today;
+    summary.submitted++;
   } else if (result.outcome === 'ambiguous') {
     finalVal = `ambiguous:${today}`;
-    console.warn('⚠️ Heartbeat send ambiguous:', result.error);
+    console.warn('⚠️ Heartbeat send ambiguous — terminal for today:', result.error);
+  } else if (result.outcome === 'definitive') {
+    finalVal = `exhausted:${today}`; // ONE call total on a misconfiguration
+    console.warn('⚠️ Heartbeat rejected by Telegram — terminal for today:', result.error);
   } else {
-    finalVal = `failed:${today}`; // retryable OR definitive: retry next cycle
-    console.warn('⚠️ Heartbeat send failed (will retry next cycle):', result.error);
+    const next = priorAttempts + 1;
+    finalVal = next >= HEARTBEAT_MAX_ATTEMPTS
+      ? `exhausted:${today}`
+      : `failed:${today}:${next}`;
+    console.warn(`⚠️ Heartbeat send failed (attempt ${next}/${HEARTBEAT_MAX_ATTEMPTS}${next >= HEARTBEAT_MAX_ATTEMPTS ? ' — retry cap reached, terminal for today' : ', will retry'}):`, result.error);
   }
   const { error: finalizeError } = await db.from('system_state')
     .update({ value: finalVal })
@@ -400,10 +459,11 @@ async function maybeHeartbeat(db, nowMs, dbFail) {
 }
 
 // Dispatch one due event: refetch the live booking, re-check relevance,
-// claim by insert, send, finalize, roll the event up. 'submitted' is the
-// terminal success — provider acceptance is NOT proof anyone saw it.
-// Every real DB failure is surfaced via dbFail; a failure never guesses
-// an event outcome (the event is left for the next cycle instead).
+// transition to in_delivery (a LOST CAS means another process changed the
+// event — stop without sending), claim by insert, send, finalize, roll
+// the event up. 'submitted' is the terminal success — provider acceptance
+// is NOT proof anyone saw it. Every real DB failure is surfaced via
+// dbFail; a failure never guesses an event outcome.
 async function dispatchOne(db, ev, nowMs, summary, dbFail) {
   const nowIso = new Date(nowMs).toISOString();
   const suppress = async (reason) => {
@@ -458,6 +518,13 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
   if (marked.error) {
     // Can't record state -> don't send: an unrecorded send could duplicate.
     dbFail('mark in_delivery', marked.error);
+    return;
+  }
+  if (!marked.row) {
+    // LOST CAS: between the relevance check and this transition, another
+    // process suppressed or terminally changed the event. Its decision
+    // stands — sending now would be a stale notification. Stop here:
+    // no delivery row, no provider call.
     return;
   }
 
