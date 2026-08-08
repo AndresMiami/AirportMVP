@@ -6,25 +6,36 @@
 // existing booking doorbell (create-booking.js) and on_my_way/complete
 // receipts (update-booking-status.js) are deliberately untouched in PR 1.
 //
+// Channels: telegram (now) and webpush (Driver PWA, next). LinkMia does
+// NOT use SMS; WhatsApp stays the human conversation channel, never
+// automated. Neither channel can prove a person SAW a notification, so
+// the honest terminal success state everywhere is 'submitted' — the
+// provider accepted the send. There is no 'delivered' state.
+//
 // Ledger model (migration 011):
 //   notification_events      one row = one business intention;
 //                            UNIQUE (booking_id, event_type, recipient_key)
+//                            states: pending / in_delivery / submitted /
+//                                    exhausted / suppressed
 //   notification_deliveries  one row = one channel-specific attempt.
 //                            Row CREATION is the claim — the
 //                            (event_id, channel, attempt_no) unique
 //                            constraint arbitrates racing workers. Rows are
 //                            permanent history; their state fields update
-//                            in place as provider results arrive.
+//                            in place as outcomes are determined.
+//                            states: claimed / submitted / failed / ambiguous
 //
-// Delivery truth: 'submitted' means the provider ACCEPTED the request —
-// never more. Telegram has no receipt confirmation, so Telegram events
-// terminate at 'submitted'; only a provider-confirmed receipt (the signed
-// SMS callback, PR 4) may ever mark 'delivered'.
+// Ambiguity, uniformly: once a request MAY have reached the provider, a
+// failure is 'ambiguous' — terminal, never automatically resent (a
+// duplicated reminder erodes trust more than a missing one; escalation
+// events cover driver inaction). Only failures that provably happened
+// BEFORE transmission (DNS resolution, connection refused) — or an
+// explicit provider throttle (429) — are retryable.
 //
-// Ambiguity, uniformly for every channel: a timeout after transmission
-// began, or a claim whose worker died (indistinguishable), is TERMINAL
-// 'ambiguous' — that delivery is never automatically resent. Escalation
-// events still fire on driver inaction; that is the safety net.
+// Database errors are NEVER swallowed here: only unique-violation 23505
+// is the expected "another worker won" result; every other select/insert/
+// update failure is returned to the caller as { dbError } so the watchdog
+// can log it and refuse to report a clean run.
 
 const MIAMI_TZ = 'America/New_York';
 
@@ -49,6 +60,11 @@ const CHAIN_TYPES = READINESS_CHAIN.map((s) => s.type);
 const MAX_ATTEMPTS_PER_CHANNEL = 3;
 const CLAIM_EXPIRY_MS = 3 * 60 * 1000;
 const TELEGRAM_TIMEOUT_MS = 5000;
+
+// Narrowly recognized pre-transmission failures — the ONLY network errors
+// safe to classify as retryable. Anything else (ECONNRESET, EPIPE,
+// ETIMEDOUT, unknown rejections) may have reached Telegram -> ambiguous.
+const PRE_TRANSMISSION_CODES = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'];
 
 function dueAtFor(pickupIso, offsetMin) {
   return new Date(Date.parse(pickupIso) - offsetMin * 60 * 1000).toISOString();
@@ -106,12 +122,22 @@ function renderEvent(eventType, b) {
 }
 
 // ---- Telegram adapter (checks response.ok, classifies outcomes) ----
-// Outcomes: 'submitted'   provider accepted the request
-//           'retryable'   provably failed BEFORE transmission (conn/DNS)
-//                         or a retryable provider status (429/5xx)
-//           'definitive'  provider rejected it (other 4xx) — no retry
-//           'ambiguous'   timed out / response lost after transmission
-//                         began — never automatically resent
+// Duplicate-safety is the design center: once a request MAY have reached
+// Telegram, resending risks a duplicate reminder, so the default for the
+// unknown is 'ambiguous', never 'retryable'.
+//
+//   'submitted'   Telegram accepted the request (HTTP 2xx). Terminal
+//                 success — NOT proof the driver saw anything.
+//   'retryable'   safe to retry: 429 (Telegram's documented throttle —
+//                 the request was explicitly not processed) or a narrowly
+//                 recognized pre-transmission failure (DNS resolution,
+//                 connection refused).
+//   'definitive'  Telegram rejected it (other 4xx) — retrying the same
+//                 request cannot succeed.
+//   'ambiguous'   timeout/abort, connection reset, unknown network error,
+//                 or 5xx (the request reached Telegram; its docs do not
+//                 guarantee a 5xx was rejected before acceptance) —
+//                 TERMINAL, never automatically resent.
 async function sendTelegram(chatId, text) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token || !chatId) return { outcome: 'definitive', error: 'telegram not configured' };
@@ -125,48 +151,57 @@ async function sendTelegram(chatId, text) {
       signal: controller.signal
     });
     if (res.ok) return { outcome: 'submitted' };
-    if (res.status === 429 || res.status >= 500) {
-      return { outcome: 'retryable', error: `telegram ${res.status}` };
-    }
+    if (res.status === 429) return { outcome: 'retryable', error: 'telegram 429' };
+    if (res.status >= 500) return { outcome: 'ambiguous', error: `telegram ${res.status}` };
     return { outcome: 'definitive', error: `telegram ${res.status}` };
   } catch (e) {
     if (e && e.name === 'AbortError') {
       return { outcome: 'ambiguous', error: 'telegram timeout' };
     }
-    // Connection-level rejection before the request could transmit
-    return { outcome: 'retryable', error: e.message || 'network error' };
+    const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+    if (PRE_TRANSMISSION_CODES.includes(code)) {
+      return { outcome: 'retryable', error: `pre-transmission ${code}` };
+    }
+    return { outcome: 'ambiguous', error: code || (e && e.message) || 'unknown network error' };
   } finally {
     clearTimeout(timer);
   }
 }
 
 // Driver Telegram target: drivers.telegram_chat_id, falling back to the
-// admin chat (driver = admin in today's one-driver operation).
-async function resolveDriverChatId(db, driverId) {
+// admin chat (driver = admin in today's one-driver operation). A lookup
+// failure is REPORTED via onDbError but still falls back — a reminder to
+// the admin chat beats silence while the DB hiccups.
+async function resolveDriverChatId(db, driverId, onDbError) {
   if (driverId) {
-    const { data } = await db.from('drivers')
-      .select('telegram_chat_id').eq('id', driverId).single();
+    const { data, error } = await db.from('drivers')
+      .select('telegram_chat_id').eq('id', driverId).maybeSingle();
+    if (error && onDbError) onDbError('resolveDriverChatId', error);
     if (data && data.telegram_chat_id) return data.telegram_chat_id;
   }
   return process.env.ADMIN_TELEGRAM_CHAT_ID || null;
 }
 
+function isUniqueViolation(error) {
+  return Boolean(error && error.code === '23505');
+}
+
 // ---- Delivery creation: insert-as-claim ----
 // Returns exactly one of:
 //   { delivery }   this worker owns the new claimed attempt — send it
-//   { satisfied }  the channel already reached submitted/delivered
+//   { satisfied }  the channel already reached submitted
 //   { inFlight }   an unexpired claim exists — another worker is sending
 //   { blocked }    an ambiguous attempt exists — never resend this channel
 //   { capped }     attempt cap reached — no more attempts allowed
-//   { lost }       another worker won the insert race — skip silently
+//   { lost }       another worker won the insert race (23505) — skip
+//   { dbError }    a REAL database failure — surface it, decide nothing
 async function createDelivery(db, ev, channel, target) {
-  const { data: existing } = await db.from('notification_deliveries')
+  const { data: existing, error: readError } = await db.from('notification_deliveries')
     .select('id, attempt_no, state')
     .eq('event_id', ev.id).eq('channel', channel);
+  if (readError) return { dbError: readError };
   const rows = existing || [];
-  if (rows.some((r) => r.state === 'submitted' || r.state === 'delivered')) {
-    return { satisfied: true };
-  }
+  if (rows.some((r) => r.state === 'submitted')) return { satisfied: true };
   if (rows.some((r) => r.state === 'claimed')) return { inFlight: true };
   if (rows.some((r) => r.state === 'ambiguous')) return { blocked: true };
   if (rows.length >= MAX_ATTEMPTS_PER_CHANNEL) return { capped: true };
@@ -181,31 +216,45 @@ async function createDelivery(db, ev, channel, target) {
       claimed_at: new Date().toISOString()
     })
     .select();
-  if (error || !data || !data.length) return { lost: true };
+  if (error) {
+    // 23505 = the expected "another worker won the claim" outcome.
+    // Anything else is a real failure the caller must surface.
+    return isUniqueViolation(error) ? { lost: true } : { dbError: error };
+  }
+  if (!data || !data.length) return { lost: true };
   return { delivery: data[0] };
 }
 
+// Returns { error } on a real database failure — callers must not ignore it.
 async function finalizeDelivery(db, deliveryId, patch) {
-  await db.from('notification_deliveries')
+  const { error } = await db.from('notification_deliveries')
     .update(patch).eq('id', deliveryId).select();
+  return { error: error || null };
 }
 
 // Conditional event-state transition (CAS on the allowed prior states).
+// Returns { row, error }: row null + error null = CAS lost (fine);
+// error non-null = real database failure the caller must surface.
 async function setEventState(db, eventId, fromStates, patch) {
-  const { data } = await db.from('notification_events')
+  const { data, error } = await db.from('notification_events')
     .update(patch).eq('id', eventId).in('state', fromStates).select();
-  return data && data.length ? data[0] : null;
+  if (error) return { row: null, error };
+  return { row: data && data.length ? data[0] : null, error: null };
 }
 
-// Suppress pending events for a booking (idempotent conditional update).
-async function suppressEvents(db, bookingId, eventTypes, reason) {
-  const { data } = await db.from('notification_events')
+// Suppress pending events for one or many bookings (idempotent
+// conditional update, batched). Returns { count, error }.
+async function suppressEvents(db, bookingIds, eventTypes, reason) {
+  const ids = Array.isArray(bookingIds) ? bookingIds : [bookingIds];
+  if (!ids.length) return { count: 0, error: null };
+  const { data, error } = await db.from('notification_events')
     .update({ state: 'suppressed', suppress_reason: reason })
-    .eq('booking_id', bookingId)
+    .in('booking_id', ids)
     .in('event_type', eventTypes)
     .in('state', ['pending'])
     .select();
-  return (data || []).length;
+  if (error) return { count: 0, error };
+  return { count: (data || []).length, error: null };
 }
 
 module.exports = {
@@ -223,6 +272,7 @@ module.exports = {
   renderEvent,
   sendTelegram,
   resolveDriverChatId,
+  isUniqueViolation,
   createDelivery,
   finalizeDelivery,
   setEventState,
