@@ -1997,6 +1997,19 @@
                     bookBtn.innerHTML = '<span class="btn-main-text">Processing...</span>';
                     bookBtn.disabled = true;
 
+                    // Fresh session FIRST — before ANY side effect. The two
+                    // that follow (the provisional trip_ record and
+                    // especially the previous-request cancel) must never run
+                    // for a session that can't submit the replacement:
+                    // an expired session cancelling the passenger's existing
+                    // ride would strand them with nothing.
+                    const { data: { session: submitSession } } =
+                        await window.supabaseClient.auth.getSession();
+                    if (!submitSession) {
+                        throw new Error('Your session expired — please sign in again to book.');
+                    }
+                    currentSession = submitSession;
+
                     if (REQUIRE_PAYMENT) {
                         // ===== STRIPE PAYMENT FLOW =====
                         // Get payment controller
@@ -2050,16 +2063,9 @@
                     // there is NO local fallback success. Only a real
                     // database booking ID may open the trip sheet — a failed
                     // server booking keeps the form intact and throws into
-                    // the error handler below.
-
-                    // Fresh session at submit time (never the page-load
-                    // snapshot — tokens can expire during a long session).
-                    const { data: { session: submitSession } } =
-                        await window.supabaseClient.auth.getSession();
-                    if (!submitSession) {
-                        throw new Error('Your session expired — please sign in again to book.');
-                    }
-                    currentSession = submitSession;
+                    // the error handler below (which also removes the
+                    // provisional trip_ record). submitSession was verified
+                    // fresh above, before any side effect.
 
                     // customerName/phone = the traveling passenger (who the driver meets);
                     // bookerName/bookerPhone = who made the booking, when different
@@ -2125,6 +2131,11 @@
 
                 } catch (error) {
                     console.error('Booking failed:', error);
+
+                    // Nothing was booked: remove the provisional local
+                    // record so a failed attempt can never masquerade as a
+                    // trip later.
+                    try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {}
 
                     // Restore button
                     const bookBtn = document.getElementById('bookBtn');

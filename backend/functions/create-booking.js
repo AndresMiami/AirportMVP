@@ -79,7 +79,19 @@ exports.handler = async (event, context) => {
   try {
     const authClient = createClient(supabaseUrl, anonKey);
     const { data: userData, error: userError } = await authClient.auth.getUser(token);
-    if (userError || !userData?.user) {
+    if (userError) {
+      // Supabase reports outages as error RESULTS, not throws. A
+      // network/service failure must be 500 — never mislabeled as an
+      // expired session (which would bounce a valid user to sign-in).
+      const retryable = userError.name === 'AuthRetryableFetchError' ||
+        !userError.status || userError.status >= 500;
+      if (retryable) {
+        console.error('❌ Auth verification unavailable:', userError.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify sign-in' }) };
+      }
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
+    }
+    if (!userData?.user) {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
     }
     user = userData.user;
@@ -134,14 +146,18 @@ exports.handler = async (event, context) => {
 
     // ============================================
     // RESOLVE THE CUSTOMER IDENTITY — every new booking is stamped.
-    //   customers row exists      -> use it
-    //   no row                    -> create it (profile.js ensure-row
-    //     pattern) from the BOOKER identity in this payload. This branch
-    //     exists because admin-provisioned accounts (e.g. ambassadors)
-    //     may have no customers row and there is no profile UI to heal a
-    //     hard 403 — flagged for Codex as a deliberate softening of the
-    //     "403 on missing profile" contract. 403 remains the fail-closed
-    //     answer when no usable identity exists; DB failures are 500.
+    // The trip payload carries the TRAVELING PASSENGER's details (the
+    // ambassador flow deliberately clears the account holder's info), so
+    // payload data must NEVER become the authenticated account's
+    // identity — Andres booking for Maria must not mint a customers row
+    // named Maria with Maria's phone and email.
+    //   customers row exists                 -> use it
+    //   missing + ACTIVE ambassador host row -> ensure-row from the HOST
+    //     record (hosts.name/phone/email, user.email as email fallback)
+    //     — approved as an ambassador-recovery mechanism only
+    //   missing + no host                    -> 403 (heal by signing in
+    //     again: the login flow saves the profile)
+    //   lookup/creation failure              -> 500, fail closed
     // ============================================
     let customerId = null;
     const { data: customer, error: customerError } = await supabase
@@ -153,25 +169,44 @@ exports.handler = async (event, context) => {
       console.error('❌ Customer lookup failed:', customerError.message);
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
     }
+
+    // Active ambassador host on this account: needed for attribution AND
+    // as the only approved ensure-row source.
+    const { data: ambassadorHost, error: hostError } = await supabase
+      .from('hosts')
+      .select('id, name, phone, email, commission_rate')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
     if (customer) {
       customerId = customer.id;
+      if (hostError) {
+        // Attribution is optional when identity is already resolved.
+        console.warn('⚠️ Ambassador lookup skipped:', hostError.message);
+      }
     } else {
-      const identityName = booking.bookerName || booking.customerName;
-      const identityPhone = booking.bookerPhone || booking.phone;
-      if (!identityName || !identityPhone) {
+      if (hostError) {
+        // Without the host we cannot decide between recovery and 403.
+        console.error('❌ Host lookup failed during identity recovery:', hostError.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+      }
+      if (!ambassadorHost) {
         return {
           statusCode: 403,
           headers,
-          body: JSON.stringify({ error: 'Account profile incomplete — sign in again to finish setting up your account' })
+          body: JSON.stringify({ error: 'Account profile incomplete — please sign in again to finish setting up your account' })
         };
       }
+      // Ambassador recovery: the account's row comes from the HOST
+      // record — never from the traveling passenger's details.
       const { data: created, error: createError } = await supabase
         .from('customers')
         .insert([{
           user_id: user.id,
-          name: identityName,
-          phone: identityPhone,
-          email: booking.email || user.email || null,
+          name: ambassadorHost.name,
+          phone: ambassadorHost.phone || null,
+          email: ambassadorHost.email || user.email || null,
           type: 'guest',
           source: 'website'
         }])
@@ -182,22 +217,6 @@ exports.handler = async (event, context) => {
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not create account profile' }) };
       }
       customerId = created.id;
-    }
-
-    // Ambassador attribution: an ACTIVE hosts row on this account wins
-    // over any stored ref code. Lookup failure is non-fatal (attribution
-    // is optional; identity above is not).
-    let ambassadorHost = null;
-    try {
-      const { data: host } = await supabase
-        .from('hosts')
-        .select('id, name, commission_rate')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .maybeSingle();
-      if (host) ambassadorHost = host;
-    } catch (hostError) {
-      console.warn('⚠️ Ambassador lookup skipped:', hostError.message);
     }
 
     // Referral attribution: a signed-in ambassador wins; otherwise a stored

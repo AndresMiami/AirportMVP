@@ -10,16 +10,17 @@
 // payloads. TELEGRAM_BOT_TOKEN is deleted so the doorbell is silent.
 //
 // Contract under test: new bookings are AUTHENTICATED-ONLY.
-//   401  missing/invalid/expired token
-//   500  auth verification unreachable, customer lookup/creation failure
-//   200  authenticated -> booking inserted with customer_id ALWAYS stamped
-//        (existing customers row, or ensure-row created from the booker
-//        identity — the branch that keeps admin-provisioned ambassadors
-//        bookable; 403 remains only as the fail-closed branch when no
-//        usable identity exists, which required-field validation makes
-//        unreachable in practice)
-// Referral attribution, guest columns, and required-field validation are
-// unchanged and asserted.
+//   401  missing token, or an auth error that is a real credential
+//        rejection (invalid/expired)
+//   500  retryable/network/service auth failures (returned OR thrown —
+//        Supabase reports outages as error results), customer lookup /
+//        host lookup / ensure-row creation failures
+//   403  authenticated user with no customers row and no active host —
+//        the payload carries the TRAVELING PASSENGER's details and must
+//        never become the account's identity
+//   200  identity resolved -> booking inserted, customer_id ALWAYS
+//        stamped. Ensure-row exists ONLY as ambassador recovery, sourced
+//        from the HOSTS record (never trip-passenger data).
 
 const path = require('path');
 const assert = require('assert');
@@ -40,7 +41,11 @@ const CUSTOMERS_BY_USER = {
   'auth-p': { id: 'cust-pat' }
 };
 const HOSTS_BY_USER = {
-  'auth-a': { id: 'host-amb', name: 'Andrea Ambassador', commission_rate: 0.06 }
+  'auth-a': {
+    id: 'host-amb', name: 'Andrea Ambassador',
+    phone: '+1 786 555 0300', email: 'andrea@casamiami.com',
+    commission_rate: 0.06
+  }
 };
 const HOSTS_BY_CODE = {
   gold: { id: 'host-gold', name: 'Goldie', commission_rate: 0.05 }
@@ -48,15 +53,19 @@ const HOSTS_BY_CODE = {
 
 let capturedCustomerInsert = null;
 let capturedBookingInsert = null;
-let customerLookupError = null; // inject
-let customerInsertError = null; // inject
-let getUserThrows = false;      // inject
+let customerLookupError = null;  // inject
+let customerInsertError = null;  // inject
+let hostLookupError = null;      // inject
+let getUserErrorResult = null;   // inject: RETURNED auth error object
+let getUserThrows = false;       // inject: THROWN auth failure
 
 function resetCaptures() {
   capturedCustomerInsert = null;
   capturedBookingInsert = null;
   customerLookupError = null;
   customerInsertError = null;
+  hostLookupError = null;
+  getUserErrorResult = null;
   getUserThrows = false;
 }
 
@@ -65,9 +74,10 @@ const supabaseMock = {
     auth: {
       getUser: async (token) => {
         if (getUserThrows) throw new Error('auth service unreachable');
+        if (getUserErrorResult) return { data: { user: null }, error: getUserErrorResult };
         return TOKENS[token]
           ? { data: { user: TOKENS[token] }, error: null }
-          : { data: { user: null }, error: { message: 'bad token' } };
+          : { data: { user: null }, error: { status: 401, message: 'bad token' } };
       }
     },
     from: (table) => {
@@ -97,10 +107,15 @@ const supabaseMock = {
           select: () => ({
             eq: (col, val) => ({
               eq: () => ({
-                maybeSingle: async () => ({
-                  data: (col === 'user_id' ? HOSTS_BY_USER[val] : HOSTS_BY_CODE[val]) || null,
-                  error: null
-                })
+                maybeSingle: async () => {
+                  if (col === 'user_id' && hostLookupError) {
+                    return { data: null, error: hostLookupError };
+                  }
+                  return {
+                    data: (col === 'user_id' ? HOSTS_BY_USER[val] : HOSTS_BY_CODE[val]) || null,
+                    error: null
+                  };
+                }
               })
             })
           })
@@ -144,6 +159,17 @@ function mkPayload(overrides) {
     ...overrides
   };
 }
+// What the REAL ambassador browser flow sends: the passenger modal clears
+// the account holder's info — the payload carries only the TRAVELER.
+function mkAmbassadorPayload() {
+  return mkPayload({
+    customerName: 'Maria Traveler',
+    phone: '+1 954 555 0400',
+    email: 'maria@example.com',
+    bookerName: null,
+    bookerPhone: null
+  });
+}
 const post = (payload, token) => fn.handler({
   httpMethod: 'POST',
   headers: token ? { authorization: `Bearer ${token}` } : {},
@@ -168,10 +194,29 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(r.statusCode, 401);
     assert.strictEqual(capturedBookingInsert, null);
   });
+
+  // ---------- auth outages are 500, never mislabeled "expired" ----------
+  resetCaptures();
+  getUserErrorResult = { status: 401, message: 'invalid JWT' };
+  r = await post(mkPayload(), 'tok-pat');
+  check('RETURNED credential rejection (status 401) -> 401', () =>
+    assert.strictEqual(r.statusCode, 401));
+  resetCaptures();
+  getUserErrorResult = { name: 'AuthRetryableFetchError', status: 0, message: 'fetch failed' };
+  r = await post(mkPayload(), 'tok-pat');
+  check('RETURNED retryable/network auth error -> 500, not 401', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(capturedBookingInsert, null);
+  });
+  resetCaptures();
+  getUserErrorResult = { status: 503, message: 'service unavailable' };
+  r = await post(mkPayload(), 'tok-pat');
+  check('RETURNED 5xx auth service error -> 500, not 401', () =>
+    assert.strictEqual(r.statusCode, 500));
   resetCaptures();
   getUserThrows = true;
   r = await post(mkPayload(), 'tok-pat');
-  check('auth verification unreachable -> 500, never a guess', () => {
+  check('THROWN auth failure -> 500', () => {
     assert.strictEqual(r.statusCode, 500);
     assert.strictEqual(capturedBookingInsert, null);
   });
@@ -191,33 +236,52 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(capturedBookingInsert.status, 'pending');
     assert.strictEqual(capturedBookingInsert.source, 'website');
   });
-
-  // ---------- ensure-row: authenticated user without a customers row ----------
   resetCaptures();
-  r = await post(mkPayload(), 'tok-new');
-  check('no customers row: ensure-row created and stamped (never anonymous)', () => {
+  r = await post(mkPayload({ bookerName: 'Booker Bob', bookerPhone: '+1 786 555 0200' }), 'tok-pat');
+  check('"book for someone else" unchanged: booker columns written', () => {
     assert.strictEqual(r.statusCode, 200);
-    assert.ok(capturedCustomerInsert, 'customers row must be created');
-    assert.strictEqual(capturedCustomerInsert.user_id, 'auth-n');
-    assert.strictEqual(capturedCustomerInsert.name, 'Pat Passenger');
-    assert.strictEqual(capturedCustomerInsert.phone, '+1 305 555 0100');
-    assert.strictEqual(capturedCustomerInsert.email, 'new@example.com'); // user.email fallback
-    assert.strictEqual(capturedCustomerInsert.type, 'guest');
-    assert.strictEqual(capturedCustomerInsert.source, 'website');
-    assert.strictEqual(capturedBookingInsert.customer_id, 'cust-new');
-  });
-  resetCaptures();
-  r = await post(mkPayload({
-    bookerName: 'Booker Bob',
-    bookerPhone: '+1 786 555 0200'
-  }), 'tok-new');
-  check('ensure-row prefers the BOOKER identity over the passenger', () => {
-    assert.strictEqual(capturedCustomerInsert.name, 'Booker Bob');
-    assert.strictEqual(capturedCustomerInsert.phone, '+1 786 555 0200');
-    assert.strictEqual(capturedBookingInsert.booker_name, 'Booker Bob',
-      '"book for someone else" stays functional');
+    assert.strictEqual(capturedBookingInsert.booker_name, 'Booker Bob');
     assert.strictEqual(capturedBookingInsert.customer_name, 'Pat Passenger');
   });
+
+  // ---------- identity recovery: ambassadors ONLY, from the HOST record ----------
+  resetCaptures();
+  r = await post(mkPayload(), 'tok-new');
+  check('no customers row + no host -> 403, no inserts (payload data never becomes identity)', () => {
+    assert.strictEqual(r.statusCode, 403);
+    assert.ok(/profile incomplete/i.test(JSON.parse(r.body).error));
+    assert.strictEqual(capturedCustomerInsert, null);
+    assert.strictEqual(capturedBookingInsert, null);
+  });
+  resetCaptures();
+  r = await post(mkAmbassadorPayload(), 'tok-amb');
+  check('ambassador recovery: account row created from the HOST record, never the traveler', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.ok(capturedCustomerInsert, 'ambassador customers row ensured');
+    assert.strictEqual(capturedCustomerInsert.user_id, 'auth-a');
+    assert.strictEqual(capturedCustomerInsert.name, 'Andrea Ambassador');
+    assert.strictEqual(capturedCustomerInsert.phone, '+1 786 555 0300');
+    assert.strictEqual(capturedCustomerInsert.email, 'andrea@casamiami.com');
+    assert.notStrictEqual(capturedCustomerInsert.name, 'Maria Traveler');
+    assert.notStrictEqual(capturedCustomerInsert.email, 'maria@example.com',
+      "the traveling passenger's email must never become the account's");
+    assert.strictEqual(capturedBookingInsert.customer_id, 'cust-new');
+    assert.strictEqual(capturedBookingInsert.customer_name, 'Maria Traveler',
+      'the TRIP still records the traveler');
+  });
+  check('ambassador booking self-attributes', () => {
+    assert.strictEqual(capturedBookingInsert.referred_by_host, 'host-amb');
+    assert.strictEqual(capturedBookingInsert.host_commission, 7.92); // 132 * 0.06
+  });
+  resetCaptures();
+  const savedEmail = HOSTS_BY_USER['auth-a'].email;
+  HOSTS_BY_USER['auth-a'].email = null;
+  r = await post(mkAmbassadorPayload(), 'tok-amb');
+  check('host without email: falls back to the AUTH email, never the traveler email', () => {
+    assert.strictEqual(capturedCustomerInsert.email, 'amb@example.com');
+    assert.notStrictEqual(capturedCustomerInsert.email, 'maria@example.com');
+  });
+  HOSTS_BY_USER['auth-a'].email = savedEmail;
 
   // ---------- fail closed on database problems ----------
   resetCaptures();
@@ -228,8 +292,23 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(capturedBookingInsert, null);
   });
   resetCaptures();
-  customerInsertError = { message: 'insert down' };
+  hostLookupError = { message: 'hosts down' };
   r = await post(mkPayload(), 'tok-new');
+  check('host lookup failure during recovery -> 500 (cannot decide 403 vs recovery)', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(capturedBookingInsert, null);
+  });
+  resetCaptures();
+  hostLookupError = { message: 'hosts down' };
+  r = await post(mkPayload(), 'tok-pat');
+  check('host lookup failure with a resolved customer: booking still succeeds (attribution optional)', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedBookingInsert.customer_id, 'cust-pat');
+    assert.strictEqual(capturedBookingInsert.referred_by_host, null);
+  });
+  resetCaptures();
+  customerInsertError = { message: 'insert down' };
+  r = await post(mkAmbassadorPayload(), 'tok-amb');
   check('ensure-row creation failure -> 500, no booking insert', () => {
     assert.strictEqual(r.statusCode, 500);
     assert.strictEqual(capturedBookingInsert, null);
@@ -241,15 +320,6 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
   check('stored ?ref= code still resolves and stamps commission', () => {
     assert.strictEqual(capturedBookingInsert.referred_by_host, 'host-gold');
     assert.strictEqual(capturedBookingInsert.host_commission, 6.6); // 132 * 0.05
-  });
-  resetCaptures();
-  r = await post(mkPayload({ refCode: 'GOLD' }), 'tok-amb');
-  check('ambassador (no customers row, active hosts row): books via ensure-row, own attribution wins', () => {
-    assert.strictEqual(r.statusCode, 200, 'admin-provisioned ambassadors must not be locked out');
-    assert.ok(capturedCustomerInsert, 'ambassador customers row ensured');
-    assert.strictEqual(capturedBookingInsert.customer_id, 'cust-new');
-    assert.strictEqual(capturedBookingInsert.referred_by_host, 'host-amb');
-    assert.strictEqual(capturedBookingInsert.host_commission, 7.92); // 132 * 0.06
   });
 
   // ---------- request validation unchanged ----------
