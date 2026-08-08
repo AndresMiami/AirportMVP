@@ -101,6 +101,9 @@ class Query {
   }
 
   _exec() {
+    // Race-simulation hook: lets a test mutate state "concurrently",
+    // e.g. suppress an event between the dispatch refetch and the CAS.
+    if (state.beforeOp) state.beforeOp(this.op, this.table, this);
     const failure = injectedFailure(this.op, this.table);
     if (failure) return { data: null, error: failure };
     const rows = state[this.table] || (state[this.table] = []);
@@ -182,7 +185,8 @@ function freshState({ silenceHeartbeat = true } = {}) {
     system_state: silenceHeartbeat
       ? [{ key: 'last_heartbeat_date', value: todayET() }]
       : [],
-    inject: []
+    inject: [],
+    beforeOp: null
   };
   fetchCalls = [];
   fetchBehavior = async () => ({ ok: true, status: 200 });
@@ -470,6 +474,33 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(fetchCalls.length, 0);
   });
 
+  // ---------- lost event-state CAS: stale dispatch must stop ----------
+  freshState();
+  const bRace = mkBooking({ pickup_datetime: iso(140) });
+  state.bookings.push(bRace);
+  state.notification_events.push({
+    id: 'ev-cas', booking_id: bRace.id, event_type: 'driver_ready_ask_1',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-10), not_after: bRace.pickup_datetime
+  });
+  // "Concurrent worker": between the dispatch refetch (bookings
+  // maybeSingle) and the in_delivery CAS, the event gets suppressed.
+  state.beforeOp = (op, table, q) => {
+    if (op === 'select' && table === 'bookings' && q.mode === 'maybeSingle') {
+      const ev = state.notification_events.find((x) => x.id === 'ev-cas');
+      if (ev) ev.state = 'suppressed';
+      state.beforeOp = null;
+    }
+  };
+  r = await wd.handler({});
+  check('lost in_delivery CAS: concurrent suppression stops dispatch — no send, no delivery row', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(fetchCalls.length, 0, 'a stale reminder must never be sent');
+    assert.strictEqual(deliveries().length, 0, 'no delivery row may be claimed');
+    assert.strictEqual(events().find((x) => x.id === 'ev-cas').state, 'suppressed',
+      'the concurrent decision stands');
+  });
+
   // ---------- attempt limit: failures still consume the cap ----------
   freshState();
   for (let i = 0; i < 20; i++) {
@@ -500,15 +531,54 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   });
   delete process.env.WATCHDOG_BUDGET_MS;
 
+  // ---------- budget expiring MID-RUN, inside chain collapse ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(100) })); // whole chain due
+  {
+    const realNow = Date.now;
+    let clockOffset = 0;
+    Date.now = () => realNow() + clockOffset;
+    // Burn the whole budget the moment the FIRST superseded-suppression
+    // executes — the collapse loop must stop before the next DB write and
+    // dispatch must never start.
+    state.beforeOp = (op, table, q) => {
+      if (op === 'update' && table === 'notification_events' &&
+          q.payload && q.payload.suppress_reason === 'superseded') {
+        clockOffset = 60000;
+        state.beforeOp = null;
+      }
+    };
+    try {
+      r = await wd.handler({});
+    } finally {
+      Date.now = realNow;
+    }
+  }
+  check('budget expiring DURING chain collapse: loop stops, dispatch never starts', () => {
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.budgetStopped, true);
+    assert.strictEqual(fetchCalls.length, 0);
+    const byType = Object.fromEntries(events().map((e) => [e.event_type, e]));
+    assert.strictEqual(byType.driver_ready_ask_1.state, 'suppressed'); // first collapse landed
+    assert.strictEqual(byType.driver_ready_ask_2.state, 'pending',
+      'collapse must stop mid-loop when the budget expires');
+    assert.strictEqual(byType.driver_ready_urgent.state, 'pending');
+  });
+
   // ---------- DB failures surface: never a clean run on broken writes ----------
   freshState();
   state.bookings.push(mkBooking({ pickup_datetime: iso(100) }));
   state.inject.push({ op: 'update', table: 'bookings', times: 1, skip: 0 });
   r = await wd.handler({});
-  check('at-risk stamp failure: logged, counted, run reported as FAILED (500)', () => {
+  check('at-risk stamp failure: 500, nothing stored, ZERO sends, no false at-risk claim', () => {
     assert.strictEqual(r.statusCode, 500);
-    assert.ok(JSON.parse(r.body).dbErrors >= 1);
+    const s = JSON.parse(r.body);
+    assert.ok(s.dbErrors >= 1);
+    assert.strictEqual(s.dispatchSkipped, true, 'a broken cycle must not talk to the outside world');
     assert.strictEqual(state.bookings[0].at_risk_at, null);
+    assert.strictEqual(fetchCalls.length, 0, 'no message may claim state that was not stored');
+    assert.ok(!events().some((e) => e.event_type === 'at_risk_mark'),
+      'at_risk_mark must never derive from an unstamped booking');
   });
 
   freshState();
@@ -573,11 +643,14 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   freshState({ silenceHeartbeat: false });
   state.bookings.push(hbBooking());
   r = await wd.handler({});
-  check('heartbeat submitted: finalized to today, exactly one admin message', () => {
+  check('heartbeat submitted: finalized to today, one message, COUNTED in the global cap', () => {
     assert.strictEqual(fetchCalls.length, 1);
     assert.strictEqual(fetchCalls[0].body.chat_id, 'admin-chat');
     assert.ok(/watchdog: alive/.test(fetchCalls[0].body.text));
     assert.strictEqual(heartbeatValue(), todayET());
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.attempts, 1, 'heartbeat must count in summary.attempts');
+    assert.strictEqual(s.submitted, 1);
   });
   r = await wd.handler({});
   check('same day, second invocation: silent', () => {
@@ -586,15 +659,50 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
   freshState({ silenceHeartbeat: false });
   state.bookings.push(hbBooking());
-  fetchBehavior = async () => ({ ok: false, status: 400 }); // definitive failure
+  fetchBehavior = async () => ({ ok: false, status: 400 }); // definitive rejection
   r = await wd.handler({});
-  check('heartbeat definite failure: day NOT consumed — eligible to retry', () => {
+  check('heartbeat definitive 400: ONE provider call, terminal for the day', () => {
     assert.strictEqual(fetchCalls.length, 1);
-    assert.strictEqual(heartbeatValue(), `failed:${todayET()}`);
+    assert.strictEqual(heartbeatValue(), `exhausted:${todayET()}`);
+  });
+  fetchBehavior = async () => ({ ok: true, status: 200 });
+  for (let i = 0; i < 5; i++) r = await wd.handler({});
+  check('misconfigured 400 never loops: still exactly one call after 5 more cycles', () => {
+    assert.strictEqual(fetchCalls.length, 1, 'not 288 calls/day — one, then terminal');
+    assert.strictEqual(heartbeatValue(), `exhausted:${todayET()}`);
+  });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  fetchBehavior = async () => ({ ok: false, status: 429 }); // retryable throttle
+  r = await wd.handler({});
+  check('heartbeat retryable failure: bounded retry state failed:<date>:1', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(heartbeatValue(), `failed:${todayET()}:1`);
+  });
+  r = await wd.handler({});
+  check('second retryable failure: failed:<date>:2', () => {
+    assert.strictEqual(fetchCalls.length, 2);
+    assert.strictEqual(heartbeatValue(), `failed:${todayET()}:2`);
+  });
+  r = await wd.handler({});
+  check('third retryable failure hits the cap: exhausted for the day', () => {
+    assert.strictEqual(fetchCalls.length, 3);
+    assert.strictEqual(heartbeatValue(), `exhausted:${todayET()}`);
   });
   fetchBehavior = async () => ({ ok: true, status: 200 });
   r = await wd.handler({});
-  check('heartbeat retry after failure: sends and finalizes today', () => {
+  check('after the retry cap: silent even once Telegram recovers', () => {
+    assert.strictEqual(fetchCalls.length, 3);
+  });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  fetchBehavior = async () => ({ ok: false, status: 429 });
+  r = await wd.handler({});
+  fetchBehavior = async () => ({ ok: true, status: 200 });
+  r = await wd.handler({});
+  check('bounded retry succeeds within the cap: finalized to today', () => {
     assert.strictEqual(fetchCalls.length, 2);
     assert.strictEqual(heartbeatValue(), todayET());
   });
