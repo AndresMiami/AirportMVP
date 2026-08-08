@@ -534,17 +534,39 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
     }
   }
 
-  if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave pending
+  // Absolute escalation deadline (driver ask events): a reminder whose
+  // deadline has passed is stale on EVERY channel — suppress it with
+  // zero provider calls. (Chain collapse usually handles this by
+  // superseding; this is the defense when the later member isn't
+  // pending, e.g. it already ran.)
+  const deadlineMin = notify.ASK_DEADLINE_MIN[ev.event_type];
+  if (deadlineMin) {
+    const pickupMs = Date.parse(b.pickup_datetime);
+    if (Number.isFinite(pickupMs) && nowMs >= pickupMs - deadlineMin * 60e3) {
+      await suppress('stale_deadline');
+      return;
+    }
+  }
 
-  const chatId = ev.recipient_role === 'driver'
-    ? await notify.resolveDriverChatId(db, b.assigned_driver, dbFail)
-    : process.env.ADMIN_TELEGRAM_CHAT_ID;
-  if (!chatId) return; // config gap, not a send failure — leave pending
-
-  const text = notify.renderEvent(ev.event_type, b);
-  if (!text) {
-    await suppress('no_template');
-    return;
+  // Channel routing. Admin events are Telegram-only, always. Driver
+  // events follow the STRICT precedence over delivery history (routing
+  // is restart-safe: a crash between a failed push and its fallback is
+  // healed here on the next cycle from stored truth).
+  let route;
+  if (ev.recipient_role !== 'driver') {
+    route = { channel: 'telegram' };
+  } else {
+    route = await notify.resolveDriverRoute(db, ev, b.assigned_driver);
+    if (route.dbError) {
+      dbFail('route resolution', route.dbError);
+      return;
+    }
+    if (route.done) {
+      const { error } = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
+        { state: route.done });
+      if (error) dbFail('rollup routed', error);
+      return;
+    }
   }
 
   const marked = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
@@ -562,9 +584,35 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
     return;
   }
 
+  if (route.channel === 'webpush') {
+    await executeWebPush(db, ev, b, route.sub, nowMs, summary, dbFail, suppress);
+  } else {
+    await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress);
+  }
+}
+
+// Telegram execution for one event (normal route AND push-fallback):
+// claim by insert, send, finalize, roll up. Self-checks the global
+// provider-call cap because a fallback send is a SECOND call in one
+// dispatch.
+async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress) {
+  const nowIso = new Date(nowMs).toISOString();
+  if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave for next cycle
+
+  const chatId = ev.recipient_role === 'driver'
+    ? await notify.resolveDriverChatId(db, b.assigned_driver, dbFail)
+    : process.env.ADMIN_TELEGRAM_CHAT_ID;
+  if (!chatId) return; // config gap, not a send failure — leave for next cycle
+
+  const text = notify.renderEvent(ev.event_type, b);
+  if (!text) {
+    await suppress('no_template');
+    return;
+  }
+
   const claim = await notify.createDelivery(db, ev, 'telegram', chatId);
   if (claim.dbError) {
-    dbFail('createDelivery', claim.dbError);
+    dbFail('createDelivery telegram', claim.dbError);
     return;
   }
   if (claim.satisfied) {
@@ -575,14 +623,13 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
   }
   if (claim.lost || claim.inFlight) return; // another worker owns it
   if (claim.blocked || claim.capped) {
-    // Ambiguous attempt (never resend) or attempt cap: nothing else can
-    // satisfy this single-channel event — terminal, visible in the ledger.
     const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
       { state: 'exhausted' });
     if (error) dbFail('rollup exhausted', error);
     return;
   }
 
+  if (summary.attempts >= MAX_ATTEMPTS) return; // global cap — next cycle continues
   summary.attempts++; // every provider call counts, success or not
   const result = await notify.sendTelegram(chatId, text);
   let fin;
@@ -620,4 +667,120 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
       if (error) dbFail('rollup attempt cap', error);
     }
   }
+}
+
+// Web Push execution for one driver event. On a DEFINITIVE failure the
+// database-safe ordering is strict: (1) persist the failed delivery +
+// failure_class; (2) for expired endpoints, disable the subscription;
+// (3) claim and send the Telegram fallback. Any database failure in
+// that sequence stops IMMEDIATELY (dbFail -> the in-loop dispatch stop
+// ends the cycle) with no further provider call — the next cycle
+// recovers from stored truth via the routing precedence.
+async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress) {
+  const nowIso = new Date(nowMs).toISOString();
+
+  // target = subscription row UUID — NEVER the endpoint (secret).
+  const claim = await notify.createDelivery(db, ev, 'webpush', sub.id);
+  if (claim.dbError) {
+    dbFail('createDelivery webpush', claim.dbError);
+    return;
+  }
+  if (claim.satisfied) {
+    const { error } = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
+      { state: 'submitted' });
+    if (error) dbFail('rollup satisfied', error);
+    return;
+  }
+  if (claim.lost || claim.inFlight) return;
+  if (claim.blocked || claim.capped) {
+    const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
+      { state: 'exhausted' });
+    if (error) dbFail('rollup exhausted', error);
+    return;
+  }
+
+  // Absolute TTL from the escalation deadline (deadline-passed events
+  // were already suppressed before routing).
+  const deadlineMin = notify.ASK_DEADLINE_MIN[ev.event_type];
+  const pickupMs = Date.parse(b.pickup_datetime);
+  const deadlineMs = (deadlineMin && Number.isFinite(pickupMs))
+    ? pickupMs - deadlineMin * 60e3
+    : (ev.not_after ? Date.parse(ev.not_after) : nowMs + 900e3);
+  const ttl = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+  const topic = notify.readinessTopic(b);
+  const payload = notify.pushPayloadFor(ev.event_type, b);
+
+  if (summary.attempts >= MAX_ATTEMPTS) return; // global cap
+  summary.attempts++;
+  const result = await notify.sendWebPush(sub, payload, { ttl, topic });
+
+  if (result.outcome === 'submitted') {
+    const fin = await notify.finalizeDelivery(db, claim.delivery.id,
+      { state: 'submitted', submitted_at: nowIso });
+    if (fin.error) dbFail('finalize push submitted', fin.error);
+    // Health info only (never used for device selection).
+    const { error: healthError } = await db.from('push_subscriptions')
+      .update({ last_success_at: nowIso })
+      .eq('id', sub.id)
+      .select();
+    if (healthError) dbFail('push health stamp', healthError);
+    const { error } = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
+      { state: 'submitted' });
+    if (error) dbFail('rollup push submitted', error);
+    summary.submitted++;
+    return;
+  }
+
+  if (result.outcome === 'ambiguous') {
+    // May have transmitted: terminal, never resent, NO fallback — a
+    // second channel would risk exactly the duplicate the ledger forbids.
+    const fin = await notify.finalizeDelivery(db, claim.delivery.id,
+      { state: 'ambiguous', finalized_at: nowIso,
+        failure_class: 'ambiguous', last_error: result.error });
+    if (fin.error) dbFail('finalize push ambiguous', fin.error);
+    const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
+      { state: 'exhausted' });
+    if (error) dbFail('rollup push ambiguous', error);
+    return;
+  }
+
+  if (result.outcome === 'retryable') {
+    const fin = await notify.finalizeDelivery(db, claim.delivery.id,
+      { state: 'failed', finalized_at: nowIso,
+        failure_class: result.failureClass, last_error: result.error });
+    if (fin.error) dbFail('finalize push retryable', fin.error);
+    if (claim.delivery.attempt_no >= notify.MAX_ATTEMPTS_PER_CHANNEL) {
+      const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
+        { state: 'exhausted' });
+      if (error) dbFail('rollup push attempt cap', error);
+    }
+    return;
+  }
+
+  // DEFINITIVE — database-safe fallback ordering (strict):
+  // (1) persist the failed delivery with its class. Failure -> STOP.
+  const fin = await notify.finalizeDelivery(db, claim.delivery.id,
+    { state: 'failed', finalized_at: nowIso,
+      failure_class: result.failureClass, last_error: result.error });
+  if (fin.error) {
+    dbFail('finalize push definitive', fin.error);
+    return;
+  }
+  // (2) 404/410 ONLY: disable the subscription. Failure -> STOP.
+  if (result.failureClass === 'expired_endpoint') {
+    const { error: disableError } = await db.from('push_subscriptions')
+      .update({ disabled_at: nowIso, disabled_reason: 'expired', last_error: result.error })
+      .eq('id', sub.id)
+      .select();
+    if (disableError) {
+      dbFail('disable expired subscription', disableError);
+      return;
+    }
+  }
+  if (result.failureClass === 'vapid_config') {
+    // OUR configuration failing — subscription KEPT; sanitized loud log.
+    console.error(`❌ Web Push VAPID configuration rejected (${result.error}) — check VAPID_* env; falling back to Telegram`);
+  }
+  // (3) claim and send the Telegram fallback (its own cap self-check).
+  await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress);
 }

@@ -62,6 +62,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/driver-push-subscription"
+  to = "/.netlify/functions/driver-push-subscription"
+  status = 200
+
+[[redirects]]
   from = "/login"
   to = "/login.html"
   status = 200
