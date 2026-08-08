@@ -26,8 +26,15 @@ verified checkpoint locations all live in the web app backed by Supabase.
 ## Key pages
 
 - `indexMVP.html` — booking flow (Where → When → Vehicle → Who's traveling).
-  Optional auth: session prefills the passenger modal; guests book freely.
-  On success the live trip sheet slides up (iframe of `/trip?embed=1`).
+  ACCOUNT-ONLY (account-gate PR): the session is verified behind a neutral
+  loading screen BEFORE the booking app boots — signed-out visitors get
+  `location.replace('/login.html')`, auth-check failure shows an honest
+  retry screen, never guest fallback. Session prefills the passenger
+  modal. Submit re-reads a FRESH session; a failed/401/403 API booking
+  keeps the form and shows a real error — only a database bookingId opens
+  the live trip sheet (iframe of `/trip?embed=1`). "Book for someone
+  else" remains: a signed-in booker arranging a ride for another
+  passenger is not guest checkout.
 - `trip.html` — passenger status page: stepper, vehicle hero, booking-time
   ETA, static verified-checkpoint map marker (honest labels, Miami-time
   stamps, never a moving dot), WhatsApp button, Go back/Cancel. SEALED smart
@@ -56,7 +63,11 @@ verified checkpoint locations all live in the web app backed by Supabase.
   success; lost responses retry once, and only the BACKEND declares a
   verified idempotent duplicate (status + owner both match) — the client
   never treats a 409 as success.
-- `login.html` — passenger email+password (self-service signUp). Drivers ARE
+- `login.html` — passenger email+password (self-service signUp) and the
+  FRONT DOOR for booking: the homepage CTA and the PWA "Book" shortcut land
+  here; a signed-in session forwards straight to `/indexMVP.html?book=1`.
+  Guest checkout is VISIBLE but inert ("Guest checkout — coming later" —
+  no href, no handler, no keyboard activation). Drivers ARE
   admin-provisioned (CreditEngine pattern, migration 009) — no signup ever.
 - `admin.html` — RETIRED (Phase B): `/admin` + `/admin.html` 404 to a
   static notice. Supabase Dashboard is the interim admin tool until the
@@ -135,14 +146,18 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 1. Dispatch state NEVER lives in chat apps — web app + Supabase own it.
 2. Telegram = private ops notifications; WhatsApp = human channel. Both are
    channels, not infrastructure.
-3. Passengers: self-service email+password + guest checkout preserved.
+3. Passengers: self-service email+password; NEW bookings are
+   account-required (account-gate PR): the homepage/PWA "Book" entry
+   goes to /login.html, indexMVP verifies the session before the app
+   boots, and create-booking enforces it server-side (401/403/500,
+   never an anonymous insert; every new booking stamps customer_id —
+   ensure-row creates a missing customers row from the booker identity).
+   Guest checkout is VISIBLE but disabled ("Guest checkout — coming
+   later") and may return; guest schema/code, legacy guest bookings
+   (customer_id NULL), and guest /trip links all keep working. "Book
+   for someone else" remains (signed-in booker ≠ guest checkout).
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
-   (Approved change, next after PR #54: account-required booking gate —
-   guest checkout stays VISIBLE but disabled, labeled "Guest checkout —
-   coming later"; authentication enforced server-side in create-booking;
-   guest schema/code, existing guest bookings, and guest trip links all
-   keep working. Passenger Push later binds to the authenticated
-   customer UUID.)
+   Passenger Push later binds to the authenticated customer UUID.
 4. Checkpoint locations (browser geolocation at status taps → Supabase →
    trip-page map) are the tracking backbone; WhatsApp live-location is a
    manual premium layer. Continuous browser GPS was tried and deliberately
@@ -184,11 +199,12 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 - ROADMAP (Aug 2026, Codex-approved order — no SMS anywhere):
   1. PR #54 (open, draft) — readiness ledger + watchdog. Run migration
      011 in the SQL Editor BEFORE merging.
-  2. Account-required booking gate — guest checkout visibly disabled
-     ("coming later"), sign-in/signup required for new bookings, form +
-     referral attribution preserved across auth, server-enforced in
-     create-booking (JWT must resolve to a customers row; stamp
-     customer_id; bookings.customer_id stays nullable for legacy guests).
+  2. Account-required booking gate — SHIPPED as the account-gate PR
+     (front-door /login.html entry, pre-init session guard on indexMVP,
+     server-enforced 401/403/500 in create-booking, customer_id stamped
+     via ensure-row, guest checkout visibly disabled, false local-success
+     fallback removed; bookings.customer_id stays nullable for legacy
+     guest rows).
   3. Driver PWA Push (Telegram stays the fallback channel).
   4. Routes API + two-ETA work.
   5. Passenger PWA Push for authenticated passengers.
