@@ -14,8 +14,14 @@
 --   * notification_deliveries  — one row per channel-specific send attempt.
 --                                Rows are permanent audit history: never
 --                                deleted or replaced; state fields update in
---                                place as provider results arrive.
+--                                place as outcomes are determined.
 --   * system_state             — tiny key/value ops store (heartbeat guard)
+--
+-- Channels are telegram and webpush ONLY (LinkMia will not use SMS;
+-- WhatsApp stays the human conversation channel and is never automated).
+-- Neither channel can prove a person SAW a notification, so the honest
+-- terminal success state for both events and deliveries is 'submitted' —
+-- the provider accepted the send. There is no 'delivered' state anywhere.
 --   * bookings: durable transition timestamps (accepted_at, on_the_way_at,
 --     arrived_at, started_at — completed_at already exists) + readiness
 --     state (driver_ready_by/at/source) + at_risk_at
@@ -76,7 +82,7 @@ CREATE TABLE IF NOT EXISTS notification_events (
   recipient_role  TEXT NOT NULL CHECK (recipient_role IN ('driver', 'passenger', 'admin')),
   recipient_key   TEXT NOT NULL,
   state           TEXT NOT NULL DEFAULT 'pending'
-                  CHECK (state IN ('pending', 'in_delivery', 'submitted', 'delivered',
+                  CHECK (state IN ('pending', 'in_delivery', 'submitted',
                                    'exhausted', 'suppressed')),
   due_at          TIMESTAMPTZ NOT NULL,
   not_after       TIMESTAMPTZ,
@@ -86,8 +92,10 @@ CREATE TABLE IF NOT EXISTS notification_events (
   CONSTRAINT notification_events_identity UNIQUE (booking_id, event_type, recipient_key)
 );
 
+-- The watchdog's live working set: only pending/in_delivery events are
+-- ever re-examined ('submitted' is terminal — no channel has callbacks).
 CREATE INDEX IF NOT EXISTS idx_events_live ON notification_events (due_at)
-  WHERE state IN ('pending', 'in_delivery', 'submitted');
+  WHERE state IN ('pending', 'in_delivery');
 
 -- ============================================================
 -- STEP 4: notification_deliveries — one channel-specific attempt each.
@@ -98,28 +106,24 @@ CREATE INDEX IF NOT EXISTS idx_events_live ON notification_events (due_at)
 CREATE TABLE IF NOT EXISTS notification_deliveries (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id            UUID NOT NULL REFERENCES notification_events(id) ON DELETE CASCADE,
-  channel             TEXT NOT NULL CHECK (channel IN ('telegram', 'webpush', 'sms')),
+  channel             TEXT NOT NULL CHECK (channel IN ('telegram', 'webpush')),
   attempt_no          INTEGER NOT NULL DEFAULT 1,
   state               TEXT NOT NULL DEFAULT 'claimed'
-                      CHECK (state IN ('claimed', 'submitted', 'delivered', 'undelivered',
-                                       'failed', 'ambiguous')),
+                      CHECK (state IN ('claimed', 'submitted', 'failed', 'ambiguous')),
   target              TEXT,
   claimed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   submitted_at        TIMESTAMPTZ,
   finalized_at        TIMESTAMPTZ,
-  provider_message_id TEXT,
-  provider_status     TEXT,
   last_error          TEXT,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT notification_deliveries_attempt UNIQUE (event_id, channel, attempt_no)
 );
 
+-- Stale-claim recovery scans only unresolved claims ('submitted' is
+-- terminal for both channels — nothing ever waits on a provider callback).
 CREATE INDEX IF NOT EXISTS idx_deliveries_open ON notification_deliveries (claimed_at)
-  WHERE state IN ('claimed', 'submitted');
-
-CREATE INDEX IF NOT EXISTS idx_deliveries_provider ON notification_deliveries (provider_message_id)
-  WHERE provider_message_id IS NOT NULL;
+  WHERE state = 'claimed';
 
 -- ============================================================
 -- STEP 5: system_state — key/value ops store (ride-day heartbeat guard).
