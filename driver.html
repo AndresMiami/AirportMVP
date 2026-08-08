@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Driver - LinkMia</title>
+    <!-- Dedicated driver PWA identity (separate from the passenger app).
+         iOS ignores manifest icons for Home Screen — the 180×180
+         apple-touch-icon is what the installed app shows. -->
+    <link rel="manifest" href="/driver-manifest.json">
+    <link rel="apple-touch-icon" href="/images/driver-icon-180.png">
+    <meta name="theme-color" content="#FF5733">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="LM Driver">
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="/supabase.js"></script>
     <style>
@@ -221,6 +229,23 @@
         .empty {
             text-align: center; color: #999; font-size: 14px; padding: 30px 10px;
         }
+        /* Driver PWA Push — notifications card + deep-link highlight */
+        .push-note { font-size: 13px; color: #555; line-height: 1.45; }
+        .push-note.ok { color: #1eaa5c; font-weight: 600; }
+        .push-note.warn { color: #cc7000; }
+        .btn-push {
+            display: block; width: 100%; margin-top: 10px; padding: 12px;
+            min-height: 44px;
+            background: #e8f1ff; color: #2668d9;
+            border: 1.5px solid #9dc0f0; border-radius: 10px;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            font-family: inherit;
+        }
+        .ride-highlight {
+            outline: 3px solid #FF9933;
+            outline-offset: 2px;
+            transition: outline-color 1s ease;
+        }
         .hidden { display: none !important; }
 
         /* Passcode gate */
@@ -295,6 +320,11 @@
             <div id="ridesView" class="hidden">
                 <div id="activeList"></div>
             </div>
+            <section id="pushCard" class="card hidden">
+                <div class="section-title" style="margin-top:0;">Notifications</div>
+                <div id="pushStateMsg" class="push-note">Checking…</div>
+                <button id="pushEnableBtn" class="btn-push hidden" type="button">🔔 Enable notifications</button>
+            </section>
         </main>
     </div>
 
@@ -499,6 +529,216 @@
             if (e.key === 'Escape' && !$('msgSheet').classList.contains('hidden')) closeMessageSheet();
         });
 
+        // ===== Driver PWA Push =====
+        // Notifications are enabled ONLY by an explicit driver tap — never
+        // requested automatically at login. The subscription binds to this
+        // driver + this device (lm_device_id); an endpoint is never
+        // reassigned between accounts (a 409 means: unsubscribe, then
+        // subscribe FRESH). The server exposes only a sha256 fingerprint
+        // of the stored endpoint, so "enabled" is claimed only when the
+        // browser and server provably hold the SAME subscription.
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches
+            || navigator.standalone === true;
+        const IS_LOCAL_DEV = ['localhost', '127.0.0.1'].includes(location.hostname);
+        let driverSwReg = null;
+
+        function deviceId() {
+            let id = null;
+            try { id = localStorage.getItem('lm_device_id'); } catch (e) {}
+            if (!id || !UUID_RE.test(id)) {
+                id = (crypto.randomUUID && crypto.randomUUID()) || null;
+                if (!id) return null; // ancient browser: push will report unsupported
+                try { localStorage.setItem('lm_device_id', id); } catch (e) {}
+            }
+            return id;
+        }
+
+        async function ensureDriverSw() {
+            if (IS_LOCAL_DEV || !('serviceWorker' in navigator)) return null;
+            if (driverSwReg) return driverSwReg;
+            // Scope '/driver' — longest-prefix matching keeps every other
+            // page on the root service worker; this one caches NOTHING.
+            driverSwReg = await navigator.serviceWorker
+                .register('/driver-sw.js', { scope: '/driver' })
+                .catch(() => null);
+            return driverSwReg;
+        }
+
+        async function sha256Hex(text) {
+            const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+            return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const raw = atob(base64);
+            const out = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+            return out;
+        }
+
+        async function fetchPushInfo() {
+            const token = await authToken();
+            const res = await fetch(`/api/driver-push-subscription?deviceId=${encodeURIComponent(deviceId() || '')}`, {
+                headers: { 'Authorization': `Bearer ${token || ''}` }
+            });
+            if (!res.ok) return null;
+            return res.json().catch(() => null);
+        }
+
+        // State PRECEDENCE matters: iOS Safari outside standalone exposes
+        // no PushManager, so install_required must be decided BEFORE
+        // unsupported. Order: install_required -> unsupported -> denied ->
+        // enabled -> expired -> available.
+        async function computePushState() {
+            if (IS_IOS && !IS_STANDALONE) return { state: 'install_required' };
+            if (!deviceId() || !('serviceWorker' in navigator) ||
+                !('PushManager' in window) || !('Notification' in window)) {
+                return { state: 'unsupported' };
+            }
+            if (Notification.permission === 'denied') return { state: 'denied' };
+            const info = await fetchPushInfo();
+            if (!info) return { state: 'unknown' };
+            if (Notification.permission === 'granted') {
+                const reg = await ensureDriverSw();
+                const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
+                if (info.state === 'enabled' && sub && info.endpointFingerprint) {
+                    const fp = await sha256Hex(sub.endpoint);
+                    if (fp === info.endpointFingerprint) return { state: 'enabled', info };
+                }
+                return { state: 'expired', info };
+            }
+            return { state: 'available', info };
+        }
+
+        const PUSH_COPY = {
+            install_required: 'Install LinkMia Driver to get ride reminders: tap Share, then "Add to Home Screen", open the installed app, and sign in once.',
+            unsupported: 'Ride reminders by notification aren’t supported in this browser — Telegram reminders still cover you.',
+            denied: 'Notifications are blocked for this app. Enable them in iOS Settings → Notifications → LM Driver, then return here.',
+            enabled: '🔔 Ride reminders are ON for this device.',
+            expired: 'Notifications need to be re-enabled on this device.',
+            available: 'Get ride readiness reminders on this device even when the app is closed.',
+            unknown: 'Couldn’t check notification status — will retry on the next refresh.'
+        };
+
+        async function updatePushCard() {
+            const card = $('pushCard');
+            if (!card || card.classList.contains('hidden')) return;
+            const msg = $('pushStateMsg');
+            const btn = $('pushEnableBtn');
+            const { state } = await computePushState();
+            msg.textContent = PUSH_COPY[state] || PUSH_COPY.unknown;
+            msg.className = 'push-note' + (state === 'enabled' ? ' ok'
+                : (state === 'denied' || state === 'expired') ? ' warn' : '');
+            const showBtn = state === 'available' || state === 'expired';
+            btn.classList.toggle('hidden', !showBtn);
+            btn.textContent = state === 'expired' ? '🔔 Re-enable notifications' : '🔔 Enable notifications';
+        }
+
+        async function postSubscription(sub) {
+            const token = await authToken();
+            const res = await fetch('/api/driver-push-subscription', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` },
+                body: JSON.stringify({
+                    deviceId: deviceId(),
+                    subscription: { endpoint: sub.endpoint, keys: sub.toJSON().keys }
+                })
+            });
+            return res.status;
+        }
+
+        // The ONLY place permission is ever requested — inside the tap.
+        async function enablePush() {
+            const btn = $('pushEnableBtn');
+            btn.disabled = true;
+            try {
+                const perm = await Notification.requestPermission();
+                if (perm !== 'granted') return;
+                const reg = await ensureDriverSw();
+                if (!reg) return;
+                const info = await fetchPushInfo();
+                if (!info || !info.vapidPublicKey) {
+                    $('pushStateMsg').textContent = 'Push isn’t configured on the server yet — Telegram reminders still cover you.';
+                    return;
+                }
+                const appKey = urlBase64ToUint8Array(info.vapidPublicKey);
+                let sub = await reg.pushManager.getSubscription();
+                if (!sub) {
+                    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+                }
+                let status = await postSubscription(sub);
+                if (status === 409) {
+                    // Endpoint belongs to another account — NEVER reassigned.
+                    // Unsubscribe and subscribe fresh (new endpoint), then retry.
+                    await sub.unsubscribe().catch(() => {});
+                    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+                    status = await postSubscription(sub);
+                }
+            } catch (e) {
+                console.warn('Push enable failed:', e);
+            } finally {
+                btn.disabled = false;
+                updatePushCard();
+            }
+        }
+        $('pushEnableBtn').addEventListener('click', enablePush);
+
+        // ---- Notification deep links ----
+        // The requested ride is PRESERVED until a render actually contains
+        // its card — a notification tap on an already-open app must not
+        // race the in-flight bookings refresh.
+        let pendingRideId = null;
+        (function captureRideParam() {
+            try {
+                const rid = new URLSearchParams(location.search).get('ride');
+                if (rid && UUID_RE.test(rid)) pendingRideId = rid;
+            } catch (e) { /* non-critical */ }
+        })();
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (e) => {
+                const d = e.data || {};
+                if (d.type === 'open-ride' && typeof d.rideId === 'string' && UUID_RE.test(d.rideId)) {
+                    pendingRideId = d.rideId;
+                    applyPendingRide();   // immediate if the card is already rendered
+                    if (pollingEnabled) kickPolling(); // otherwise the refresh brings it
+                }
+            });
+        }
+
+        function applyPendingRide() {
+            if (!pendingRideId) return;
+            const card = document.querySelector(`.card[data-id="${pendingRideId}"]`);
+            if (!card) return; // keep waiting for the render that has it
+            const b = lastBookings.find((x) => x.id === pendingRideId);
+            switchView(b && b.status === 'pending' ? 'requests' : 'rides');
+            card.classList.add('ride-highlight');
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => card.classList.remove('ride-highlight'), 4000);
+            pendingRideId = null;
+        }
+
+        // Sign-out cleanup: the server DELETE needs the still-valid JWT.
+        async function cleanupPushOnSignOut() {
+            const token = await authToken();
+            if (token && deviceId()) {
+                await fetch('/api/driver-push-subscription', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ deviceId: deviceId() })
+                }).catch(() => {});
+            }
+            if ('serviceWorker' in navigator) {
+                const reg = await navigator.serviceWorker.getRegistration('/driver').catch(() => null);
+                const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
+                if (sub) await sub.unsubscribe().catch(() => {});
+            }
+        }
+
         function rideCard(b, buttonsHtml, badgeHtml) {
             return `
             <div class="card" data-id="${b.id}">
@@ -578,6 +818,10 @@
 
             $('tabRequests').innerHTML = `Requests${pending.length ? ` <span class="count">${pending.length}</span>` : ''}`;
             $('tabRides').innerHTML = `My rides${active.length ? ` <span class="count">${active.length}</span>` : ''}`;
+
+            // Notification deep link: select/highlight once the requested
+            // ride's card actually exists in this render.
+            applyPendingRide();
         }
 
         // Two-view layout: offers to accept vs rides already accepted
@@ -830,6 +1074,10 @@
                 idlePolls = hasWorkNow(bookings) ? 0 : 1;
                 render(bookings);
                 scheduleNext();
+                // Push status card (never requests permission by itself —
+                // that happens only inside the Enable tap).
+                $('pushCard').classList.remove('hidden');
+                ensureDriverSw().finally(() => updatePushCard());
                 return true;
             } catch (e) {
                 return false;
@@ -861,9 +1109,21 @@
             pollingEnabled = false;
             clearTimeout(pollTimeout);
             pollTimeout = null;
-            await window.supabaseClient?.auth.signOut().catch(() => {});
-            $('app').classList.add('hidden');
-            $('gate').classList.remove('hidden');
+            try {
+                // Push cleanup FIRST (server DELETE needs the still-valid
+                // JWT), bounded so it can never trap the driver signed in.
+                await Promise.race([
+                    cleanupPushOnSignOut(),
+                    new Promise((resolve) => setTimeout(resolve, 2000))
+                ]);
+            } catch (err) {
+                /* best-effort — an orphaned row dies on its next 404/410 */
+            } finally {
+                await window.supabaseClient?.auth.signOut().catch(() => {});
+                $('pushCard').classList.add('hidden');
+                $('app').classList.add('hidden');
+                $('gate').classList.remove('hidden');
+            }
         });
 
         // Auto-unlock with a stored session (Supabase persists + refreshes)
