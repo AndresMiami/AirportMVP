@@ -1,6 +1,17 @@
 // Secure Booking Creation with Supabase Persistence + Telegram doorbell ping
 // IMPORTANT: Supabase insert happens FIRST, the doorbell only fires on success.
 // All dispatch actions (accept/decline/status) happen on the driver page.
+//
+// ACCOUNT GATE: new bookings are AUTHENTICATED-ONLY. The disabled
+// "Guest checkout — coming later" UI is convenience; THIS is the
+// enforcement: 401 for a missing/invalid/expired token, 403 when the
+// authenticated identity cannot be resolved to a customers row, 500 on
+// auth-verification or database failure. There is no anonymous insert
+// path — every new booking is stamped with customer_id. Legacy guest
+// bookings (customer_id NULL) and their /trip links are untouched; the
+// guest columns (customer_*/booker_*) are still written exactly as
+// before, because "book for someone else" remains a signed-in booker
+// arranging a ride for another passenger.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -8,7 +19,7 @@ exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'private, no-store',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
@@ -39,42 +50,54 @@ exports.handler = async (event, context) => {
     };
   }
 
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!anonKey) {
+    console.error('❌ Missing SUPABASE_ANON_KEY — cannot verify sessions');
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Server configuration error' })
+    };
+  }
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  // Optional identity link: when the frontend sends a session token, resolve
-  // it to a customers row so the booking is tied to the account. If the
-  // account is an active ambassador, the booking is attributed to them.
-  // Failures here never block the booking — guests book exactly as before.
-  let linkedCustomerId = null;
-  let ambassadorHost = null;
+  // ============================================
+  // ACCOUNT GATE: require a valid session (CreditEngine requireAuth
+  // pattern — checks BOTH the auth error and the missing user; the old
+  // optional-identity block checked neither and silently fell through
+  // to an anonymous insert).
+  //   missing token           -> 401
+  //   invalid/expired token   -> 401
+  //   verification unreachable -> 500 (never guess)
+  // ============================================
+  const authHeader = event.headers.authorization || event.headers.Authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (!token) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Not authenticated' }) };
+  }
+  let user;
   try {
-    const authHeader = event.headers.authorization || event.headers.Authorization || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    if (token && process.env.SUPABASE_ANON_KEY) {
-      const authClient = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
-      const { data: userData } = await authClient.auth.getUser(token);
-      if (userData?.user) {
-        const { data: customer } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('user_id', userData.user.id)
-          .maybeSingle();
-        if (customer) {
-          linkedCustomerId = customer.id;
-        }
-        const { data: host } = await supabase
-          .from('hosts')
-          .select('id, name, commission_rate')
-          .eq('user_id', userData.user.id)
-          .eq('status', 'active')
-          .maybeSingle();
-        if (host) {
-          ambassadorHost = host;
-        }
+    const authClient = createClient(supabaseUrl, anonKey);
+    const { data: userData, error: userError } = await authClient.auth.getUser(token);
+    if (userError) {
+      // Supabase reports outages as error RESULTS, not throws. A
+      // network/service failure must be 500 — never mislabeled as an
+      // expired session (which would bounce a valid user to sign-in).
+      const retryable = userError.name === 'AuthRetryableFetchError' ||
+        !userError.status || userError.status >= 500;
+      if (retryable) {
+        console.error('❌ Auth verification unavailable:', userError.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify sign-in' }) };
       }
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
     }
-  } catch (identityError) {
-    console.warn('⚠️ Identity link skipped:', identityError.message);
+    if (!userData?.user) {
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
+    }
+    user = userData.user;
+  } catch (authError) {
+    console.error('❌ Auth verification failed:', authError.message);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify sign-in' }) };
   }
 
   try {
@@ -120,6 +143,81 @@ exports.handler = async (event, context) => {
       'Mercedes Sprinter': 'sprinter'
     };
     const vehicleType = vehicleTypeMap[booking.vehicle] || 'sedan';
+
+    // ============================================
+    // RESOLVE THE CUSTOMER IDENTITY — every new booking is stamped.
+    // The trip payload carries the TRAVELING PASSENGER's details (the
+    // ambassador flow deliberately clears the account holder's info), so
+    // payload data must NEVER become the authenticated account's
+    // identity — Andres booking for Maria must not mint a customers row
+    // named Maria with Maria's phone and email.
+    //   customers row exists                 -> use it
+    //   missing + ACTIVE ambassador host row -> ensure-row from the HOST
+    //     record (hosts.name/phone/email, user.email as email fallback)
+    //     — approved as an ambassador-recovery mechanism only
+    //   missing + no host                    -> 403 (heal by signing in
+    //     again: the login flow saves the profile)
+    //   lookup/creation failure              -> 500, fail closed
+    // ============================================
+    let customerId = null;
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (customerError) {
+      console.error('❌ Customer lookup failed:', customerError.message);
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+    }
+
+    // Active ambassador host on this account: needed for attribution AND
+    // as the only approved ensure-row source.
+    const { data: ambassadorHost, error: hostError } = await supabase
+      .from('hosts')
+      .select('id, name, phone, email, commission_rate')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (customer) {
+      customerId = customer.id;
+      if (hostError) {
+        // Attribution is optional when identity is already resolved.
+        console.warn('⚠️ Ambassador lookup skipped:', hostError.message);
+      }
+    } else {
+      if (hostError) {
+        // Without the host we cannot decide between recovery and 403.
+        console.error('❌ Host lookup failed during identity recovery:', hostError.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+      }
+      if (!ambassadorHost) {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({ error: 'Account profile incomplete — please sign in again to finish setting up your account' })
+        };
+      }
+      // Ambassador recovery: the account's row comes from the HOST
+      // record — never from the traveling passenger's details.
+      const { data: created, error: createError } = await supabase
+        .from('customers')
+        .insert([{
+          user_id: user.id,
+          name: ambassadorHost.name,
+          phone: ambassadorHost.phone || null,
+          email: ambassadorHost.email || user.email || null,
+          type: 'guest',
+          source: 'website'
+        }])
+        .select('id')
+        .single();
+      if (createError || !created) {
+        console.error('❌ Customer profile creation failed:', createError?.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not create account profile' }) };
+      }
+      customerId = created.id;
+    }
 
     // Referral attribution: a signed-in ambassador wins; otherwise a stored
     // QR ref code (?ref=...) is honored. Commission is stamped at booking
@@ -178,7 +276,7 @@ exports.handler = async (event, context) => {
       promo_code: booking.promoCode || null,
       booking_mode: booking.mode || null,
       duration_minutes: parseInt(booking.durationMinutes) || null,
-      customer_id: linkedCustomerId,
+      customer_id: customerId,
       referred_by_host: referredByHost,
       host_commission: hostCommission,
       source: 'website'

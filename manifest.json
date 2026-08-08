@@ -31,7 +31,7 @@
       "name": "Book Transfer",
       "short_name": "Book",
       "description": "Book a new airport transfer",
-      "url": "/indexMVP.html?book=1"
+      "url": "/login.html"
     },
     {
       "name": "Chat on Telegram",
