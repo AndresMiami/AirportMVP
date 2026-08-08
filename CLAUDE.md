@@ -137,6 +137,12 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    channels, not infrastructure.
 3. Passengers: self-service email+password + guest checkout preserved.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
+   (Approved change, next after PR #54: account-required booking gate —
+   guest checkout stays VISIBLE but disabled, labeled "Guest checkout —
+   coming later"; authentication enforced server-side in create-booking;
+   guest schema/code, existing guest bookings, and guest trip links all
+   keep working. Passenger Push later binds to the authenticated
+   customer UUID.)
 4. Checkpoint locations (browser geolocation at status taps → Supabase →
    trip-page map) are the tracking backbone; WhatsApp live-location is a
    manual premium layer. Continuous browser GPS was tried and deliberately
@@ -151,9 +157,13 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    page is automatic-only: no manual refresh button (product decision).
 8. Supabase Realtime is DEFERRED until the RLS lockdown + guest
    authorization make subscriptions safe (browser + public anon key would
-   bypass the functions/service-key boundary). Long-term push channel is
-   SMS milestone notifications (Blacklane pattern), not sockets — WhatsApp
-   stays a human-only conversation link (see decision 2), never automated.
+   bypass the functions/service-key boundary). Long-term closed-page
+   channels are PWA Web Push — Driver first, then AUTHENTICATED-passenger
+   — never sockets and never SMS (Twilio/SMS rejected, Aug 2026; the
+   notification ledger supports telegram + webpush only, and 'submitted'
+   is the honest terminal state — no channel proves a human saw it).
+   WhatsApp stays a human-only conversation link (see decision 2), never
+   automated.
 9. RLS lockdown (Phase B, migration 010): seven tables default-deny with
    zero client-role grants (PUBLIC included), six reporting views forced
    to security_invoker, postgres-creator default privileges stripped, and
@@ -171,6 +181,18 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 
 ## Known gaps / next up
 
+- ROADMAP (Aug 2026, Codex-approved order — no SMS anywhere):
+  1. PR #54 (open, draft) — readiness ledger + watchdog. Run migration
+     011 in the SQL Editor BEFORE merging.
+  2. Account-required booking gate — guest checkout visibly disabled
+     ("coming later"), sign-in/signup required for new bookings, form +
+     referral attribution preserved across auth, server-enforced in
+     create-booking (JWT must resolve to a customers row; stamp
+     customer_id; bookings.customer_id stays nullable for legacy guests).
+  3. Driver PWA Push (Telegram stays the fallback channel).
+  4. Routes API + two-ETA work.
+  5. Passenger PWA Push for authenticated passengers.
+  6. Polling reduction reconsidered ONLY after real Push field evidence.
 - Phase B RLS lockdown SHIPPED as code — run `database/migrations/`
   010_rls_lockdown.sql (atomic, self-verifying, unedited) right after
   merging, then security probes + full smoke test.
@@ -201,9 +223,10 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   policies before persisting ETAs. Rounded, timestamped snapshots.
 - Ambassador dashboard (mock approved; all queries exist as views).
 - Pending-request timeout rule (the trip page already pauses pending
-  displays at 10 min — the server-side rule is still open); SMS milestone
-  notifications with return links (WhatsApp stays human-only); in-app
-  chat + web push (parked).
+  displays at 10 min — the server-side rule is still open; the watchdog
+  is its natural future home). SMS was REJECTED (Aug 2026) — closed-page
+  notifications are PWA Web Push per the roadmap above; in-app chat
+  stays parked.
 - Collaboration pattern: Andres relays between Claude and a second AI
   reviewer (Codex); diagnostics and plans get reviewed before
   implementation is authorized. Respect that gate.

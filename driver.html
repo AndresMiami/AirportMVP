@@ -196,6 +196,24 @@
             cursor: pointer; font-family: inherit;
         }
         .btn-payment { background: white; color: #cc7000; border: 1.5px solid #f0b060; }
+        /* Readiness confirmation (PR 1) — internal operational state on
+           confirmed rides; never a passenger-facing status */
+        .ready-note {
+            font-size: 13px; font-weight: 600; color: #cc7000; margin-top: 10px;
+        }
+        .ready-chip {
+            display: inline-block; background: #e6f7ec; color: #1eaa5c;
+            font-size: 12px; font-weight: 700; padding: 4px 10px;
+            border-radius: 8px; margin-top: 10px;
+        }
+        .btn-ready {
+            display: block; width: 100%; margin-top: 8px; padding: 12px;
+            min-height: 44px;
+            background: #e6f7ec; color: #1eaa5c;
+            border: 1.5px solid #8fd6ab; border-radius: 10px;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            font-family: inherit;
+        }
         .paid-badge {
             display: inline-block; background: #e6f7ec; color: #1eaa5c;
             font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px;
@@ -318,6 +336,42 @@
 
         function isUrgent(iso) {
             return iso && (new Date(iso) - new Date()) < 2 * 60 * 60 * 1000;
+        }
+
+        // ---- Driver readiness (PR 1) ----
+        // Internal operational state on confirmed rides. The Confirm button
+        // appears from T-180 and captures NO location (location is first
+        // requested at On my way, never here). Rides accepted at/after
+        // T-180 arrive already ready (source 'recent_accept', stamped by
+        // the server at accept). Ride times render in Miami time explicitly
+        // — serverless/functions convention carried into the driver UI.
+        const READY_BUTTON_MS = 180 * 60 * 1000; // Confirm available from T-180
+        const READY_CHECK_MS  = 150 * 60 * 1000; // readiness check begins at T-150
+
+        function fmtTimeET(iso) {
+            return new Date(iso).toLocaleTimeString('en-US', {
+                hour: 'numeric', minute: '2-digit', hour12: true,
+                timeZone: 'America/New_York'
+            });
+        }
+
+        function readinessBlock(b) {
+            if (b.status !== 'confirmed') return '';
+            if (b.driver_ready_at) {
+                const label = b.driver_ready_source === 'recent_accept'
+                    ? '✅ Ready (recent accept)'
+                    : '✅ Ready confirmed';
+                return `<div class="ready-chip">${label}</div>`;
+            }
+            const pickupMs = Date.parse(b.pickup_datetime);
+            if (!Number.isFinite(pickupMs)) return '';
+            if (pickupMs - Date.now() > READY_BUTTON_MS) {
+                const checkAt = new Date(pickupMs - READY_CHECK_MS).toISOString();
+                return `<div class="ready-note">⏰ Readiness check begins at ${fmtTimeET(checkAt)}</div>`;
+            }
+            return `
+                <div class="ready-note">⏰ Readiness confirmation required</div>
+                <button class="btn-ready" data-action="ready" data-id="${b.id}">✅ Confirm I'm ready</button>`;
         }
 
         // ---- WhatsApp quick messages ----
@@ -514,7 +568,7 @@
                         <div class="btn-row">
                             ${payBtn}
                             <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
-                        </div>${msgBtn}${geoNote}`,
+                        </div>${readinessBlock(b)}${msgBtn}${geoNote}`,
                         `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
                     );
                 }).join('')

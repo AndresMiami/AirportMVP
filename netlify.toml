@@ -143,3 +143,11 @@
   # directory = "backend/functions"  # Commented out as it's already defined in [build]
   # Node bundler for functions
   node_bundler = "esbuild"
+
+# Proactive readiness watchdog (PR 1) — Netlify Scheduled Function.
+# Runs every 5 minutes on published production deploys only (deploy
+# previews never run schedules; not exposed as a URL endpoint). Emergency
+# stop: set WATCHDOG_DISABLED=1 in the Netlify env. Local invocation:
+#   netlify functions:invoke notification-watchdog
+[functions."notification-watchdog"]
+  schedule = "*/5 * * * *"

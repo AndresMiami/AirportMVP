@@ -81,7 +81,8 @@ const supabaseMock = {
             or(expr) { capturedListOr = expr; return chain; },
             order() { return Promise.resolve({ data: listResult, error: null }); },
             eq() { return chain; },
-            single() { return Promise.resolve(currentBookingResult); }
+            single() { return Promise.resolve(currentBookingResult); },
+            maybeSingle() { return Promise.resolve(currentBookingResult); }
           };
           return chain;
         }
@@ -246,6 +247,138 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   // ---------- decline removed ----------
   r = await post({ bookingId: BID, action: 'decline' }, 'tok-andres');
   check('decline -> 400 Unknown action', () => assert.strictEqual(r.statusCode, 400));
+
+  // ---------- durable transition timestamps + readiness (PR 1) ----------
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 10 * 3600e3).toISOString() },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  check('accept stamps accepted_at; far pickup -> NO recent-accept readiness', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.ok(lastUpdate.accepted_at, 'accepted_at anchor missing');
+    assert.ok(!('driver_ready_source' in lastUpdate), 'readiness must not stamp on far accepts');
+  });
+  lastUpdate = null;
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  check('accept at/after T-180 IS readiness: recent_accept stamped in the SAME update', () => {
+    assert.strictEqual(lastUpdate.driver_ready_source, 'recent_accept');
+    assert.strictEqual(lastUpdate.driver_ready_by, 'drv-a');
+    assert.ok(lastUpdate.driver_ready_at);
+    assert.ok(lastUpdate.accepted_at);
+  });
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'on_the_way' }], error: null };
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
+  check('on_my_way: stamps on_the_way_at + clears at_risk_at; NEVER writes readiness fields', () => {
+    assert.ok(lastUpdate.on_the_way_at, 'on_the_way_at anchor missing');
+    assert.strictEqual(lastUpdate.at_risk_at, null, 'On my way must clear at_risk_at');
+    assert.ok(!('driver_ready_source' in lastUpdate));
+    assert.ok(!('driver_ready_at' in lastUpdate));
+    assert.ok(!('driver_ready_by' in lastUpdate));
+  });
+  // Interleaving regression: an explicit web confirmation lands moments
+  // before On my way. Because on_my_way has NO readiness write path at
+  // all (the on_the_way status + on_the_way_at ARE the implicit proof),
+  // no interleaving can ever downgrade 'web' to 'implicit'.
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },
+    error: null
+  };
+  updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
+  await post({ bookingId: BID, action: 'ready' }, 'tok-andres'); // web confirm lands first
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'on_the_way' }], error: null };
+  r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
+  check('race regression: web readiness can never become implicit via On my way', () => {
+    assert.ok(!('driver_ready_source' in lastUpdate), 'readiness field written by on_my_way');
+    assert.ok(!('driver_ready_at' in lastUpdate));
+    assert.ok(!('driver_ready_by' in lastUpdate));
+    assert.ok(lastUpdate.on_the_way_at);
+    assert.strictEqual(lastUpdate.at_risk_at, null);
+  });
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'arrived' }], error: null };
+  r = await post({ bookingId: BID, action: 'arrived' }, 'tok-andres');
+  check('arrived stamps arrived_at (durable milestone anchor)', () =>
+    assert.ok(lastUpdate.arrived_at));
+  lastUpdate = null;
+  updateResult = { data: [{ id: BID, status: 'in_progress' }], error: null };
+  r = await post({ bookingId: BID, action: 'start_trip' }, 'tok-andres');
+  check('start_trip stamps started_at (durable milestone anchor)', () =>
+    assert.ok(lastUpdate.started_at));
+
+  // ---------- ready action ----------
+  // Server-side T-180 window: the UI gate is convenience, not security.
+  lastUpdate = null;
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 10 * 3600e3).toISOString() },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready more than T-180 out -> 409 rejected SERVER-side, no update attempted', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.ok(/too early/i.test(JSON.parse(r.body).error));
+    assert.strictEqual(lastUpdate, null, 'premature ready must never reach the update');
+  });
+  currentBookingResult = { data: null, error: { message: 'read exploded' } };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready window read failure -> 500, never a silent pass-through', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(lastUpdate, null);
+  });
+  currentBookingResult = { data: { pickup_datetime: 'not-a-date' }, error: null };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready with an UNPARSEABLE pickup time: fails CLOSED (409), no readiness recorded', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(lastUpdate, null, 'invalid timing must never reach the update');
+  });
+  currentBookingResult = { data: {}, error: null }; // booking exists, pickup missing
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready with a MISSING pickup time: fails CLOSED (409), no readiness recorded', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(lastUpdate, null);
+  });
+  lastUpdate = null; lastFilters = null; lastIsFilter = null;
+  currentBookingResult = {
+    data: { pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },
+    error: null
+  };
+  updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready inside T-180: confirmed-only + owner-guarded + first-confirm-wins; records WHO; clears at-risk', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.deepStrictEqual(lastFilters.status, ['confirmed']);
+    assert.strictEqual(lastFilters.assigned_driver, 'drv-a');
+    assert.deepStrictEqual(lastIsFilter, { col: 'driver_ready_at', val: null });
+    assert.strictEqual(lastUpdate.driver_ready_by, 'drv-a');
+    assert.strictEqual(lastUpdate.driver_ready_source, 'web');
+    assert.ok(lastUpdate.driver_ready_at);
+    assert.strictEqual(lastUpdate.at_risk_at, null);
+    assert.ok(!('status' in lastUpdate), 'ready must never change the passenger lifecycle status');
+    assert.ok(!('driver_lat' in lastUpdate), 'ready must never capture location');
+  });
+  updateResult = { data: [], error: null }; // 0 rows: already ready
+  currentBookingResult = {
+    data: { status: 'confirmed', assigned_driver: 'drv-a',
+            driver_ready_at: '2026-08-07T10:00:00Z', driver_ready_by: 'drv-a',
+            pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-andres');
+  check('ready duplicate by the SAME owner -> 200 idempotent', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(JSON.parse(r.body).idempotent, true);
+  });
+  r = await post({ bookingId: BID, action: 'ready' }, 'tok-carlos');
+  check('ready by a NON-owner -> 409, never success', () =>
+    assert.strictEqual(r.statusCode, 409));
 
   // ---------- passenger-facing driver exposure ----------
   currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-c' }, error: null };

@@ -22,6 +22,20 @@
 // The passenger label derives from the current status, so preserving an
 // older coordinate would relabel it as this checkpoint (e.g. the departure
 // point shown as "arrived at pickup"). Honest absence beats a stale lie.
+//
+// Readiness (PR 1): `ready` records the driver's explicit T-150
+// confirmation (driver_ready_by/at/source='web') — internal operational
+// state only, never a passenger status, never a location capture, and
+// the T-180 window is enforced server-side (the UI gate is not
+// security). Recent acceptance (accept at/after T-180) satisfies
+// readiness at accept time ('recent_accept'). On my way stamps
+// on_the_way_at and clears at_risk_at but NEVER writes driver_ready_* —
+// the on_the_way status itself is the implicit readiness proof, and a
+// read-then-write here could race an explicit confirmation and
+// overwrite 'web' with 'implicit'. Every transition also stamps its
+// durable timestamp (accepted_at, on_the_way_at, arrived_at,
+// started_at) atomically with the status — the scheduling anchors for
+// the notification watchdog.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -71,6 +85,11 @@ const TRANSITIONS = {
 // payment_collected doesn't touch status — allowed on any live/finished ride
 const PAYMENT_ALLOWED_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
+// Recent acceptance IS readiness: accepting a ride that starts within
+// 3 hours is itself the commitment check — the readiness chain is never
+// generated and the driver is never nagged for a ride they just took.
+const RECENT_ACCEPT_MS = 180 * 60 * 1000;
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -111,12 +130,56 @@ exports.handler = async (event) => {
 
     let fromStatuses;
     let updates;
+    const nowIso = new Date().toISOString();
 
     if (action === 'payment_collected') {
       fromStatuses = PAYMENT_ALLOWED_STATUSES;
       updates = {
         payment_status: 'paid_by_guest',
         payment_method: paymentMethod === 'zelle' ? 'zelle' : 'cash'
+      };
+    } else if (action === 'ready') {
+      // Explicit readiness confirmation (the T-150 check). Internal
+      // operational state ONLY: no passenger status change, no location
+      // capture. Records WHO confirmed — readiness is valid only while
+      // driver_ready_by still matches assigned_driver — and clears any
+      // at-risk mark in the same atomic update.
+      //
+      // The T-180 window is enforced HERE, server-side — the UI gate is
+      // convenience, not security. FAIL CLOSED: a read failure is a real
+      // 500; a booking whose pickup time is missing or unparseable gets
+      // 409 (readiness timing cannot be verified, so readiness is never
+      // recorded). Only a MISSING booking falls through to the guarded
+      // update, which yields the normal not-found/conflict response.
+      const { data: pre, error: preError } = await supabase
+        .from('bookings').select('pickup_datetime').eq('id', bookingId).maybeSingle();
+      if (preError) {
+        console.error('❌ ready: pickup window read failed:', preError.message || preError);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Readiness check failed' }) };
+      }
+      if (pre) {
+        const readyPickupMs = Date.parse(pre.pickup_datetime);
+        if (!Number.isFinite(readyPickupMs)) {
+          return {
+            statusCode: 409,
+            headers,
+            body: JSON.stringify({ error: 'Booking has no valid pickup time — readiness unavailable' })
+          };
+        }
+        if (readyPickupMs - Date.now() > RECENT_ACCEPT_MS) {
+          return {
+            statusCode: 409,
+            headers,
+            body: JSON.stringify({ error: 'Too early — readiness confirmation opens 3 hours before pickup' })
+          };
+        }
+      }
+      fromStatuses = ['confirmed'];
+      updates = {
+        driver_ready_by: driver.id,
+        driver_ready_at: nowIso,
+        driver_ready_source: 'web',
+        at_risk_at: null
       };
     } else if (TRANSITIONS[action]) {
       if (action === 'accept' && driver.status !== 'active') {
@@ -128,6 +191,39 @@ exports.handler = async (event) => {
       // assigned explicitly by the migration-009 cutover, never claimed.
       if (action === 'accept') {
         updates.assigned_driver = driver.id;
+        // Durable anchor: stamped atomically with the transition so the
+        // watchdog can derive readiness timing from it.
+        updates.accepted_at = nowIso;
+        // Recent acceptance IS readiness (accept at/after T-180). The
+        // pre-read is safe: pickup_datetime never changes after booking.
+        // (Tolerant on read failure: accepting the ride is the critical
+        // path; a missed recent-accept stamp only means the readiness
+        // chain runs — annoying, never wrong.)
+        const { data: pre } = await supabase
+          .from('bookings').select('pickup_datetime').eq('id', bookingId).maybeSingle();
+        const pickupMs = pre ? Date.parse(pre.pickup_datetime) : NaN;
+        if (Number.isFinite(pickupMs) && pickupMs - Date.now() <= RECENT_ACCEPT_MS) {
+          updates.driver_ready_by = driver.id;
+          updates.driver_ready_at = nowIso;
+          updates.driver_ready_source = 'recent_accept';
+        }
+      }
+      if (action === 'on_my_way') {
+        // Durable anchor + at-risk clear. driver_ready_* is deliberately
+        // NOT written here: the on_the_way status and on_the_way_at stamp
+        // ARE the implicit readiness proof (the watchdog suppresses the
+        // chain for active rides), and any read-then-write of readiness
+        // fields could race a concurrent explicit 'web' confirmation and
+        // overwrite it with 'implicit'. An existing explicit or
+        // recent-accept record is therefore always preserved.
+        updates.on_the_way_at = nowIso;
+        updates.at_risk_at = null;
+      }
+      if (action === 'arrived') {
+        updates.arrived_at = nowIso;
+      }
+      if (action === 'start_trip') {
+        updates.started_at = nowIso;
       }
       if (CHECKPOINT_ACTIONS.includes(action)) {
         const fresh = validCoords(lat, lng);
@@ -163,6 +259,11 @@ exports.handler = async (event) => {
     } else {
       query = query.eq('assigned_driver', driver.id);
     }
+    if (action === 'ready') {
+      // First confirmation wins; a second tap matches 0 rows and is
+      // recognized below as a verified idempotent duplicate.
+      query = query.is('driver_ready_at', null);
+    }
     const { data, error } = await query.select();
 
     if (error) {
@@ -173,7 +274,7 @@ exports.handler = async (event) => {
     if (!data || data.length === 0) {
       const { data: current } = await supabase
         .from('bookings')
-        .select('status, assigned_driver')
+        .select('status, assigned_driver, driver_ready_at, driver_ready_by')
         .eq('id', bookingId)
         .single();
       // VERIFIED idempotent success — only the backend may declare it, and
@@ -185,6 +286,15 @@ exports.handler = async (event) => {
           current.status === TRANSITIONS[action].set.status &&
           current.assigned_driver === driver.id) {
         console.log(`✅ Booking ${bookingId}: ${action} (idempotent duplicate)`);
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true, idempotent: true }) };
+      }
+      // ready: already confirmed ready BY THIS DRIVER on a ride this
+      // driver still owns = verified duplicate. Anyone/anything else: 409.
+      if (current && action === 'ready' &&
+          current.status === 'confirmed' &&
+          current.assigned_driver === driver.id &&
+          current.driver_ready_at && current.driver_ready_by === driver.id) {
+        console.log(`✅ Booking ${bookingId}: ready (idempotent duplicate)`);
         return { statusCode: 200, headers, body: JSON.stringify({ success: true, idempotent: true }) };
       }
       return {
