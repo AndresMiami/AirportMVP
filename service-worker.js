@@ -3,10 +3,9 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-// v1.3.12: account-gate PR — index.html CTA and indexMVP boot guard changed
-// (both are precached, so the cache name MUST bump or installed PWAs would
-// keep serving the ungated pages).
-const CACHE_NAME = 'linkmia-v1.3.12';
+// v1.3.13: Driver PWA Push PR — dead passenger push listeners removed and
+// /driver* excluded from interception (cached assets changed -> bump).
+const CACHE_NAME = 'linkmia-v1.3.13';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';
@@ -122,6 +121,15 @@ self.addEventListener('fetch', (event) => {
   // the network directly with no service-worker involvement.
   if (url.origin === self.location.origin &&
       (url.pathname.startsWith('/api/') || url.pathname.startsWith('/.netlify/functions/'))) {
+    return;
+  }
+
+  // DRIVER PAGES: /driver* belongs to the dedicated driver service
+  // worker (driver-sw.js, scope '/driver'), which deliberately caches
+  // NOTHING. This root worker must never intercept those navigations
+  // either — a browser that visited the passenger app first would
+  // otherwise runtime-cache driver markup here.
+  if (url.origin === self.location.origin && url.pathname.startsWith('/driver')) {
     return;
   }
 
@@ -247,52 +255,12 @@ async function syncOfflineBookings() {
   }
 }
 
-// Handle push notifications
-self.addEventListener('push', (event) => {
-  const options = {
-    body: event.data ? event.data.text() : 'Your ride is arriving!',
-    icon: '/images/icon-192x192.png',
-    badge: '/images/badge-72x72.png',
-    vibrate: [200, 100, 200],
-    data: {
-      dateOfArrival: Date.now(),
-      primaryKey: '1'
-    },
-    actions: [
-      {
-        action: 'track',
-        title: 'Track Driver',
-        icon: '/images/track-icon.png'
-      },
-      {
-        action: 'close',
-        title: 'Close',
-        icon: '/images/close-icon.png'
-      }
-    ]
-  };
-
-  event.waitUntil(
-    self.registration.showNotification('LinkMia', options)
-  );
-});
-
-// Handle notification clicks
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-
-  if (event.action === 'track') {
-    // Open tracking page
-    event.waitUntil(
-      clients.openWindow('/indexMVP.html?action=track')
-    );
-  } else {
-    // Open main app
-    event.waitUntil(
-      clients.openWindow('/indexMVP.html')
-    );
-  }
-});
+// NO push handling here. Web Push is a DRIVER capability handled
+// exclusively by driver-sw.js (scope '/driver'), so no second listener
+// can ever answer a push. The dead passenger push/notificationclick
+// listeners that used to live here (nothing ever subscribed on this
+// registration, and they referenced icons that don't exist) were
+// removed with the Driver PWA Push PR.
 
 // Listen for skip waiting message
 self.addEventListener('message', (event) => {

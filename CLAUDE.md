@@ -62,7 +62,16 @@ verified checkpoint locations all live in the web app backed by Supabase.
   at On my way, never at Accept. Same-tab Maps handoffs only after status
   success; lost responses retry once, and only the BACKEND declares a
   verified idempotent duplicate (status + owner both match) — the client
-  never treats a 409 as success.
+  never treats a 409 as success. Driver PWA Push (Driver PWA Push PR):
+  dedicated manifest (id "/driver") + no-cache driver-sw.js at scope
+  /driver; readiness reminders arrive as Web Push on the installed app —
+  enabled ONLY by an explicit tap, bound to driver+device
+  (push_subscriptions; newest activated_at device wins; endpoints are
+  never reassigned across accounts — 409 + fresh resubscribe), push-first
+  with Telegram fallback (never both; urgent/admin stay Telegram-only),
+  absolute TTLs + per-booking Topic/Tag, durable failure_class routing,
+  PUSH_DISABLED kill switch. Clicks deep-link to /driver?ride=<id>;
+  notifications never mutate ride state.
 - `login.html` — passenger email+password (self-service signUp) and the
   FRONT DOOR for booking: the homepage CTA and the PWA "Book" shortcut land
   here; a signed-in session forwards straight to `/indexMVP.html?book=1`.
@@ -205,7 +214,10 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
      via ensure-row, guest checkout visibly disabled, false local-success
      fallback removed; bookings.customer_id stays nullable for legacy
      guest rows).
-  3. Driver PWA Push (Telegram stays the fallback channel).
+  3. Driver PWA Push — BUILT (Driver PWA Push PR): run migration 012 +
+     set VAPID_* env BEFORE merging; Telegram stays the fallback and
+     safety channel; PUSH_DISABLED=1 reroutes everything to Telegram
+     without touching the watchdog.
   4. Routes API + two-ETA work.
   5. Passenger PWA Push for authenticated passengers.
   6. Polling reduction reconsidered ONLY after real Push field evidence.

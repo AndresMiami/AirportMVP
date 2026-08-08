@@ -37,6 +37,8 @@
 // update failure is returned to the caller as { dbError } so the watchdog
 // can log it and refuse to report a clean run.
 
+const webpush = require('web-push');
+
 const MIAMI_TZ = 'America/New_York';
 
 // Readiness chain (PR 1): offsets are minutes BEFORE pickup. All due-time
@@ -168,6 +170,189 @@ async function sendTelegram(chatId, text) {
   }
 }
 
+// ---- Web Push (Driver PWA) ----
+// Duplicate-safety mirrors the Telegram discipline; classifications are
+// written DURABLY to notification_deliveries.failure_class so routing —
+// including Telegram-fallback continuation — is restart-safe from
+// delivery history alone. Endpoints and keys are SECRETS: never logged
+// (logs carry the subscription row UUID), never returned by APIs, never
+// cached (the driver service worker has no fetch handler).
+
+const PUSH_TIMEOUT_MS = 5000;
+
+// Absolute escalation deadlines (minutes before pickup): a queued ask_1
+// the push service could not deliver by the ask_2 time must EXPIRE, and
+// a passed deadline suppresses the send without any provider call.
+const ASK_DEADLINE_MIN = {
+  driver_ready_ask_1: 135, // expires when ask_2 is scheduled
+  driver_ready_ask_2: 120  // expires when the urgent escalation fires
+};
+// Definitive webpush failure classes -> Telegram fallback begins (and,
+// per the routing precedence, the event never returns to Push).
+const DEFINITIVE_PUSH_CLASSES = ['expired_endpoint', 'vapid_config', 'payload', 'provider_rejected'];
+
+const VAPID_B64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+function validVapidSubject(subject) {
+  if (typeof subject !== 'string' || !subject) return false;
+  try {
+    const parsed = new URL(subject);
+    if (parsed.protocol === 'https:') {
+      return Boolean(parsed.hostname && parsed.hostname !== 'localhost');
+    }
+    if (parsed.protocol === 'mailto:') {
+      const address = decodeURIComponent(parsed.pathname || '');
+      return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address);
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+function validVapidKey(value, decodedBytes) {
+  if (typeof value !== 'string' || !value || !VAPID_B64URL_RE.test(value)) return false;
+  try {
+    return Buffer.from(value, 'base64url').length === decodedBytes;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Canonical configuration check shared by the watchdog and subscription
+// endpoint. A non-empty but truncated/corrupt key is NOT configured:
+// routing stays on Telegram and the UI never claims Push is available.
+function vapidConfigValid() {
+  return validVapidSubject(process.env.VAPID_SUBJECT) &&
+    validVapidKey(process.env.VAPID_PUBLIC_KEY, 65) &&
+    validVapidKey(process.env.VAPID_PRIVATE_KEY, 32);
+}
+
+function pushConfigured() {
+  if (process.env.PUSH_DISABLED === '1' || process.env.PUSH_DISABLED === 'true') return false;
+  return vapidConfigValid();
+}
+
+// One per-booking readiness topic (32-char base64url limit respected):
+// an undelivered queued ask_1 is REPLACED at the push service by ask_2,
+// and the same string as notification tag collapses displayed banners.
+function readinessTopic(b) {
+  return 'rdy-' + String(b.id || '').replace(/-/g, '').slice(0, 24);
+}
+
+// Minimal payload: trip code + generic action line ONLY — never passenger
+// name, phone, address, or notes. The authenticated app fetches details.
+function pushPayloadFor(eventType, b) {
+  const code = tripCode(b);
+  const body = eventType === 'driver_ready_ask_2'
+    ? `Ride ${code} is still not confirmed ready. Open to confirm.`
+    : `Ride ${code} — readiness check due. Open to confirm.`;
+  return { type: 'ride', rideId: b.id, title: 'LinkMia Driver', body, tag: readinessTopic(b) };
+}
+
+// Outcomes mirror sendTelegram, with the durable class alongside:
+//   submitted   provider accepted (NOT proof the driver saw it)
+//   retryable   throttled (429) or provably pre-transmission
+//   definitive  expired_endpoint (404/410 — the ONLY class that disables
+//               the subscription), vapid_config (401/403 — OUR config,
+//               subscription kept), payload (400/413), provider_rejected
+//               (other 4xx)
+//   ambiguous   5xx / timeout / unknown network — terminal, never resent
+async function sendWebPush(sub, payload, { ttl, topic }) {
+  if (!pushConfigured()) {
+    return { outcome: 'definitive', failureClass: 'vapid_config', error: 'push vapid_missing' };
+  }
+  // Defense in depth: even after our canonical validation, the library
+  // may reject configuration locally. That is a definitive OUR-config
+  // failure, safe for Telegram fallback — never an ambiguous send.
+  try {
+    webpush.setVapidDetails(
+      process.env.VAPID_SUBJECT,
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+  } catch (e) {
+    return { outcome: 'definitive', failureClass: 'vapid_config', error: 'push vapid_invalid' };
+  }
+  try {
+    await webpush.sendNotification(
+      { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+      JSON.stringify(payload),
+      { TTL: ttl, urgency: 'high', topic, timeout: PUSH_TIMEOUT_MS }
+    );
+    return { outcome: 'submitted' };
+  } catch (e) {
+    const status = e && e.statusCode;
+    if (status === 404 || status === 410) {
+      return { outcome: 'definitive', failureClass: 'expired_endpoint', error: `push ${status}` };
+    }
+    if (status === 401 || status === 403) {
+      // Sanitized: OUR VAPID configuration failing — never the endpoint,
+      // keys, or provider response body in the error string.
+      return { outcome: 'definitive', failureClass: 'vapid_config', error: `push ${status}` };
+    }
+    if (status === 400 || status === 413) {
+      return { outcome: 'definitive', failureClass: 'payload', error: `push ${status}` };
+    }
+    if (status === 429) {
+      return { outcome: 'retryable', failureClass: 'throttled', error: 'push 429' };
+    }
+    if (status >= 500) {
+      return { outcome: 'ambiguous', failureClass: 'ambiguous', error: `push ${status}` };
+    }
+    if (status >= 400) {
+      return { outcome: 'definitive', failureClass: 'provider_rejected', error: `push ${status}` };
+    }
+    const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+    if (PRE_TRANSMISSION_CODES.includes(code)) {
+      return { outcome: 'retryable', failureClass: 'pre_transmission', error: `push ${code}` };
+    }
+    return { outcome: 'ambiguous', failureClass: 'ambiguous', error: 'push unknown' };
+  }
+}
+
+// MVP device selection: the subscription the driver most recently
+// ENABLED (newest activated_at) — never last_success_at, which would pin
+// notifications to an old phone forever. Health lives in last_success_at.
+async function selectSubscription(db, driverId) {
+  const { data, error } = await db.from('push_subscriptions')
+    .select('id, endpoint, p256dh, auth, activated_at')
+    .eq('driver_id', driverId)
+    .is('disabled_at', null)
+    .order('activated_at', { ascending: false })
+    .limit(1);
+  if (error) return { error };
+  return { sub: (data && data[0]) || null, error: null };
+}
+
+// STRICT routing precedence over delivery history — first match wins.
+// Returns { done } | { channel:'telegram' } | { channel:'webpush', sub }
+// | { dbError }. Once Telegram fallback has begun for an event, it never
+// returns to Push.
+async function resolveDriverRoute(db, ev, driverId) {
+  const { data: rows, error } = await db.from('notification_deliveries')
+    .select('id, channel, state, failure_class')
+    .eq('event_id', ev.id);
+  if (error) return { dbError: error };
+  const r = rows || [];
+  if (r.some((x) => x.state === 'submitted')) return { done: 'submitted' };   // 1
+  if (r.some((x) => x.state === 'ambiguous')) return { done: 'exhausted' };   // 2
+  if (r.some((x) => x.channel === 'telegram')) return { channel: 'telegram' }; // 3
+  if (r.some((x) => x.channel === 'webpush' &&
+                    DEFINITIVE_PUSH_CLASSES.includes(x.failure_class))) {
+    return { channel: 'telegram' };                                            // 4
+  }
+  // 5 (retryable push history) and 6 (no history) collapse to the same
+  // decision: Push when allowed AND a healthy subscription exists,
+  // Telegram otherwise (the kill switch and a vanished device degrade
+  // identically and safely).
+  if (!pushConfigured()) return { channel: 'telegram' };
+  const picked = await selectSubscription(db, driverId);
+  if (picked.error) return { dbError: picked.error };
+  if (!picked.sub) return { channel: 'telegram' };
+  return { channel: 'webpush', sub: picked.sub };
+}
+
 // Driver Telegram target: drivers.telegram_chat_id, falling back to the
 // admin chat (driver = admin in today's one-driver operation). A lookup
 // failure is REPORTED via onDbError but still falls back — a reminder to
@@ -264,6 +449,8 @@ module.exports = {
   CHAIN_TYPES,
   MAX_ATTEMPTS_PER_CHANNEL,
   CLAIM_EXPIRY_MS,
+  ASK_DEADLINE_MIN,
+  DEFINITIVE_PUSH_CLASSES,
   dueAtFor,
   readinessValid,
   tripCode,
@@ -276,5 +463,12 @@ module.exports = {
   createDelivery,
   finalizeDelivery,
   setEventState,
-  suppressEvents
+  suppressEvents,
+  vapidConfigValid,
+  pushConfigured,
+  readinessTopic,
+  pushPayloadFor,
+  sendWebPush,
+  selectSubscription,
+  resolveDriverRoute
 };
