@@ -602,6 +602,9 @@
             if (Notification.permission === 'denied') return { state: 'denied' };
             const info = await fetchPushInfo();
             if (!info) return { state: 'unknown' };
+            if (info.pushConfigured === false || !info.vapidPublicKey) {
+                return { state: 'unavailable', info };
+            }
             if (Notification.permission === 'granted') {
                 const reg = await ensureDriverSw();
                 const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
@@ -621,6 +624,7 @@
             enabled: '🔔 Ride reminders are ON for this device.',
             expired: 'Notifications need to be re-enabled on this device.',
             available: 'Get ride readiness reminders on this device even when the app is closed.',
+            unavailable: 'Push isn’t configured on the server yet — Telegram reminders still cover you.',
             unknown: 'Couldn’t check notification status — will retry on the next refresh.'
         };
 
@@ -632,7 +636,7 @@
             const { state } = await computePushState();
             msg.textContent = PUSH_COPY[state] || PUSH_COPY.unknown;
             msg.className = 'push-note' + (state === 'enabled' ? ' ok'
-                : (state === 'denied' || state === 'expired') ? ' warn' : '');
+                : (state === 'denied' || state === 'expired' || state === 'unavailable') ? ' warn' : '');
             const showBtn = state === 'available' || state === 'expired';
             btn.classList.toggle('hidden', !showBtn);
             btn.textContent = state === 'expired' ? '🔔 Re-enable notifications' : '🔔 Enable notifications';
@@ -651,9 +655,32 @@
             return res.status;
         }
 
+        // Remove a known-stale subscription and prove the browser no
+        // longer holds it before asking the push service for a replacement.
+        // If removal cannot be verified, fail closed: never POST the same
+        // endpoint that already returned 404/410.
+        async function subscribeFresh(reg, appKey, staleSub) {
+            const staleEndpoint = staleSub && staleSub.endpoint;
+            if (staleSub) {
+                try { await staleSub.unsubscribe(); } catch (e) { /* verified below */ }
+                const remaining = await reg.pushManager.getSubscription().catch(() => staleSub);
+                if (remaining) throw new Error('stale_subscription_remains');
+            }
+            const fresh = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: appKey
+            });
+            if (!fresh || (staleEndpoint && fresh.endpoint === staleEndpoint)) {
+                if (fresh) await fresh.unsubscribe().catch(() => {});
+                throw new Error('push_service_reused_stale_endpoint');
+            }
+            return fresh;
+        }
+
         // The ONLY place permission is ever requested — inside the tap.
         async function enablePush() {
             const btn = $('pushEnableBtn');
+            let failed = false;
             btn.disabled = true;
             try {
                 const perm = await Notification.requestPermission();
@@ -680,26 +707,33 @@
                         mustRefresh = fp !== info.endpointFingerprint;
                     }
                     if (mustRefresh) {
-                        await sub.unsubscribe().catch(() => {});
-                        sub = null;
+                        sub = await subscribeFresh(reg, appKey, sub);
                     }
                 }
                 if (!sub) {
-                    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+                    sub = await subscribeFresh(reg, appKey, null);
                 }
                 let status = await postSubscription(sub);
                 if (status === 409) {
                     // Endpoint belongs to another account — NEVER reassigned.
-                    // Unsubscribe and subscribe fresh (new endpoint), then retry.
-                    await sub.unsubscribe().catch(() => {});
-                    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+                    sub = await subscribeFresh(reg, appKey, sub);
                     status = await postSubscription(sub);
                 }
+                if (status < 200 || status >= 300) {
+                    throw new Error('subscription_registration_failed');
+                }
             } catch (e) {
-                console.warn('Push enable failed:', e);
+                failed = true;
+                console.warn('Push enable failed:', (e && e.message) || 'unknown');
             } finally {
                 btn.disabled = false;
-                updatePushCard();
+                if (failed) {
+                    const msg = $('pushStateMsg');
+                    msg.textContent = 'Notifications could not be enabled. Telegram reminders still cover you — try again later.';
+                    msg.className = 'push-note warn';
+                } else {
+                    updatePushCard();
+                }
             }
         }
         $('pushEnableBtn').addEventListener('click', enablePush);

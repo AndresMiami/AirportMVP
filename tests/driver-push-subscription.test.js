@@ -17,7 +17,9 @@ const crypto = require('crypto');
 process.env.SUPABASE_URL = 'https://example.supabase.co';
 process.env.SUPABASE_SERVICE_KEY = 'service-key';
 process.env.SUPABASE_ANON_KEY = 'anon-key';
-process.env.VAPID_PUBLIC_KEY = 'test-vapid-public';
+process.env.VAPID_PUBLIC_KEY = Buffer.alloc(65, 1).toString('base64url');
+process.env.VAPID_PRIVATE_KEY = Buffer.alloc(32, 2).toString('base64url');
+process.env.VAPID_SUBJECT = 'mailto:test@example.test';
 
 // ---------- fixtures ----------
 const TOKENS = {
@@ -35,8 +37,9 @@ const GOOD_KEYS = { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) };
 let SUBS = [];
 let capturedUpsert = null;
 let capturedDeletes = [];
-let upsertError = null;   // inject
-let upsertEmpty = false;  // inject
+let upsertError = null;   // inject returned error
+let upsertEmpty = false;  // inject empty success
+let upsertThrow = null;   // inject thrown client/network error
 
 function resetState() {
   SUBS = [];
@@ -44,6 +47,7 @@ function resetState() {
   capturedDeletes = [];
   upsertError = null;
   upsertEmpty = false;
+  upsertThrow = null;
 }
 
 const supabaseMock = {
@@ -98,6 +102,7 @@ const supabaseMock = {
           },
           upsert: (rows) => ({
             select: async () => {
+              if (upsertThrow) throw upsertThrow;
               if (upsertError) return { data: null, error: upsertError };
               capturedUpsert = rows[0];
               if (upsertEmpty) return { data: [], error: null };
@@ -123,7 +128,6 @@ const call = (method, { token, query, body } = {}) => fn.handler({
   queryStringParameters: query || null,
   body: body ? JSON.stringify(body) : null
 });
-
 let passed = 0;
 function check(name, f) { f(); passed++; console.log('✓ ' + name); }
 
@@ -140,12 +144,22 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
   r = await call('GET', { token: 'tok-andres', query: { deviceId: 'not-a-uuid' } });
   check('GET invalid deviceId -> 400', () => assert.strictEqual(r.statusCode, 400));
   r = await call('GET', { token: 'tok-andres', query: { deviceId: DEV_A } });
-  check('GET no row -> state none + vapid public key', () => {
+  check('GET no row -> state none + fully validated VAPID public key', () => {
     const body = JSON.parse(r.body);
     assert.strictEqual(body.state, 'none');
-    assert.strictEqual(body.vapidPublicKey, 'test-vapid-public');
+    assert.strictEqual(body.pushConfigured, true);
+    assert.strictEqual(body.vapidPublicKey, process.env.VAPID_PUBLIC_KEY);
     assert.ok(!('endpointFingerprint' in body));
   });
+  const validPublicKey = process.env.VAPID_PUBLIC_KEY;
+  process.env.VAPID_PUBLIC_KEY = 'truncated-but-nonempty';
+  r = await call('GET', { token: 'tok-andres', query: { deviceId: DEV_A } });
+  check('GET with corrupt VAPID config does not advertise Push availability', () => {
+    const body = JSON.parse(r.body);
+    assert.strictEqual(body.pushConfigured, false);
+    assert.strictEqual(body.vapidPublicKey, null);
+  });
+  process.env.VAPID_PUBLIC_KEY = validPublicKey;
   SUBS.push({ driver_id: 'drv-a', device_id: DEV_A, endpoint: GOOD_ENDPOINT, disabled_at: null });
   r = await call('GET', { token: 'tok-andres', query: { deviceId: DEV_A } });
   check('GET active row -> enabled + sha256 fingerprint, NEVER the endpoint or keys', () => {
@@ -232,6 +246,23 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
   r = await postSub(DEV_A, { endpoint: GOOD_ENDPOINT, keys: GOOD_KEYS });
   check('upsert returning no row is a FAILED save -> 500', () => {
     assert.strictEqual(r.statusCode, 500);
+  });
+  resetState();
+  upsertThrow = new Error(`network wrapper leaked ${GOOD_ENDPOINT} p256dh=SECRET`);
+  const errorLogs = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => errorLogs.push(args.join(' '));
+  try {
+    r = await postSub(DEV_A, { endpoint: GOOD_ENDPOINT, keys: GOOD_KEYS });
+  } finally {
+    console.error = originalConsoleError;
+  }
+  check('thrown endpoint-handler error is sanitized: code/name only, no endpoint or keys', () => {
+    assert.strictEqual(r.statusCode, 500);
+    const joined = errorLogs.join('\n');
+    assert.ok(!joined.includes(GOOD_ENDPOINT));
+    assert.ok(!joined.includes('SECRET'));
+    assert.ok(joined.includes('Error'));
   });
 
   // ---------- POST happy path ----------

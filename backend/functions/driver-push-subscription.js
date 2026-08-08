@@ -24,6 +24,7 @@
 
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const notify = require('./lib/notify');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
@@ -145,9 +146,11 @@ exports.handler = async (event) => {
         console.error('❌ Subscription lookup failed:', error.code || 'db error');
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
       }
+      const configured = notify.pushConfigured();
       const body = {
         state: !row ? 'none' : (row.disabled_at ? 'expired' : 'enabled'),
-        vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null
+        pushConfigured: configured,
+        vapidPublicKey: configured ? process.env.VAPID_PUBLIC_KEY : null
       };
       if (row && !row.disabled_at) body.endpointFingerprint = fingerprint(row.endpoint);
       return { statusCode: 200, headers, body: JSON.stringify(body) };
@@ -243,7 +246,10 @@ exports.handler = async (event) => {
     console.log(`✅ Push subscription active for driver ${driver.id} (device ${deviceId.slice(0, 8)}…)`);
     return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
   } catch (error) {
-    console.error('❌ driver-push-subscription error:', error);
+    // Never log the full object: thrown client/network errors can contain
+    // request context, including a stored endpoint. Codes/names only.
+    const safeCode = (error && (error.code || error.name)) || 'unexpected';
+    console.error('❌ driver-push-subscription error:', safeCode);
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Internal error' }) };
   }
 };

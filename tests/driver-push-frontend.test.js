@@ -21,6 +21,7 @@ const read = (f) => fs.readFileSync(path.join(repoRoot, f), 'utf8');
 
 let passed = 0;
 function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
+async function checkAsync(name, fn) { await fn(); passed++; console.log('✓ ' + name); }
 
 // ---------- layer 1: driver-sw.js under vm ----------
 function makeSwHarness({ windows = [] } = {}) {
@@ -75,7 +76,6 @@ const pushEvent = (data) => ({
 const clickEvent = (rideId) => ({
   notification: { close() {}, data: { rideId } }
 });
-
 (async () => {
   let h = makeSwHarness();
   await h.fire('push', pushEvent({
@@ -126,8 +126,62 @@ const clickEvent = (rideId) => ({
     assert.strictEqual(h.messaged[0].rideId, RIDE);
   });
 
-  // ---------- layer 2: static shape ----------
+  // ---------- driver.html fresh-subscription helper under vm ----------
   const driver = read('driver.html');
+  const helperStart = driver.indexOf('async function subscribeFresh(');
+  const helperEnd = driver.indexOf('// The ONLY place permission is ever requested', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'subscribeFresh helper extractable');
+  const subscribeFresh = vm.runInNewContext(
+    driver.slice(helperStart, helperEnd) + '\nsubscribeFresh;',
+    { Error }
+  );
+
+  await checkAsync('fresh re-enable fails closed when the stale subscription remains', async () => {
+    let subscribeCalls = 0;
+    const stale = {
+      endpoint: 'https://web.push.apple.com/OLD',
+      unsubscribe: async () => { throw new Error('unsubscribe failed'); }
+    };
+    const reg = { pushManager: {
+      getSubscription: async () => stale,
+      subscribe: async () => { subscribeCalls++; return { endpoint: 'NEW' }; }
+    } };
+    await assert.rejects(() => subscribeFresh(reg, {}, stale), /stale_subscription_remains/);
+    assert.strictEqual(subscribeCalls, 0, 'must not subscribe or POST while stale endpoint remains');
+  });
+
+  await checkAsync('fresh re-enable removes old endpoint and accepts a different replacement', async () => {
+    const stale = {
+      endpoint: 'https://web.push.apple.com/OLD',
+      unsubscribe: async () => true
+    };
+    const fresh = { endpoint: 'https://web.push.apple.com/NEW', unsubscribe: async () => true };
+    const reg = { pushManager: {
+      getSubscription: async () => null,
+      subscribe: async () => fresh
+    } };
+    assert.strictEqual(await subscribeFresh(reg, {}, stale), fresh);
+  });
+
+  await checkAsync('push service reusing the known-dead endpoint is rejected and never registered', async () => {
+    let cleaned = false;
+    const stale = {
+      endpoint: 'https://web.push.apple.com/OLD',
+      unsubscribe: async () => true
+    };
+    const reused = {
+      endpoint: stale.endpoint,
+      unsubscribe: async () => { cleaned = true; return true; }
+    };
+    const reg = { pushManager: {
+      getSubscription: async () => null,
+      subscribe: async () => reused
+    } };
+    await assert.rejects(() => subscribeFresh(reg, {}, stale), /push_service_reused_stale_endpoint/);
+    assert.strictEqual(cleaned, true);
+  });
+
+  // ---------- layer 2: static shape ----------
   check('state precedence: install_required decided before unsupported, then denied', () => {
     const i1 = driver.indexOf("{ state: 'install_required' }");
     const i2 = driver.indexOf("{ state: 'unsupported' }");
@@ -135,19 +189,22 @@ const clickEvent = (rideId) => ({
     assert.ok(i1 >= 0 && i2 >= 0 && i3 >= 0);
     assert.ok(i1 < i2 && i2 < i3, 'iOS Safari must hear "install first", not "unsupported"');
   });
-  check('re-enable NEVER reuses a dead endpoint: expired/mismatched -> unsubscribe + fresh', () => {
+  check('re-enable routes expired/mismatched subscriptions through the verified-fresh helper', () => {
     const fnIdx = driver.indexOf('async function enablePush()');
     const postIdx = driver.indexOf('await postSubscription(sub)', fnIdx);
     const expiredIdx = driver.indexOf("info.state === 'expired'", fnIdx);
     const fpIdx = driver.indexOf('sha256Hex(sub.endpoint)', fnIdx);
-    const unsubIdx = driver.indexOf('sub.unsubscribe()', fnIdx);
+    const refreshIdx = driver.indexOf('subscribeFresh(reg, appKey, sub)', fnIdx);
     assert.ok(fnIdx >= 0 && postIdx > fnIdx);
-    assert.ok(expiredIdx > fnIdx && expiredIdx < postIdx,
-      'server-expired state must be checked before POSTing');
-    assert.ok(fpIdx > fnIdx && fpIdx < postIdx,
-      'fingerprint mismatch must be checked before POSTing');
-    assert.ok(unsubIdx > fnIdx && unsubIdx < postIdx,
-      'stale local subscription must be unsubscribed before a fresh subscribe');
+    assert.ok(expiredIdx > fnIdx && expiredIdx < postIdx);
+    assert.ok(fpIdx > fnIdx && fpIdx < postIdx);
+    assert.ok(refreshIdx > fnIdx && refreshIdx < postIdx);
+  });
+  check('UI never claims Push is enabled while server VAPID configuration is unavailable', () => {
+    const configGate = driver.indexOf("info.pushConfigured === false");
+    const enabledReturn = driver.indexOf("return { state: 'enabled'");
+    assert.ok(configGate >= 0 && configGate < enabledReturn);
+    assert.ok(driver.includes("state: 'unavailable'"));
   });
   check('permission is requested ONLY inside the explicit Enable tap', () => {
     const occurrences = driver.split('Notification.requestPermission').length - 1;

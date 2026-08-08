@@ -22,8 +22,8 @@ process.env.SUPABASE_ANON_KEY = 'anon-key';
 process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
 process.env.ADMIN_TELEGRAM_CHAT_ID = 'admin-chat';
 process.env.URL = 'https://example.test';
-process.env.VAPID_PUBLIC_KEY = 'test-vapid-public';
-process.env.VAPID_PRIVATE_KEY = 'test-vapid-private';
+process.env.VAPID_PUBLIC_KEY = Buffer.alloc(65, 1).toString('base64url');
+process.env.VAPID_PRIVATE_KEY = Buffer.alloc(32, 2).toString('base64url');
 process.env.VAPID_SUBJECT = 'mailto:test@example.test';
 delete process.env.WATCHDOG_DISABLED;
 delete process.env.WATCHDOG_BUDGET_MS;
@@ -173,8 +173,11 @@ global.fetch = async (url, opts) => {
 // ---------- web-push mock (planted like the supabase mock) ----------
 let pushCalls = [];
 let pushBehavior = async () => ({ statusCode: 201 }); // resolve = accepted
+let vapidSetupError = null;
 const webPushMock = {
-  setVapidDetails() {},
+  setVapidDetails() {
+    if (vapidSetupError) throw vapidSetupError;
+  },
   sendNotification: async (sub, payloadStr, opts) => {
     pushCalls.push({ endpoint: sub.endpoint, payload: JSON.parse(payloadStr), opts });
     return pushBehavior(sub, payloadStr, opts);
@@ -220,6 +223,7 @@ function freshState({ silenceHeartbeat = true } = {}) {
   fetchBehavior = async () => ({ ok: true, status: 200 });
   pushCalls = [];
   pushBehavior = async () => ({ statusCode: 201 });
+  vapidSetupError = null;
 }
 
 function mkSub(overrides) {
@@ -1208,6 +1212,63 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(fetchCalls.length, 1);
   });
   process.env.VAPID_SUBJECT = savedSubject;
+
+  // ---------- canonical VAPID validation: corrupt non-empty config
+  // never consumes the Push path or suppresses the Telegram safety net ----------
+  const validPublic = process.env.VAPID_PUBLIC_KEY;
+  const validPrivate = process.env.VAPID_PRIVATE_KEY;
+  const validSubject = process.env.VAPID_SUBJECT;
+
+  process.env.VAPID_PUBLIC_KEY = 'truncated-but-nonempty';
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  r = await wd.handler({});
+  check('truncated VAPID public key: Telegram fallback, zero push calls', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(deliveries()[0].channel, 'telegram');
+  });
+
+  process.env.VAPID_PUBLIC_KEY = validPublic;
+  process.env.VAPID_PRIVATE_KEY = 'also-truncated';
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  r = await wd.handler({});
+  check('truncated VAPID private key: Telegram fallback, zero push calls', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+  });
+
+  process.env.VAPID_PRIVATE_KEY = validPrivate;
+  process.env.VAPID_SUBJECT = 'https://';
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  r = await wd.handler({});
+  check('prefix-valid but invalid VAPID subject: Telegram fallback', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+  });
+
+  process.env.VAPID_SUBJECT = validSubject;
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  vapidSetupError = new Error('library rejected VAPID locally');
+  r = await wd.handler({});
+  check('local setVapidDetails rejection: definitive vapid_config + Telegram fallback', () => {
+    assert.strictEqual(pushCalls.length, 0, 'provider send was never attempted');
+    assert.strictEqual(fetchCalls.length, 1, 'Telegram safety net carries the event');
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    assert.strictEqual(push.failure_class, 'vapid_config');
+    assert.ok(deliveries().some((d) => d.channel === 'telegram' && d.state === 'submitted'));
+  });
+  vapidSetupError = null;
+  process.env.VAPID_PUBLIC_KEY = validPublic;
+  process.env.VAPID_PRIVATE_KEY = validPrivate;
+  process.env.VAPID_SUBJECT = validSubject;
 
   // ---------- DST: due times are instant arithmetic, immune to fall-back ----------
   check('DST instant math: Nov 1 2026 6 PM EST pickup -> T-150 at 3:30 PM EST', () => {

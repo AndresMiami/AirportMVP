@@ -187,19 +187,50 @@ const ASK_DEADLINE_MIN = {
   driver_ready_ask_1: 135, // expires when ask_2 is scheduled
   driver_ready_ask_2: 120  // expires when the urgent escalation fires
 };
-
 // Definitive webpush failure classes -> Telegram fallback begins (and,
 // per the routing precedence, the event never returns to Push).
 const DEFINITIVE_PUSH_CLASSES = ['expired_endpoint', 'vapid_config', 'payload', 'provider_rejected'];
 
+const VAPID_B64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+function validVapidSubject(subject) {
+  if (typeof subject !== 'string' || !subject) return false;
+  try {
+    const parsed = new URL(subject);
+    if (parsed.protocol === 'https:') {
+      return Boolean(parsed.hostname && parsed.hostname !== 'localhost');
+    }
+    if (parsed.protocol === 'mailto:') {
+      const address = decodeURIComponent(parsed.pathname || '');
+      return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address);
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+function validVapidKey(value, decodedBytes) {
+  if (typeof value !== 'string' || !value || !VAPID_B64URL_RE.test(value)) return false;
+  try {
+    return Buffer.from(value, 'base64url').length === decodedBytes;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Canonical configuration check shared by the watchdog and subscription
+// endpoint. A non-empty but truncated/corrupt key is NOT configured:
+// routing stays on Telegram and the UI never claims Push is available.
+function vapidConfigValid() {
+  return validVapidSubject(process.env.VAPID_SUBJECT) &&
+    validVapidKey(process.env.VAPID_PUBLIC_KEY, 65) &&
+    validVapidKey(process.env.VAPID_PRIVATE_KEY, 32);
+}
+
 function pushConfigured() {
   if (process.env.PUSH_DISABLED === '1' || process.env.PUSH_DISABLED === 'true') return false;
-  // ALL THREE variables are required — a missing or malformed
-  // VAPID_SUBJECT must activate the Telegram fallback exactly like a
-  // missing key (no fake substitute subject exists anywhere).
-  const subject = process.env.VAPID_SUBJECT || '';
-  const subjectValid = subject.startsWith('mailto:') || subject.startsWith('https://');
-  return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && subjectValid);
+  return vapidConfigValid();
 }
 
 // One per-booking readiness topic (32-char base64url limit respected):
@@ -231,12 +262,19 @@ async function sendWebPush(sub, payload, { ttl, topic }) {
   if (!pushConfigured()) {
     return { outcome: 'definitive', failureClass: 'vapid_config', error: 'push vapid_missing' };
   }
+  // Defense in depth: even after our canonical validation, the library
+  // may reject configuration locally. That is a definitive OUR-config
+  // failure, safe for Telegram fallback — never an ambiguous send.
   try {
     webpush.setVapidDetails(
-      process.env.VAPID_SUBJECT, // guaranteed present+valid by pushConfigured()
+      process.env.VAPID_SUBJECT,
       process.env.VAPID_PUBLIC_KEY,
       process.env.VAPID_PRIVATE_KEY
     );
+  } catch (e) {
+    return { outcome: 'definitive', failureClass: 'vapid_config', error: 'push vapid_invalid' };
+  }
+  try {
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
       JSON.stringify(payload),
@@ -426,6 +464,7 @@ module.exports = {
   finalizeDelivery,
   setEventState,
   suppressEvents,
+  vapidConfigValid,
   pushConfigured,
   readinessTopic,
   pushPayloadFor,
