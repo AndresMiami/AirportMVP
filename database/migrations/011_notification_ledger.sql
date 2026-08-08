@@ -64,6 +64,10 @@ ALTER TABLE bookings
   ADD COLUMN IF NOT EXISTS started_at          TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS driver_ready_by     UUID REFERENCES drivers(id),
   ADD COLUMN IF NOT EXISTS driver_ready_at     TIMESTAMPTZ,
+  -- 'implicit' is reserved but currently unwritten: On my way no longer
+  -- stamps readiness fields (race-safety — an explicit 'web' confirmation
+  -- must never be overwritten); the on_the_way status itself is the
+  -- implicit readiness proof.
   ADD COLUMN IF NOT EXISTS driver_ready_source TEXT
       CHECK (driver_ready_source IN ('web', 'implicit', 'recent_accept')),
   ADD COLUMN IF NOT EXISTS at_risk_at          TIMESTAMPTZ;

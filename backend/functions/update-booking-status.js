@@ -25,13 +25,17 @@
 //
 // Readiness (PR 1): `ready` records the driver's explicit T-150
 // confirmation (driver_ready_by/at/source='web') — internal operational
-// state only, never a passenger status, never a location capture. Recent
-// acceptance (accept at/after T-180) satisfies readiness at accept time
-// ('recent_accept'); On my way satisfies it implicitly ('implicit') if
-// skipped. Confirm-ready and On my way both clear at_risk_at. Every
-// transition also stamps its durable timestamp (accepted_at,
-// on_the_way_at, arrived_at, started_at) atomically with the status —
-// the scheduling anchors for the notification watchdog.
+// state only, never a passenger status, never a location capture, and
+// the T-180 window is enforced server-side (the UI gate is not
+// security). Recent acceptance (accept at/after T-180) satisfies
+// readiness at accept time ('recent_accept'). On my way stamps
+// on_the_way_at and clears at_risk_at but NEVER writes driver_ready_* —
+// the on_the_way status itself is the implicit readiness proof, and a
+// read-then-write here could race an explicit confirmation and
+// overwrite 'web' with 'implicit'. Every transition also stamps its
+// durable timestamp (accepted_at, on_the_way_at, arrived_at,
+// started_at) atomically with the status — the scheduling anchors for
+// the notification watchdog.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -140,6 +144,25 @@ exports.handler = async (event) => {
       // capture. Records WHO confirmed — readiness is valid only while
       // driver_ready_by still matches assigned_driver — and clears any
       // at-risk mark in the same atomic update.
+      //
+      // The T-180 window is enforced HERE, server-side — the UI gate is
+      // convenience, not security. A read failure is a real 500, never a
+      // silent pass-through; an unparseable/missing pickup falls through
+      // to the guarded update, which still enforces status + ownership.
+      const { data: pre, error: preError } = await supabase
+        .from('bookings').select('pickup_datetime').eq('id', bookingId).maybeSingle();
+      if (preError) {
+        console.error('❌ ready: pickup window read failed:', preError.message || preError);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Readiness check failed' }) };
+      }
+      const readyPickupMs = pre ? Date.parse(pre.pickup_datetime) : NaN;
+      if (Number.isFinite(readyPickupMs) && readyPickupMs - Date.now() > RECENT_ACCEPT_MS) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'Too early — readiness confirmation opens 3 hours before pickup' })
+        };
+      }
       fromStatuses = ['confirmed'];
       updates = {
         driver_ready_by: driver.id,
@@ -162,8 +185,11 @@ exports.handler = async (event) => {
         updates.accepted_at = nowIso;
         // Recent acceptance IS readiness (accept at/after T-180). The
         // pre-read is safe: pickup_datetime never changes after booking.
+        // (Tolerant on read failure: accepting the ride is the critical
+        // path; a missed recent-accept stamp only means the readiness
+        // chain runs — annoying, never wrong.)
         const { data: pre } = await supabase
-          .from('bookings').select('pickup_datetime').eq('id', bookingId).single();
+          .from('bookings').select('pickup_datetime').eq('id', bookingId).maybeSingle();
         const pickupMs = pre ? Date.parse(pre.pickup_datetime) : NaN;
         if (Number.isFinite(pickupMs) && pickupMs - Date.now() <= RECENT_ACCEPT_MS) {
           updates.driver_ready_by = driver.id;
@@ -172,20 +198,15 @@ exports.handler = async (event) => {
         }
       }
       if (action === 'on_my_way') {
-        // Durable anchor + at-risk clear: On my way is the strongest
-        // possible readiness signal. If the driver skipped the explicit
-        // confirm, readiness is satisfied implicitly — in this same
-        // atomic update (pre-read only decides WHICH fields to include;
-        // an already-recorded 'web' confirmation is never overwritten).
+        // Durable anchor + at-risk clear. driver_ready_* is deliberately
+        // NOT written here: the on_the_way status and on_the_way_at stamp
+        // ARE the implicit readiness proof (the watchdog suppresses the
+        // chain for active rides), and any read-then-write of readiness
+        // fields could race a concurrent explicit 'web' confirmation and
+        // overwrite it with 'implicit'. An existing explicit or
+        // recent-accept record is therefore always preserved.
         updates.on_the_way_at = nowIso;
         updates.at_risk_at = null;
-        const { data: pre } = await supabase
-          .from('bookings').select('driver_ready_at').eq('id', bookingId).single();
-        if (!pre || !pre.driver_ready_at) {
-          updates.driver_ready_by = driver.id;
-          updates.driver_ready_at = nowIso;
-          updates.driver_ready_source = 'implicit';
-        }
       }
       if (action === 'arrived') {
         updates.arrived_at = nowIso;
