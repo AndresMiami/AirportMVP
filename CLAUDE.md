@@ -197,8 +197,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
 ## Known gaps / next up
 
 - ROADMAP (Aug 2026, Codex-approved order — no SMS anywhere):
-  1. PR #54 (open, draft) — readiness ledger + watchdog. Run migration
-     011 in the SQL Editor BEFORE merging.
+  1. PR #54 — SHIPPED (merged; migration 011 run and production-verified;
+     watchdog live on the 5-minute schedule with ride-day heartbeat).
   2. Account-required booking gate — SHIPPED as the account-gate PR
      (front-door /login.html entry, pre-init session guard on indexMVP,
      server-enforced 401/403/500 in create-booking, customer_id stamped

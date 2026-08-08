@@ -2159,13 +2159,15 @@
             }
             
             showPaymentError(message) {
-                // Create error modal
+                // Booking/auth failure modal (payment is disabled — this
+                // fires for authentication and submission failures, so the
+                // headline must say what actually happened: no ride exists).
                 const errorModal = document.createElement('div');
                 errorModal.className = 'payment-error-modal';
                 errorModal.innerHTML = `
                     <div class="payment-error-content">
                         <div class="payment-error-icon">❌</div>
-                        <h3>Payment Failed</h3>
+                        <h3>Booking not submitted</h3>
                         <p>${message}</p>
                         <button onclick="this.closest('.payment-error-modal').remove()" class="payment-error-btn">OK</button>
                     </div>
