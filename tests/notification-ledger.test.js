@@ -8,8 +8,10 @@
 // tests/driver-identity.test.js) but with a small IN-MEMORY table engine
 // that enforces the ledger's unique constraints — the idempotent-insert
 // and insert-as-claim guarantees are exercised for real, not stubbed.
-// global.fetch is replaced to capture/steer Telegram calls. The REAL
-// watchdog handler and notify library run unmodified.
+// The engine also supports FAILURE INJECTION ({op, table, times, skip})
+// so database errors can be proven to surface instead of being
+// swallowed. global.fetch is replaced to capture/steer Telegram calls.
+// The REAL watchdog handler and notify library run unmodified.
 
 const path = require('path');
 const assert = require('assert');
@@ -21,6 +23,7 @@ process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
 process.env.ADMIN_TELEGRAM_CHAT_ID = 'admin-chat';
 process.env.URL = 'https://example.test';
 delete process.env.WATCHDOG_DISABLED;
+delete process.env.WATCHDOG_BUDGET_MS;
 
 const MIAMI_TZ = 'America/New_York';
 
@@ -37,6 +40,20 @@ const UNIQUE_VIOLATION = {
     r.attempt_no === row.attempt_no),
   system_state: (row, rows) => rows.some((r) => r.key === row.key)
 };
+
+// Failure injection: state.inject = [{ op, table, times, skip }]
+// skip: number of matching calls to let through before failing.
+function injectedFailure(op, table) {
+  for (const inj of state.inject || []) {
+    if (inj.op !== op || inj.table !== table) continue;
+    if (inj.skip > 0) { inj.skip--; continue; }
+    if (inj.times > 0) {
+      inj.times--;
+      return { message: `injected failure: ${op} ${table}` };
+    }
+  }
+  return null;
+}
 
 class Query {
   constructor(table) {
@@ -84,6 +101,8 @@ class Query {
   }
 
   _exec() {
+    const failure = injectedFailure(this.op, this.table);
+    if (failure) return { data: null, error: failure };
     const rows = state[this.table] || (state[this.table] = []);
     if (this.op === 'select') {
       let out = rows.filter((r) => this._match(r));
@@ -149,6 +168,7 @@ const notify = require(path.join(repoRoot, 'backend/functions/lib/notify.js'));
 // ---------- fixtures ----------
 const todayET = () => new Date().toLocaleDateString('en-CA', { timeZone: MIAMI_TZ });
 const iso = (minsFromNow) => new Date(Date.now() + minsFromNow * 60e3).toISOString();
+const errWithCode = (code) => { const e = new Error(code); e.code = code; return e; };
 
 function freshState({ silenceHeartbeat = true } = {}) {
   state = {
@@ -161,7 +181,8 @@ function freshState({ silenceHeartbeat = true } = {}) {
     notification_deliveries: [],
     system_state: silenceHeartbeat
       ? [{ key: 'last_heartbeat_date', value: todayET() }]
-      : []
+      : [],
+    inject: []
   };
   fetchCalls = [];
   fetchBehavior = async () => ({ ok: true, status: 200 });
@@ -189,6 +210,10 @@ function mkBooking(overrides) {
 function events() { return state.notification_events; }
 function deliveries() { return state.notification_deliveries; }
 function telegramChats() { return fetchCalls.map((c) => c.body && c.body.chat_id); }
+function heartbeatValue() {
+  const row = state.system_state.find((r) => r.key === 'last_heartbeat_date');
+  return row ? row.value : null;
+}
 
 let passed = 0;
 function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
@@ -207,12 +232,50 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   });
   delete process.env.WATCHDOG_DISABLED;
 
+  // ---------- Telegram outcome classification (duplicate-safety) ----------
+  freshState();
+  const classify = async (behavior) => {
+    fetchBehavior = behavior;
+    const res = await notify.sendTelegram('chat-x', 'hello');
+    return res.outcome;
+  };
+  let outcome;
+  outcome = await classify(async () => ({ ok: true, status: 200 }));
+  check('2xx -> submitted (terminal success; never claims the person saw it)', () =>
+    assert.strictEqual(outcome, 'submitted'));
+  outcome = await classify(async () => ({ ok: false, status: 429 }));
+  check('429 -> retryable (Telegram explicitly did not process the request)', () =>
+    assert.strictEqual(outcome, 'retryable'));
+  outcome = await classify(async () => ({ ok: false, status: 502 }));
+  check('5xx -> ambiguous (request reached Telegram; acceptance unprovable)', () =>
+    assert.strictEqual(outcome, 'ambiguous'));
+  outcome = await classify(async () => ({ ok: false, status: 400 }));
+  check('other 4xx -> definitive (rejected; retry cannot succeed)', () =>
+    assert.strictEqual(outcome, 'definitive'));
+  outcome = await classify(async () => {
+    const e = new Error('aborted'); e.name = 'AbortError'; throw e;
+  });
+  check('timeout/abort -> ambiguous', () => assert.strictEqual(outcome, 'ambiguous'));
+  outcome = await classify(async () => { throw errWithCode('ENOTFOUND'); });
+  check('DNS failure (ENOTFOUND) -> retryable (provably pre-transmission)', () =>
+    assert.strictEqual(outcome, 'retryable'));
+  outcome = await classify(async () => {
+    const e = new Error('fetch failed'); e.cause = { code: 'ECONNREFUSED' }; throw e;
+  });
+  check('connection refused via error.cause -> retryable', () =>
+    assert.strictEqual(outcome, 'retryable'));
+  outcome = await classify(async () => { throw errWithCode('ECONNRESET'); });
+  check('connection reset (ECONNRESET) -> ambiguous (may have transmitted)', () =>
+    assert.strictEqual(outcome, 'ambiguous'));
+  outcome = await classify(async () => { throw new Error('mystery'); });
+  check('unknown fetch rejection -> ambiguous, never retryable by default', () =>
+    assert.strictEqual(outcome, 'ambiguous'));
+
   // ---------- derive + dispatch + roll-up truth + idempotency ----------
   freshState();
-  const b1 = mkBooking({ pickup_datetime: iso(140) }); // only ask_1 due
-  state.bookings.push(b1);
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) })); // only ask_1 due
   r = await wd.handler({});
-  check('T-150 due: exactly one ask_1 event, one telegram delivery to the driver chat', () => {
+  check('T-150 due: one ask_1 event, one telegram delivery to the driver chat', () => {
     assert.strictEqual(r.statusCode, 200);
     assert.strictEqual(events().length, 1);
     assert.strictEqual(events()[0].event_type, 'driver_ready_ask_1');
@@ -221,11 +284,14 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(deliveries()[0].channel, 'telegram');
     assert.strictEqual(deliveries()[0].target, 'chat-a');
     assert.deepStrictEqual(telegramChats(), ['chat-a']);
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.attempts, 1);
+    assert.strictEqual(s.submitted, 1);
+    assert.strictEqual(s.dbErrors, 0);
   });
-  check('delivery truth: provider acceptance is submitted, NEVER delivered', () => {
+  check('delivery truth: provider acceptance is submitted — no delivered state exists', () => {
     assert.strictEqual(deliveries()[0].state, 'submitted');
     assert.strictEqual(events()[0].state, 'submitted');
-    assert.notStrictEqual(events()[0].state, 'delivered');
   });
   r = await wd.handler({});
   check('second sweep is idempotent: same one event, no second telegram', () => {
@@ -236,8 +302,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
   // ---------- chain collapse + at-risk stamp ----------
   freshState();
-  const b2 = mkBooking({ pickup_datetime: iso(100) }); // whole chain due
-  state.bookings.push(b2);
+  state.bookings.push(mkBooking({ pickup_datetime: iso(100) })); // whole chain due
   r = await wd.handler({});
   check('T-105 with whole chain due: at_risk_at stamped on the booking', () => {
     assert.ok(state.bookings[0].at_risk_at, 'at_risk_at not stamped');
@@ -257,16 +322,38 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   // ---------- at-risk stamped INDEPENDENTLY of Telegram ----------
   freshState();
   state.bookings.push(mkBooking({ pickup_datetime: iso(100) }));
-  fetchBehavior = async () => { throw new Error('connection refused'); };
+  fetchBehavior = async () => { throw errWithCode('ECONNREFUSED'); }; // provably pre-transmission
   r = await wd.handler({});
   check('Telegram down: at_risk_at STILL stamped (DB is the truth, Telegram the alert)', () => {
     assert.ok(state.bookings[0].at_risk_at);
   });
-  check('failed sends recorded as failed attempts; events stay in_delivery for retry', () => {
+  check('pre-transmission failures recorded as failed attempts; events stay in_delivery', () => {
     assert.ok(deliveries().length >= 1);
     deliveries().forEach((d) => assert.strictEqual(d.state, 'failed'));
     const urgent = events().find((e) => e.event_type === 'driver_ready_urgent');
     assert.strictEqual(urgent.state, 'in_delivery');
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.attempts, 3);
+    assert.strictEqual(s.submitted, 0);
+  });
+
+  // ---------- ambiguous send is terminal: never automatically resent ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  fetchBehavior = async () => ({ ok: false, status: 500 }); // ambiguous
+  r = await wd.handler({});
+  check('5xx send: delivery ambiguous, event exhausted', () => {
+    assert.strictEqual(deliveries().length, 1);
+    assert.strictEqual(deliveries()[0].state, 'ambiguous');
+    assert.strictEqual(events()[0].state, 'exhausted');
+    assert.strictEqual(fetchCalls.length, 1);
+  });
+  fetchBehavior = async () => ({ ok: true, status: 200 }); // Telegram healthy again
+  r = await wd.handler({});
+  check('ambiguous delivery is NEVER automatically resent, even once healthy', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(deliveries().length, 1);
+    assert.strictEqual(events()[0].state, 'exhausted');
   });
 
   // ---------- readiness suppression ----------
@@ -333,8 +420,9 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   const dup = await db.from('notification_deliveries')
     .insert({ event_id: 'ev-race', channel: 'telegram', attempt_no: 1, state: 'claimed' })
     .select();
-  check('racing duplicate insert loses on the unique constraint', () => {
+  check('racing duplicate insert loses on the unique constraint (23505)', () => {
     assert.ok(dup.error, 'duplicate insert must error');
+    assert.strictEqual(dup.error.code, '23505');
     assert.strictEqual((dup.data || []).length, 0);
   });
   const cd2 = await notify.createDelivery(db, { id: 'ev-race' }, 'telegram', 'chat-a');
@@ -382,28 +470,178 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(fetchCalls.length, 0);
   });
 
-  // ---------- ride-day heartbeat ----------
-  freshState({ silenceHeartbeat: false });
-  state.bookings.push(mkBooking({
-    pickup_datetime: iso(10 * 60), // 10h out: outside sweep, inside 24h heartbeat window
-    driver_ready_at: iso(-30), driver_ready_by: 'drv-a', driver_ready_source: 'web'
-  }));
+  // ---------- attempt limit: failures still consume the cap ----------
+  freshState();
+  for (let i = 0; i < 20; i++) {
+    state.bookings.push(mkBooking({ pickup_datetime: iso(140), assigned_driver: 'drv-a' }));
+  }
+  fetchBehavior = async () => ({ ok: false, status: 429 }); // every attempt fails retryable
   r = await wd.handler({});
-  check('ride day, first invocation: exactly one heartbeat to admin', () => {
+  check('rapid failures stop at the attempt limit (attempts counted, not successes)', () => {
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.attempts, 15, 'MAX_ATTEMPTS must gate provider calls');
+    assert.strictEqual(s.submitted, 0);
+    assert.strictEqual(fetchCalls.length, 15);
+    assert.strictEqual(r.statusCode, 200, 'provider failures are not DB failures');
+  });
+
+  // ---------- soft budget applies to the WHOLE run, not just dispatch ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(100) }));
+  process.env.WATCHDOG_BUDGET_MS = '0';
+  r = await wd.handler({});
+  check('exhausted budget halts all phases after the sweep', () => {
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.budgetStopped, true);
+    assert.strictEqual(s.swept, 1);
+    assert.strictEqual(events().length, 0, 'derivation must respect the budget');
+    assert.strictEqual(state.bookings[0].at_risk_at, null, 'at-risk loop must respect the budget');
+    assert.strictEqual(fetchCalls.length, 0);
+  });
+  delete process.env.WATCHDOG_BUDGET_MS;
+
+  // ---------- DB failures surface: never a clean run on broken writes ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(100) }));
+  state.inject.push({ op: 'update', table: 'bookings', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('at-risk stamp failure: logged, counted, run reported as FAILED (500)', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.ok(JSON.parse(r.body).dbErrors >= 1);
+    assert.strictEqual(state.bookings[0].at_risk_at, null);
+  });
+
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.inject.push({ op: 'select', table: 'notification_events', times: 99, skip: 0 });
+  r = await wd.handler({});
+  check('due-event load failure: 500, no dispatch guessing, nothing sent', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.ok(JSON.parse(r.body).dbErrors >= 1);
+    assert.strictEqual(fetchCalls.length, 0);
+  });
+
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(600) })); // nothing due
+  state.inject.push({ op: 'update', table: 'notification_deliveries', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('stale-claim recovery failure: surfaced as 500', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.ok(JSON.parse(r.body).dbErrors >= 1);
+  });
+
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.inject.push({ op: 'insert', table: 'notification_deliveries', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('createDelivery insert failure (non-23505): 500, event left intact, no send', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(deliveries().length, 0);
+    assert.strictEqual(events()[0].state, 'in_delivery', 'event must not be condemned');
+  });
+
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  // skip:0 would hit stale recovery; skip past it so the injection lands
+  // on finalizeDelivery after a successful send.
+  state.inject.push({ op: 'update', table: 'notification_deliveries', times: 1, skip: 1 });
+  r = await wd.handler({});
+  check('finalizeDelivery failure after send: surfaced as 500, claim left for recovery', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(fetchCalls.length, 1, 'the send itself happened');
+    assert.strictEqual(deliveries()[0].state, 'claimed',
+      'unfinalized claim ages into ambiguous via stale recovery — never a blind resend');
+  });
+
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.inject.push({ op: 'update', table: 'notification_events', times: 99, skip: 0 });
+  r = await wd.handler({});
+  check('event-state update failure: 500 and NO send (unrecordable state = no send)', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(events()[0].state, 'pending');
+  });
+
+  // ---------- heartbeat truthfulness ----------
+  const hbBooking = () => mkBooking({
+    pickup_datetime: iso(10 * 60), // outside sweep (+3h), inside 24h heartbeat window
+    driver_ready_at: iso(-30), driver_ready_by: 'drv-a', driver_ready_source: 'web'
+  });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  r = await wd.handler({});
+  check('heartbeat submitted: finalized to today, exactly one admin message', () => {
     assert.strictEqual(fetchCalls.length, 1);
     assert.strictEqual(fetchCalls[0].body.chat_id, 'admin-chat');
     assert.ok(/watchdog: alive/.test(fetchCalls[0].body.text));
-    assert.strictEqual(state.system_state[0].value, todayET());
+    assert.strictEqual(heartbeatValue(), todayET());
   });
   r = await wd.handler({});
   check('same day, second invocation: silent', () => {
     assert.strictEqual(fetchCalls.length, 1);
   });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  fetchBehavior = async () => ({ ok: false, status: 400 }); // definitive failure
+  r = await wd.handler({});
+  check('heartbeat definite failure: day NOT consumed — eligible to retry', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(heartbeatValue(), `failed:${todayET()}`);
+  });
+  fetchBehavior = async () => ({ ok: true, status: 200 });
+  r = await wd.handler({});
+  check('heartbeat retry after failure: sends and finalizes today', () => {
+    assert.strictEqual(fetchCalls.length, 2);
+    assert.strictEqual(heartbeatValue(), todayET());
+  });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  fetchBehavior = async () => { throw new Error('mystery'); }; // ambiguous
+  r = await wd.handler({});
+  check('heartbeat ambiguous: recorded as ambiguous, one attempt only', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(heartbeatValue(), `ambiguous:${todayET()}`);
+  });
+  fetchBehavior = async () => ({ ok: true, status: 200 });
+  r = await wd.handler({});
+  check('heartbeat ambiguous is never blindly resent', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(heartbeatValue(), `ambiguous:${todayET()}`);
+  });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  state.system_state.push({
+    key: 'last_heartbeat_date',
+    value: `claimed:${todayET()}:${new Date().toISOString()}`
+  });
+  r = await wd.handler({});
+  check('concurrent run: a fresh claim by another worker blocks a duplicate send', () => {
+    assert.strictEqual(fetchCalls.length, 0);
+  });
+
+  freshState({ silenceHeartbeat: false });
+  state.bookings.push(hbBooking());
+  state.system_state.push({
+    key: 'last_heartbeat_date',
+    value: `claimed:${todayET()}:${iso(-5)}`
+  });
+  r = await wd.handler({});
+  check('crashed heartbeat worker: stale claim turns ambiguous, no resend', () => {
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(heartbeatValue(), `ambiguous:${todayET()}`);
+  });
+
   freshState({ silenceHeartbeat: false }); // no bookings at all
   r = await wd.handler({});
   check('quiet day (no rides): no heartbeat — silence stays meaningful', () => {
     assert.strictEqual(fetchCalls.length, 0);
-    assert.strictEqual(state.system_state.length, 0);
+    assert.strictEqual(heartbeatValue(), null);
   });
 
   // ---------- DST: due times are instant arithmetic, immune to fall-back ----------
