@@ -208,8 +208,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(book.url, '/login.html');
   });
   const sw = read('service-worker.js');
-  check('service-worker cache bumped for the changed precached pages', () => {
-    assert.ok(/CACHE_NAME = 'linkmia-v1\.3\.12'/.test(sw));
+  check('service-worker cache at or beyond the account-gate bump (v1.3.12+)', () => {
+    const m = sw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
+    assert.ok(m, 'versioned cache name required');
+    assert.ok(parseInt(m[1], 10) >= 12,
+      'cache must never regress below the account-gate bump');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

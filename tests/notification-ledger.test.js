@@ -22,8 +22,12 @@ process.env.SUPABASE_ANON_KEY = 'anon-key';
 process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
 process.env.ADMIN_TELEGRAM_CHAT_ID = 'admin-chat';
 process.env.URL = 'https://example.test';
+process.env.VAPID_PUBLIC_KEY = 'test-vapid-public';
+process.env.VAPID_PRIVATE_KEY = 'test-vapid-private';
+process.env.VAPID_SUBJECT = 'mailto:test@example.test';
 delete process.env.WATCHDOG_DISABLED;
 delete process.env.WATCHDOG_BUDGET_MS;
+delete process.env.PUSH_DISABLED;
 
 const MIAMI_TZ = 'America/New_York';
 
@@ -81,7 +85,11 @@ class Query {
   lte(col, val) { this.filters.push({ t: 'lte', col, val }); return this; }
   gte(col, val) { this.filters.push({ t: 'gte', col, val }); return this; }
   or(expr) { this.orExpr = expr; return this; } // recorded, not evaluated
-  order(col) { this.orderCol = col; return this; }
+  order(col, opts) {
+    this.orderCol = col;
+    this.orderDesc = Boolean(opts && opts.ascending === false);
+    return this;
+  }
   limit(n) { this.limitN = n; return this; }
   single() { this.mode = 'single'; return this; }
   maybeSingle() { this.mode = 'maybeSingle'; return this; }
@@ -111,7 +119,8 @@ class Query {
       let out = rows.filter((r) => this._match(r));
       if (this.orderCol) {
         const c = this.orderCol;
-        out = out.slice().sort((a, b) => (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0));
+        const dir = this.orderDesc ? -1 : 1;
+        out = out.slice().sort((a, b) => (a[c] < b[c] ? -dir : a[c] > b[c] ? dir : 0));
       }
       if (this.limitN != null) out = out.slice(0, this.limitN);
       out = out.map((r) => ({ ...r }));
@@ -161,9 +170,27 @@ global.fetch = async (url, opts) => {
   return fetchBehavior(url, opts);
 };
 
+// ---------- web-push mock (planted like the supabase mock) ----------
+let pushCalls = [];
+let pushBehavior = async () => ({ statusCode: 201 }); // resolve = accepted
+const webPushMock = {
+  setVapidDetails() {},
+  sendNotification: async (sub, payloadStr, opts) => {
+    pushCalls.push({ endpoint: sub.endpoint, payload: JSON.parse(payloadStr), opts });
+    return pushBehavior(sub, payloadStr, opts);
+  }
+};
+const pushStatusError = (statusCode) => {
+  const e = new Error(`push status ${statusCode}`);
+  e.statusCode = statusCode;
+  return e;
+};
+
 const repoRoot = path.resolve(__dirname, '..');
 const mockPath = require.resolve('@supabase/supabase-js', { paths: [repoRoot] });
 require.cache[mockPath] = { id: mockPath, filename: mockPath, loaded: true, exports: supabaseMock };
+const webPushPath = require.resolve('web-push', { paths: [repoRoot] });
+require.cache[webPushPath] = { id: webPushPath, filename: webPushPath, loaded: true, exports: webPushMock };
 
 const wd = require(path.join(repoRoot, 'backend/functions/notification-watchdog.js'));
 const notify = require(path.join(repoRoot, 'backend/functions/lib/notify.js'));
@@ -185,12 +212,32 @@ function freshState({ silenceHeartbeat = true } = {}) {
     system_state: silenceHeartbeat
       ? [{ key: 'last_heartbeat_date', value: todayET() }]
       : [],
+    push_subscriptions: [],
     inject: [],
     beforeOp: null
   };
   fetchCalls = [];
   fetchBehavior = async () => ({ ok: true, status: 200 });
+  pushCalls = [];
+  pushBehavior = async () => ({ statusCode: 201 });
 }
+
+function mkSub(overrides) {
+  return {
+    id: `sub-${++idSeq}`,
+    driver_id: 'drv-a',
+    device_id: `dev-${idSeq}`,
+    endpoint: `https://push.example/ep-${idSeq}`,
+    p256dh: 'p256dh-key',
+    auth: 'auth-key',
+    activated_at: iso(-60),
+    last_success_at: null,
+    disabled_at: null,
+    disabled_reason: null,
+    ...overrides
+  };
+}
+function subs() { return state.push_subscriptions; }
 
 function mkBooking(overrides) {
   return {
@@ -814,6 +861,243 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(fetchCalls.length, 0);
     assert.strictEqual(heartbeatValue(), null);
   });
+
+  // ============================================================
+  // Driver PWA Push (this PR)
+  // ============================================================
+
+  // ---------- push-first happy path + TTL/Urgency/Topic/minimal payload ----------
+  freshState();
+  const bp1 = mkBooking({ pickup_datetime: iso(140) }); // only ask_1 due; deadline T-135 in ~5 min
+  state.bookings.push(bp1);
+  state.push_subscriptions.push(mkSub({ driver_id: 'drv-a' }));
+  r = await wd.handler({});
+  check('healthy subscription: ask_1 goes by PUSH — no Telegram, never both', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(pushCalls.length, 1);
+    assert.strictEqual(fetchCalls.length, 0, 'Telegram must not fire alongside push');
+    const d = deliveries()[0];
+    assert.strictEqual(d.channel, 'webpush');
+    assert.strictEqual(d.state, 'submitted');
+    assert.strictEqual(d.failure_class, undefined, 'success carries no failure class');
+    assert.strictEqual(d.target, subs()[0].id, 'target is the subscription ROW id, never the endpoint');
+    assert.strictEqual(events()[0].state, 'submitted');
+    assert.ok(subs()[0].last_success_at, 'health stamp recorded');
+  });
+  check('push carries absolute TTL, high urgency, per-booking topic, minimal payload', () => {
+    const call = pushCalls[0];
+    assert.strictEqual(call.opts.urgency, 'high');
+    assert.ok(call.opts.TTL > 280 && call.opts.TTL <= 301,
+      `ask_1 TTL must run to the T-135 deadline (~300s), got ${call.opts.TTL}`);
+    assert.strictEqual(call.opts.topic, notify.readinessTopic(bp1));
+    assert.strictEqual(call.payload.tag, call.opts.topic, 'notification tag matches the topic');
+    assert.strictEqual(call.payload.rideId, bp1.id);
+    assert.ok(!JSON.stringify(call.payload).includes('Pat'),
+      'payload must never contain passenger details');
+  });
+
+  // ---------- 410: expired endpoint -> disable + Telegram fallback (6c order) ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(410); };
+  r = await wd.handler({});
+  check('410: delivery failed·expired_endpoint, subscription DISABLED, Telegram fallback same cycle', () => {
+    assert.strictEqual(r.statusCode, 200);
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    const tg = deliveries().find((d) => d.channel === 'telegram');
+    assert.strictEqual(push.state, 'failed');
+    assert.strictEqual(push.failure_class, 'expired_endpoint');
+    assert.ok(subs()[0].disabled_at, '404/410 is the only disabling signal');
+    assert.strictEqual(subs()[0].disabled_reason, 'expired');
+    assert.ok(tg && tg.state === 'submitted', 'the reminder still arrives this cycle');
+    assert.strictEqual(events()[0].state, 'submitted');
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.attempts, 2, 'fallback consumes a second provider attempt');
+  });
+
+  // ---------- 403: OUR VAPID config — subscription KEPT + fallback ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(403); };
+  r = await wd.handler({});
+  check('403: vapid_config — subscription NOT disabled, Telegram fallback arrives', () => {
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    assert.strictEqual(push.failure_class, 'vapid_config');
+    assert.strictEqual(subs()[0].disabled_at, null, '401/403 must never disable a subscription');
+    const tg = deliveries().find((d) => d.channel === 'telegram');
+    assert.ok(tg && tg.state === 'submitted');
+  });
+
+  // ---------- other 4xx: provider_rejected -> fallback ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(418); };
+  r = await wd.handler({});
+  check('other 4xx: provider_rejected — definitive, subscription kept, fallback sent', () => {
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    assert.strictEqual(push.failure_class, 'provider_rejected');
+    assert.strictEqual(subs()[0].disabled_at, null);
+    assert.ok(deliveries().some((d) => d.channel === 'telegram' && d.state === 'submitted'));
+  });
+
+  // ---------- 5xx: ambiguous — terminal, NO fallback ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(503); };
+  r = await wd.handler({});
+  check('5xx push: ambiguous — event exhausted, NO Telegram (duplicate risk), sub kept', () => {
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    assert.strictEqual(push.state, 'ambiguous');
+    assert.strictEqual(push.failure_class, 'ambiguous');
+    assert.strictEqual(fetchCalls.length, 0, 'no fallback after a maybe-delivered push');
+    assert.strictEqual(events()[0].state, 'exhausted');
+    assert.strictEqual(subs()[0].disabled_at, null);
+  });
+
+  // ---------- 429: throttled — same-channel retry next cycle ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(429); };
+  r = await wd.handler({});
+  check('429: throttled — retryable on the SAME channel, no fallback', () => {
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    assert.strictEqual(push.state, 'failed');
+    assert.strictEqual(push.failure_class, 'throttled');
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+  pushBehavior = async () => ({ statusCode: 201 });
+  r = await wd.handler({});
+  check('next cycle retries Push (attempt 2) and succeeds — never switched channels', () => {
+    assert.strictEqual(pushCalls.length, 2);
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(events()[0].state, 'submitted');
+    assert.strictEqual(deliveries().filter((d) => d.channel === 'webpush').length, 2);
+  });
+
+  // ---------- restart-safe fallback continuation (precedence rule 4) ----------
+  freshState();
+  const bCont = mkBooking({ pickup_datetime: iso(140) });
+  state.bookings.push(bCont);
+  state.push_subscriptions.push(mkSub()); // healthy sub present — rule 4 must still win
+  state.notification_events.push({
+    id: 'ev-cont', booking_id: bCont.id, event_type: 'driver_ready_ask_1',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'in_delivery',
+    due_at: iso(-10), not_after: bCont.pickup_datetime
+  });
+  state.notification_deliveries.push({
+    id: 'del-cont', event_id: 'ev-cont', channel: 'webpush', attempt_no: 1,
+    state: 'failed', failure_class: 'expired_endpoint', claimed_at: iso(-6),
+    finalized_at: iso(-6), target: 'sub-old'
+  });
+  r = await wd.handler({});
+  check('crash healed from stored truth: definitive push history -> Telegram fallback, no new push', () => {
+    assert.strictEqual(pushCalls.length, 0, 'rule 4 outranks the healthy subscription');
+    assert.strictEqual(fetchCalls.length, 1);
+    const tg = deliveries().find((d) => d.channel === 'telegram');
+    assert.ok(tg && tg.state === 'submitted');
+    assert.strictEqual(events().find((e) => e.id === 'ev-cont').state, 'submitted');
+  });
+
+  // ---------- telegram history precedence (rule 3): never back to Push ----------
+  freshState();
+  const bTg = mkBooking({ pickup_datetime: iso(140) });
+  state.bookings.push(bTg);
+  state.push_subscriptions.push(mkSub()); // healthy sub must NOT recapture the event
+  state.notification_events.push({
+    id: 'ev-tg', booking_id: bTg.id, event_type: 'driver_ready_ask_1',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'in_delivery',
+    due_at: iso(-10), not_after: bTg.pickup_datetime
+  });
+  state.notification_deliveries.push({
+    id: 'del-tg', event_id: 'ev-tg', channel: 'telegram', attempt_no: 1,
+    state: 'failed', claimed_at: iso(-6), finalized_at: iso(-6), target: 'chat-a'
+  });
+  r = await wd.handler({});
+  check('once fallback began, the event NEVER returns to Push (telegram retry only)', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(deliveries().filter((d) => d.channel === 'telegram').length, 2);
+    assert.strictEqual(events().find((e) => e.id === 'ev-tg').state, 'submitted');
+  });
+
+  // ---------- activated_at device selection ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(
+    mkSub({ endpoint: 'https://push.example/OLD', activated_at: iso(-600), last_success_at: iso(-5) }),
+    mkSub({ endpoint: 'https://push.example/NEW', activated_at: iso(-1), last_success_at: null })
+  );
+  r = await wd.handler({});
+  check('device selection: newest activated_at wins — an old phone with successes cannot pin', () => {
+    assert.strictEqual(pushCalls.length, 1);
+    assert.strictEqual(pushCalls[0].endpoint, 'https://push.example/NEW');
+  });
+
+  // ---------- absolute deadline passed: suppressed, zero provider calls ----------
+  freshState();
+  const bLate = mkBooking({ pickup_datetime: iso(130) }); // ask_1 deadline (T-135) already passed
+  state.bookings.push(bLate);
+  state.push_subscriptions.push(mkSub());
+  state.notification_events.push({
+    id: 'ev-late-ask2', booking_id: bLate.id, event_type: 'driver_ready_ask_2',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'submitted',
+    due_at: iso(-5), not_after: bLate.pickup_datetime
+  }); // ask_2 already ran -> collapse can't supersede ask_1; the deadline guard must
+  r = await wd.handler({});
+  check('passed escalation deadline: stale ask suppressed with ZERO provider calls', () => {
+    const ask1 = events().find((e) => e.event_type === 'driver_ready_ask_1');
+    assert.strictEqual(ask1.state, 'suppressed');
+    assert.strictEqual(ask1.suppress_reason, 'stale_deadline');
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 0);
+  });
+
+  // ---------- PUSH_DISABLED kill switch ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  process.env.PUSH_DISABLED = '1';
+  r = await wd.handler({});
+  check('PUSH_DISABLED: healthy subscription ignored, Telegram carries the reminder', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(deliveries()[0].channel, 'telegram');
+  });
+  delete process.env.PUSH_DISABLED;
+
+  // ---------- 6c database-safe ordering: DB failure stops before fallback ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(410); };
+  state.inject.push({ op: 'update', table: 'push_subscriptions', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('6c: disable-step DB failure -> 500, NO fallback provider call after it', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(fetchCalls.length, 0, 'no Telegram after a broken sequence');
+    const push = deliveries().find((d) => d.channel === 'webpush');
+    assert.strictEqual(push.failure_class, 'expired_endpoint', 'step 1 persisted before the stop');
+    assert.strictEqual(subs()[0].disabled_at, null, 'disable failed — recovered next cycle');
+  });
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  pushBehavior = async () => { throw pushStatusError(410); };
+  // skip:0 would hit stale recovery; land the failure on the finalize step
+  state.inject.push({ op: 'update', table: 'notification_deliveries', times: 1, skip: 1 });
+  r = await wd.handler({});
+  check('6c: finalize-step DB failure -> 500, no disable, no fallback', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(subs()[0].disabled_at, null);
+    assert.strictEqual(fetchCalls.length, 0);
+  });
+  pushBehavior = async () => ({ statusCode: 201 });
 
   // ---------- DST: due times are instant arithmetic, immune to fall-back ----------
   check('DST instant math: Nov 1 2026 6 PM EST pickup -> T-150 at 3:30 PM EST', () => {
