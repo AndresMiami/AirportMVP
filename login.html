@@ -101,7 +101,12 @@
             margin-top: 18px; text-align: center;
             font-size: 14px; color: var(--text-secondary);
         }
-        .guest-link a { color: #FF9933; font-weight: 600; text-decoration: none; }
+        /* Guest checkout is deliberately VISIBLE but inert: a plain span —
+           no href, no click handler, not focusable, no keyboard activation.
+           The real enforcement is server-side in create-booking. */
+        .guest-link .guest-disabled {
+            color: var(--text-light); font-weight: 600; cursor: default;
+        }
         .welcome-back {
             text-align: center; font-size: 14px; color: var(--text-secondary);
             margin-bottom: 14px;
@@ -166,7 +171,7 @@
         </form>
 
         <div class="guest-link">
-            In a hurry? <a href="/indexMVP.html?book=1">Continue as guest</a>
+            <span class="guest-disabled" aria-disabled="true">Guest checkout — coming later</span>
         </div>
     </div>
 

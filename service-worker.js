@@ -3,7 +3,10 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-const CACHE_NAME = 'linkmia-v1.3.11';
+// v1.3.12: account-gate PR — index.html CTA and indexMVP boot guard changed
+// (both are precached, so the cache name MUST bump or installed PWAs would
+// keep serving the ungated pages).
+const CACHE_NAME = 'linkmia-v1.3.12';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

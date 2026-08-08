@@ -322,14 +322,68 @@
     <script>
         // Use the supabaseClient already initialized in supabase.js
         // (Avoids duplicate declaration error with the Supabase SDK global)
-        
-        // Optional identity: booking works as guest either way. When a
-        // session exists we prefill "Who's traveling" from the saved profile
-        // and link the booking to the customer record.
+
+        // Bookings are ACCOUNT-ONLY (account-gate PR): the session is
+        // verified behind a neutral loading screen before the booking app
+        // boots. A signed-in session prefills "Who's traveling" from the
+        // saved profile and links the booking to the customer record.
         let currentUser = null;
         let currentSession = null;
         let currentProfile = null;
         let currentAmbassador = null;
+
+        // ===== ACCOUNT GATE =====
+        // The booking app must not initialize for signed-out visitors —
+        // including direct URL entry that bypasses the homepage. While the
+        // session is checked, a neutral loading screen covers the page (the
+        // address form never flashes). Outcomes:
+        //   session        -> overlay removed, app boots
+        //   no session     -> location.replace('/login.html') (the front
+        //                     door; it forwards back here after sign-in)
+        //   check failed   -> honest retry screen — NEVER guest fallback
+        // Legacy guest bookings and /trip links are untouched: /trip is a
+        // separate page with its own UUID-capability access.
+        let bootAuthReady = null; // promise<boolean>: true only with a session
+
+        (function authGate() {
+            const overlay = document.createElement('div');
+            overlay.id = 'authGate';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:20000;background:#1C1C1E;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#8E8E93;font-size:14px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:20px;';
+            overlay.innerHTML = '<div style="font-size:26px;font-weight:700;background:linear-gradient(135deg,#FF9933,#FF5733);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">LinkMia</div><div id="authGateMsg">Checking your session…</div>';
+            const mount = () => document.body.appendChild(overlay);
+            if (document.body) { mount(); } else { document.addEventListener('DOMContentLoaded', mount); }
+
+            const showRetry = () => {
+                const msg = document.getElementById('authGateMsg');
+                if (!msg) return;
+                msg.textContent = "We can't verify your sign-in right now.";
+                const btn = document.createElement('button');
+                btn.textContent = 'Try again';
+                btn.style.cssText = 'display:block;margin:16px auto 0;padding:12px 28px;border:none;border-radius:12px;background:linear-gradient(135deg,#FF9933,#FF5733);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;';
+                btn.addEventListener('click', () => window.location.reload());
+                msg.appendChild(btn);
+            };
+
+            bootAuthReady = (async () => {
+                try {
+                    if (!window.supabaseClient) throw new Error('auth client unavailable');
+                    const { data: { session } } = await window.supabaseClient.auth.getSession();
+                    if (!session) {
+                        // replace() so Back doesn't bounce into the gate again
+                        window.location.replace('/login.html');
+                        return false; // overlay stays up until navigation lands
+                    }
+                    currentSession = session;
+                    currentUser = session.user;
+                    overlay.remove();
+                    return true;
+                } catch (e) {
+                    console.error('❌ Auth gate failed:', e);
+                    showRetry();
+                    return false;
+                }
+            })();
+        })();
 
         // Post-cancellation notice: after a confirmed cancellation the page
         // reloads to a clean Where screen; this one-time banner explains why.
@@ -413,7 +467,9 @@
                     }
                 }
             } catch (e) {
-                console.warn('Auth check failed (continuing as guest):', e);
+                // Profile prefill is a nicety — the account gate (above) and
+                // the server-side 401 in create-booking are the enforcement.
+                console.warn('Profile prefill skipped:', e);
             }
         })();
 
@@ -1989,12 +2045,25 @@
                         this.activeSheetBookingId = null;
                     }
 
-                    // ===== PERSIST TO SUPABASE VIA API =====
-                    let supabaseBookingId = null;
-                    try {
-                        // customerName/phone = the traveling passenger (who the driver meets);
-                        // bookerName/bookerPhone = who made the booking, when different
-                        const apiPayload = {
+                    // ===== PERSIST TO SUPABASE VIA API (REQUIRED) =====
+                    // Bookings are authenticated-only and server-persisted:
+                    // there is NO local fallback success. Only a real
+                    // database booking ID may open the trip sheet — a failed
+                    // server booking keeps the form intact and throws into
+                    // the error handler below.
+
+                    // Fresh session at submit time (never the page-load
+                    // snapshot — tokens can expire during a long session).
+                    const { data: { session: submitSession } } =
+                        await window.supabaseClient.auth.getSession();
+                    if (!submitSession) {
+                        throw new Error('Your session expired — please sign in again to book.');
+                    }
+                    currentSession = submitSession;
+
+                    // customerName/phone = the traveling passenger (who the driver meets);
+                    // bookerName/bookerPhone = who made the booking, when different
+                    const apiPayload = {
                             customerName: bookingData.passenger?.name || bookingData.booker?.name || 'Guest',
                             phone: bookingData.passenger?.phone || bookingData.booker?.phone || '',
                             bookerName: bookingData.booker?.name || null,
@@ -2018,47 +2087,41 @@
                             refCode: getStoredRefCode()
                         };
 
-                        // Attach the session token when signed in so the
-                        // booking gets linked to the customer's identity
-                        // (currentSession is a page-level global set by checkAuth)
-                        const bookingHeaders = { 'Content-Type': 'application/json' };
-                        if (typeof currentSession !== 'undefined' && currentSession?.access_token) {
-                            bookingHeaders['Authorization'] = `Bearer ${currentSession.access_token}`;
-                        }
+                    const response = await fetch('/api/create-booking', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${submitSession.access_token}`
+                        },
+                        body: JSON.stringify(apiPayload)
+                    });
 
-                        const response = await fetch('/api/create-booking', {
-                            method: 'POST',
-                            headers: bookingHeaders,
-                            body: JSON.stringify(apiPayload)
-                        });
+                    const result = await response.json().catch(() => null);
 
-                        const result = await response.json();
-
-                        if (response.ok && result.bookingId) {
-                            // Store Supabase ID in localStorage for reference
-                            supabaseBookingId = result.bookingId;
-                            const storedBooking = JSON.parse(localStorage.getItem(`trip_${tripId}`));
-                            storedBooking.supabaseId = result.bookingId;
-                            storedBooking.supabaseSaved = true;
-                            localStorage.setItem(`trip_${tripId}`, JSON.stringify(storedBooking));
-                            localStorage.setItem('lm_last_trip_id', result.bookingId);
-                            console.log('✅ Booking saved to Supabase:', result.bookingId);
-                        } else {
-                            console.error('⚠️ Supabase save failed (localStorage backup active):', result);
-                        }
-                    } catch (apiError) {
-                        console.error('⚠️ API call failed (localStorage backup active):', apiError);
-                        // Non-blocking - localStorage serves as backup
+                    if (response.status === 401) {
+                        throw new Error('Your session expired — please sign in again to book.');
                     }
+                    if (response.status === 403) {
+                        throw new Error('Your account profile is incomplete — please sign out, sign back in, and try again.');
+                    }
+                    if (!response.ok || !result?.bookingId) {
+                        console.error('❌ Booking API failed:', response.status, result);
+                        throw new Error('Booking could not be submitted — nothing was booked. Please try again.');
+                    }
+
+                    // Real database booking — the ONLY path to a success screen.
+                    const supabaseBookingId = result.bookingId;
+                    const storedBooking = JSON.parse(localStorage.getItem(`trip_${tripId}`));
+                    storedBooking.supabaseId = result.bookingId;
+                    storedBooking.supabaseSaved = true;
+                    localStorage.setItem(`trip_${tripId}`, JSON.stringify(storedBooking));
+                    localStorage.setItem('lm_last_trip_id', result.bookingId);
+                    console.log('✅ Booking saved to Supabase:', result.bookingId);
                     // ===== END SUPABASE PERSISTENCE =====
 
-                    // Success: slide up the live trip status sheet (same page, form
-                    // state preserved underneath for Modify). Failure: fallback modal.
-                    if (supabaseBookingId) {
-                        this.showTripSheet(supabaseBookingId);
-                    } else {
-                        this.showBookingConfirmation(tripId, bookingData, null);
-                    }
+                    // Success: slide up the live trip status sheet (same page,
+                    // form state preserved underneath for Modify).
+                    this.showTripSheet(supabaseBookingId);
 
                 } catch (error) {
                     console.error('Booking failed:', error);
@@ -2762,19 +2825,26 @@
         }
         
         function initializeApp() {
-            console.log('🚀 Initializing Airport Booking App...');
-            
-            // Initialize main app
-            if (!window.airportApp) {
-                window.airportApp = new AirportBookingApp();
-            }
-            
-            // Load standalone vehicle carousel
-            if (window.airportApp && !document.querySelector('.vehicle-carousel-component')) {
-                loadVehicleCarousel();
-            }
-            
-            console.log('🎉 Application initialization complete');
+            // Account gate: the booking app boots ONLY behind a verified
+            // session. false means we're redirecting to /login.html or
+            // showing the retry screen — either way, nothing initializes.
+            Promise.resolve(bootAuthReady).then((authed) => {
+                if (!authed) return;
+
+                console.log('🚀 Initializing Airport Booking App...');
+
+                // Initialize main app
+                if (!window.airportApp) {
+                    window.airportApp = new AirportBookingApp();
+                }
+
+                // Load standalone vehicle carousel
+                if (window.airportApp && !document.querySelector('.vehicle-carousel-component')) {
+                    loadVehicleCarousel();
+                }
+
+                console.log('🎉 Application initialization complete');
+            });
         }
         
         // PWA Service Worker Registration
