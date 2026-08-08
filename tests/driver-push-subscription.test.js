@@ -29,17 +29,21 @@ const DRIVERS_BY_USER = {
 };
 const DEV_A = '11111111-2222-4333-8444-555555555555';
 const DEV_B = '99999999-8888-4777-8666-555555555555';
-const GOOD_ENDPOINT = 'https://push.example.net/send/abc123';
+const GOOD_ENDPOINT = 'https://fcm.googleapis.com/fcm/send/abc123';
 const GOOD_KEYS = { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) };
 
 let SUBS = [];
 let capturedUpsert = null;
 let capturedDeletes = [];
+let upsertError = null;   // inject
+let upsertEmpty = false;  // inject
 
 function resetState() {
   SUBS = [];
   capturedUpsert = null;
   capturedDeletes = [];
+  upsertError = null;
+  upsertEmpty = false;
 }
 
 const supabaseMock = {
@@ -94,7 +98,9 @@ const supabaseMock = {
           },
           upsert: (rows) => ({
             select: async () => {
+              if (upsertError) return { data: null, error: upsertError };
               capturedUpsert = rows[0];
+              if (upsertEmpty) return { data: [], error: null };
               return { data: [{ id: 'sub-new' }], error: null };
             }
           })
@@ -173,6 +179,59 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
   check('POST malformed keys -> 400, nothing stored', () => {
     assert.strictEqual(r.statusCode, 400);
     assert.strictEqual(capturedUpsert, null);
+  });
+
+  // ---------- endpoint host allowlist: server-side requests go ONLY to
+  // recognized push services ----------
+  const rejected = [
+    'https://attacker.example.com/collect',          // arbitrary https destination
+    'https://10.0.0.5/push',                         // IP literal / private
+    'https://127.0.0.1/push',                        // loopback
+    'https://localhost/push',                        // localhost
+    'https://mything.local/push',                    // mDNS name
+    'https://user:pw@fcm.googleapis.com/fcm/send/x', // embedded credentials
+    'https://fcm.googleapis.com:8443/fcm/send/x',    // nonstandard port
+    'https://evilfcm.googleapis.com.attacker.net/x', // suffix spoof
+    'https://push.apple.com/x'                       // bare suffix (no shard label)
+  ];
+  for (const ep of rejected) {
+    r = await postSub(DEV_A, { endpoint: ep, keys: GOOD_KEYS });
+    check(`POST rejects non-push-service endpoint: ${new URL(ep).host}${new URL(ep).port ? ' (port)' : ''}${ep.includes('@') ? ' (creds)' : ''}`, () => {
+      assert.strictEqual(r.statusCode, 400);
+      assert.strictEqual(capturedUpsert, null);
+    });
+  }
+  const accepted = [
+    'https://fcm.googleapis.com/fcm/send/tok',
+    'https://web.push.apple.com/QGxyz',
+    'https://abc123.push.apple.com/QGxyz',
+    'https://updates.push.services.mozilla.com/wpush/v2/tok',
+    'https://autopush7.push.services.mozilla.com/wpush/v2/tok',
+    'https://wns2-bl2p.notify.windows.com/w/?token=x'
+  ];
+  for (const ep of accepted) {
+    resetState();
+    r = await postSub(DEV_A, { endpoint: ep, keys: GOOD_KEYS });
+    check(`POST accepts recognized push service: ${new URL(ep).host}`, () => {
+      assert.strictEqual(r.statusCode, 200);
+      assert.strictEqual(capturedUpsert.endpoint, ep);
+    });
+  }
+
+  // ---------- concurrent ownership race: 23505 -> sanitized 409 ----------
+  resetState();
+  upsertError = { code: '23505', message: 'duplicate key value violates unique constraint "push_subscriptions_endpoint" DETAIL: (endpoint)=(SECRET)' };
+  r = await postSub(DEV_A, { endpoint: GOOD_ENDPOINT, keys: GOOD_KEYS });
+  check('concurrent cross-driver upsert (23505) -> 409, never a 500, endpoint never echoed', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.ok(!r.body.includes(GOOD_ENDPOINT));
+    assert.ok(!r.body.includes('SECRET'));
+  });
+  resetState();
+  upsertEmpty = true;
+  r = await postSub(DEV_A, { endpoint: GOOD_ENDPOINT, keys: GOOD_KEYS });
+  check('upsert returning no row is a FAILED save -> 500', () => {
+    assert.strictEqual(r.statusCode, 500);
   });
 
   // ---------- POST happy path ----------

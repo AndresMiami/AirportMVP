@@ -667,6 +667,23 @@
                 }
                 const appKey = urlBase64ToUint8Array(info.vapidPublicKey);
                 let sub = await reg.pushManager.getSubscription();
+                if (sub) {
+                    // A dead endpoint must NEVER be re-registered: if the
+                    // server disabled this device's subscription (expired)
+                    // or holds a DIFFERENT one (fingerprint mismatch),
+                    // re-POSTing the browser's existing subscription would
+                    // loop enable→410 forever. Unsubscribe and mint a
+                    // fresh endpoint instead.
+                    let mustRefresh = info.state === 'expired';
+                    if (!mustRefresh && info.endpointFingerprint) {
+                        const fp = await sha256Hex(sub.endpoint);
+                        mustRefresh = fp !== info.endpointFingerprint;
+                    }
+                    if (mustRefresh) {
+                        await sub.unsubscribe().catch(() => {});
+                        sub = null;
+                    }
+                }
                 if (!sub) {
                     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
                 }

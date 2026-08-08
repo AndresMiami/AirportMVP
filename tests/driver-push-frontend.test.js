@@ -135,6 +135,20 @@ const clickEvent = (rideId) => ({
     assert.ok(i1 >= 0 && i2 >= 0 && i3 >= 0);
     assert.ok(i1 < i2 && i2 < i3, 'iOS Safari must hear "install first", not "unsupported"');
   });
+  check('re-enable NEVER reuses a dead endpoint: expired/mismatched -> unsubscribe + fresh', () => {
+    const fnIdx = driver.indexOf('async function enablePush()');
+    const postIdx = driver.indexOf('await postSubscription(sub)', fnIdx);
+    const expiredIdx = driver.indexOf("info.state === 'expired'", fnIdx);
+    const fpIdx = driver.indexOf('sha256Hex(sub.endpoint)', fnIdx);
+    const unsubIdx = driver.indexOf('sub.unsubscribe()', fnIdx);
+    assert.ok(fnIdx >= 0 && postIdx > fnIdx);
+    assert.ok(expiredIdx > fnIdx && expiredIdx < postIdx,
+      'server-expired state must be checked before POSTing');
+    assert.ok(fpIdx > fnIdx && fpIdx < postIdx,
+      'fingerprint mismatch must be checked before POSTing');
+    assert.ok(unsubIdx > fnIdx && unsubIdx < postIdx,
+      'stale local subscription must be unsubscribed before a fresh subscribe');
+  });
   check('permission is requested ONLY inside the explicit Enable tap', () => {
     const occurrences = driver.split('Notification.requestPermission').length - 1;
     assert.strictEqual(occurrences, 1, 'exactly one requestPermission call site');

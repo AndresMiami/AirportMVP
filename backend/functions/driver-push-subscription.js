@@ -29,6 +29,26 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const MAX_ENDPOINT_LEN = 2048;
 
+// Endpoints are contacted SERVER-SIDE later, so an arbitrary https URL
+// from a compromised driver account would become a server-side request
+// to an attacker-chosen destination. Only recognized browser push
+// services are accepted (exact host or a dot-boundary suffix).
+const PUSH_HOST_SUFFIXES = [
+  '.push.apple.com',              // Safari/iOS (e.g. web.push.apple.com)
+  '.push.services.mozilla.com',   // Firefox autopush shards
+  '.notify.windows.com'           // Edge (WNS)
+];
+const PUSH_HOSTS_EXACT = [
+  'web.push.apple.com',
+  'fcm.googleapis.com',           // Chrome/Chromium (FCM)
+  'updates.push.services.mozilla.com'
+];
+function allowedPushHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  if (PUSH_HOSTS_EXACT.includes(host)) return true;
+  return PUSH_HOST_SUFFIXES.some((sfx) => host.endsWith(sfx) && host.length > sfx.length);
+}
+
 async function requireDriver(event, supabaseUrl, anonKey, db) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -54,11 +74,19 @@ function validSubscription(sub) {
   if (!sub || typeof sub !== 'object') return false;
   const { endpoint, keys } = sub;
   if (typeof endpoint !== 'string' || endpoint.length > MAX_ENDPOINT_LEN) return false;
+  let url;
   try {
-    if (new URL(endpoint).protocol !== 'https:') return false;
+    url = new URL(endpoint);
   } catch (e) {
     return false;
   }
+  if (url.protocol !== 'https:') return false;
+  if (url.username || url.password) return false;      // no embedded credentials
+  if (url.port) return false;                          // standard port only
+  const host = url.hostname.toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.local')) return false;
+  if (/^[0-9.]+$/.test(host) || host.includes(':') || host.startsWith('[')) return false; // no IP literals
+  if (!allowedPushHost(host)) return false;            // recognized push services only
   if (!keys || typeof keys !== 'object') return false;
   const { p256dh, auth } = keys;
   if (typeof p256dh !== 'string' || p256dh.length < 40 || p256dh.length > 200 ||
@@ -113,7 +141,8 @@ exports.handler = async (event) => {
         .eq('device_id', deviceId)
         .maybeSingle();
       if (error) {
-        console.error('❌ Subscription lookup failed:', error.message);
+        // Sanitized: database messages can echo stored values (endpoints).
+        console.error('❌ Subscription lookup failed:', error.code || 'db error');
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
       }
       const body = {
@@ -136,7 +165,7 @@ exports.handler = async (event) => {
         .eq('driver_id', driver.id)
         .eq('device_id', deviceId);
       if (error) {
-        console.error('❌ Subscription delete failed:', error.message);
+        console.error('❌ Subscription delete failed:', error.code || 'db error');
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Delete failed' }) };
       }
       return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
@@ -154,7 +183,7 @@ exports.handler = async (event) => {
       .eq('endpoint', sub.endpoint)
       .maybeSingle();
     if (ownerError) {
-      console.error('❌ Endpoint ownership check failed:', ownerError.message);
+      console.error('❌ Endpoint ownership check failed:', ownerError.code || 'db error');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
     }
     if (owner && owner.driver_id !== driver.id) {
@@ -173,7 +202,7 @@ exports.handler = async (event) => {
       .eq('endpoint', sub.endpoint)
       .neq('device_id', deviceId);
     if (cleanupError) {
-      console.error('❌ Stale-row cleanup failed:', cleanupError.message);
+      console.error('❌ Stale-row cleanup failed:', cleanupError.code || 'db error');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Save failed' }) };
     }
 
@@ -192,8 +221,23 @@ exports.handler = async (event) => {
         last_error: null
       }], { onConflict: 'driver_id,device_id' })
       .select('id');
-    if (saveError || !saved) {
-      console.error('❌ Subscription save failed:', saveError?.message);
+    if (saveError) {
+      // Two drivers can pass the ownership lookup CONCURRENTLY; the
+      // endpoint UNIQUE constraint then rejects the loser. That race is
+      // the same promise as the pre-check: sanitized 409, never a 500.
+      if (saveError.code === '23505') {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'Subscription in use by another account — resubscribe freshly' })
+        };
+      }
+      console.error('❌ Subscription save failed:', saveError.code || 'db error');
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Save failed' }) };
+    }
+    if (!saved || !saved.length) {
+      // An empty result is a failed save, not a success.
+      console.error('❌ Subscription save returned no row');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Save failed' }) };
     }
     console.log(`✅ Push subscription active for driver ${driver.id} (device ${deviceId.slice(0, 8)}…)`);

@@ -727,11 +727,13 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   // on finalizeDelivery after a successful send.
   state.inject.push({ op: 'update', table: 'notification_deliveries', times: 1, skip: 1 });
   r = await wd.handler({});
-  check('finalizeDelivery failure after send: surfaced as 500, claim left for recovery', () => {
+  check('finalizeDelivery failure after send: 500, claim left for recovery, NO rollup', () => {
     assert.strictEqual(r.statusCode, 500);
     assert.strictEqual(fetchCalls.length, 1, 'the send itself happened');
     assert.strictEqual(deliveries()[0].state, 'claimed',
       'unfinalized claim ages into ambiguous via stale recovery — never a blind resend');
+    assert.strictEqual(events()[0].state, 'in_delivery',
+      'unknown recorded truth: processing must stop before any rollup');
   });
 
   freshState();
@@ -1098,6 +1100,114 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(fetchCalls.length, 0);
   });
   pushBehavior = async () => ({ statusCode: 201 });
+
+  // ---------- provider cap can never strand a claimed fallback ----------
+  freshState();
+  for (let i = 0; i < 14; i++) {
+    state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  }
+  const bCap = mkBooking({ pickup_datetime: iso(141) }); // due LAST -> dispatched 15th
+  state.bookings.push(bCap);
+  state.push_subscriptions.push(mkSub());
+  let pushCount = 0;
+  pushBehavior = async () => {
+    pushCount++;
+    if (pushCount === 15) throw pushStatusError(410); // the 15th call fails definitively
+    return { statusCode: 201 };
+  };
+  r = await wd.handler({});
+  check('cap boundary: push fails as call 15 -> NO telegram claim is created', () => {
+    const s = JSON.parse(r.body);
+    assert.strictEqual(s.attempts, 15);
+    assert.strictEqual(fetchCalls.length, 0, 'no telegram call past the cap');
+    const capEv = events().find((e) => e.booking_id === bCap.id);
+    const rows = deliveries().filter((d) => d.event_id === capEv.id);
+    assert.strictEqual(rows.length, 1, 'a claimed-but-never-sent fallback row must not exist');
+    assert.strictEqual(rows[0].channel, 'webpush');
+    assert.strictEqual(rows[0].failure_class, 'expired_endpoint');
+    assert.strictEqual(capEv.state, 'in_delivery');
+  });
+  pushBehavior = async () => ({ statusCode: 201 });
+  r = await wd.handler({});
+  check('next cycle: routing rule 4 sends the Telegram fallback cleanly', () => {
+    const capEv = events().find((e) => e.booking_id === bCap.id);
+    assert.strictEqual(capEv.state, 'submitted');
+    const tg = deliveries().find((d) => d.event_id === capEv.id && d.channel === 'telegram');
+    assert.ok(tg && tg.state === 'submitted');
+    assert.strictEqual(fetchCalls.length, 1);
+  });
+
+  // ---------- finalization failures stop EVERY outcome branch ----------
+  // (inject: skip stale-recovery's deliveries-update, fail the finalize)
+  const finalizeStopScenario = async ({ push, behavior }) => {
+    freshState();
+    state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+    if (push) state.push_subscriptions.push(mkSub());
+    if (push) pushBehavior = behavior; else fetchBehavior = behavior;
+    state.inject.push({ op: 'update', table: 'notification_deliveries', times: 1, skip: 1 });
+    const res = await wd.handler({});
+    pushBehavior = async () => ({ statusCode: 201 });
+    fetchBehavior = async () => ({ ok: true, status: 200 });
+    return res;
+  };
+  r = await finalizeStopScenario({ push: true, behavior: async () => ({ statusCode: 201 }) });
+  check('push SUBMITTED finalize failure: 500, no health stamp, no rollup', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(deliveries()[0].state, 'claimed');
+    assert.strictEqual(subs()[0].last_success_at, null, 'health stamp must not run');
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+  r = await finalizeStopScenario({ push: true, behavior: async () => { throw pushStatusError(503); } });
+  check('push AMBIGUOUS finalize failure: 500, event NOT exhausted yet', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(deliveries()[0].state, 'claimed');
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+  r = await finalizeStopScenario({ push: true, behavior: async () => { throw pushStatusError(429); } });
+  check('push RETRYABLE finalize failure: 500, stop before any further write', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(deliveries()[0].state, 'claimed');
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+  r = await finalizeStopScenario({ push: false, behavior: async () => ({ ok: false, status: 502 }) });
+  check('telegram AMBIGUOUS finalize failure: 500, event NOT exhausted yet', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(deliveries()[0].state, 'claimed');
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+  r = await finalizeStopScenario({ push: false, behavior: async () => ({ ok: false, status: 400 }) });
+  check('telegram DEFINITIVE finalize failure: 500, event NOT exhausted yet', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+  r = await finalizeStopScenario({ push: false, behavior: async () => ({ ok: false, status: 429 }) });
+  check('telegram RETRYABLE finalize failure: 500, stop before any further write', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(events()[0].state, 'in_delivery');
+  });
+
+  // ---------- VAPID_SUBJECT is REQUIRED — no fake fallback subject ----------
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  const savedSubject = process.env.VAPID_SUBJECT;
+  delete process.env.VAPID_SUBJECT;
+  r = await wd.handler({});
+  check('missing VAPID_SUBJECT: push not configured -> Telegram fallback, zero push calls', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(deliveries()[0].channel, 'telegram');
+  });
+  process.env.VAPID_SUBJECT = 'not-a-mailto';
+  freshState();
+  state.bookings.push(mkBooking({ pickup_datetime: iso(140) }));
+  state.push_subscriptions.push(mkSub());
+  r = await wd.handler({});
+  check('malformed VAPID_SUBJECT: also Telegram fallback', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 1);
+  });
+  process.env.VAPID_SUBJECT = savedSubject;
 
   // ---------- DST: due times are instant arithmetic, immune to fall-back ----------
   check('DST instant math: Nov 1 2026 6 PM EST pickup -> T-150 at 3:30 PM EST', () => {

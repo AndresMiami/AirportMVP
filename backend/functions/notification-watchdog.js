@@ -610,6 +610,11 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress) {
     return;
   }
 
+  // GLOBAL CAP FIRST — before any delivery row exists. A claim created
+  // and then never sent would age into ambiguous next cycle and wrongly
+  // terminate the event; with no row, the next cycle simply sends.
+  if (summary.attempts >= MAX_ATTEMPTS) return;
+
   const claim = await notify.createDelivery(db, ev, 'telegram', chatId);
   if (claim.dbError) {
     dbFail('createDelivery telegram', claim.dbError);
@@ -629,14 +634,20 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress) {
     return;
   }
 
-  if (summary.attempts >= MAX_ATTEMPTS) return; // global cap — next cycle continues
   summary.attempts++; // every provider call counts, success or not
   const result = await notify.sendTelegram(chatId, text);
+  // Finalization failures STOP immediately in every branch: once the
+  // delivery's recorded truth is unknown, no health stamp, rollup, or
+  // any further write may run. The claimed row ages into ambiguous via
+  // stale recovery (never a blind resend) and the run reports 500.
   let fin;
   if (result.outcome === 'submitted') {
     fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'submitted', submitted_at: nowIso });
-    if (fin.error) dbFail('finalize submitted', fin.error);
+    if (fin.error) {
+      dbFail('finalize submitted', fin.error);
+      return;
+    }
     const { error } = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
       { state: 'submitted' });
     if (error) dbFail('rollup submitted', error);
@@ -644,14 +655,20 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress) {
   } else if (result.outcome === 'ambiguous') {
     fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'ambiguous', finalized_at: nowIso, last_error: result.error });
-    if (fin.error) dbFail('finalize ambiguous', fin.error);
+    if (fin.error) {
+      dbFail('finalize ambiguous', fin.error);
+      return;
+    }
     const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
       { state: 'exhausted' });
     if (error) dbFail('rollup ambiguous', error);
   } else if (result.outcome === 'definitive') {
     fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'failed', finalized_at: nowIso, last_error: result.error });
-    if (fin.error) dbFail('finalize definitive', fin.error);
+    if (fin.error) {
+      dbFail('finalize definitive', fin.error);
+      return;
+    }
     const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
       { state: 'exhausted' });
     if (error) dbFail('rollup definitive', error);
@@ -660,7 +677,10 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress) {
     // next cycle creates attempt N+1 (cap enforced in createDelivery).
     fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'failed', finalized_at: nowIso, last_error: result.error });
-    if (fin.error) dbFail('finalize retryable', fin.error);
+    if (fin.error) {
+      dbFail('finalize retryable', fin.error);
+      return;
+    }
     if (claim.delivery.attempt_no >= notify.MAX_ATTEMPTS_PER_CHANNEL) {
       const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
         { state: 'exhausted' });
@@ -678,6 +698,9 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress) {
 // recovers from stored truth via the routing precedence.
 async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress) {
   const nowIso = new Date(nowMs).toISOString();
+
+  // GLOBAL CAP FIRST — before any delivery row exists (see executeTelegram).
+  if (summary.attempts >= MAX_ATTEMPTS) return;
 
   // target = subscription row UUID — NEVER the endpoint (secret).
   const claim = await notify.createDelivery(db, ev, 'webpush', sub.id);
@@ -710,20 +733,29 @@ async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress) 
   const topic = notify.readinessTopic(b);
   const payload = notify.pushPayloadFor(ev.event_type, b);
 
-  if (summary.attempts >= MAX_ATTEMPTS) return; // global cap
   summary.attempts++;
   const result = await notify.sendWebPush(sub, payload, { ttl, topic });
+  // Finalization failures STOP immediately in every branch (same rule as
+  // executeTelegram): unknown recorded truth means no health stamp, no
+  // rollup, no fallback — the run reports 500 and the next cycle
+  // recovers from stored truth.
 
   if (result.outcome === 'submitted') {
     const fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'submitted', submitted_at: nowIso });
-    if (fin.error) dbFail('finalize push submitted', fin.error);
+    if (fin.error) {
+      dbFail('finalize push submitted', fin.error);
+      return;
+    }
     // Health info only (never used for device selection).
     const { error: healthError } = await db.from('push_subscriptions')
       .update({ last_success_at: nowIso })
       .eq('id', sub.id)
       .select();
-    if (healthError) dbFail('push health stamp', healthError);
+    if (healthError) {
+      dbFail('push health stamp', healthError);
+      return; // rule 1 of the routing precedence rolls the event up next cycle
+    }
     const { error } = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
       { state: 'submitted' });
     if (error) dbFail('rollup push submitted', error);
@@ -737,7 +769,10 @@ async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress) 
     const fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'ambiguous', finalized_at: nowIso,
         failure_class: 'ambiguous', last_error: result.error });
-    if (fin.error) dbFail('finalize push ambiguous', fin.error);
+    if (fin.error) {
+      dbFail('finalize push ambiguous', fin.error);
+      return;
+    }
     const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
       { state: 'exhausted' });
     if (error) dbFail('rollup push ambiguous', error);
@@ -748,7 +783,10 @@ async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress) 
     const fin = await notify.finalizeDelivery(db, claim.delivery.id,
       { state: 'failed', finalized_at: nowIso,
         failure_class: result.failureClass, last_error: result.error });
-    if (fin.error) dbFail('finalize push retryable', fin.error);
+    if (fin.error) {
+      dbFail('finalize push retryable', fin.error);
+      return;
+    }
     if (claim.delivery.attempt_no >= notify.MAX_ATTEMPTS_PER_CHANNEL) {
       const { error } = await notify.setEventState(db, ev.id, ['in_delivery'],
         { state: 'exhausted' });

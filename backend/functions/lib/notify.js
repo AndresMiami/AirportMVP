@@ -194,7 +194,12 @@ const DEFINITIVE_PUSH_CLASSES = ['expired_endpoint', 'vapid_config', 'payload', 
 
 function pushConfigured() {
   if (process.env.PUSH_DISABLED === '1' || process.env.PUSH_DISABLED === 'true') return false;
-  return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+  // ALL THREE variables are required — a missing or malformed
+  // VAPID_SUBJECT must activate the Telegram fallback exactly like a
+  // missing key (no fake substitute subject exists anywhere).
+  const subject = process.env.VAPID_SUBJECT || '';
+  const subjectValid = subject.startsWith('mailto:') || subject.startsWith('https://');
+  return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && subjectValid);
 }
 
 // One per-booking readiness topic (32-char base64url limit respected):
@@ -228,7 +233,7 @@ async function sendWebPush(sub, payload, { ttl, topic }) {
   }
   try {
     webpush.setVapidDetails(
-      process.env.VAPID_SUBJECT || 'mailto:support@linkmia.example',
+      process.env.VAPID_SUBJECT, // guaranteed present+valid by pushConfigured()
       process.env.VAPID_PUBLIC_KEY,
       process.env.VAPID_PRIVATE_KEY
     );
