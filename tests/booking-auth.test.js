@@ -56,6 +56,8 @@ let capturedBookingInsert = null;
 let customerLookupError = null;  // inject
 let customerInsertError = null;  // inject
 let hostLookupError = null;      // inject
+let activeBooking = null;        // inject
+let activeBookingLookupError = null; // inject
 let getUserErrorResult = null;   // inject: RETURNED auth error object
 let getUserThrows = false;       // inject: THROWN auth failure
 
@@ -65,6 +67,8 @@ function resetCaptures() {
   customerLookupError = null;
   customerInsertError = null;
   hostLookupError = null;
+  activeBooking = null;
+  activeBookingLookupError = null;
   getUserErrorResult = null;
   getUserThrows = false;
 }
@@ -123,6 +127,19 @@ const supabaseMock = {
       }
       if (table === 'bookings') {
         return {
+          select: () => ({
+            eq: () => ({
+              in: () => ({
+                order: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => activeBookingLookupError
+                      ? { data: null, error: activeBookingLookupError }
+                      : { data: activeBooking, error: null }
+                  })
+                })
+              })
+            })
+          }),
           insert: (rows) => {
             capturedBookingInsert = rows[0];
             return {
@@ -236,6 +253,30 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(capturedBookingInsert.status, 'pending');
     assert.strictEqual(capturedBookingInsert.source, 'website');
   });
+
+  resetCaptures();
+  activeBooking = {
+    id: 'bk-existing', trip_id: 'LM-LIVE',
+    status: 'confirmed', pickup_datetime: new Date(Date.now() + 3600e3).toISOString()
+  };
+  r = await post(mkPayload(), 'tok-pat');
+  check('existing nonterminal booking -> 409 with trusted id, no duplicate insert', () => {
+    const body = JSON.parse(r.body);
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(body.existingBookingId, 'bk-existing');
+    assert.strictEqual(body.tripId, 'LM-LIVE');
+    assert.strictEqual(body.status, 'confirmed');
+    assert.strictEqual(capturedBookingInsert, null);
+  });
+
+  resetCaptures();
+  activeBookingLookupError = { code: 'DB_ACTIVE', message: 'lookup failed' };
+  r = await post(mkPayload(), 'tok-pat');
+  check('active-booking lookup failure -> 500 fail closed, no insert', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(capturedBookingInsert, null);
+  });
+
   resetCaptures();
   r = await post(mkPayload({ bookerName: 'Booker Bob', bookerPhone: '+1 786 555 0200' }), 'tok-pat');
   check('"book for someone else" unchanged: booker columns written', () => {
@@ -254,8 +295,12 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(capturedBookingInsert, null);
   });
   resetCaptures();
+  activeBooking = {
+    id: 'bk-other-guest', trip_id: 'LM-HOST',
+    status: 'confirmed', pickup_datetime: new Date(Date.now() + 7200e3).toISOString()
+  };
   r = await post(mkAmbassadorPayload(), 'tok-amb');
-  check('ambassador recovery: account row created from the HOST record, never the traveler', () => {
+  check('ambassador recovery stays multi-ride: host bypasses passenger guard and uses host identity', () => {
     assert.strictEqual(r.statusCode, 200);
     assert.ok(capturedCustomerInsert, 'ambassador customers row ensured');
     assert.strictEqual(capturedCustomerInsert.user_id, 'auth-a');

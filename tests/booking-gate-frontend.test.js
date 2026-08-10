@@ -182,6 +182,27 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(!appBlock.includes('showBookingConfirmation(tripId, bookingData, null)'),
       'the false local-success fallback must stay removed');
   });
+  check('account booking recovery reopens the server-trusted trip exactly once', () => {
+    assert.ok(gateBlock.includes('currentActiveBooking = activeBooking'));
+    assert.ok(gateBlock.includes('resumeAccountBookingWhenReady()'));
+    assert.ok(gateBlock.includes("localStorage.setItem('lm_last_trip_id', bookingId)"));
+    assert.ok(gateBlock.includes('activeBookingResumed = true'));
+    const constructIdx = appBlock.indexOf('window.airportApp = new AirportBookingApp()');
+    const resumeIdx = appBlock.indexOf('resumeAccountBookingWhenReady()', constructIdx);
+    assert.ok(constructIdx >= 0 && resumeIdx > constructIdx,
+      'the startup race must be retried after the app instance exists');
+  });
+  check('server duplicate response reopens the existing sheet, never creates local success', () => {
+    const conflictIdx = appBlock.indexOf('response.status === 409 && result?.existingBookingId');
+    const removeIdx = appBlock.indexOf('localStorage.removeItem(\`trip_\${tripId}\`)', conflictIdx);
+    const sheetIdx = appBlock.indexOf('this.showTripSheet(result.existingBookingId)', conflictIdx);
+    assert.ok(conflictIdx >= 0 && removeIdx > conflictIdx && sheetIdx > removeIdx);
+  });
+  check('replacement cancellation is awaited before a new create request', () => {
+    const cancelIdx = appBlock.indexOf("const cancelResponse = await fetch('/api/booking-status'");
+    const createIdx = appBlock.indexOf("const response = await fetch('/api/create-booking'");
+    assert.ok(cancelIdx >= 0 && createIdx > cancelIdx);
+  });
   check('a failed attempt removes its provisional trip_ record', () => {
     assert.ok(appBlock.includes('localStorage.removeItem(`trip_${tripId}`)'));
   });
@@ -208,11 +229,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(book.url, '/login.html');
   });
   const sw = read('service-worker.js');
-  check('service-worker cache at or beyond the account-gate bump (v1.3.12+)', () => {
+  check('service-worker cache includes the account-continuity bump (v1.3.14+)', () => {
     const m = sw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
     assert.ok(m, 'versioned cache name required');
-    assert.ok(parseInt(m[1], 10) >= 12,
-      'cache must never regress below the account-gate bump');
+    assert.ok(parseInt(m[1], 10) >= 14,
+      'cache must never regress below the account-continuity bump');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

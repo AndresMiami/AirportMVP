@@ -15,6 +15,8 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress'];
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -217,6 +219,43 @@ exports.handler = async (event, context) => {
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not create account profile' }) };
       }
       customerId = created.id;
+    }
+
+    // MVP account contract: one nonterminal booking at a time. This is the
+    // server-side seal behind the login recovery UI — a stale tab or a
+    // second device cannot create another ride while the account already
+    // owns one. Return the existing id so the client can reopen its sheet.
+    // Ambassadors manage independent rides for multiple guests and are not
+    // subject to the one-passenger-booking MVP rule.
+    if (!ambassadorHost) {
+      const { data: existingActive, error: activeError } = await supabase
+        .from('bookings')
+        .select('id, trip_id, status, pickup_datetime')
+        .eq('customer_id', customerId)
+        .in('status', ACTIVE_BOOKING_STATUSES)
+        .order('pickup_datetime', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (activeError) {
+        console.error('❌ Active booking lookup failed:', activeError.code || 'db error');
+        return {
+          statusCode: 500,
+          headers,
+          body: JSON.stringify({ error: 'Could not verify existing bookings' })
+        };
+      }
+      if (existingActive) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({
+            error: 'Active booking already exists',
+            existingBookingId: existingActive.id,
+            tripId: existingActive.trip_id,
+            status: existingActive.status
+          })
+        };
+      }
     }
 
     // Referral attribution: a signed-in ambassador wins; otherwise a stored

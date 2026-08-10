@@ -7,6 +7,8 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress'];
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -73,7 +75,33 @@ exports.handler = async (event) => {
         };
       }
 
-      return { statusCode: 200, headers, body: JSON.stringify({ profile: data || null, ambassador }) };
+      // Account continuity: browser storage is not the source of truth.
+      // Return the account's nearest nonterminal booking so a fresh login
+      // can reopen the live trip sheet instead of presenting an empty form.
+      let activeBooking = null;
+      // Ambassador accounts manage rides for multiple guests, so they are
+      // intentionally excluded from the single-passenger continuity rule.
+      if (data?.id && !host) {
+        const { data: booking, error: bookingError } = await db
+          .from('bookings')
+          .select('id, trip_id, status, pickup_datetime')
+          .eq('customer_id', data.id)
+          .in('status', ACTIVE_BOOKING_STATUSES)
+          .order('pickup_datetime', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (bookingError) {
+          console.error('❌ Active booking lookup failed:', bookingError.code || 'db error');
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Active booking lookup failed' }) };
+        }
+        activeBooking = booking || null;
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ profile: data || null, ambassador, activeBooking })
+      };
     }
 
     if (event.httpMethod === 'POST') {
