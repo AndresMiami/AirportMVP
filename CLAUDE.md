@@ -30,9 +30,14 @@ verified checkpoint locations all live in the web app backed by Supabase.
   loading screen BEFORE the booking app boots — signed-out visitors get
   `location.replace('/login.html')`, auth-check failure shows an honest
   retry screen, never guest fallback. Session prefills the passenger
-  modal. Submit re-reads a FRESH session; a failed/401/403 API booking
-  keeps the form and shows a real error — only a database bookingId opens
-  the live trip sheet (iframe of `/trip?embed=1`). "Book for someone
+  modal and restores the account's nearest nonterminal booking directly
+  into the live trip sheet, independent of browser storage. Normal
+  passenger accounts have one nonterminal booking at a time; create-booking
+  returns the existing id on conflict so stale tabs reopen it instead of
+  inserting a duplicate. Ambassador accounts are deliberately exempt and
+  stay multi-ride. Submit re-reads a FRESH session; a failed/401/403 API
+  booking keeps the form and shows a real error — only a database bookingId
+  opens the live trip sheet (iframe of `/trip?embed=1`). "Book for someone
   else" remains: a signed-in booker arranging a ride for another
   passenger is not guest checkout.
 - `trip.html` — passenger status page: stepper, vehicle hero, booking-time
@@ -165,6 +170,12 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    later") and may return; guest schema/code, legacy guest bookings
    (customer_id NULL), and guest /trip links all keep working. "Book
    for someone else" remains (signed-in booker ≠ guest checkout).
+   Account continuity is server-backed: after login a normal passenger's
+   nearest nonterminal booking reopens automatically, and create-booking
+   blocks ordinary stale-tab/device duplicates by returning the existing
+   ride. A truly simultaneous first-insert race remains recorded for the
+   migration-013 database constraint. Ambassadors remain explicitly
+   multi-ride.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
    Passenger Push later binds to the authenticated customer UUID.
 4. Checkpoint locations (browser geolocation at status taps → Supabase →
@@ -214,10 +225,11 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
      via ensure-row, guest checkout visibly disabled, false local-success
      fallback removed; bookings.customer_id stays nullable for legacy
      guest rows).
-  3. Driver PWA Push — BUILT (Driver PWA Push PR): run migration 012 +
-     set VAPID_* env BEFORE merging; Telegram stays the fallback and
-     safety channel; PUSH_DISABLED=1 reroutes everything to Telegram
-     without touching the watchdog.
+  3. Driver PWA Push — SHIPPED (migration 012 + VAPID configured;
+     locked-phone delivery, deep link, no-duplicate Telegram routing,
+     readiness suppression, and sign-out/re-enable production-verified).
+     Telegram stays the fallback and safety channel; PUSH_DISABLED=1
+     reroutes everything to Telegram without touching the watchdog.
   4. Routes API + two-ETA work.
   5. Passenger PWA Push for authenticated passengers.
   6. Polling reduction reconsidered ONLY after real Push field evidence.

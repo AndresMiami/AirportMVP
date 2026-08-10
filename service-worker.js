@@ -3,9 +3,9 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-// v1.3.13: Driver PWA Push PR — dead passenger push listeners removed and
-// /driver* excluded from interception (cached assets changed -> bump).
-const CACHE_NAME = 'linkmia-v1.3.13';
+// v1.3.16: Passenger account continuity gate — revoked sessions are cleared
+// and returned to login instead of looping on the cached Retry screen.
+const CACHE_NAME = 'linkmia-v1.3.16';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

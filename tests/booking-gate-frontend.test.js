@@ -5,7 +5,8 @@
 // Two layers, following the tests/passenger-polling.test.js precedent:
 //  1. BEHAVIOR: the auth-gate inline script (indexMVP's FIRST script
 //     block) runs for real under `vm` with a fake DOM — proving the gate
-//     redirects, retries, or admits based on the actual session result.
+//     redirects, retries, or admits based on the actual session and account-
+//     continuity results.
 //  2. STATIC: source-shape assertions on the main app block and the
 //     other gate files (initializeApp gated, fresh-session ordering,
 //     fake success removed, inert guest control, entry points, SW bump).
@@ -48,10 +49,11 @@ function makeElement(tag) {
   return el;
 }
 
-function makeHarness({ getSession, omitClient = false } = {}) {
+function makeHarness({ getSession, omitClient = false, profileResponse } = {}) {
   const created = [];
   const byId = new Map();
   const replaceCalls = [];
+  let signOutCalls = 0;
 
   const document = {
     readyState: 'complete',
@@ -86,14 +88,22 @@ function makeHarness({ getSession, omitClient = false } = {}) {
     location,
     localStorage: storage(),
     sessionStorage: storage(),
-    fetch: async () => ({ ok: false, json: async () => ({}) }),
+    fetch: async () => profileResponse || ({
+      ok: true,
+      json: async () => ({ profile: null, ambassador: null, activeBooking: null })
+    }),
     console: { log() {}, warn() {}, error() {} },
     URLSearchParams,
     JSON, Date, Math, Promise, setTimeout, clearTimeout, setInterval, clearInterval
   };
   context.window = context;
   if (!omitClient) {
-    context.supabaseClient = { auth: { getSession, signOut: async () => ({}) } };
+    context.supabaseClient = {
+      auth: {
+        getSession,
+        signOut: async () => { signOutCalls++; return {}; }
+      }
+    };
     context.window.supabaseClient = context.supabaseClient;
   }
   vm.createContext(context);
@@ -102,6 +112,7 @@ function makeHarness({ getSession, omitClient = false } = {}) {
   const overlay = created.find((el) => el.id === 'authGate');
   const settle = () => new Promise((res) => setImmediate(() => setImmediate(res)));
   return { context, created, byId, replaceCalls, bootAuthReady, overlay, settle,
+    signOutCalls: () => signOutCalls,
     gateMsg: () => byId.get('authGateMsg') };
 }
 
@@ -138,6 +149,37 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(authed, false);
     assert.deepStrictEqual(h.replaceCalls, []);
     assert.ok(h.gateMsg().children.some((c) => c.textContent === 'Try again'));
+  });
+
+  h = makeHarness({
+    getSession: async () => ({
+      data: { session: { access_token: 'tok', user: { email: 'pat@example.com' } } }
+    }),
+    profileResponse: { ok: false, status: 500, json: async () => ({ error: 'lookup failed' }) }
+  });
+  authed = await h.bootAuthReady;
+  await h.settle();
+  check('continuity-check failure: gate stays closed on Retry, never an empty booking form', () => {
+    assert.strictEqual(authed, false);
+    assert.deepStrictEqual(h.replaceCalls, []);
+    assert.strictEqual(h.overlay.removed, false);
+    assert.ok(h.gateMsg().children.some((c) => c.textContent === 'Try again'));
+  });
+
+  h = makeHarness({
+    getSession: async () => ({
+      data: { session: { access_token: 'revoked', user: { email: 'pat@example.com' } } }
+    }),
+    profileResponse: { ok: false, status: 401, json: async () => ({ error: 'Invalid session' }) }
+  });
+  authed = await h.bootAuthReady;
+  await h.settle();
+  check('server-revoked session: clears local auth and returns to login instead of Retry loop', () => {
+    assert.strictEqual(authed, false);
+    assert.strictEqual(h.signOutCalls(), 1);
+    assert.deepStrictEqual(h.replaceCalls, ['/login.html']);
+    assert.strictEqual(h.overlay.removed, false);
+    assert.ok(!h.gateMsg()?.children.some((c) => c.textContent === 'Try again'));
   });
 
   h = makeHarness({
@@ -182,6 +224,30 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(!appBlock.includes('showBookingConfirmation(tripId, bookingData, null)'),
       'the false local-success fallback must stay removed');
   });
+  check('account truth resolves before boot and recovery reopens the trusted trip exactly once', () => {
+    assert.ok(gateBlock.includes('currentActiveBooking = activeBooking'));
+    assert.ok(gateBlock.includes("localStorage.setItem('lm_last_trip_id', bookingId)"));
+    assert.ok(gateBlock.includes('activeBookingResumed = true'));
+    const profileIdx = gateBlock.indexOf("await fetch('/api/profile'");
+    const removeOverlayIdx = gateBlock.indexOf('overlay.remove()', profileIdx);
+    assert.ok(profileIdx >= 0 && removeOverlayIdx > profileIdx,
+      'the booking form must stay covered until account continuity is known');
+    const constructIdx = appBlock.indexOf('window.airportApp = new AirportBookingApp()');
+    const resumeIdx = appBlock.indexOf('resumeAccountBookingWhenReady()', constructIdx);
+    assert.ok(constructIdx >= 0 && resumeIdx > constructIdx,
+      'the startup race must be retried after the app instance exists');
+  });
+  check('server duplicate response reopens the existing sheet, never creates local success', () => {
+    const conflictIdx = appBlock.indexOf('response.status === 409 && result?.existingBookingId');
+    const removeIdx = appBlock.indexOf('localStorage.removeItem(\`trip_\${tripId}\`)', conflictIdx);
+    const sheetIdx = appBlock.indexOf('this.showTripSheet(result.existingBookingId)', conflictIdx);
+    assert.ok(conflictIdx >= 0 && removeIdx > conflictIdx && sheetIdx > removeIdx);
+  });
+  check('replacement cancellation is awaited before a new create request', () => {
+    const cancelIdx = appBlock.indexOf("const cancelResponse = await fetch('/api/booking-status'");
+    const createIdx = appBlock.indexOf("const response = await fetch('/api/create-booking'");
+    assert.ok(cancelIdx >= 0 && createIdx > cancelIdx);
+  });
   check('a failed attempt removes its provisional trip_ record', () => {
     assert.ok(appBlock.includes('localStorage.removeItem(`trip_${tripId}`)'));
   });
@@ -208,11 +274,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(book.url, '/login.html');
   });
   const sw = read('service-worker.js');
-  check('service-worker cache at or beyond the account-gate bump (v1.3.12+)', () => {
+  check('service-worker cache includes the revoked-session bump (v1.3.16+)', () => {
     const m = sw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
     assert.ok(m, 'versioned cache name required');
-    assert.ok(parseInt(m[1], 10) >= 12,
-      'cache must never regress below the account-gate bump');
+    assert.ok(parseInt(m[1], 10) >= 16,
+      'cache must never regress below the revoked-session continuity bump');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

@@ -258,7 +258,8 @@ const clickEvent = (rideId) => ({
   check('root SW: /driver excluded, push listeners gone, cache bumped', () => {
     assert.ok(rootSw.includes("url.pathname.startsWith('/driver')"));
     assert.ok(!rootSw.includes('showNotification'), 'no second push listener may exist');
-    assert.ok(/CACHE_NAME = 'linkmia-v1\.3\.13'/.test(rootSw));
+    const cache = rootSw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
+    assert.ok(cache && parseInt(cache[1], 10) >= 14);
   });
   const driverSw = read('driver-sw.js');
   check('driver SW: no fetch handler — the driver app is never cached', () => {

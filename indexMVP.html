@@ -331,13 +331,15 @@
         let currentSession = null;
         let currentProfile = null;
         let currentAmbassador = null;
+        let currentActiveBooking = null;
+        let activeBookingResumed = false;
 
         // ===== ACCOUNT GATE =====
         // The booking app must not initialize for signed-out visitors —
         // including direct URL entry that bypasses the homepage. While the
         // session is checked, a neutral loading screen covers the page (the
         // address form never flashes). Outcomes:
-        //   session        -> overlay removed, app boots
+        //   session + account truth -> overlay removed, app boots
         //   no session     -> location.replace('/login.html') (the front
         //                     door; it forwards back here after sign-in)
         //   check failed   -> honest retry screen — NEVER guest fallback
@@ -375,6 +377,30 @@
                     }
                     currentSession = session;
                     currentUser = session.user;
+
+                    // Account continuity is part of the gate, not optional
+                    // profile decoration. Until the server confirms whether
+                    // this account owns a live ride, showing an empty booking
+                    // form would invite an unnecessary second submission.
+                    const profileResponse = await fetch('/api/profile', {
+                        headers: { 'Authorization': `Bearer ${session.access_token}` }
+                    });
+                    if (profileResponse.status === 401) {
+                        // getSession() can still return a locally unexpired
+                        // token that was revoked server-side. Clear it before
+                        // returning to the front door so Retry cannot loop.
+                        try { await window.supabaseClient.auth.signOut(); } catch (_) {}
+                        window.location.replace('/login.html');
+                        return false;
+                    }
+                    if (!profileResponse.ok) throw new Error('account continuity unavailable');
+                    const { profile, ambassador, activeBooking } = await profileResponse.json();
+                    currentProfile = profile || null;
+                    currentAmbassador = ambassador || null;
+                    currentActiveBooking = activeBooking || null;
+
+                    console.log('✅ Signed in as:', session.user.email);
+                    addAuthPill(true);
                     overlay.remove();
                     return true;
                 } catch (e) {
@@ -435,43 +461,28 @@
             } catch (e) { return null; }
         }
 
-        (async function checkAuth() {
-            try {
-                const { data: { session } } = await window.supabaseClient.auth.getSession();
-                if (!session) {
-                    addAuthPill(false);
-                    return;
-                }
-                currentSession = session;
-                currentUser = session.user;
-                console.log('✅ Signed in as:', session.user.email);
-                addAuthPill(true);
+        // The account gate resolves the server-owned booking before the app
+        // boots. This single-shot guard still protects repeated init calls.
+        function resumeAccountBookingWhenReady() {
+            const bookingId = currentActiveBooking?.id;
+            if (!bookingId || !window.airportApp || activeBookingResumed) return;
+            activeBookingResumed = true;
+            try { localStorage.setItem('lm_last_trip_id', bookingId); } catch (_) {}
+            window.airportApp.showTripSheet(bookingId);
+        }
 
-                // Load the saved profile and prefill the passenger modal
-                const res = await fetch('/api/profile', {
-                    headers: { 'Authorization': `Bearer ${session.access_token}` }
-                });
-                if (res.ok) {
-                    const { profile, ambassador } = await res.json();
-                    if (ambassador) {
-                        // Ambassadors book for guests only — lock "For myself",
-                        // never prefill their own info as the traveler
-                        currentAmbassador = ambassador;
-                        applyAmbassadorMode();
-                        showAmbassadorStamp(ambassador);
-                        if (profile) showWelcome(profile);
-                    } else if (profile) {
-                        currentProfile = profile;
-                        applyProfilePrefill();
-                        showWelcome(profile);
-                    }
-                }
-            } catch (e) {
-                // Profile prefill is a nicety — the account gate (above) and
-                // the server-side 401 in create-booking are the enforcement.
-                console.warn('Profile prefill skipped:', e);
+        function applyAuthenticatedAccountState() {
+            if (currentAmbassador) {
+                // Ambassadors book for guests only — lock "For myself",
+                // never prefill their own info as the traveler.
+                applyAmbassadorMode();
+                showAmbassadorStamp(currentAmbassador);
+                if (currentProfile) showWelcome(currentProfile);
+            } else if (currentProfile) {
+                applyProfilePrefill();
+                showWelcome(currentProfile);
             }
-        })();
+        }
 
         // Lock "For myself" for ambassador accounts once the modal exists
         function applyAmbassadorMode() {
@@ -2050,12 +2061,16 @@
                     // rebooking doesn't create a duplicate. Server-side status
                     // check makes this a no-op if the driver already accepted.
                     if (this.activeSheetBookingId) {
-                        fetch('/api/booking-status', {
+                        const cancelResponse = await fetch('/api/booking-status', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ id: this.activeSheetBookingId, action: 'cancel' })
-                        }).catch(() => {});
-                        this.activeSheetBookingId = null;
+                        });
+                        // Pending replacement: wait until the old request is
+                        // truly cancelled before creating the new one. A
+                        // confirmed/active ride cannot be replaced here; the
+                        // create endpoint returns its id and reopens it.
+                        if (cancelResponse.ok) this.activeSheetBookingId = null;
                     }
 
                     // ===== PERSIST TO SUPABASE VIA API (REQUIRED) =====
@@ -2108,7 +2123,19 @@
                         throw new Error('Your session expired — please sign in again to book.');
                     }
                     if (response.status === 403) {
-                        throw new Error('Your account profile is incomplete — please sign out, sign back in, and try again.');
+                        throw new Error('This account does not have a passenger profile. Please sign in with your passenger account or contact support.');
+                    }
+                    if (response.status === 409 && result?.existingBookingId) {
+                        // Another tab/device already owns the account's live
+                        // ride. Remove this provisional attempt and reopen the
+                        // server-trusted booking instead of showing success or
+                        // creating a duplicate.
+                        try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {}
+                        localStorage.setItem('lm_last_trip_id', result.existingBookingId);
+                        bookBtn.innerHTML = originalText;
+                        bookBtn.disabled = false;
+                        this.showTripSheet(result.existingBookingId);
+                        return;
                     }
                     if (!response.ok || !result?.bookingId) {
                         console.error('❌ Booking API failed:', response.status, result);
@@ -2850,6 +2877,8 @@
                 if (!window.airportApp) {
                     window.airportApp = new AirportBookingApp();
                 }
+                applyAuthenticatedAccountState();
+                resumeAccountBookingWhenReady();
 
                 // Load standalone vehicle carousel
                 if (window.airportApp && !document.querySelector('.vehicle-carousel-component')) {
