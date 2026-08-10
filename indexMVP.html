@@ -339,7 +339,7 @@
         // including direct URL entry that bypasses the homepage. While the
         // session is checked, a neutral loading screen covers the page (the
         // address form never flashes). Outcomes:
-        //   session        -> overlay removed, app boots
+        //   session + account truth -> overlay removed, app boots
         //   no session     -> location.replace('/login.html') (the front
         //                     door; it forwards back here after sign-in)
         //   check failed   -> honest retry screen — NEVER guest fallback
@@ -377,6 +377,22 @@
                     }
                     currentSession = session;
                     currentUser = session.user;
+
+                    // Account continuity is part of the gate, not optional
+                    // profile decoration. Until the server confirms whether
+                    // this account owns a live ride, showing an empty booking
+                    // form would invite an unnecessary second submission.
+                    const profileResponse = await fetch('/api/profile', {
+                        headers: { 'Authorization': `Bearer ${session.access_token}` }
+                    });
+                    if (!profileResponse.ok) throw new Error('account continuity unavailable');
+                    const { profile, ambassador, activeBooking } = await profileResponse.json();
+                    currentProfile = profile || null;
+                    currentAmbassador = ambassador || null;
+                    currentActiveBooking = activeBooking || null;
+
+                    console.log('✅ Signed in as:', session.user.email);
+                    addAuthPill(true);
                     overlay.remove();
                     return true;
                 } catch (e) {
@@ -437,9 +453,8 @@
             } catch (e) { return null; }
         }
 
-        // Called from both sides of the startup race: the authenticated
-        // profile request and the booking-app constructor. Exactly one call
-        // wins once both the account booking and app instance are ready.
+        // The account gate resolves the server-owned booking before the app
+        // boots. This single-shot guard still protects repeated init calls.
         function resumeAccountBookingWhenReady() {
             const bookingId = currentActiveBooking?.id;
             if (!bookingId || !window.airportApp || activeBookingResumed) return;
@@ -448,47 +463,18 @@
             window.airportApp.showTripSheet(bookingId);
         }
 
-        (async function checkAuth() {
-            try {
-                const { data: { session } } = await window.supabaseClient.auth.getSession();
-                if (!session) {
-                    addAuthPill(false);
-                    return;
-                }
-                currentSession = session;
-                currentUser = session.user;
-                console.log('✅ Signed in as:', session.user.email);
-                addAuthPill(true);
-
-                // Load the saved profile and prefill the passenger modal
-                const res = await fetch('/api/profile', {
-                    headers: { 'Authorization': `Bearer ${session.access_token}` }
-                });
-                if (res.ok) {
-                    const { profile, ambassador, activeBooking } = await res.json();
-                    if (activeBooking?.id) {
-                        currentActiveBooking = activeBooking;
-                        resumeAccountBookingWhenReady();
-                    }
-                    if (ambassador) {
-                        // Ambassadors book for guests only — lock "For myself",
-                        // never prefill their own info as the traveler
-                        currentAmbassador = ambassador;
-                        applyAmbassadorMode();
-                        showAmbassadorStamp(ambassador);
-                        if (profile) showWelcome(profile);
-                    } else if (profile) {
-                        currentProfile = profile;
-                        applyProfilePrefill();
-                        showWelcome(profile);
-                    }
-                }
-            } catch (e) {
-                // Profile prefill is a nicety — the account gate (above) and
-                // the server-side 401 in create-booking are the enforcement.
-                console.warn('Profile prefill skipped:', e);
+        function applyAuthenticatedAccountState() {
+            if (currentAmbassador) {
+                // Ambassadors book for guests only — lock "For myself",
+                // never prefill their own info as the traveler.
+                applyAmbassadorMode();
+                showAmbassadorStamp(currentAmbassador);
+                if (currentProfile) showWelcome(currentProfile);
+            } else if (currentProfile) {
+                applyProfilePrefill();
+                showWelcome(currentProfile);
             }
-        })();
+        }
 
         // Lock "For myself" for ambassador accounts once the modal exists
         function applyAmbassadorMode() {
@@ -2883,6 +2869,7 @@
                 if (!window.airportApp) {
                     window.airportApp = new AirportBookingApp();
                 }
+                applyAuthenticatedAccountState();
                 resumeAccountBookingWhenReady();
 
                 // Load standalone vehicle carousel

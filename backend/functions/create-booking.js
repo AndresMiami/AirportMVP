@@ -222,9 +222,11 @@ exports.handler = async (event, context) => {
     }
 
     // MVP account contract: one nonterminal booking at a time. This is the
-    // server-side seal behind the login recovery UI — a stale tab or a
-    // second device cannot create another ride while the account already
-    // owns one. Return the existing id so the client can reopen its sheet.
+    // server-side guard behind the login recovery UI — once an active ride
+    // is stored, stale tabs and other devices reopen it instead of inserting
+    // another. Return the existing id so the client can reopen its sheet.
+    // A truly simultaneous first insert still needs the recorded migration-
+    // 013 database constraint to become transactionally impossible.
     // Ambassadors manage independent rides for multiple guests and are not
     // subject to the one-passenger-booking MVP rule.
     if (!ambassadorHost) {

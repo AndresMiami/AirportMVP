@@ -5,7 +5,8 @@
 // Two layers, following the tests/passenger-polling.test.js precedent:
 //  1. BEHAVIOR: the auth-gate inline script (indexMVP's FIRST script
 //     block) runs for real under `vm` with a fake DOM — proving the gate
-//     redirects, retries, or admits based on the actual session result.
+//     redirects, retries, or admits based on the actual session and account-
+//     continuity results.
 //  2. STATIC: source-shape assertions on the main app block and the
 //     other gate files (initializeApp gated, fresh-session ordering,
 //     fake success removed, inert guest control, entry points, SW bump).
@@ -48,7 +49,7 @@ function makeElement(tag) {
   return el;
 }
 
-function makeHarness({ getSession, omitClient = false } = {}) {
+function makeHarness({ getSession, omitClient = false, profileResponse } = {}) {
   const created = [];
   const byId = new Map();
   const replaceCalls = [];
@@ -86,7 +87,10 @@ function makeHarness({ getSession, omitClient = false } = {}) {
     location,
     localStorage: storage(),
     sessionStorage: storage(),
-    fetch: async () => ({ ok: false, json: async () => ({}) }),
+    fetch: async () => profileResponse || ({
+      ok: true,
+      json: async () => ({ profile: null, ambassador: null, activeBooking: null })
+    }),
     console: { log() {}, warn() {}, error() {} },
     URLSearchParams,
     JSON, Date, Math, Promise, setTimeout, clearTimeout, setInterval, clearInterval
@@ -143,6 +147,21 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   h = makeHarness({
     getSession: async () => ({
       data: { session: { access_token: 'tok', user: { email: 'pat@example.com' } } }
+    }),
+    profileResponse: { ok: false, status: 500, json: async () => ({ error: 'lookup failed' }) }
+  });
+  authed = await h.bootAuthReady;
+  await h.settle();
+  check('continuity-check failure: gate stays closed on Retry, never an empty booking form', () => {
+    assert.strictEqual(authed, false);
+    assert.deepStrictEqual(h.replaceCalls, []);
+    assert.strictEqual(h.overlay.removed, false);
+    assert.ok(h.gateMsg().children.some((c) => c.textContent === 'Try again'));
+  });
+
+  h = makeHarness({
+    getSession: async () => ({
+      data: { session: { access_token: 'tok', user: { email: 'pat@example.com' } } }
     })
   });
   authed = await h.bootAuthReady;
@@ -182,11 +201,14 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(!appBlock.includes('showBookingConfirmation(tripId, bookingData, null)'),
       'the false local-success fallback must stay removed');
   });
-  check('account booking recovery reopens the server-trusted trip exactly once', () => {
+  check('account truth resolves before boot and recovery reopens the trusted trip exactly once', () => {
     assert.ok(gateBlock.includes('currentActiveBooking = activeBooking'));
-    assert.ok(gateBlock.includes('resumeAccountBookingWhenReady()'));
     assert.ok(gateBlock.includes("localStorage.setItem('lm_last_trip_id', bookingId)"));
     assert.ok(gateBlock.includes('activeBookingResumed = true'));
+    const profileIdx = gateBlock.indexOf("await fetch('/api/profile'");
+    const removeOverlayIdx = gateBlock.indexOf('overlay.remove()', profileIdx);
+    assert.ok(profileIdx >= 0 && removeOverlayIdx > profileIdx,
+      'the booking form must stay covered until account continuity is known');
     const constructIdx = appBlock.indexOf('window.airportApp = new AirportBookingApp()');
     const resumeIdx = appBlock.indexOf('resumeAccountBookingWhenReady()', constructIdx);
     assert.ok(constructIdx >= 0 && resumeIdx > constructIdx,
@@ -229,11 +251,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(book.url, '/login.html');
   });
   const sw = read('service-worker.js');
-  check('service-worker cache includes the account-continuity bump (v1.3.14+)', () => {
+  check('service-worker cache includes the fail-closed continuity bump (v1.3.15+)', () => {
     const m = sw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
     assert.ok(m, 'versioned cache name required');
-    assert.ok(parseInt(m[1], 10) >= 14,
-      'cache must never regress below the account-continuity bump');
+    assert.ok(parseInt(m[1], 10) >= 15,
+      'cache must never regress below the fail-closed continuity bump');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

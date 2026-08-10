@@ -172,8 +172,10 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    for someone else" remains (signed-in booker ≠ guest checkout).
    Account continuity is server-backed: after login a normal passenger's
    nearest nonterminal booking reopens automatically, and create-booking
-   seals the one-active-booking MVP rule even across tabs/devices.
-   Ambassadors remain explicitly multi-ride.
+   blocks ordinary stale-tab/device duplicates by returning the existing
+   ride. A truly simultaneous first-insert race remains recorded for the
+   migration-013 database constraint. Ambassadors remain explicitly
+   multi-ride.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
    Passenger Push later binds to the authenticated customer UUID.
 4. Checkpoint locations (browser geolocation at status taps → Supabase →
