@@ -53,6 +53,7 @@ function makeHarness({ getSession, omitClient = false, profileResponse } = {}) {
   const created = [];
   const byId = new Map();
   const replaceCalls = [];
+  let signOutCalls = 0;
 
   const document = {
     readyState: 'complete',
@@ -97,7 +98,12 @@ function makeHarness({ getSession, omitClient = false, profileResponse } = {}) {
   };
   context.window = context;
   if (!omitClient) {
-    context.supabaseClient = { auth: { getSession, signOut: async () => ({}) } };
+    context.supabaseClient = {
+      auth: {
+        getSession,
+        signOut: async () => { signOutCalls++; return {}; }
+      }
+    };
     context.window.supabaseClient = context.supabaseClient;
   }
   vm.createContext(context);
@@ -106,6 +112,7 @@ function makeHarness({ getSession, omitClient = false, profileResponse } = {}) {
   const overlay = created.find((el) => el.id === 'authGate');
   const settle = () => new Promise((res) => setImmediate(() => setImmediate(res)));
   return { context, created, byId, replaceCalls, bootAuthReady, overlay, settle,
+    signOutCalls: () => signOutCalls,
     gateMsg: () => byId.get('authGateMsg') };
 }
 
@@ -157,6 +164,22 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.deepStrictEqual(h.replaceCalls, []);
     assert.strictEqual(h.overlay.removed, false);
     assert.ok(h.gateMsg().children.some((c) => c.textContent === 'Try again'));
+  });
+
+  h = makeHarness({
+    getSession: async () => ({
+      data: { session: { access_token: 'revoked', user: { email: 'pat@example.com' } } }
+    }),
+    profileResponse: { ok: false, status: 401, json: async () => ({ error: 'Invalid session' }) }
+  });
+  authed = await h.bootAuthReady;
+  await h.settle();
+  check('server-revoked session: clears local auth and returns to login instead of Retry loop', () => {
+    assert.strictEqual(authed, false);
+    assert.strictEqual(h.signOutCalls(), 1);
+    assert.deepStrictEqual(h.replaceCalls, ['/login.html']);
+    assert.strictEqual(h.overlay.removed, false);
+    assert.ok(!h.gateMsg()?.children.some((c) => c.textContent === 'Try again'));
   });
 
   h = makeHarness({
@@ -251,11 +274,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(book.url, '/login.html');
   });
   const sw = read('service-worker.js');
-  check('service-worker cache includes the fail-closed continuity bump (v1.3.15+)', () => {
+  check('service-worker cache includes the revoked-session bump (v1.3.16+)', () => {
     const m = sw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
     assert.ok(m, 'versioned cache name required');
-    assert.ok(parseInt(m[1], 10) >= 15,
-      'cache must never regress below the fail-closed continuity bump');
+    assert.ok(parseInt(m[1], 10) >= 16,
+      'cache must never regress below the revoked-session continuity bump');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

@@ -385,6 +385,14 @@
                     const profileResponse = await fetch('/api/profile', {
                         headers: { 'Authorization': `Bearer ${session.access_token}` }
                     });
+                    if (profileResponse.status === 401) {
+                        // getSession() can still return a locally unexpired
+                        // token that was revoked server-side. Clear it before
+                        // returning to the front door so Retry cannot loop.
+                        try { await window.supabaseClient.auth.signOut(); } catch (_) {}
+                        window.location.replace('/login.html');
+                        return false;
+                    }
                     if (!profileResponse.ok) throw new Error('account continuity unavailable');
                     const { profile, ambassador, activeBooking } = await profileResponse.json();
                     currentProfile = profile || null;

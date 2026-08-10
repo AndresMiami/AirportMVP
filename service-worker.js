@@ -3,9 +3,9 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-// v1.3.15: Passenger account continuity gate — a fresh login resolves the
-// server-owned active trip before the cached booking app boots.
-const CACHE_NAME = 'linkmia-v1.3.15';
+// v1.3.16: Passenger account continuity gate — revoked sessions are cleared
+// and returned to login instead of looping on the cached Retry screen.
+const CACHE_NAME = 'linkmia-v1.3.16';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';
