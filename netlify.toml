@@ -27,6 +27,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/update-pending-booking"
+  to = "/.netlify/functions/update-pending-booking"
+  status = 200
+
+[[redirects]]
   from = "/api/create-payment-intent"
   to = "/.netlify/functions/create-payment-intent"
   status = 200

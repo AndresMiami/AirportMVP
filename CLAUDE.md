@@ -42,7 +42,11 @@ verified checkpoint locations all live in the web app backed by Supabase.
   passenger is not guest checkout.
 - `trip.html` — passenger status page: stepper, vehicle hero, booking-time
   ETA, static verified-checkpoint map marker (honest labels, Miami-time
-  stamps, never a moving dot), WhatsApp button, Go back/Cancel. Cancel is
+  stamps, never a moving dot), WhatsApp button, Edit ride/Cancel. Pending
+  edits reuse the existing booking form and update the same booking row in
+  place (`/api/update-pending-booking`, signed-in owner only): UUID, trip
+  code, owner, creation time, and trip URL remain stable, and a guarded
+  details_version prevents an edit from racing driver Accept. Cancel is
   QUOTE-FIRST (PR 1A): tap → server quote from `/api/cancel-booking` →
   inline card shows the SERVER's verdict (pending: a plain "hasn't been
   accepted yet — cancelling is free" sentence, no fee arithmetic; the
@@ -206,7 +210,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    nearest nonterminal booking reopens automatically, and create-booking
    blocks ordinary stale-tab/device duplicates by returning the existing
    ride. A truly simultaneous first-insert race remains recorded for the
-   migration-013 database constraint. Ambassadors remain explicitly
+   migration-014 database constraint (013 is the pending-edit version guard).
+   Ambassadors remain explicitly
    multi-ride.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
    Passenger Push later binds to the authenticated customer UUID.

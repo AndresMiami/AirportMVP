@@ -3,10 +3,11 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-// v1.3.17: PR 1A pending cancellation — the rebook auto-cancel now sends
-// the owner's session token (account-owned cancels are no longer
-// bare-UUID), so the precached indexMVP.html must refresh everywhere.
-const CACHE_NAME = 'linkmia-v1.3.17';
+// v1.3.18: pending rides edit in place — refresh the cached booking form
+// so no cancel-and-recreate client survives this deployment. (v1.3.17
+// shipped PR 1A pending cancellation with the owner-session auto-cancel
+// header; that whole rebook path is deleted by the edit flow.)
+const CACHE_NAME = 'linkmia-v1.3.18';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

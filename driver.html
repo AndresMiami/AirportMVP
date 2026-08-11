@@ -1053,6 +1053,10 @@
             // the status request itself is never aborted — a request that
             // may have committed must not be abandoned ambiguously.
             const body = { bookingId, action, paymentMethod };
+            if (action === 'accept') {
+                const offer = lastBookings.find((b) => b.id === bookingId);
+                body.expectedDetailsVersion = Number(offer?.details_version) || 1;
+            }
             if (CHECKPOINT_ACTIONS.includes(action)) {
                 const coord = await getCheckpointFix(6000);
                 if (coord) { body.lat = coord.lat; body.lng = coord.lng; }

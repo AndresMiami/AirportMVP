@@ -14,7 +14,8 @@ let activeBooking = {
   id: 'bk-live',
   trip_id: 'LM-LIVE',
   status: 'confirmed',
-  pickup_datetime: '2026-08-11T16:00:00Z'
+  pickup_datetime: '2026-08-11T16:00:00Z',
+  details_version: 1
 };
 let activeLookupError = null;
 let capturedStatuses = null;
@@ -110,7 +111,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(r.statusCode, 200);
     assert.deepStrictEqual(body.activeBooking, activeBooking);
     assert.deepStrictEqual(Object.keys(body.activeBooking).sort(),
-      ['id', 'pickup_datetime', 'status', 'trip_id']);
+      ['details_version', 'id', 'pickup_datetime', 'status', 'trip_id']);
   });
   check('lookup includes every nonterminal status and excludes terminal states', () => {
     assert.deepStrictEqual(capturedStatuses,
@@ -130,7 +131,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
   activeBooking = {
     id: 'bk-guest', trip_id: 'LM-GUEST',
-    status: 'confirmed', pickup_datetime: '2026-08-11T18:00:00Z'
+    status: 'confirmed', pickup_datetime: '2026-08-11T18:00:00Z', details_version: 1
   };
   hostExists = true;
   const beforeHost = bookingQueries;

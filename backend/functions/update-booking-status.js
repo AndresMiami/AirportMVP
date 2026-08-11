@@ -122,7 +122,7 @@ exports.handler = async (event) => {
   const driver = auth.driver;
 
   try {
-    const { bookingId, action, paymentMethod, lat, lng } = JSON.parse(event.body || '{}');
+    const { bookingId, action, paymentMethod, lat, lng, expectedDetailsVersion } = JSON.parse(event.body || '{}');
 
     if (!bookingId || !UUID_RE.test(bookingId)) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid bookingId' }) };
@@ -185,6 +185,10 @@ exports.handler = async (event) => {
       if (action === 'accept' && driver.status !== 'active') {
         return { statusCode: 403, headers, body: JSON.stringify({ error: 'Busy drivers cannot accept new rides' }) };
       }
+      if (action === 'accept' &&
+          (!Number.isInteger(expectedDetailsVersion) || expectedDetailsVersion < 1)) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing or invalid details version' }) };
+      }
       fromStatuses = TRANSITIONS[action].from;
       updates = { ...TRANSITIONS[action].set };
       // Accept — and only accept — claims the ride. Legacy rows are
@@ -195,7 +199,11 @@ exports.handler = async (event) => {
         // watchdog can derive readiness timing from it.
         updates.accepted_at = nowIso;
         // Recent acceptance IS readiness (accept at/after T-180). The
-        // pre-read is safe: pickup_datetime never changes after booking.
+        // The pre-read can race a pending edit, but the guarded UPDATE also
+        // matches details_version. If the edit commits first, Accept matches
+        // zero rows and the driver refreshes the revised offer; if Accept
+        // commits first, the passenger edit matches zero rows. No stale
+        // pickup time can therefore be stamped onto an accepted ride.
         // (Tolerant on read failure: accepting the ride is the critical
         // path; a missed recent-accept stamp only means the readiness
         // chain runs — annoying, never wrong.)
@@ -255,7 +263,9 @@ exports.handler = async (event) => {
       .eq('id', bookingId)
       .in('status', fromStatuses);
     if (action === 'accept') {
-      query = query.is('assigned_driver', null);
+      query = query
+        .is('assigned_driver', null)
+        .eq('details_version', expectedDetailsVersion);
     } else {
       query = query.eq('assigned_driver', driver.id);
     }
@@ -274,7 +284,7 @@ exports.handler = async (event) => {
     if (!data || data.length === 0) {
       const { data: current } = await supabase
         .from('bookings')
-        .select('status, assigned_driver, driver_ready_at, driver_ready_by')
+        .select('status, assigned_driver, driver_ready_at, driver_ready_by, details_version')
         .eq('id', bookingId)
         .single();
       // VERIFIED idempotent success — only the backend may declare it, and
@@ -302,7 +312,8 @@ exports.handler = async (event) => {
         headers,
         body: JSON.stringify({
           error: 'Invalid transition',
-          currentStatus: current?.status || 'unknown'
+          currentStatus: current?.status || 'unknown',
+          currentDetailsVersion: current?.details_version || null
         })
       };
     }

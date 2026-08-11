@@ -333,6 +333,10 @@
         let currentAmbassador = null;
         let currentActiveBooking = null;
         let activeBookingResumed = false;
+        let pendingEditIntent = null;
+        try {
+            pendingEditIntent = JSON.parse(sessionStorage.getItem('lm_pending_edit_intent') || 'null');
+        } catch (_) { pendingEditIntent = null; }
 
         // ===== ACCOUNT GATE =====
         // The booking app must not initialize for signed-out visitors —
@@ -468,6 +472,19 @@
             if (!bookingId || !window.airportApp || activeBookingResumed) return;
             activeBookingResumed = true;
             try { localStorage.setItem('lm_last_trip_id', bookingId); } catch (_) {}
+            if (currentActiveBooking.status === 'pending' &&
+                pendingEditIntent?.bookingId === bookingId) {
+                const intent = {
+                    bookingId,
+                    tripCode: currentActiveBooking.trip_id || pendingEditIntent.tripCode || '',
+                    detailsVersion: Number(currentActiveBooking.details_version) ||
+                        Number(pendingEditIntent.detailsVersion) || 1
+                };
+                pendingEditIntent = null;
+                try { sessionStorage.removeItem('lm_pending_edit_intent'); } catch (_) {}
+                window.airportApp.beginPendingEdit(intent);
+                return;
+            }
             window.airportApp.showTripSheet(bookingId);
         }
 
@@ -677,6 +694,7 @@
                 this.vehicleMap = null;
                 this.directionsRenderer = null;
                 this.pricingService = null;
+                this.pendingEdit = null;
                 
                 this.init();
             }
@@ -1587,6 +1605,12 @@
                 
                 this.state.dateTime.time = date;
                 this.updateTimeNote();
+                // Time-of-day affects surge pricing. Recalculate the
+                // selected vehicle before either a new booking or an edit is
+                // submitted so the displayed and stored prices stay aligned.
+                if (this.state.route.distance && this.state.route.duration) {
+                    this.updateVehiclePrices();
+                }
                 this.updateBookButton();
             }
 
@@ -1936,6 +1960,38 @@
                 }
             }
 
+            beginPendingEdit({ bookingId, tripCode, detailsVersion }) {
+                if (!bookingId) return;
+                this.pendingEdit = {
+                    bookingId,
+                    tripCode: tripCode || currentActiveBooking?.trip_id || '',
+                    detailsVersion: Number(detailsVersion) ||
+                        Number(currentActiveBooking?.details_version) || 1
+                };
+                this.activeSheetBookingId = bookingId;
+                this.startBooking();
+                this.navigateToPanel('where');
+
+                let notice = document.getElementById('editRideNotice');
+                if (!notice) {
+                    notice = document.createElement('div');
+                    notice.id = 'editRideNotice';
+                    notice.style.cssText = 'margin:12px 16px;padding:12px 14px;border-radius:12px;background:#fff3e0;color:#a85b00;font-weight:600;';
+                    this.els.bookingContainer?.prepend(notice);
+                }
+                notice.textContent = `Editing ${this.pendingEdit.tripCode || 'your pending ride'}. Your existing ride stays active until these changes are saved.`;
+                const bookBtn = document.getElementById('bookBtn');
+                if (bookBtn) {
+                    bookBtn.innerHTML = '<span class="btn-main-text">Save changes</span>';
+                    bookBtn.disabled = false;
+                }
+            }
+
+            finishPendingEdit() {
+                this.pendingEdit = null;
+                document.getElementById('editRideNotice')?.remove();
+            }
+
             async confirmBooking() {
                 // ========== PAYMENT CONFIGURATION ==========
                 // Set to false to skip Stripe payment (driver collects cash/Zelle)
@@ -1943,7 +1999,11 @@
                 const REQUIRE_PAYMENT = false;
                 // ============================================
 
-                const tripId = this.generateTripId();
+                const editContext = this.pendingEdit ? { ...this.pendingEdit } : null;
+                const isEditing = !!editContext;
+                const tripId = isEditing
+                    ? (editContext.tripCode || currentActiveBooking?.trip_id || '')
+                    : this.generateTripId();
 
                 // Get contact info from passenger modal
                 const passengerModal = PassengerModal.getInstance();
@@ -2008,12 +2068,9 @@
                     bookBtn.innerHTML = '<span class="btn-main-text">Processing...</span>';
                     bookBtn.disabled = true;
 
-                    // Fresh session FIRST — before ANY side effect. The two
-                    // that follow (the provisional trip_ record and
-                    // especially the previous-request cancel) must never run
-                    // for a session that can't submit the replacement:
-                    // an expired session cancelling the passenger's existing
-                    // ride would strand them with nothing.
+                    // Fresh session FIRST — before any provisional storage or
+                    // server write. Editing never cancels the existing ride;
+                    // a failure therefore leaves the original row untouched.
                     const { data: { session: submitSession } } =
                         await window.supabaseClient.auth.getSession();
                     if (!submitSession) {
@@ -2054,30 +2111,13 @@
                         bookingData.payment.note = 'Pay your driver by cash or Zelle';
                     }
 
-                    localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
-
-                    // If a previous request from this session is still pending
-                    // (user came back via "Go back" to adjust), cancel it so
-                    // rebooking doesn't create a duplicate. Server-side status
-                    // check makes this a no-op if the driver already accepted.
-                    if (this.activeSheetBookingId) {
-                        const cancelResponse = await fetch('/api/booking-status', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                // Account-owned pending cancels require the
-                                // owner's session since PR 1A (bare UUID no
-                                // longer suffices); submitSession was
-                                // verified fresh above, before side effects.
-                                'Authorization': `Bearer ${submitSession.access_token}`
-                            },
-                            body: JSON.stringify({ id: this.activeSheetBookingId, action: 'cancel' })
-                        });
-                        // Pending replacement: wait until the old request is
-                        // truly cancelled before creating the new one. A
-                        // confirmed/active ride cannot be replaced here; the
-                        // create endpoint returns its id and reopens it.
-                        if (cancelResponse.ok) this.activeSheetBookingId = null;
+                    // A new ride may use a provisional local record. An edit
+                    // never overwrites local truth before the server commits:
+                    // on any failure the original pending ride stays intact.
+                    // (The old auto-cancel-and-recreate path lived here; it
+                    // is deleted — editing updates the same row in place.)
+                    if (!isEditing) {
+                        localStorage.setItem(`trip_${tripId}`, JSON.stringify(bookingData));
                     }
 
                     // ===== PERSIST TO SUPABASE VIA API (REQUIRED) =====
@@ -2115,7 +2155,14 @@
                             refCode: getStoredRefCode()
                         };
 
-                    const response = await fetch('/api/create-booking', {
+                    if (isEditing) {
+                        apiPayload.bookingId = editContext.bookingId;
+                        apiPayload.expectedDetailsVersion = editContext.detailsVersion;
+                    }
+
+                    const response = await fetch(isEditing
+                        ? '/api/update-pending-booking'
+                        : '/api/create-booking', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -2130,7 +2177,24 @@
                         throw new Error('Your session expired — please sign in again to book.');
                     }
                     if (response.status === 403) {
-                        throw new Error('This account does not have a passenger profile. Please sign in with your passenger account or contact support.');
+                        throw new Error(isEditing
+                            ? 'You do not have permission to edit this ride.'
+                            : 'This account does not have a passenger profile. Please sign in with your passenger account or contact support.');
+                    }
+                    if (isEditing && response.status === 409) {
+                        this.finishPendingEdit();
+                        currentActiveBooking = {
+                            ...(currentActiveBooking || {}),
+                            id: editContext.bookingId,
+                            trip_id: editContext.tripCode,
+                            status: result?.currentStatus || currentActiveBooking?.status || 'pending',
+                            details_version: result?.currentDetailsVersion || editContext.detailsVersion
+                        };
+                        bookBtn.innerHTML = originalText;
+                        bookBtn.disabled = false;
+                        alert('This ride changed while you were editing. Your changes were not applied.');
+                        this.showTripSheet(editContext.bookingId);
+                        return;
                     }
                     if (response.status === 409 && result?.existingBookingId) {
                         // Another tab/device already owns the account's live
@@ -2146,17 +2210,34 @@
                     }
                     if (!response.ok || !result?.bookingId) {
                         console.error('❌ Booking API failed:', response.status, result);
-                        throw new Error('Booking could not be submitted — nothing was booked. Please try again.');
+                        throw new Error(isEditing
+                            ? 'Changes not saved. Your original ride is unchanged. Please try again.'
+                            : 'Booking could not be submitted — nothing was booked. Please try again.');
                     }
 
                     // Real database booking — the ONLY path to a success screen.
                     const supabaseBookingId = result.bookingId;
-                    const storedBooking = JSON.parse(localStorage.getItem(`trip_${tripId}`));
+                    const storedBooking = isEditing
+                        ? bookingData
+                        : JSON.parse(localStorage.getItem(`trip_${tripId}`));
+                    const savedTripId = result.tripId || tripId;
+                    storedBooking.tripId = savedTripId;
                     storedBooking.supabaseId = result.bookingId;
                     storedBooking.supabaseSaved = true;
-                    localStorage.setItem(`trip_${tripId}`, JSON.stringify(storedBooking));
+                    if (savedTripId) localStorage.setItem(`trip_${savedTripId}`, JSON.stringify(storedBooking));
                     localStorage.setItem('lm_last_trip_id', result.bookingId);
-                    console.log('✅ Booking saved to Supabase:', result.bookingId);
+                    if (isEditing) {
+                        currentActiveBooking = {
+                            id: result.bookingId,
+                            trip_id: result.tripId || tripId,
+                            status: 'pending',
+                            details_version: result.detailsVersion
+                        };
+                        this.finishPendingEdit();
+                        console.log('✅ Pending ride updated in place:', result.bookingId);
+                    } else {
+                        console.log('✅ Booking saved to Supabase:', result.bookingId);
+                    }
                     // ===== END SUPABASE PERSISTENCE =====
 
                     // Success: slide up the live trip status sheet (same page,
@@ -2169,16 +2250,22 @@
                     // Nothing was booked: remove the provisional local
                     // record so a failed attempt can never masquerade as a
                     // trip later.
-                    try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {}
+                    if (!isEditing) {
+                        try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {}
+                    }
 
                     // Restore button
                     const bookBtn = document.getElementById('bookBtn');
-                    bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
+                    bookBtn.innerHTML = isEditing
+                        ? '<span class="btn-main-text">Save changes</span>'
+                        : '<span class="btn-main-text">Book Service</span>';
                     bookBtn.disabled = false;
 
                     // Show more detailed error message
-                    const errorMessage = error.message || 'Booking failed. Please try again.';
-                    this.showPaymentError(errorMessage);
+                    const errorMessage = isEditing
+                        ? (error.message || 'Changes not saved. Your original ride is unchanged.')
+                        : (error.message || 'Booking failed. Please try again.');
+                    this.showPaymentError(errorMessage, isEditing ? 'Changes not saved' : 'Booking not submitted');
                 }
             }
 
@@ -2192,7 +2279,7 @@
                 return 'LM-' + id;
             }
             
-            showPaymentError(message) {
+            showPaymentError(message, title = 'Booking not submitted') {
                 // Booking/auth failure modal (payment is disabled — this
                 // fires for authentication and submission failures, so the
                 // headline must say what actually happened: no ride exists).
@@ -2201,7 +2288,7 @@
                 errorModal.innerHTML = `
                     <div class="payment-error-content">
                         <div class="payment-error-icon">❌</div>
-                        <h3>Booking not submitted</h3>
+                        <h3>${title}</h3>
                         <p>${message}</p>
                         <button onclick="this.closest('.payment-error-modal').remove()" class="payment-error-btn">OK</button>
                     </div>
@@ -2346,10 +2433,12 @@
                 const reveal = () => {
                     if (overlay.dataset.shown) return;
                     overlay.dataset.shown = '1';
-                    // Restore the book button so the form is usable after "Go back"
+                    // Restore the correct primary action under the sheet.
                     const bookBtn = document.getElementById('bookBtn');
                     if (bookBtn) {
-                        bookBtn.innerHTML = '<span class="btn-main-text">Book Service</span>';
+                        bookBtn.innerHTML = this.pendingEdit
+                            ? '<span class="btn-main-text">Save changes</span>'
+                            : '<span class="btn-main-text">Book Service</span>';
                         bookBtn.disabled = false;
                     }
                     requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('active')));
@@ -2375,7 +2464,11 @@
                         reveal();
                     }
                     if (e.data?.type === 'lm-resize') sizePanel(e.data.height); // status changed
-                    if (e.data?.type === 'lm-close') closeSheet();   // "Go back" pressed inside the sheet
+                    if (e.data?.type === 'lm-close') closeSheet();
+                    if (e.data?.type === 'lm-edit') {
+                        closeSheet();
+                        this.beginPendingEdit(e.data);
+                    }
                     if (e.data?.type === 'lm-cancelled') {
                         // Server-confirmed cancellation: full booking-state reset.
                         // Guard: only for the booking this sheet was opened for.
@@ -2387,7 +2480,7 @@
                 window.addEventListener('message', onMessage);
 
                 // NOTE: no backdrop-dismiss. Once a booking exists, this sheet
-                // is the active ride experience — it closes only via "Go back"
+                // is the active ride experience — it closes only via "Edit ride"
                 // (pending) or a confirmed cancellation. Accidental taps on the
                 // dimmed area must never hide a live ride.
 
