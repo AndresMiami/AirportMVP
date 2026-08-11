@@ -62,6 +62,13 @@ const SWEEP_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, ' +
   'dropoff_location, customer_name, assigned_driver, driver_ready_at, ' +
   'driver_ready_by, driver_ready_source, at_risk_at, accepted_at';
 
+// Dispatch refetches ONE row and may render cancellation templates, which
+// read the stamped shadow-fee audit (migration 013) — the notification
+// claims DB truth, never a recomputation. The 50-row sweep stays lean on
+// SWEEP_FIELDS; only the per-event refetch pays for the extra columns.
+const DISPATCH_FIELDS = SWEEP_FIELDS + ', price, cancelled_at, cancelled_from_status, ' +
+  'cancel_fee_percent, cancel_fee_policy_amount, cancel_fee_collected, cancel_waiver_reason';
+
 const SOFT_BUDGET_MS = 8000;
 const MAX_BOOKINGS = 50;
 const MAX_ATTEMPTS = 15;          // global provider-call cap, heartbeat included
@@ -507,7 +514,7 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
   };
 
   const { data: b, error: refetchError } = await db.from('bookings')
-    .select(SWEEP_FIELDS).eq('id', ev.booking_id).maybeSingle();
+    .select(DISPATCH_FIELDS).eq('id', ev.booking_id).maybeSingle();
   if (refetchError) {
     // Transient read failure must NOT condemn the event as missing.
     dbFail('dispatch refetch', refetchError);
@@ -532,6 +539,13 @@ async function dispatchOne(db, ev, nowMs, summary, dbFail) {
       await suppress('reassigned');
       return;
     }
+  }
+  // Cancellation events claim the row IS cancelled — same principle as
+  // at_risk_mark deriving only from the stamped column. If the live row
+  // says otherwise (however unlikely), the claim would be a lie: suppress.
+  if (notify.CANCELLATION_TYPES.includes(ev.event_type) && b.status !== 'cancelled') {
+    await suppress('not_cancelled');
+    return;
   }
 
   // Absolute escalation deadline (driver ask events): a reminder whose
