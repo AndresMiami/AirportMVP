@@ -42,7 +42,17 @@ verified checkpoint locations all live in the web app backed by Supabase.
   passenger is not guest checkout.
 - `trip.html` — passenger status page: stepper, vehicle hero, booking-time
   ETA, static verified-checkpoint map marker (honest labels, Miami-time
-  stamps, never a moving dot), WhatsApp button, Go back/Cancel. SEALED smart
+  stamps, never a moving dot), WhatsApp button, Go back/Cancel. Cancel is
+  QUOTE-FIRST (PR 1A): tap → server quote from `/api/cancel-booking` →
+  inline card shows the SERVER's numbers (pending: fee $0 · due today $0,
+  pilot wording, never "charged") → final Cancel ride sends the reviewed
+  quote back as `expected` and any drift 409s with a fresh quote (409 is
+  never success). Account-owned bookings attach the owner's session via a
+  lazy, deadline-bounded load of the SAME supabase-js CDN bundle indexMVP
+  uses plus the same-origin supabase.js client (CDN failure = guest path,
+  the server still decides); legacy guest links keep bare-UUID
+  (pending only). `CANCEL_QUOTE_DISABLED=1` 503s the new endpoint and the
+  page falls back to the legacy path (same server-side authorization). SEALED smart
   polling of `/api/booking-status`: cadence by status (pending 15s /
   confirmed 30s only within 30 min of pickup — farther out sleeps locally
   with zero network / on_the_way 30s / arrived 15s / in_progress 60s),
@@ -73,7 +83,9 @@ verified checkpoint locations all live in the web app backed by Supabase.
   enabled ONLY by an explicit tap, bound to driver+device
   (push_subscriptions; newest activated_at device wins; endpoints are
   never reassigned across accounts — 409 + fresh resubscribe), push-first
-  with Telegram fallback (never both; urgent/admin stay Telegram-only),
+  with Telegram fallback (never both; ADMIN-role events are Telegram-only —
+  driver events, the urgent ask included, route push-first: verified
+  against the shipped routing, watchdog dispatchOne),
   absolute TTLs + per-booking Topic/Tag, durable failure_class routing,
   PUSH_DISABLED kill switch. Clicks deep-link to /driver?ride=<id>;
   notifications never mutate ride state.
@@ -98,6 +110,24 @@ EXACT ownership match. A stale/foreign action matches 0 rows → the backend
 answers 200 `{idempotent:true}` ONLY when status AND owner both match
 (verified duplicate), else 409 with `currentStatus` — the client never
 interprets a 409 as success. Legacy status `assigned` kept for old rows.
+
+Passenger cancellation (PR 1A, pending only — Blacklane-style policy,
+pilot = shadow fees): authorization lives in `lib/cancel-core.js`, shared
+verbatim by `/api/cancel-booking` (quote + guarded cancel) and the legacy
+`/api/booking-status` cancel action so the rules can never diverge.
+`customer_id` set → signed-in OWNER required (401/403/500, auth-outage
+discipline); `customer_id` NULL (legacy guest) → the unguessable UUID
+remains the capability. Every cancellation stamps the migration-013
+shadow audit (from-status, pickup snapshot, policy version `pilot-2026-08`,
+fee %/amount, collected $0 — DB CHECK enforced — waiver, actor role +
+auth UUID) in the SAME guarded UPDATE as the status flip, and the 013
+outbox TRIGGER inserts the `ride_cancelled_admin` ledger event in the
+SAME transaction (manual admin SQL cancels get it free). Delivery is the
+watchdog's (~5 min); PR 1A has NO immediate dispatch — the API honestly
+reports `immediateSubmission:'deferred'`. Confirmed/on_the_way/arrived
+self-service cancellation (50%/100% shadow brackets), the driver
+`ride_cancelled` push event, and the shared-dispatcher extraction are
+PR 2/3 per the Codex-approved progression.
 
 Checkpoint model (5 statuses, 3 verified locations, 1 cleanup): `on_my_way`,
 `arrived`, `start_trip` may carry `lat`/`lng`, stamped atomically with the
