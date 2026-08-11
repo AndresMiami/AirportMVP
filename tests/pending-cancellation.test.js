@@ -27,6 +27,8 @@ function resetState() {
     customer_id: null, pickup_datetime: PICKUP, price: '55.00'
   };
   state.rereadRow = null;      // row served AFTER a conflict (defaults to bookingRow)
+  state.rereadMissing = false; // second read finds no booking
+  state.rereadError = null;    // second read fails at the database
   state.readError = null;
   state.customerRow = { id: 'cust-1' };
   state.customerError = null;
@@ -60,8 +62,12 @@ const supabaseMock = {
               maybeSingle: async () => {
                 state.reads++;
                 if (state.readError) return { data: null, error: state.readError };
-                const row = state.reads > 1 && state.rereadRow ? state.rereadRow : state.bookingRow;
-                return { data: row, error: null };
+                if (state.reads > 1) {
+                  if (state.rereadError) return { data: null, error: state.rereadError };
+                  if (state.rereadMissing) return { data: null, error: null };
+                  if (state.rereadRow) return { data: state.rereadRow, error: null };
+                }
+                return { data: state.bookingRow, error: null };
               },
               single: async () => {
                 const row = state.rereadRow || state.bookingRow;
@@ -362,6 +368,26 @@ async function check(name, fn) {
     const body = JSON.parse(res.body);
     assert.strictEqual(body.error, 'Cannot cancel');
     assert.strictEqual(body.status, 'confirmed');
+  });
+
+  await check('legacy cancel lost race: booking vanished on re-read -> 404, never 409 unknown', async () => {
+    state.updateRows = [];
+    state.rereadMissing = true;
+    const res = await post(bookingStatus, { id: BOOKING_ID, action: 'cancel' });
+    assert.strictEqual(res.statusCode, 404);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.error, 'Booking not found');
+    assert.ok(!res.body.includes('unknown'));
+  });
+
+  await check('legacy cancel lost race: re-read DB failure -> honest 500, never success or unknown', async () => {
+    state.updateRows = [];
+    state.rereadError = { message: 'db down' };
+    const res = await post(bookingStatus, { id: BOOKING_ID, action: 'cancel' });
+    assert.strictEqual(res.statusCode, 500);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.error, 'Lookup failed');
+    assert.ok(!body.success);
   });
 
   await check('both endpoints allow the Authorization header (CORS)', async () => {

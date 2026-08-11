@@ -129,18 +129,21 @@ exports.handler = async (event) => {
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to cancel booking' }) };
       }
       if (result.conflict) {
-        // Lost the race to a concurrent accept/cancel — report live truth.
-        const { data: current } = await supabase
-          .from('bookings')
-          .select('status')
-          .eq('id', id)
-          .single();
+        // Lost the race to a concurrent accept/cancel — report live truth,
+        // and report it honestly: a booking present answers 409 with its
+        // real status, a genuinely missing booking is 404, and a failed
+        // re-read is a real 500 — never the old '409 unknown' guess, and
+        // never success.
+        const reread = await core.readBookingForCancel(supabase, id);
+        if (!reread.booking) {
+          return { statusCode: reread.status, headers, body: JSON.stringify({ error: reread.error }) };
+        }
         return {
           statusCode: 409,
           headers,
           body: JSON.stringify({
             error: 'Cannot cancel',
-            status: current?.status || 'unknown'
+            status: reread.booking.status
           })
         };
       }
