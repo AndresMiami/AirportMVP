@@ -1279,6 +1279,54 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     );
   });
 
+  // ---------- PR 1A: ride_cancelled_admin outbox events (behavioral) ----------
+  // The migration-013 trigger is the producer; here its row is injected
+  // directly and the REAL dispatch loop must (a) deliver it for a
+  // cancelled booking with the stamped audit text, (b) suppress it with
+  // zero provider calls when the live row is not actually cancelled.
+  freshState();
+  const cxlBooking = mkBooking({
+    status: 'cancelled',
+    trip_id: 'LM-HXA5',
+    assigned_driver: null,
+    cancelled_from_status: 'pending',
+    cancelled_at: iso(-1),
+    cancel_fee_percent: 0,
+    cancel_fee_policy_amount: 0,
+    cancel_fee_collected: 0
+  });
+  state.bookings.push(cxlBooking);
+  state.notification_events.push({
+    id: 'ev-cxl-1', booking_id: cxlBooking.id, event_type: 'ride_cancelled_admin',
+    recipient_role: 'admin', recipient_key: 'admin', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('cancelled booking: admin outbox event dispatches via Telegram with withdrawal copy', () => {
+    assert.strictEqual(fetchCalls.length, 1, 'exactly one Telegram send');
+    assert.strictEqual(telegramChats()[0], 'admin-chat', 'admin events are Telegram-only to the admin chat');
+    assert.ok(fetchCalls[0].body.text.includes('withdrawn'), 'pending variant renders the withdrawal copy');
+    assert.ok(fetchCalls[0].body.text.includes('LM-HXA5'));
+    const ev = events().find((e) => e.id === 'ev-cxl-1');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
+  freshState();
+  const liveBooking = mkBooking({ status: 'pending', assigned_driver: null, pickup_datetime: iso(500) });
+  state.bookings.push(liveBooking);
+  state.notification_events.push({
+    id: 'ev-cxl-2', booking_id: liveBooking.id, event_type: 'ride_cancelled_admin',
+    recipient_role: 'admin', recipient_key: 'admin', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('NOT-cancelled booking: cancellation event suppressed not_cancelled, zero sends', () => {
+    assert.strictEqual(fetchCalls.length, 0, 'no provider call may claim a cancellation that is not DB truth');
+    const ev = events().find((e) => e.id === 'ev-cxl-2');
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'not_cancelled');
+  });
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {
   console.error('\nFAIL:', e.message);
