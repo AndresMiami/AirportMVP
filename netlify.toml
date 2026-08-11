@@ -47,6 +47,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/cancel-booking"
+  to = "/.netlify/functions/cancel-booking"
+  status = 200
+
+[[redirects]]
   from = "/api/driver-bookings"
   to = "/.netlify/functions/driver-bookings"
   status = 200

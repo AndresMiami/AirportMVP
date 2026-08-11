@@ -1,23 +1,32 @@
 // Passenger-facing booking status endpoint.
-// The Supabase UUID acts as the access token — it is unguessable and only
-// given to the passenger who created the booking.
 //   GET  /api/booking-status?id=<uuid>          -> whitelisted booking fields
 //   POST /api/booking-status {id, action:'cancel'} -> cancel while still pending
+//
+// The Supabase UUID acts as the READ access token — it is unguessable and
+// only given to the passenger who created the booking. CANCELLATION is
+// tighter since PR 1A: an account-owned booking (customer_id set) requires
+// its signed-in owner's Bearer JWT; only legacy guest bookings
+// (customer_id NULL) keep bare-UUID cancellation. The authorization,
+// audit stamps, and guarded update live in lib/cancel-core — shared
+// verbatim with /api/cancel-booking so the two paths can never diverge.
+// This endpoint keeps its legacy response shapes for old open tabs.
 
 const { createClient } = require('@supabase/supabase-js');
+const core = require('./lib/cancel-core');
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = core.UUID_RE;
 
-// Whitelisted booking fields exclude private contact data and internal ids.
+// Whitelisted booking fields exclude private contact data, internal ids,
+// and all cancellation audit fields (single source: lib/cancel-core).
 // The assigned driver's PUBLIC contact (name + phone) is intentionally
 // returned separately for the pairing message and WhatsApp button.
-const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, driver_lat, driver_lng, driver_location_at';
+const PASSENGER_FIELDS = core.PASSENGER_FIELDS;
 
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'private, no-store',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
   };
 
@@ -80,21 +89,47 @@ exports.handler = async (event) => {
         return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unsupported action' }) };
       }
 
-      // Only a still-pending booking can be cancelled by the passenger.
-      // The status filter makes this race-safe against a concurrent accept.
-      const { data, error } = await supabase
-        .from('bookings')
-        .update({ status: 'cancelled' })
-        .eq('id', id)
-        .eq('status', 'pending')
-        .select(PASSENGER_FIELDS);
-
-      if (error) {
-        console.error('❌ Cancel failed:', error);
-        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to cancel booking' }) };
+      const anonKey = process.env.SUPABASE_ANON_KEY;
+      if (!anonKey) {
+        console.error('❌ Missing SUPABASE_ANON_KEY — cannot verify cancel authorization');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
       }
 
-      if (!data || data.length === 0) {
+      const read = await core.readBookingForCancel(supabase, id);
+      if (!read.booking) {
+        return { statusCode: read.status, headers, body: JSON.stringify({ error: read.error }) };
+      }
+      const booking = read.booking;
+
+      // Account-owned bookings require their signed-in owner; legacy guest
+      // bookings (customer_id NULL) keep the UUID capability.
+      const auth = await core.authorizeCancel(event, booking, {
+        supabaseUrl, anonKey, db: supabase
+      });
+      if (!auth.actor) {
+        return { statusCode: auth.status, headers, body: JSON.stringify({ error: auth.error }) };
+      }
+
+      // This legacy action stays PENDING-only (its historical contract).
+      // Legacy 409 shape preserved for old open tabs: {error, status}.
+      if (booking.status !== 'pending') {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'Cannot cancel', status: booking.status })
+        };
+      }
+
+      const nowMs = Date.now();
+      const quote = core.computeQuote(booking, nowMs);
+      const result = await core.performCancel(supabase, booking, quote, auth.actor, nowMs);
+
+      if (result.dbError) {
+        console.error('❌ Cancel failed:', result.dbError);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to cancel booking' }) };
+      }
+      if (result.conflict) {
+        // Lost the race to a concurrent accept/cancel — report live truth.
         const { data: current } = await supabase
           .from('bookings')
           .select('status')
@@ -110,7 +145,7 @@ exports.handler = async (event) => {
         };
       }
 
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true, booking: data[0] }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, booking: result.row }) };
     }
 
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
