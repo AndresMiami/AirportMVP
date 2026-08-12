@@ -468,24 +468,57 @@
         // The account gate resolves the server-owned booking before the app
         // boots. This single-shot guard still protects repeated init calls.
         function resumeAccountBookingWhenReady() {
-            const bookingId = currentActiveBooking?.id;
-            if (!bookingId || !window.airportApp || activeBookingResumed) return;
-            activeBookingResumed = true;
-            try { localStorage.setItem('lm_last_trip_id', bookingId); } catch (_) {}
-            if (currentActiveBooking.status === 'pending' &&
-                pendingEditIntent?.bookingId === bookingId) {
-                const intent = {
-                    bookingId,
-                    tripCode: currentActiveBooking.trip_id || pendingEditIntent.tripCode || '',
-                    detailsVersion: Number(currentActiveBooking.details_version) ||
-                        Number(pendingEditIntent.detailsVersion) || 1
-                };
+            if (!window.airportApp || activeBookingResumed) return;
+            const intent = pendingEditIntent;
+            const clearIntent = () => {
                 pendingEditIntent = null;
                 try { sessionStorage.removeItem('lm_pending_edit_intent'); } catch (_) {}
-                window.airportApp.beginPendingEdit(intent);
+            };
+
+            const bookingId = currentActiveBooking?.id;
+            if (bookingId) {
+                activeBookingResumed = true;
+                try { localStorage.setItem('lm_last_trip_id', bookingId); } catch (_) {}
+                if (currentActiveBooking.status === 'pending' &&
+                    intent?.bookingId === bookingId) {
+                    const editIntent = {
+                        bookingId,
+                        tripCode: currentActiveBooking.trip_id || intent.tripCode || '',
+                        detailsVersion: Number(currentActiveBooking.details_version) ||
+                            Number(intent.detailsVersion) || 1
+                    };
+                    clearIntent();
+                    window.airportApp.beginPendingEdit(editIntent);
+                    return;
+                }
+                // Unmatched or non-pending intent: clear it so it can never
+                // resurface confusingly in a later session.
+                clearIntent();
+                window.airportApp.showTripSheet(bookingId);
                 return;
             }
-            window.airportApp.showTripSheet(bookingId);
+
+            // Ambassadors get no profile.activeBooking (multi-ride by
+            // design), but their standalone Edit ride intent must still be
+            // honored — a fresh Book Service form here would invite an
+            // accidental SECOND ride. The server (update-pending-booking)
+            // remains the sole authority on ownership, pending status,
+            // assignment, and details_version; a bad intent just 403/409s.
+            if (currentAmbassador && intent &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(intent.bookingId || '')) {
+                activeBookingResumed = true;
+                const editIntent = {
+                    bookingId: intent.bookingId,
+                    tripCode: intent.tripCode || '',
+                    detailsVersion: Number(intent.detailsVersion) || 1
+                };
+                clearIntent();
+                window.airportApp.beginPendingEdit(editIntent);
+                return;
+            }
+
+            // No live booking and no consumable intent: drop anything stale.
+            if (intent) clearIntent();
         }
 
         function applyAuthenticatedAccountState() {

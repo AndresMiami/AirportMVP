@@ -254,6 +254,72 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.deepStrictEqual(booking, beforeFailure);
   });
 
+  // ---- Review fixes: optional-field preservation + booker coherence ----
+  resetBooking({
+    customer_email: 'stored@example.com', flight_number: 'DL999',
+    notes: 'Gate note', pickup_sign: 'STORED', promo_code: 'KEEP10',
+    booker_name: 'Booker Bob', booker_phone: '+17865550999'
+  });
+  r = await post(validBody({
+    email: '', flightNumber: '', notes: '', pickupSign: '', promoCode: '',
+    bookerName: '', bookerPhone: ''
+  }));
+  check('restored-session edit with blank optionals preserves every stored value', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedUpdate.customer_email, 'stored@example.com');
+    assert.strictEqual(capturedUpdate.flight_number, 'DL999');
+    assert.strictEqual(capturedUpdate.notes, 'Gate note');
+    assert.strictEqual(capturedUpdate.pickup_sign, 'STORED');
+    assert.strictEqual(capturedUpdate.promo_code, 'KEEP10');
+    assert.strictEqual(capturedUpdate.booker_name, 'Booker Bob');
+    assert.strictEqual(capturedUpdate.booker_phone, '+17865550999');
+  });
+
+  resetBooking({ customer_email: 'old@example.com', notes: 'old note' });
+  r = await post(validBody({
+    email: 'new@example.com', notes: 'new note',
+    bookerName: 'Someone Else', bookerPhone: '+17865550111'
+  }));
+  check('non-empty submitted optionals replace stored values', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedUpdate.customer_email, 'new@example.com');
+    assert.strictEqual(capturedUpdate.notes, 'new note');
+    assert.strictEqual(capturedUpdate.booker_name, 'Someone Else');
+    assert.strictEqual(capturedUpdate.booker_phone, '+17865550111');
+  });
+
+  resetBooking(); // no stored booker pair
+  r = await post(validBody({ bookerName: '', bookerPhone: '+17865550222' }));
+  check('orphan bookerPhone with no stored booker -> both NULL, never an orphaned phone', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedUpdate.booker_name, null);
+    assert.strictEqual(capturedUpdate.booker_phone, null);
+  });
+
+  resetBooking({ booker_name: 'Booker Bob', booker_phone: '+17865550999' });
+  r = await post(validBody({ bookerName: '', bookerPhone: '+17865550333' }));
+  check('orphan bookerPhone with a stored pair -> pair preserved, orphan ignored', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedUpdate.booker_name, 'Booker Bob');
+    assert.strictEqual(capturedUpdate.booker_phone, '+17865550999');
+  });
+
+  resetBooking({ booker_name: 'Booker Bob', booker_phone: '+17865550999' });
+  r = await post(validBody({ bookerName: 'Maria Passenger', bookerPhone: '+17865550444' }));
+  check('booker name matching the passenger clears the pair (explicit for-myself)', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedUpdate.booker_name, null);
+    assert.strictEqual(capturedUpdate.booker_phone, null);
+  });
+
+  check('RESPONSE_FIELDS never exposes private personal fields', () => {
+    const src = require('fs').readFileSync(
+      path.join(repoRoot, 'backend/functions/update-pending-booking.js'), 'utf8');
+    const line = src.match(/const RESPONSE_FIELDS = '([^']+)'/)[1];
+    ['customer_email', 'booker_name', 'booker_phone', 'notes', 'pickup_sign', 'promo_code']
+      .forEach((f) => assert.ok(!line.includes(f), f + ' must stay private'));
+  });
+
   console.log('\nALL ' + passed + ' CHECKS PASS');
 })().catch((error) => {
   console.error('\nFAIL:', error.stack || error.message);

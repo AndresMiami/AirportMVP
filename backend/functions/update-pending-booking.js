@@ -89,14 +89,11 @@ function parseEdit(body) {
   return {
     bookingId,
     expectedVersion,
+    // Required ride details: always full-replace (the form re-validates
+    // them on every edit).
     values: {
       customer_name: customerName,
       customer_phone: phone,
-      customer_email: text(body.email, 254),
-      booker_name: text(body.bookerName, 120) === customerName
-        ? null : text(body.bookerName, 120),
-      booker_phone: text(body.bookerName, 120) === customerName
-        ? null : text(body.bookerPhone, 40),
       pickup_location: pickup,
       dropoff_location: dropoff,
       pickup_datetime: new Date(pickupMs).toISOString(),
@@ -106,12 +103,25 @@ function parseEdit(body) {
       vehicle_name: vehicleName,
       price: Math.round(price * 100) / 100,
       payment_method: text(body.paymentMethod, 30) || 'cash',
+      booking_mode: body.mode === 'pickup' ? 'pickup' : 'dropoff',
+      duration_minutes: duration
+    },
+    // Optional personal details: null here means "not submitted/blank" —
+    // the handler PRESERVES the stored value in that case (a restored
+    // session or fresh device starts from an empty form and must never
+    // silently erase data the passenger didn't retype).
+    optional: {
+      customer_email: text(body.email, 254),
       flight_number: text(body.flightNumber, 80),
       notes: text(body.notes, 2000),
       pickup_sign: text(body.pickupSign, 160),
-      promo_code: text(body.promoCode, 80),
-      booking_mode: body.mode === 'pickup' ? 'pickup' : 'dropoff',
-      duration_minutes: duration
+      promo_code: text(body.promoCode, 80)
+    },
+    // Booker pair, resolved coherently against the stored row in the
+    // handler (a phone may only ever be stored alongside a name).
+    booker: {
+      name: text(body.bookerName, 120),
+      phone: text(body.bookerPhone, 40)
     }
   };
 }
@@ -183,7 +193,7 @@ exports.handler = async (event) => {
   try {
     const { data: current, error: readError } = await db
       .from('bookings')
-      .select('id, trip_id, status, assigned_driver, customer_id, details_version, price, host_commission')
+      .select('id, trip_id, status, assigned_driver, customer_id, details_version, price, host_commission, customer_email, booker_name, booker_phone, flight_number, notes, pickup_sign, promo_code')
       .eq('id', edit.bookingId)
       .maybeSingle();
     if (readError) {
@@ -208,8 +218,39 @@ exports.handler = async (event) => {
     const oldHostCommission = Number(current.host_commission);
     const commissionRate = oldPrice > 0 && oldHostCommission > 0
       ? oldHostCommission / oldPrice : 0;
+
+    // Optional-field preservation: a non-empty submitted value replaces;
+    // a missing/blank one preserves the stored value. Explicitly CLEARING
+    // an optional field is DEFERRED until the editor receives protected
+    // server-side prefill data — until then a blank input cannot be
+    // distinguished from an untouched one.
+    const preserved = {};
+    for (const [col, submitted] of Object.entries(edit.optional)) {
+      preserved[col] = submitted !== null ? submitted : (current[col] ?? null);
+    }
+
+    // Booker pair coherence (create-booking parity): booker_phone may only
+    // be stored alongside a meaningful booker_name. Submitting the
+    // passenger's own name is an explicit "for myself" and clears the
+    // pair; a blank name preserves the stored pair; an orphaned phone is
+    // never written.
+    let bookerName = null;
+    let bookerPhone = null;
+    if (edit.booker.name) {
+      if (edit.booker.name !== edit.values.customer_name) {
+        bookerName = edit.booker.name;
+        bookerPhone = edit.booker.phone;
+      }
+    } else if (current.booker_name) {
+      bookerName = current.booker_name;
+      bookerPhone = current.booker_phone || null;
+    }
+
     const updates = {
       ...edit.values,
+      ...preserved,
+      booker_name: bookerName,
+      booker_phone: bookerPhone,
       host_commission: Math.round(edit.values.price * commissionRate * 100) / 100,
       details_version: edit.expectedVersion + 1,
       updated_at: new Date().toISOString()

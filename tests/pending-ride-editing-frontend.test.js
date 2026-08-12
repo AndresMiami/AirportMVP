@@ -71,6 +71,23 @@ check('driver Accept sends the exact details version it rendered', () => {
   assert.ok(driver.includes('body.expectedDetailsVersion = Number(offer?.details_version) || 1'));
 });
 
+check('ambassador standalone edit intent is consumed — never a fresh create form', () => {
+  const at = booking.indexOf('if (currentAmbassador && intent');
+  assert.ok(at > -1, 'ambassador intent branch missing');
+  const branch = booking.slice(at, at + 900);
+  assert.ok(branch.includes('beginPendingEdit(editIntent)'),
+    'ambassador intent must enter guarded edit mode');
+  assert.ok(/\[0-9a-f\]\{8\}/.test(branch), 'intent bookingId must be UUID-validated');
+});
+
+check('invalid, unmatched, or consumed intents are always cleared', () => {
+  assert.ok(booking.includes('const clearIntent = () => {'));
+  assert.ok(/clearIntent\(\);\s*\n\s*window\.airportApp\.showTripSheet\(bookingId\)/.test(booking),
+    'unmatched intent must be cleared before showing the sheet');
+  assert.ok(booking.includes('if (intent) clearIntent();'),
+    'unconsumable intents must never linger');
+});
+
 check('service worker evicts pre-edit booking-form clients (v1.3.18+)', () => {
   const m = sw.match(/CACHE_NAME = 'linkmia-v(\d+)\.(\d+)\.(\d+)'/);
   assert.ok(m, 'CACHE_NAME missing');
