@@ -210,9 +210,9 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    nearest nonterminal booking reopens automatically, and create-booking
    blocks ordinary stale-tab/device duplicates by returning the existing
    ride. A truly simultaneous first-insert race remains recorded for the
-   migration-014 database constraint (013 is the pending-edit version guard).
-   Ambassadors remain explicitly
-   multi-ride.
+   future migration-015 database constraint (013 shipped as the
+   cancellation policy; 014 is the pending-edit details_version
+   migration). Ambassadors remain explicitly multi-ride.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.
    Passenger Push later binds to the authenticated customer UUID.
 4. Checkpoint locations (browser geolocation at status taps → Supabase →
