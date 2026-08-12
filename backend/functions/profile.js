@@ -84,7 +84,7 @@ exports.handler = async (event) => {
       if (data?.id && !host) {
         const { data: booking, error: bookingError } = await db
           .from('bookings')
-          .select('id, trip_id, status, pickup_datetime')
+          .select('id, trip_id, status, pickup_datetime, details_version')
           .eq('customer_id', data.id)
           .in('status', ACTIVE_BOOKING_STATUSES)
           .order('pickup_datetime', { ascending: true })

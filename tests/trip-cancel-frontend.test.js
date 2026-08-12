@@ -133,17 +133,15 @@ check('polling seals untouched: cadences, budget, cutoffs, no manual refresh', (
 });
 
 // ---------- indexMVP.html ----------
-check('rebook auto-cancel sends the owner session token (ambassador dedupe fix)', () => {
-  const at = indexMvp.indexOf("const cancelResponse = await fetch('/api/booking-status'");
-  assert.ok(at > -1, 'rebook auto-cancel anchor missing');
-  const block = indexMvp.slice(at, at + 1200);
-  assert.ok(block.includes('Bearer ${submitSession.access_token}'), 'Authorization header missing');
-  assert.ok(block.includes("action: 'cancel'"));
-  // Fresh session is still fetched BEFORE the cancel side effect —
-  // the anchor itself must exist for the ordering claim to mean anything
-  const sessionAt = indexMvp.indexOf('session: submitSession');
-  assert.ok(sessionAt > -1, 'fresh-session anchor missing');
-  assert.ok(sessionAt < at);
+check('the cancel-and-recreate path is fully deleted (in-place editing owns rebooking)', () => {
+  // PR 1A briefly authenticated this path; the editing PR deletes it
+  // entirely — no auto-cancel may ever return to the submit flow.
+  assert.ok(!indexMvp.includes("const cancelResponse = await fetch('/api/booking-status'"),
+    'auto-cancel fetch must not exist');
+  assert.ok(!/If a previous request from this session is still pending/.test(indexMvp),
+    'auto-cancel comment must not exist');
+  // The fresh-session-first discipline still guards the submit flow
+  assert.ok(indexMvp.indexOf('session: submitSession') > -1, 'fresh-session anchor missing');
 });
 
 // ---------- service worker + routing ----------

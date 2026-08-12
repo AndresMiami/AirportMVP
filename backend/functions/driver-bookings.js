@@ -17,7 +17,7 @@ const { createClient } = require('@supabase/supabase-js');
 // (referred_by_host, host_commission, linkmia_commission), no customer
 // email, no internal ids the client doesn't need (assigned_driver is a
 // query filter, never a response field).
-const DRIVER_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, dropoff_location, vehicle_type, vehicle_name, passengers, bags, price, driver_payout, payment_status, flight_number, duration_minutes, customer_name, customer_phone, booker_name, booker_phone, pickup_sign, notes, accepted_at, driver_ready_at, driver_ready_source';
+const DRIVER_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, dropoff_location, vehicle_type, vehicle_name, passengers, bags, price, driver_payout, payment_status, flight_number, duration_minutes, customer_name, customer_phone, booker_name, booker_phone, pickup_sign, notes, accepted_at, driver_ready_at, driver_ready_source, details_version';
 
 // Additionally hidden on UNACCEPTED (pending) offers — revealed at accept.
 const PENDING_PRIVATE_FIELDS = ['customer_name', 'customer_phone', 'booker_name', 'booker_phone', 'pickup_sign', 'notes', 'payment_status', 'flight_number'];

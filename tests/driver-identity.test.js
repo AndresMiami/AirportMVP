@@ -115,11 +115,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
 (async () => {
   // ---------- authentication ----------
-  let r = await post({ bookingId: BID, action: 'accept' });
+  let r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 });
   check('no token -> 401', () => assert.strictEqual(r.statusCode, 401));
-  r = await post({ bookingId: BID, action: 'accept' }, 'tok-invalid');
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-invalid');
   check('invalid token -> 401', () => assert.strictEqual(r.statusCode, 401));
-  r = await post({ bookingId: BID, action: 'accept' }, 'tok-nodrv');
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-nodrv');
   check('no drivers row -> 403', () => assert.strictEqual(r.statusCode, 403));
   DRIVERS_BY_USER['auth-c'].status = 'inactive';
   r = await post({ bookingId: BID, action: 'on_my_way' }, 'tok-carlos');
@@ -155,7 +155,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
   // ---------- pre-accept privacy ----------
   listResult = [
-    { id: 'p1', status: 'pending', customer_name: 'Pat', customer_phone: '+15551234567',
+    { id: 'p1', status: 'pending', details_version: 3, customer_name: 'Pat', customer_phone: '+15551234567',
       booker_name: 'Booker', booker_phone: '+15559876543', pickup_sign: 'SIGN', notes: 'gate code 1234',
       payment_status: 'unpaid', flight_number: 'AA123', assigned_driver: null, price: 80 },
     { id: 'a1', status: 'on_the_way', customer_name: 'Pat', customer_phone: '+15551234567',
@@ -190,16 +190,32 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   // ---------- accept ----------
   lastUpdate = null; lastIsFilter = null; lastFilters = null;
   updateResult = { data: [{ id: BID, status: 'confirmed' }], error: null };
-  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
   check('accept: stamps assigned_driver atomically, requires UNASSIGNED pending', () => {
     assert.strictEqual(r.statusCode, 200);
     assert.strictEqual(lastUpdate.status, 'confirmed');
     assert.strictEqual(lastUpdate.assigned_driver, 'drv-a');
     assert.deepStrictEqual(lastIsFilter, { col: 'assigned_driver', val: null });
     assert.deepStrictEqual(lastFilters.status, ['pending']);
+    assert.strictEqual(lastFilters.details_version, 1,
+      'Accept must match the exact offer version the driver saw');
   });
-  r = await post({ bookingId: BID, action: 'accept' }, 'tok-busy');
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-busy');
   check('busy driver cannot accept -> 403', () => assert.strictEqual(r.statusCode, 403));
+
+  updateResult = { data: [], error: null };
+  currentBookingResult = {
+    data: {
+      status: 'pending', assigned_driver: null, details_version: 2,
+      pickup_datetime: new Date(Date.now() + 4 * 3600e3).toISOString()
+    },
+    error: null
+  };
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
+  check('stale offer version cannot be accepted -> 409 with current version', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(JSON.parse(r.body).currentDetailsVersion, 2);
+  });
 
   // ---------- ownership on later actions ----------
   lastUpdate = null; lastIsFilter = null; lastFilters = null;
@@ -255,7 +271,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     data: { pickup_datetime: new Date(Date.now() + 10 * 3600e3).toISOString() },
     error: null
   };
-  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
   check('accept stamps accepted_at; far pickup -> NO recent-accept readiness', () => {
     assert.strictEqual(r.statusCode, 200);
     assert.ok(lastUpdate.accepted_at, 'accepted_at anchor missing');
@@ -266,7 +282,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     data: { pickup_datetime: new Date(Date.now() + 2 * 3600e3).toISOString() },
     error: null
   };
-  r = await post({ bookingId: BID, action: 'accept' }, 'tok-andres');
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
   check('accept at/after T-180 IS readiness: recent_accept stamped in the SAME update', () => {
     assert.strictEqual(lastUpdate.driver_ready_source, 'recent_accept');
     assert.strictEqual(lastUpdate.driver_ready_by, 'drv-a');

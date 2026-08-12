@@ -286,7 +286,7 @@
 
             <div class="actions">
                 <a class="btn btn-whatsapp hidden" id="waBtn" target="_blank" rel="noopener">💬 Message your driver on WhatsApp</a>
-                <button class="btn btn-modify hidden" id="backBtn">← Go back</button>
+                <button class="btn btn-modify hidden" id="backBtn">✏️ Edit ride</button>
                 <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
                 <div class="cancel-quote-card hidden" id="cancelQuoteCard">
                     <div class="cancel-quote-title">Cancel this booking?</div>
@@ -1177,14 +1177,26 @@
             hideQuoteCard();
         });
 
-        // Go back behaves exactly like the back arrow on the other modals:
-        // just slides the sheet away. The request stays pending — if the
-        // passenger rebooks, the booking page cancels this one automatically.
+        // Pending edits reuse the booking form underneath this sheet. The
+        // parent keeps the existing booking identity and saves through the
+        // authenticated in-place update endpoint — never cancel + recreate.
         $('backBtn').addEventListener('click', () => {
             if (isEmbedded) {
-                window.parent.postMessage({ type: 'lm-close' }, '*');
+                window.parent.postMessage({
+                    type: 'lm-edit',
+                    bookingId,
+                    tripCode: lastBooking?.trip_id || '',
+                    detailsVersion: Number(lastBooking?.details_version) || 1
+                }, location.origin);
             } else {
-                window.location.href = '/';
+                try {
+                    sessionStorage.setItem('lm_pending_edit_intent', JSON.stringify({
+                        bookingId,
+                        tripCode: lastBooking?.trip_id || '',
+                        detailsVersion: Number(lastBooking?.details_version) || 1
+                    }));
+                } catch (_) { /* navigation still reaches the account gate */ }
+                window.location.href = '/indexMVP.html?book=1';
             }
         });
 

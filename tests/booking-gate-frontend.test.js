@@ -206,14 +206,13 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(appBlock.indexOf('new AirportBookingApp', bootIdx + 1), -1,
       'no second ungated construction path');
   });
-  check('fresh-session check runs BEFORE the trip_ write and the previous-ride cancel', () => {
+  check('fresh-session check runs BEFORE any provisional trip_ write', () => {
     const sessionIdx = appBlock.indexOf('session: submitSession');
     const tripWriteIdx = appBlock.indexOf('localStorage.setItem(`trip_');
-    const cancelIdx = appBlock.indexOf("action: 'cancel'");
-    assert.ok(sessionIdx >= 0 && tripWriteIdx >= 0 && cancelIdx >= 0);
+    assert.ok(sessionIdx >= 0 && tripWriteIdx >= 0);
     assert.ok(sessionIdx < tripWriteIdx, 'session must be verified before the local trip_ record');
-    assert.ok(sessionIdx < cancelIdx,
-      'an expired session must never cancel an existing ride it cannot replace');
+    assert.ok(!appBlock.includes("action: 'cancel'"),
+      'booking submit must never cancel an existing ride before another write succeeds');
   });
   check('failed/401 booking can never open the trip sheet; fake success removed', () => {
     assert.ok(appBlock.includes('response.status === 401'));
@@ -243,10 +242,10 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     const sheetIdx = appBlock.indexOf('this.showTripSheet(result.existingBookingId)', conflictIdx);
     assert.ok(conflictIdx >= 0 && removeIdx > conflictIdx && sheetIdx > removeIdx);
   });
-  check('replacement cancellation is awaited before a new create request', () => {
-    const cancelIdx = appBlock.indexOf("const cancelResponse = await fetch('/api/booking-status'");
-    const createIdx = appBlock.indexOf("const response = await fetch('/api/create-booking'");
-    assert.ok(cancelIdx >= 0 && createIdx > cancelIdx);
+  check('pending edit uses the guarded update endpoint, never cancel-and-recreate', () => {
+    assert.ok(appBlock.includes("? '/api/update-pending-booking'"));
+    assert.ok(appBlock.includes('apiPayload.expectedDetailsVersion = editContext.detailsVersion'));
+    assert.ok(!appBlock.includes("const cancelResponse = await fetch('/api/booking-status'"));
   });
   check('a failed attempt removes its provisional trip_ record', () => {
     assert.ok(appBlock.includes('localStorage.removeItem(`trip_${tripId}`)'));
@@ -274,11 +273,11 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(book.url, '/login.html');
   });
   const sw = read('service-worker.js');
-  check('service-worker cache includes the revoked-session bump (v1.3.16+)', () => {
+  check('service-worker cache includes the pending-edit bump (v1.3.17+)', () => {
     const m = sw.match(/CACHE_NAME = 'linkmia-v1\.3\.(\d+)'/);
     assert.ok(m, 'versioned cache name required');
-    assert.ok(parseInt(m[1], 10) >= 16,
-      'cache must never regress below the revoked-session continuity bump');
+    assert.ok(parseInt(m[1], 10) >= 17,
+      'cache must never regress below the pending-edit form bump');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);
