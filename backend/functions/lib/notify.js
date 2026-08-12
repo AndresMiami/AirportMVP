@@ -59,6 +59,14 @@ const DRIVER_ASKS = ['driver_ready_ask_1', 'driver_ready_ask_2', 'driver_ready_u
 
 const CHAIN_TYPES = READINESS_CHAIN.map((s) => s.type);
 
+// One-shot cancellation events, produced by the migration-013 outbox
+// trigger ATOMICALLY with the status flip — never derived by the watchdog.
+// Deliberately NOT in CHAIN_TYPES (their booking is terminal — the
+// status!=confirmed relevance gate must not suppress them) and NOT in
+// DRIVER_ASKS (never chain-collapsed). PR 1A ships the admin event only;
+// PR 2 adds 'ride_cancelled' (assigned driver, push-first) here.
+const CANCELLATION_TYPES = ['ride_cancelled_admin'];
+
 const MAX_ATTEMPTS_PER_CHANNEL = 3;
 const CLAIM_EXPIRY_MS = 3 * 60 * 1000;
 const TELEGRAM_TIMEOUT_MS = 5000;
@@ -118,6 +126,21 @@ function renderEvent(eventType, b) {
       return `🚨 Ride ${code} (${b.pickup_location} → ${b.dropoff_location}) at ${at}: driver has NOT confirmed readiness by T-120.`;
     case 'at_risk_mark':
       return `⚠️ AT RISK — ride ${code} at ${at}: no driver readiness by T-105. Marked at-risk in the database; consider calling.`;
+    case 'ride_cancelled_admin': {
+      // Renders ONLY from the row's stamped migration-013 audit fields —
+      // the notification claims database truth, never a recomputation.
+      const route = `${b.pickup_location} → ${b.dropoff_location}`;
+      const when = fmtWhenET(b.pickup_datetime);
+      if (b.cancelled_from_status === 'pending') {
+        return `🚫 Request ${code} withdrawn by the passenger before acceptance.\n${route}\nPickup was ${when}.`;
+      }
+      const pct = b.cancel_fee_percent == null ? null : Number(b.cancel_fee_percent);
+      const amt = b.cancel_fee_policy_amount == null ? null : Number(b.cancel_fee_policy_amount);
+      const feeLine = Number.isFinite(pct) && Number.isFinite(amt)
+        ? `\nPolicy: ${pct}% = $${amt.toFixed(2)} · pilot waived, $${Number(b.cancel_fee_collected || 0).toFixed(2)} collected`
+        : '';
+      return `🚫 Ride ${code} CANCELLED (was ${b.cancelled_from_status || 'active'}).\n${route}\nPickup was ${when}.${feeLine}`;
+    }
     default:
       return null;
   }
@@ -447,6 +470,7 @@ module.exports = {
   READINESS_CHAIN,
   DRIVER_ASKS,
   CHAIN_TYPES,
+  CANCELLATION_TYPES,
   MAX_ATTEMPTS_PER_CHANNEL,
   CLAIM_EXPIRY_MS,
   ASK_DEADLINE_MIN,

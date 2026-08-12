@@ -3,9 +3,10 @@
  * Handles caching, offline functionality, and performance optimization
  */
 
-// v1.3.16: Passenger account continuity gate — revoked sessions are cleared
-// and returned to login instead of looping on the cached Retry screen.
-const CACHE_NAME = 'linkmia-v1.3.16';
+// v1.3.17: PR 1A pending cancellation — the rebook auto-cancel now sends
+// the owner's session token (account-owned cancels are no longer
+// bare-UUID), so the precached indexMVP.html must refresh everywhere.
+const CACHE_NAME = 'linkmia-v1.3.17';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

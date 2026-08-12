@@ -175,6 +175,22 @@
             color: #FF453A;
             padding: 13px;
         }
+        .btn-keep {
+            background: #3A3A3C;
+            padding: 13px;
+        }
+        .cancel-quote-card {
+            background: rgba(255, 69, 58, 0.08);
+            border: 1px solid rgba(255, 69, 58, 0.35);
+            border-radius: 13px;
+            padding: 14px;
+            display: flex; flex-direction: column; gap: 9px;
+        }
+        .cancel-quote-title { font-size: 15px; font-weight: 700; text-align: center; }
+        .cancel-quote-lines {
+            font-size: 13px; color: var(--text-secondary);
+            text-align: center; line-height: 1.6;
+        }
         .btn-whatsapp {
             background: #25D366;
             box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
@@ -272,6 +288,12 @@
                 <a class="btn btn-whatsapp hidden" id="waBtn" target="_blank" rel="noopener">💬 Message your driver on WhatsApp</a>
                 <button class="btn btn-modify hidden" id="backBtn">← Go back</button>
                 <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
+                <div class="cancel-quote-card hidden" id="cancelQuoteCard">
+                    <div class="cancel-quote-title">Cancel this booking?</div>
+                    <div class="cancel-quote-lines" id="cancelQuoteLines"></div>
+                    <button class="btn btn-cancel" id="confirmCancelBtn">Cancel ride</button>
+                    <button class="btn btn-keep" id="keepRideBtn">Keep my ride</button>
+                </div>
                 <a class="btn btn-modify hidden" id="rebookBtn" href="/" target="_top">🚗 Book another ride</a>
                 <div class="action-error hidden" id="actionError"></div>
             </div>
@@ -624,10 +646,13 @@
                 $('flightLine').classList.add('hidden');
             }
 
-            // Actions
+            // Actions. The 15s pending poll re-renders while the quote
+            // card is open — the outer Cancel button must not resurrect
+            // under it (activeQuote owns the button while the card shows).
             const isPending = b.status === 'pending';
             $('backBtn').classList.toggle('hidden', !isPending);
-            $('cancelBtn').classList.toggle('hidden', !isPending);
+            $('cancelBtn').classList.toggle('hidden', !isPending || activeQuote !== null);
+            if (!isPending) hideQuoteCard(); // a status change closes the quote
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
 
             // Warm human channel once paired: WhatsApp chat with the driver.
@@ -895,13 +920,168 @@
             }
         }
 
-        async function cancelRequest() {
-            const res = await fetch('/api/booking-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: bookingId, action: 'cancel' })
+        // ---- Cancellation (quote-first, PR 1A) ----
+        // Same booking row, same guarded server update, same downstream
+        // paths as always (lm-cancelled reset for the embedded sheet,
+        // fetchStatus('return') standalone, driver-accepted 409 message).
+        // What changed: the browser confirm() became a server-quoted
+        // confirmation card, and account-owned bookings send their
+        // signed-in owner's token — a bare UUID no longer cancels them.
+
+        let supabaseLoadPromise = null;
+        let activeQuote = null;
+
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = src;
+                s.async = true;
+                s.onload = resolve;
+                s.onerror = () => reject(new Error('load failed: ' + src));
+                document.head.appendChild(s);
             });
-            return res;
+        }
+
+        // A hanging CDN must never wedge the tapped button: past the
+        // deadline the flow proceeds as a guest (the server still decides
+        // whether that is enough).
+        function withTimeout(promise, ms) {
+            return Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+            ]);
+        }
+
+        // Lazy session lookup, only when the passenger acts. Guests have
+        // no session and stay on the bare-UUID path (the server decides if
+        // that is enough); account passengers get their Bearer token from
+        // the same-origin supabase-js localStorage session — works
+        // standalone AND inside the booking page's sheet iframe. Loading
+        // failures resolve to null: never block the page on a CDN.
+        async function getSessionToken() {
+            try {
+                if (!supabaseLoadPromise) {
+                    supabaseLoadPromise = (async () => {
+                        if (!window.supabaseClient) {
+                            if (!window.supabase) await loadScript('https://unpkg.com/@supabase/supabase-js@2');
+                            await loadScript('/supabase.js');
+                        }
+                    })();
+                }
+                await withTimeout(supabaseLoadPromise, 6000);
+                if (!window.supabaseClient) return null;
+                const { data: { session } } = await withTimeout(window.supabaseClient.auth.getSession(), 4000);
+                return session ? session.access_token : null;
+            } catch (e) {
+                supabaseLoadPromise = null; // allow a later retry
+                return null;
+            }
+        }
+
+        function authHeaders(token) {
+            const h = { 'Content-Type': 'application/json' };
+            if (token) h['Authorization'] = 'Bearer ' + token;
+            return h;
+        }
+
+        async function cancelApi(action, extra, token) {
+            return fetch('/api/cancel-booking', {
+                method: 'POST',
+                headers: authHeaders(token),
+                body: JSON.stringify(Object.assign({ id: bookingId, action: action }, extra || {}))
+            });
+        }
+
+        // Legacy path — used only when the new endpoint is switched off
+        // (CANCEL_QUOTE_DISABLED). Enforces the same authorization
+        // server-side; the old native confirm() stands in for the card.
+        async function legacyCancelFlow(token) {
+            if (!confirm('Cancel this booking?')) return;
+            try {
+                const res = await fetch('/api/booking-status', {
+                    method: 'POST',
+                    headers: authHeaders(token),
+                    body: JSON.stringify({ id: bookingId, action: 'cancel' })
+                });
+                if (res.ok) { onCancelConfirmed(); return; }
+                handleCancelFailure(res.status, await res.json().catch(() => null));
+            } catch (e) {
+                showActionError('Connection problem — we couldn\'t confirm whether the cancellation went through. Checking the latest status…');
+                fetchStatus('return');
+            }
+        }
+
+        // The server's numbers, verbatim — never computed on the client.
+        function renderQuoteLines(q) {
+            const fmt = (n) => '$' + Number(n || 0).toFixed(2);
+            if (Number(q.feePercent) > 0) {
+                return 'Standard policy amount: ' + fmt(q.policyAmount) + ' — ' + Number(q.feePercent) + '% of your fare<br>' +
+                    'Pilot waiver: −' + fmt(q.waiverAmount) + '<br>' +
+                    '<strong>Amount due today: ' + fmt(q.dueNow) + '</strong><br>' +
+                    'No payment will be collected during the pilot.';
+            }
+            // Free bracket (pending): a plain human sentence — the fee
+            // ledger renders only when a real policy amount exists (PR 2's
+            // 50%/100% brackets light up the branch above).
+            return 'Your ride hasn’t been accepted yet, so cancelling is free.';
+        }
+
+        function showQuoteCard(q) {
+            activeQuote = q;
+            $('cancelQuoteLines').innerHTML = renderQuoteLines(q);
+            $('cancelQuoteCard').classList.remove('hidden');
+            $('cancelBtn').classList.add('hidden');
+            requestAnimationFrame(() => reportHeight('lm-resize'));
+        }
+
+        function hideQuoteCard() {
+            activeQuote = null;
+            $('cancelQuoteCard').classList.add('hidden');
+            if (lastBooking && lastBooking.status === 'pending') {
+                $('cancelBtn').classList.remove('hidden');
+            }
+            requestAnimationFrame(() => reportHeight('lm-resize'));
+        }
+
+        // Server confirmed — hand off exactly as before.
+        function onCancelConfirmed() {
+            hideQuoteCard();
+            if (isEmbedded) {
+                window.parent.postMessage({
+                    type: 'lm-cancelled',
+                    bookingId: bookingId,
+                    tripCode: lastBooking?.trip_id || ''
+                }, location.origin);
+                return;
+            }
+            fetchStatus('return'); // standalone: show the cancelled state
+        }
+
+        function handleCancelFailure(status, body) {
+            const current = body && (body.currentStatus || body.status);
+            if (status === 401) {
+                showActionError(`Please sign in to your LinkMia account to cancel this booking, or call or text us: ${SUPPORT_PHONE}`);
+                return;
+            }
+            if (status === 403) {
+                showActionError(`This booking belongs to a different account — call or text us: ${SUPPORT_PHONE}`);
+                return;
+            }
+            if (status === 409) {
+                // Never success: show live truth. Already-cancelled just
+                // renders the cancelled state; anything else means the
+                // driver moved first.
+                if (current !== 'cancelled') {
+                    showActionError(`Your driver already accepted this ride — call or text us to change plans: ${SUPPORT_PHONE}`);
+                }
+                fetchStatus('return');
+                return;
+            }
+            if (status === 404) {
+                fetchStatus('return');
+                return;
+            }
+            showActionError('Cancellation didn\'t go through. Please try again.');
         }
 
         function showActionError(msg) {
@@ -912,34 +1092,89 @@
             $('actionError').classList.add('hidden');
         }
 
+        // Step 1: quote. The card only ever shows the SERVER's numbers.
         $('cancelBtn').addEventListener('click', async () => {
-            if (!confirm('Cancel this booking?')) return;
             clearActionError();
+            const btn = $('cancelBtn');
+            btn.disabled = true;
             try {
-                const res = await cancelRequest();
-                if (res.ok) {
-                    if (isEmbedded) {
-                        // Server confirmed — hand off to the parent for the
-                        // full booking-flow reset + post-reload notice
-                        window.parent.postMessage({
-                            type: 'lm-cancelled',
-                            bookingId: bookingId,
-                            tripCode: lastBooking?.trip_id || ''
-                        }, location.origin);
-                        return;
-                    }
-                    fetchStatus('return'); // standalone: show the cancelled state
+                const token = await getSessionToken();
+                const res = await cancelApi('quote', null, token);
+                if (res.status === 503) {
+                    // Kill switch: fall back to the legacy flow (same
+                    // server-side authorization, native confirm dialog).
+                    await legacyCancelFlow(token);
                     return;
                 }
-                if (res.status === 409) {
-                    showActionError(`Your driver already accepted this ride — call or text us to change plans: ${SUPPORT_PHONE}`);
-                    fetchStatus('return');
+                if (!res.ok) {
+                    handleCancelFailure(res.status, await res.json().catch(() => null));
                     return;
                 }
-                showActionError('Cancellation didn\'t go through. Please try again.');
+                const { quote } = await res.json();
+                if (!quote || !quote.cancellable) {
+                    handleCancelFailure(409, { currentStatus: quote && quote.status });
+                    return;
+                }
+                showQuoteCard(quote);
             } catch (e) {
-                showActionError('Connection problem — the booking was NOT cancelled. Please try again.');
+                // Only the quote failed — no cancel request was ever sent.
+                showActionError('Connection problem — nothing was changed. Please try again.');
+            } finally {
+                btn.disabled = false;
             }
+        });
+
+        // Step 2: the final Cancel ride tap sends back the quote the
+        // passenger REVIEWED; the server re-computes and 409s on any drift.
+        $('confirmCancelBtn').addEventListener('click', async () => {
+            // Snapshot the reviewed quote BEFORE any await — a poll-driven
+            // status change can null activeQuote mid-flight.
+            const reviewed = activeQuote;
+            if (!reviewed) return;
+            clearActionError();
+            const btn = $('confirmCancelBtn');
+            btn.disabled = true;
+            try {
+                const token = await getSessionToken();
+                const res = await cancelApi('cancel', {
+                    expected: {
+                        status: reviewed.status,
+                        feePercent: reviewed.feePercent,
+                        policyAmount: reviewed.policyAmount,
+                        policyVersion: reviewed.policyVersion,
+                        pickupAt: reviewed.pickupAt
+                    }
+                }, token);
+                if (res.ok) {
+                    onCancelConfirmed();
+                    return;
+                }
+                const body = await res.json().catch(() => null);
+                // Quote drifted but the ride is still pending (rare: a
+                // policy deploy between quote and confirm): show the FRESH
+                // numbers for review instead of a false driver message.
+                if (res.status === 409 && body && body.currentStatus === 'pending' &&
+                    body.quote && body.quote.cancellable) {
+                    showActionError('The cancellation details changed — please review again.');
+                    showQuoteCard(body.quote);
+                    return;
+                }
+                hideQuoteCard();
+                handleCancelFailure(res.status, body);
+            } catch (e) {
+                // The request may or may not have reached the server —
+                // never claim certainty either way; let a status check
+                // reveal the truth.
+                showActionError('Connection problem — we couldn\'t confirm whether the cancellation went through. Checking the latest status…');
+                fetchStatus('return');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        $('keepRideBtn').addEventListener('click', () => {
+            clearActionError();
+            hideQuoteCard();
         });
 
         // Go back behaves exactly like the back arrow on the other modals:

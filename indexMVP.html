@@ -2063,7 +2063,14 @@
                     if (this.activeSheetBookingId) {
                         const cancelResponse = await fetch('/api/booking-status', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                // Account-owned pending cancels require the
+                                // owner's session since PR 1A (bare UUID no
+                                // longer suffices); submitSession was
+                                // verified fresh above, before side effects.
+                                'Authorization': `Bearer ${submitSession.access_token}`
+                            },
                             body: JSON.stringify({ id: this.activeSheetBookingId, action: 'cancel' })
                         });
                         // Pending replacement: wait until the old request is
