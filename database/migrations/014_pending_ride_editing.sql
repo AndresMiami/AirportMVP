@@ -1,4 +1,7 @@
--- Migration 013: race-safe in-place editing for pending rides
+-- Migration 014: race-safe in-place editing for pending rides
+-- (renumbered from 013 — that slot shipped as the cancellation-policy
+-- migration with PR #58; the one-active-booking constraint reservation
+-- moves to 015)
 -- Run this file unedited in the Supabase SQL Editor before deploying the
 -- Pending Ride Editing code. Additive and backwards-compatible: old code
 -- ignores details_version, while the new passenger and driver endpoints use

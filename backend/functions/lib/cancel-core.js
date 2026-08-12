@@ -35,8 +35,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Whitelisted booking fields for passenger-facing responses — excludes
 // private contact data, internal ids, and ALL cancellation audit fields
 // (policy numbers travel only in quote/cancel payloads, never the public
-// GET). Single source of truth: booking-status.js imports this.
-const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, driver_lat, driver_lng, driver_location_at';
+// GET). details_version is deliberately public: the trip page carries it
+// into the pending-edit intent, and it is only an edit counter. Single
+// source of truth: booking-status.js imports this.
+const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, driver_lat, driver_lng, driver_location_at, details_version';
 
 // What the cancel handlers need to authorize and decide — internal only.
 const CANCEL_READ_FIELDS = 'id, trip_id, status, customer_id, pickup_datetime, price';

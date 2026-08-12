@@ -226,8 +226,9 @@ exports.handler = async (event, context) => {
     // is stored, stale tabs and other devices reopen it instead of inserting
     // another. Return the existing id so the client can reopen its sheet.
     // A truly simultaneous first insert still needs the recorded migration-
-    // 014 database constraint to become transactionally impossible (013 is
-    // now the pending-edit details_version migration).
+    // 015 database constraint to become transactionally impossible (013
+    // shipped as the cancellation policy, 014 is the pending-edit
+    // details_version migration).
     // Ambassadors manage independent rides for multiple guests and are not
     // subject to the one-passenger-booking MVP rule.
     if (!ambassadorHost) {

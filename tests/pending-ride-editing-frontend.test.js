@@ -71,8 +71,12 @@ check('driver Accept sends the exact details version it rendered', () => {
   assert.ok(driver.includes('body.expectedDetailsVersion = Number(offer?.details_version) || 1'));
 });
 
-check('service worker evicts pre-edit booking-form clients', () => {
-  assert.ok(sw.includes("CACHE_NAME = 'linkmia-v1.3.17'"));
+check('service worker evicts pre-edit booking-form clients (v1.3.18+)', () => {
+  const m = sw.match(/CACHE_NAME = 'linkmia-v(\d+)\.(\d+)\.(\d+)'/);
+  assert.ok(m, 'CACHE_NAME missing');
+  const [maj, min, pat] = m.slice(1).map(Number);
+  assert.ok(maj > 1 || (maj === 1 && (min > 3 || (min === 3 && pat >= 18))),
+    `cache ${m[0]} must be >= 1.3.18 (1.3.17 shipped with cancellation)`);
 });
 
 console.log('\nALL ' + passed + ' CHECKS PASS');
