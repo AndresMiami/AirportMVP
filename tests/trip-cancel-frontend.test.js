@@ -60,9 +60,11 @@ check('final cancel carries the full reviewed expectation', () => {
   }
 });
 
-check('card shows server numbers with the pilot wording, never "charged"', () => {
-  assert.ok(tripScript.includes('Amount due today: $0'));
-  assert.ok(tripScript.includes('No payment will be collected during the pilot'));
+check('pending card is a plain free-cancellation sentence; the fee ledger waits for real amounts', () => {
+  assert.ok(tripScript.includes('Your ride hasn’t been accepted yet, so cancelling is free.'));
+  assert.ok(!tripScript.includes('Amount due today: $0'), 'no fee arithmetic on the free bracket');
+  assert.ok(tripScript.includes('No payment will be collected during the pilot'),
+    'pilot wording stays wired for the PR 2 fee brackets');
   assert.ok(!/\bcharged\b/i.test(tripScript), 'wording must not imply a card charge');
 });
 

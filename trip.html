@@ -1020,8 +1020,10 @@
                     '<strong>Amount due today: ' + fmt(q.dueNow) + '</strong><br>' +
                     'No payment will be collected during the pilot.';
             }
-            return 'Cancellation fee: $0 · Amount due today: $0<br>' +
-                'This request hasn’t been accepted yet — cancelling is free.';
+            // Free bracket (pending): a plain human sentence — the fee
+            // ledger renders only when a real policy amount exists (PR 2's
+            // 50%/100% brackets light up the branch above).
+            return 'Your ride hasn’t been accepted yet, so cancelling is free.';
         }
 
         function showQuoteCard(q) {

@@ -44,8 +44,10 @@ verified checkpoint locations all live in the web app backed by Supabase.
   ETA, static verified-checkpoint map marker (honest labels, Miami-time
   stamps, never a moving dot), WhatsApp button, Go back/Cancel. Cancel is
   QUOTE-FIRST (PR 1A): tap → server quote from `/api/cancel-booking` →
-  inline card shows the SERVER's numbers (pending: fee $0 · due today $0,
-  pilot wording, never "charged") → final Cancel ride sends the reviewed
+  inline card shows the SERVER's verdict (pending: a plain "hasn't been
+  accepted yet — cancelling is free" sentence, no fee arithmetic; the
+  fee ledger + pilot-waiver wording renders when PR 2's 50%/100%
+  brackets exist; never "charged") → final Cancel ride sends the reviewed
   quote back as `expected` and any drift 409s with a fresh quote (409 is
   never success). Account-owned bookings attach the owner's session via a
   lazy, deadline-bounded load of the SAME supabase-js CDN bundle indexMVP
