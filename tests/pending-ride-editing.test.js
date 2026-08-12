@@ -20,6 +20,9 @@ let customer = { id: 'cust-a' };
 let customerError = null;
 let booking = null;
 let bookingReadError = null;
+let rereadError = null;   // fails ONLY the second (conflict) read
+let rereadMissing = false; // second read finds no booking
+let bookingSelects = 0;
 let updateError = null;
 let capturedUpdate = null;
 let capturedFilters = null;
@@ -42,6 +45,9 @@ function resetBooking(overrides = {}) {
   customer = { id: 'cust-a' };
   customerError = null;
   bookingReadError = null;
+  rereadError = null;
+  rereadMissing = false;
+  bookingSelects = 0;
   updateError = null;
   capturedUpdate = null;
   capturedFilters = null;
@@ -76,7 +82,12 @@ const dbClient = {
         const chain = {
           eq(col, value) { filters[col] = value; return chain; },
           async maybeSingle() {
+            bookingSelects++;
             if (bookingReadError) return { data: null, error: bookingReadError };
+            if (bookingSelects > 1) {
+              if (rereadError) return { data: null, error: rereadError };
+              if (rereadMissing) return { data: null, error: null };
+            }
             if (!booking || (filters.id && filters.id !== booking.id)) {
               return { data: null, error: null };
             }
@@ -310,6 +321,50 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(r.statusCode, 200);
     assert.strictEqual(capturedUpdate.booker_name, null);
     assert.strictEqual(capturedUpdate.booker_phone, null);
+  });
+
+  // ---- Conflict re-read honesty (Codex re-review, cancellation parity) ----
+  resetBooking({ details_version: 2 }); // guarded update (expects v1) loses
+  r = await post();
+  check('conflict re-read with live row -> 409 real status + version, never unknown', () => {
+    assert.strictEqual(r.statusCode, 409);
+    const body = JSON.parse(r.body);
+    assert.strictEqual(body.currentStatus, 'pending');
+    assert.strictEqual(body.currentDetailsVersion, 2);
+    assert.ok(!r.body.includes('unknown'));
+  });
+
+  resetBooking({ details_version: 2 });
+  rereadMissing = true;
+  r = await post();
+  check('booking vanished on conflict re-read -> 404, never 409 unknown', () => {
+    assert.strictEqual(r.statusCode, 404);
+    assert.strictEqual(JSON.parse(r.body).error, 'Booking not found');
+  });
+
+  resetBooking({ details_version: 2 });
+  rereadError = { code: 'DB_REREAD' };
+  r = await post();
+  check('conflict re-read database failure -> honest 500 Lookup failed, never a fake race', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(JSON.parse(r.body).error, 'Lookup failed');
+  });
+
+  // ---- Telegram doorbell stays informational ----
+  resetBooking();
+  process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  process.env.ADMIN_TELEGRAM_CHAT_ID = 'test-chat';
+  const realFetch = global.fetch;
+  let doorbellCalls = 0;
+  global.fetch = async () => { doorbellCalls++; return { ok: false, status: 400 }; };
+  r = await post();
+  global.fetch = realFetch;
+  delete process.env.TELEGRAM_BOT_TOKEN;
+  delete process.env.ADMIN_TELEGRAM_CHAT_ID;
+  check('Telegram non-2xx is warned about, never a passenger-visible failure', () => {
+    assert.strictEqual(doorbellCalls, 1, 'doorbell was attempted');
+    assert.strictEqual(r.statusCode, 200, 'the committed edit stays success');
+    assert.strictEqual(JSON.parse(r.body).success, true);
   });
 
   check('RESPONSE_FIELDS never exposes private personal fields', () => {

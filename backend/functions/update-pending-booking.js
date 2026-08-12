@@ -142,12 +142,16 @@ async function sendUpdatedDoorbell(booking) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2000);
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: message }),
       signal: controller.signal
     });
+    if (!res.ok) {
+      // Sanitized: status code only — never the token, chat id, or body.
+      console.warn('pending-edit Telegram rejected:', res.status);
+    }
   } catch (error) {
     // The database is authoritative; an ops notification failure must not
     // turn a committed edit into a false passenger failure.
@@ -272,18 +276,30 @@ exports.handler = async (event) => {
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Changes were not saved' }) };
     }
     if (!updated) {
-      const { data: latest } = await db
+      // Lost the guarded race — report live truth HONESTLY (the same
+      // discipline as cancellation): a present booking answers 409 with
+      // its real status + version, a genuinely missing booking is 404,
+      // and a failed re-read is a real 500 — never a guessed 409
+      // 'unknown' that could disguise a database outage as a race.
+      const { data: latest, error: rereadError } = await db
         .from('bookings')
         .select('status, details_version')
         .eq('id', edit.bookingId)
         .maybeSingle();
+      if (rereadError) {
+        console.error('pending-edit conflict re-read failed:', rereadError.code || 'db_error');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
+      }
+      if (!latest) {
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
+      }
       return {
         statusCode: 409,
         headers,
         body: JSON.stringify({
           error: 'Booking changed while you were editing',
-          currentStatus: latest?.status || 'unknown',
-          currentDetailsVersion: latest?.details_version || null
+          currentStatus: latest.status,
+          currentDetailsVersion: latest.details_version
         })
       };
     }
