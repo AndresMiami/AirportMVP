@@ -850,6 +850,59 @@ class PassengerModal {
         this.updatePassengerButton();
     }
 
+    // Booking truth for EDIT mode. Unlike prefillFromProfile this ALWAYS
+    // overwrites session-entered data: the ride being edited defines who
+    // travels — a fresh-browser edit of a book-for-someone-else or
+    // ambassador ride must never replace the traveler with the signed-in
+    // account holder.
+    prefillFromBooking(snapshot) {
+        const parsePhone = (full) => {
+            const m = (full || '').trim().match(/^(\+\d{1,3})\s*(.*)$/);
+            return {
+                countryCode: m ? m[1] : '+1',
+                phone: m ? m[2] : (full || '').trim()
+            };
+        };
+        const splitName = (name) => {
+            const parts = (name || '').trim().split(/\s+/);
+            return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') };
+        };
+
+        if (snapshot.booker_name) {
+            // Ride booked for another traveler: booker = account side,
+            // traveler = guest side.
+            const bp = parsePhone(snapshot.booker_phone);
+            this.userData = {
+                ...splitName(snapshot.booker_name),
+                countryCode: bp.countryCode,
+                phone: bp.phone,
+                fullPhone: snapshot.booker_phone || '',
+                fullName: snapshot.booker_name
+            };
+            const gp = parsePhone(snapshot.customer_phone);
+            this.guestData = {
+                ...splitName(snapshot.customer_name),
+                countryCode: gp.countryCode,
+                phone: gp.phone,
+                fullName: snapshot.customer_name || '',
+                email: snapshot.customer_email || ''
+            };
+            this.selectedType = 'guest';
+        } else {
+            const p = parsePhone(snapshot.customer_phone);
+            this.userData = {
+                ...splitName(snapshot.customer_name),
+                countryCode: p.countryCode,
+                phone: p.phone,
+                fullPhone: snapshot.customer_phone || '',
+                fullName: snapshot.customer_name || ''
+            };
+            this.guestData = null;
+            this.selectedType = 'myself';
+        }
+        this.updatePassengerButton();
+    }
+
     // Get the contact info for WhatsApp message
     getContactInfo() {
         if (this.userData) {

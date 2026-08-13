@@ -46,7 +46,14 @@ verified checkpoint locations all live in the web app backed by Supabase.
   edits reuse the existing booking form and update the same booking row in
   place (`/api/update-pending-booking`, signed-in owner only): UUID, trip
   code, owner, creation time, and trip URL remain stable, and a guarded
-  details_version prevents an edit from racing driver Accept. Cancel is
+  details_version prevents an edit from racing driver Accept. Edit ride
+  HYDRATES from the owner-authenticated GET snapshot (traveler + booker
+  identity included so a fresh-browser edit never swaps the traveler for
+  the account holder; price/bags never hydrated — route+pricing must
+  recompute before the editor opens, else it FAILS CLOSED back to the
+  trip sheet). Blank optional fields still preserve stored values;
+  deliberate clearing travels as clearOptionalFields (5 allowlisted
+  fields; unknown or contradictory entries 400). Cancel is
   QUOTE-FIRST (PR 1A): tap → server quote from `/api/cancel-booking` →
   inline card shows the SERVER's verdict (pending: a plain "hasn't been
   accepted yet — cancelling is free" sentence, no fee arithmetic; the

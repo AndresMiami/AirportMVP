@@ -15,11 +15,22 @@ class PickupNoteModal {
 
     init() {
         if (this.isInitialized) return;
-        
+
         this.injectStyles();
         this.createModal();
         this.attachEventListeners();
         this.isInitialized = true;
+    }
+
+    // Booking truth for EDIT mode: seed the modal's state so reopening it
+    // shows the stored notes/sign/reference instead of an empty form
+    // (open() -> loadExistingData() reads from pickupData).
+    setFromBooking({ chauffeurNotes, pickupSign, referenceCode }) {
+        this.pickupData = {
+            chauffeurNotes: chauffeurNotes || '',
+            pickupSign: pickupSign || '',
+            referenceCode: referenceCode || ''
+        };
     }
 
     injectStyles() {

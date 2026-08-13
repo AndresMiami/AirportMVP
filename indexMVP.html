@@ -1993,16 +1993,61 @@
                 }
             }
 
-            beginPendingEdit({ bookingId, tripCode, detailsVersion }) {
+            async beginPendingEdit({ bookingId, tripCode, detailsVersion }) {
                 if (!bookingId) return;
+                // SERVER TRUTH FIRST: the editor opens only from the
+                // owner-authenticated snapshot — never from whatever this
+                // particular browser happens to remember (a fresh device
+                // remembers nothing, and a misleading blank editor invites
+                // rewriting or contradicting stored instructions).
+                let snapshot = null;
+                try {
+                    const { data: { session } } = await window.supabaseClient.auth.getSession();
+                    if (!session) throw new Error('no session');
+                    const res = await fetch(`/api/update-pending-booking?id=${encodeURIComponent(bookingId)}`, {
+                        headers: { 'Authorization': `Bearer ${session.access_token}` }
+                    });
+                    if (!res.ok) throw new Error('snapshot ' + res.status);
+                    snapshot = (await res.json())?.snapshot;
+                    if (!snapshot || snapshot.id !== bookingId) throw new Error('snapshot mismatch');
+                } catch (e) {
+                    console.warn('Edit snapshot unavailable:', e.message);
+                    this.failPendingEdit(bookingId,
+                        'We couldn\'t load your ride for editing. Nothing was changed — please try again in a moment.');
+                    return;
+                }
+
+                try {
+                    // Route + pricing must COMPLETE before the editor is
+                    // usable; hydrateFromSnapshot throws on any gap.
+                    await this.hydrateFromSnapshot(snapshot);
+                } catch (e) {
+                    console.warn('Edit hydration failed:', e.message);
+                    this.failPendingEdit(bookingId,
+                        'We couldn\'t rebuild your ride for editing. Nothing was changed — please try again.');
+                    return;
+                }
+
                 this.pendingEdit = {
                     bookingId,
-                    tripCode: tripCode || currentActiveBooking?.trip_id || '',
-                    detailsVersion: Number(detailsVersion) ||
-                        Number(currentActiveBooking?.details_version) || 1
+                    tripCode: snapshot.trip_id || tripCode || '',
+                    // The snapshot's fresh version supersedes the (possibly
+                    // stale) intent copy — fewer spurious 409s, same CAS.
+                    detailsVersion: Number(snapshot.details_version) ||
+                        Number(detailsVersion) || 1,
+                    // Normalized originals of the clearable fields: the
+                    // save step lists a field in clearOptionalFields ONLY
+                    // when it originally held data and was deliberately
+                    // emptied in this hydrated editor.
+                    hydrated: {
+                        customer_email: (snapshot.customer_email || '').trim(),
+                        flight_number: (snapshot.flight_number || '').trim(),
+                        notes: (snapshot.notes || '').trim(),
+                        pickup_sign: (snapshot.pickup_sign || '').trim(),
+                        promo_code: (snapshot.promo_code || '').trim()
+                    }
                 };
                 this.activeSheetBookingId = bookingId;
-                this.startBooking();
                 this.navigateToPanel('where');
 
                 let notice = document.getElementById('editRideNotice');
@@ -2017,6 +2062,103 @@
                 if (bookBtn) {
                     bookBtn.innerHTML = '<span class="btn-main-text">Save changes</span>';
                     bookBtn.disabled = false;
+                }
+            }
+
+            // Fail CLOSED: no blank or partially hydrated editor, ever. The
+            // trip sheet reopens with fresh truth and an honest message.
+            failPendingEdit(bookingId, message) {
+                this.finishPendingEdit();
+                this.showPaymentError(message, 'Couldn\'t open editing');
+                this.showTripSheet(bookingId);
+            }
+
+            // Rebuild the whole booking form from the snapshot. Throws on
+            // anything unmappable — never guesses direction or airport.
+            async hydrateFromSnapshot(s) {
+                const mode = s.booking_mode === 'pickup' ? 'pickup'
+                    : (s.booking_mode === 'dropoff' ? 'dropoff' : null);
+                if (!mode) throw new Error('unknown booking mode');
+                const AIRPORT_CODES = {
+                    'Miami International': 'MIA',
+                    'Fort Lauderdale': 'FLL',
+                    'Palm Beach': 'PBI'
+                };
+                const airportSide = mode === 'dropoff' ? s.dropoff_location : s.pickup_location;
+                const addressSide = mode === 'dropoff' ? s.pickup_location : s.dropoff_location;
+                const airportCode = AIRPORT_CODES[airportSide];
+                if (!airportCode || !addressSide) throw new Error('unmappable route');
+                const when = new Date(s.pickup_datetime);
+                if (!Number.isFinite(when.getTime())) throw new Error('bad pickup time');
+
+                this.startBooking();
+                this.setMode(mode); // resets selections — runs BEFORE filling
+
+                // Address side: routing uses the STRING (coordinates are
+                // only ever used for the airport side), so the stored
+                // address hydrates without re-geocoding.
+                this.state.locations.address = { address: addressSide, coordinates: null };
+                if (this.els.addressInput) {
+                    this.els.addressInput.value = addressSide;
+                    this.els.addressInput.classList.add('validated');
+                }
+                if (this.autocomplete) this.autocomplete.isValidated = true;
+                this.updateAddressStepState();
+
+                // Airport side: mirror selectAirport's UI without its
+                // fire-and-forget route call — hydration awaits ONE below.
+                this.state.locations.airport = { code: airportCode, name: this.getAirportName(airportCode) };
+                this.els.airportOptions.forEach(opt =>
+                    opt.classList.toggle('selected', opt.dataset.airport === airportCode));
+                this.els.airportBadge.classList.remove('active');
+                this.els.airportBadge.classList.add('completed');
+                this.updateAirportStepState();
+                this.updateContinueButton();
+
+                // Schedule
+                this.state.dateTime.date = when;
+                this.state.dateTime.time = when;
+                if (this.els.hourSelect && this.els.minuteSelect && this.els.ampmSelect) {
+                    let h = when.getHours();
+                    const ampm = h >= 12 ? 'PM' : 'AM';
+                    if (h > 12) h -= 12;
+                    if (h === 0) h = 12;
+                    this.els.hourSelect.value = h;
+                    this.els.minuteSelect.value = when.getMinutes();
+                    this.els.ampmSelect.value = ampm;
+                }
+                this.updateBookButton();
+
+                // Identity, counts, and optional details — booking truth
+                // outranks the session profile in edit mode.
+                this.state.passengers = Number(s.passengers) || 1;
+                this.state.pickupNotes = {
+                    chauffeurNotes: s.notes || '',
+                    pickupSign: s.pickup_sign || '',
+                    referenceCode: s.flight_number || ''
+                };
+                this.state.promoCode = s.promo_code || null;
+                if (typeof PassengerModal !== 'undefined') {
+                    PassengerModal.getInstance()?.prefillFromBooking?.(s);
+                }
+                if (typeof PickupNoteModal !== 'undefined') {
+                    PickupNoteModal.getInstance()?.setFromBooking?.(this.state.pickupNotes);
+                }
+                if (typeof PromotionModal !== 'undefined') {
+                    const promoModal = PromotionModal.getInstance?.();
+                    if (promoModal) promoModal.promoCode = s.promo_code || null;
+                }
+
+                // Route + pricing gate: Save changes must never submit an
+                // old server price, zero, or a partially hydrated route.
+                await this.calculateRoute();
+                if (!this.state.route?.distance || !this.state.route?.duration) {
+                    throw new Error('route calculation failed');
+                }
+                this.selectVehicle(s.vehicle_type);
+                const priced = Number(this.state.vehicle?.pricing?.finalPrice);
+                if (!this.state.vehicle?.selected || !Number.isFinite(priced) || priced <= 0) {
+                    throw new Error('pricing failed');
                 }
             }
 
@@ -2191,6 +2333,21 @@
                     if (isEditing) {
                         apiPayload.bookingId = editContext.bookingId;
                         apiPayload.expectedDetailsVersion = editContext.detailsVersion;
+                        // Deliberate clears: list ONLY fields that held data
+                        // at hydration and are blank now. A blank without
+                        // this signal still means "preserve" server-side.
+                        if (editContext.hydrated) {
+                            const finals = {
+                                customer_email: (apiPayload.email || '').trim(),
+                                flight_number: (apiPayload.flightNumber || '').trim(),
+                                notes: (apiPayload.notes || '').trim(),
+                                pickup_sign: (apiPayload.pickupSign || '').trim(),
+                                promo_code: (apiPayload.promoCode || '').trim()
+                            };
+                            const clears = Object.keys(finals).filter(
+                                (k) => editContext.hydrated[k] && !finals[k]);
+                            if (clears.length) apiPayload.clearOptionalFields = clears;
+                        }
                     }
 
                     const response = await fetch(isEditing
