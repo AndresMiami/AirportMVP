@@ -171,6 +171,39 @@ const post = (body = validBody(), token = 'good') => editFn.handler({
   body: JSON.stringify(body)
 });
 
+const get = (id = BID, token = 'good') => editFn.handler({
+  httpMethod: 'GET',
+  headers: token ? { authorization: 'Bearer ' + token } : {},
+  queryStringParameters: { id }
+});
+
+// Full-bodied row for snapshot tests: editable fields PLUS private and
+// operational internals the whitelist must never leak.
+const snapshotRow = () => ({
+  booking_mode: 'dropoff',
+  pickup_location: '100 Stored Pickup Ave, Miami, FL',
+  dropoff_location: 'Miami International',
+  pickup_datetime: '2026-08-20T18:00:00+00:00',
+  customer_name: 'Maria Traveler',
+  customer_phone: '+17865550101',
+  customer_email: 'maria@example.com',
+  booker_name: 'Booker Bob',
+  booker_phone: '+17865550999',
+  passengers: 2,
+  bags: 3,
+  vehicle_type: 'sedan',
+  vehicle_name: 'Tesla Model Y',
+  flight_number: 'AA123',
+  pickup_sign: 'MARIA',
+  notes: 'Lobby',
+  promo_code: 'KEEP10',
+  driver_payout: 90,
+  linkmia_commission: 30,
+  cancelled_at: null,
+  cancel_fee_percent: null,
+  payment_status: 'unpaid'
+});
+
 let passed = 0;
 function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
@@ -365,6 +398,112 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(doorbellCalls, 1, 'doorbell was attempted');
     assert.strictEqual(r.statusCode, 200, 'the committed edit stays success');
     assert.strictEqual(JSON.parse(r.body).success, true);
+  });
+
+  // ---- GET snapshot: auth, ownership, status, whitelist ----
+  resetBooking(snapshotRow());
+  r = await get(BID, null);
+  check('GET without token -> 401', () => assert.strictEqual(r.statusCode, 401));
+  r = await get(BID, 'bad');
+  check('GET invalid token -> 401', () => assert.strictEqual(r.statusCode, 401));
+  r = await get(BID, 'outage');
+  check('GET auth outage -> 500', () => assert.strictEqual(r.statusCode, 500));
+
+  customer = null;
+  r = await get();
+  check('GET without customer profile -> 403', () => assert.strictEqual(r.statusCode, 403));
+
+  resetBooking({ ...snapshotRow(), customer_id: 'cust-other' });
+  r = await get();
+  check('GET another customer\'s ride -> 403', () => assert.strictEqual(r.statusCode, 403));
+
+  resetBooking(snapshotRow());
+  booking = null;
+  r = await get();
+  check('GET missing booking -> 404', () => assert.strictEqual(r.statusCode, 404));
+
+  resetBooking({ ...snapshotRow(), status: 'confirmed', assigned_driver: 'drv-a' });
+  r = await get();
+  check('GET accepted ride -> 409 with current status (not editable)', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(JSON.parse(r.body).currentStatus, 'confirmed');
+  });
+
+  resetBooking(snapshotRow());
+  r = await get();
+  check('GET snapshot: traveler + booker identity, fresh version, no-store', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(r.headers['Cache-Control'], 'private, no-store');
+    const snap = JSON.parse(r.body).snapshot;
+    assert.strictEqual(snap.id, BID);
+    assert.strictEqual(snap.trip_id, 'LM-EDIT');
+    assert.strictEqual(snap.details_version, 1);
+    assert.strictEqual(snap.customer_name, 'Maria Traveler');
+    assert.strictEqual(snap.customer_phone, '+17865550101');
+    assert.strictEqual(snap.booker_name, 'Booker Bob');
+    assert.strictEqual(snap.booker_phone, '+17865550999');
+    assert.strictEqual(snap.booking_mode, 'dropoff');
+    assert.strictEqual(snap.vehicle_type, 'sedan');
+    assert.strictEqual(snap.passengers, 2);
+    assert.strictEqual(snap.notes, 'Lobby');
+    assert.strictEqual(snap.pickup_sign, 'MARIA');
+    assert.strictEqual(snap.flight_number, 'AA123');
+    assert.strictEqual(snap.promo_code, 'KEEP10');
+  });
+  check('GET snapshot whitelist: no price, bags, commissions, audit, or internals', () => {
+    const snap = JSON.parse(r.body).snapshot;
+    for (const banned of ['price', 'bags', 'host_commission', 'driver_payout',
+      'linkmia_commission', 'customer_id', 'status', 'assigned_driver',
+      'created_at', 'referred_by_host', 'cancelled_at', 'cancel_fee_percent',
+      'payment_status', 'source']) {
+      assert.ok(!(banned in snap), banned + ' must not be in the snapshot');
+    }
+  });
+
+  // ---- Explicit clearing ----
+  for (const [field, blankBody] of [
+    ['customer_email', { email: '' }],
+    ['flight_number', { flightNumber: '' }],
+    ['notes', { notes: '' }],
+    ['pickup_sign', { pickupSign: '' }],
+    ['promo_code', { promoCode: '' }]
+  ]) {
+    resetBooking(snapshotRow());
+    r = await post(validBody({ ...blankBody, clearOptionalFields: [field] }));
+    check(`deliberate clear of ${field} -> NULL stored`, () => {
+      assert.strictEqual(r.statusCode, 200);
+      assert.strictEqual(capturedUpdate[field], null, field + ' must be cleared');
+    });
+  }
+
+  resetBooking(snapshotRow());
+  r = await post(validBody({ notes: 'kept because no clear signal', pickupSign: '', clearOptionalFields: ['pickup_sign'] }));
+  check('clear touches ONLY listed fields; others replace/preserve normally', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedUpdate.pickup_sign, null);
+    assert.strictEqual(capturedUpdate.notes, 'kept because no clear signal');
+    assert.strictEqual(capturedUpdate.customer_email, 'maria@example.com');
+  });
+
+  resetBooking(snapshotRow());
+  r = await post(validBody({ clearOptionalFields: ['assigned_driver'] }));
+  check('unknown clear field -> 400, nothing written', () => {
+    assert.strictEqual(r.statusCode, 400);
+    assert.strictEqual(capturedUpdate, null);
+  });
+
+  resetBooking(snapshotRow());
+  r = await post(validBody({ notes: 'still here', clearOptionalFields: ['notes'] }));
+  check('contradictory clear (listed while nonempty) -> 400, nothing written', () => {
+    assert.strictEqual(r.statusCode, 400);
+    assert.strictEqual(capturedUpdate, null);
+  });
+
+  resetBooking(snapshotRow());
+  r = await post(validBody({ clearOptionalFields: 'notes' }));
+  check('non-array clearOptionalFields -> 400', () => {
+    assert.strictEqual(r.statusCode, 400);
+    assert.strictEqual(capturedUpdate, null);
   });
 
   check('RESPONSE_FIELDS never exposes private personal fields', () => {

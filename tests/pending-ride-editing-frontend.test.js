@@ -71,6 +71,50 @@ check('driver Accept sends the exact details version it rendered', () => {
   assert.ok(driver.includes('body.expectedDetailsVersion = Number(offer?.details_version) || 1'));
 });
 
+check('Edit ride hydrates from the owner snapshot BEFORE the editor opens', () => {
+  const at = booking.indexOf('async beginPendingEdit(');
+  assert.ok(at > -1, 'beginPendingEdit must be async (snapshot-first)');
+  const method = booking.slice(at, booking.indexOf('failPendingEdit(bookingId, message)'));
+  assert.ok(method.includes('/api/update-pending-booking?id='), 'snapshot GET missing');
+  const hydrateAt = method.indexOf('await this.hydrateFromSnapshot(snapshot)');
+  const revealAt = method.indexOf("navigateToPanel('where')");
+  assert.ok(hydrateAt > -1 && revealAt > hydrateAt, 'hydration must complete before the editor reveals');
+});
+
+check('fail-closed: snapshot or hydration failure reopens the sheet, never a blank editor', () => {
+  assert.ok(booking.includes('failPendingEdit(bookingId,'));
+  const fail = booking.slice(booking.indexOf('failPendingEdit(bookingId, message)'));
+  assert.ok(fail.slice(0, 400).includes('this.showTripSheet(bookingId)'));
+  assert.ok(fail.slice(0, 400).includes('showPaymentError'));
+});
+
+check('route + pricing must complete before Save; direction/airport never guessed', () => {
+  const h = booking.slice(booking.indexOf('async hydrateFromSnapshot('));
+  const block = h.slice(0, h.indexOf('finishPendingEdit'));
+  assert.ok(block.includes('await this.calculateRoute()'));
+  assert.ok(block.includes("throw new Error('route calculation failed')"));
+  assert.ok(block.includes("throw new Error('pricing failed')"));
+  assert.ok(block.includes("throw new Error('unmappable route')"));
+  assert.ok(block.includes("throw new Error('unknown booking mode')"));
+  assert.ok(block.includes('AIRPORT_CODES'), 'airport mapping must be explicit');
+});
+
+check('traveler and booker identity come from booking truth, not the session profile', () => {
+  const modal = read('js/passenger-modal.js');
+  assert.ok(modal.includes('prefillFromBooking(snapshot)'));
+  const fn = modal.slice(modal.indexOf('prefillFromBooking(snapshot)'));
+  const body = fn.slice(0, fn.indexOf('getContactInfo'));
+  assert.ok(body.includes('snapshot.booker_name'), 'someone-else rides keyed on booker_name');
+  assert.ok(body.includes("this.selectedType = 'guest'"));
+  assert.ok(body.includes("this.selectedType = 'myself'"));
+  assert.ok(booking.includes('prefillFromBooking?.(s)'), 'hydration must call the booking prefill');
+});
+
+check('clearOptionalFields generated only from hydrated-nonempty fields emptied in the editor', () => {
+  assert.ok(booking.includes('editContext.hydrated[k] && !finals[k]'));
+  assert.ok(booking.includes('apiPayload.clearOptionalFields = clears'));
+});
+
 check('ambassador standalone edit intent is consumed — never a fresh create form', () => {
   const at = booking.indexOf('if (currentAmbassador && intent');
   assert.ok(at > -1, 'ambassador intent branch missing');
@@ -92,8 +136,8 @@ check('service worker evicts pre-edit booking-form clients (v1.3.18+)', () => {
   const m = sw.match(/CACHE_NAME = 'linkmia-v(\d+)\.(\d+)\.(\d+)'/);
   assert.ok(m, 'CACHE_NAME missing');
   const [maj, min, pat] = m.slice(1).map(Number);
-  assert.ok(maj > 1 || (maj === 1 && (min > 3 || (min === 3 && pat >= 18))),
-    `cache ${m[0]} must be >= 1.3.18 (1.3.17 shipped with cancellation)`);
+  assert.ok(maj > 1 || (maj === 1 && (min > 3 || (min === 3 && pat >= 19))),
+    `cache ${m[0]} must be >= 1.3.19 (hydration changes precached indexMVP + modals)`);
 });
 
 console.log('\nALL ' + passed + ' CHECKS PASS');
