@@ -1,7 +1,21 @@
 // Authenticated, in-place editing for an account-owned pending ride.
+//   GET  /api/update-pending-booking?id=<uuid> -> editable snapshot (owner
+//        only, pending + unassigned only). The trip page's Edit ride flow
+//        hydrates the booking form from THIS server truth — never from
+//        whatever a particular browser happens to remember.
+//   POST /api/update-pending-booking {bookingId, expectedDetailsVersion, ...}
+//        -> guarded in-place update.
+//
 // The booking identity never changes: id, trip_id, customer_id and created_at
 // are deliberately absent from the update payload. A guarded status + version
 // UPDATE arbitrates the passenger Edit-vs-driver Accept race.
+//
+// Explicit clearing (hydrated editors only): clearOptionalFields lists
+// allowlisted optional columns the passenger DELIBERATELY emptied after
+// seeing their stored values. A blank without that signal still means
+// "preserve" (shipped behavior — old or partially loaded clients can
+// never erase data). Booker identity is NOT clearable this way: the pair
+// stays coherent through the name-keyed rules below.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -14,6 +28,22 @@ const VEHICLE_TYPE = {
 };
 
 const RESPONSE_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, details_version';
+
+// Editable snapshot for the OWNER-authenticated GET. Explicit whitelist:
+// traveler + booker identity included (a fresh-browser edit of a
+// book-for-someone-else or ambassador ride must never replace the
+// traveler with the signed-in account holder); NO price (always
+// recalculated), NO bags (capacity comes from the selected vehicle's
+// configuration), and none of the cancellation-audit, commission,
+// assignment, or notification internals.
+const SNAPSHOT_FIELDS = ['pickup_location', 'dropoff_location', 'booking_mode',
+  'pickup_datetime', 'customer_name', 'customer_phone', 'customer_email',
+  'booker_name', 'booker_phone', 'passengers', 'vehicle_type', 'vehicle_name',
+  'flight_number', 'pickup_sign', 'notes', 'promo_code'];
+
+// The only fields an explicit clear may target. Unknown names and
+// clear-while-nonempty contradictions are 400s, never guesses.
+const CLEARABLE_FIELDS = ['customer_email', 'flight_number', 'notes', 'pickup_sign', 'promo_code'];
 
 function text(value, max, required = false) {
   const cleaned = typeof value === 'string' ? value.trim() : '';
@@ -86,9 +116,39 @@ function parseEdit(body) {
   const vehicleType = VEHICLE_TYPE[vehicleName];
   if (!vehicleType) return { error: 'Invalid vehicle' };
 
+  // Optional personal details: null here means "not submitted/blank" —
+  // the handler PRESERVES the stored value in that case unless the field
+  // is explicitly listed in clearOptionalFields.
+  const optional = {
+    customer_email: text(body.email, 254),
+    flight_number: text(body.flightNumber, 80),
+    notes: text(body.notes, 2000),
+    pickup_sign: text(body.pickupSign, 160),
+    promo_code: text(body.promoCode, 80)
+  };
+
+  let clearFields = [];
+  if (body.clearOptionalFields !== undefined) {
+    if (!Array.isArray(body.clearOptionalFields)) {
+      return { error: 'Invalid clearOptionalFields' };
+    }
+    for (const field of body.clearOptionalFields) {
+      if (!CLEARABLE_FIELDS.includes(field)) {
+        return { error: 'Unknown clear field' };
+      }
+      if (optional[field] !== null) {
+        // Clearing a field while also submitting a value for it is a
+        // contradictory request — reject it rather than guess.
+        return { error: 'Contradictory clear request' };
+      }
+    }
+    clearFields = [...new Set(body.clearOptionalFields)];
+  }
+
   return {
     bookingId,
     expectedVersion,
+    clearFields,
     // Required ride details: always full-replace (the form re-validates
     // them on every edit).
     values: {
@@ -106,17 +166,7 @@ function parseEdit(body) {
       booking_mode: body.mode === 'pickup' ? 'pickup' : 'dropoff',
       duration_minutes: duration
     },
-    // Optional personal details: null here means "not submitted/blank" —
-    // the handler PRESERVES the stored value in that case (a restored
-    // session or fresh device starts from an empty form and must never
-    // silently erase data the passenger didn't retype).
-    optional: {
-      customer_email: text(body.email, 254),
-      flight_number: text(body.flightNumber, 80),
-      notes: text(body.notes, 2000),
-      pickup_sign: text(body.pickupSign, 160),
-      promo_code: text(body.promoCode, 80)
-    },
+    optional,
     // Booker pair, resolved coherently against the stored row in the
     // handler (a phone may only ever be stored alongside a name).
     booker: {
@@ -166,10 +216,10 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'private, no-store',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
-  if (event.httpMethod !== 'POST') {
+  if (event.httpMethod !== 'POST' && event.httpMethod !== 'GET') {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
@@ -183,6 +233,48 @@ exports.handler = async (event) => {
   const auth = await requirePassenger(event, supabaseUrl, anonKey, db);
   if (!auth.customerId) {
     return { statusCode: auth.status, headers, body: JSON.stringify({ error: auth.error }) };
+  }
+
+  // ---- GET: owner-authenticated editable snapshot ----
+  // Same identity, same ownership rule, same pending+unassigned gate as
+  // the guarded update below. Cache-Control stays private, no-store.
+  if (event.httpMethod === 'GET') {
+    const id = event.queryStringParameters?.id;
+    if (!id || !UUID_RE.test(id)) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid booking id' }) };
+    }
+    try {
+      const { data: current, error: readError } = await db
+        .from('bookings')
+        .select('id, trip_id, status, assigned_driver, customer_id, details_version, ' + SNAPSHOT_FIELDS.join(', '))
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) {
+        console.error('pending-edit snapshot lookup failed:', readError.code || 'db_error');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not load booking' }) };
+      }
+      if (!current) return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
+      if (current.customer_id !== auth.customerId) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not your booking' }) };
+      }
+      if (current.status !== 'pending' || current.assigned_driver) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'Ride is no longer editable', currentStatus: current.status })
+        };
+      }
+      const snapshot = {
+        id: current.id,
+        trip_id: current.trip_id,
+        details_version: current.details_version
+      };
+      for (const field of SNAPSHOT_FIELDS) snapshot[field] = current[field] ?? null;
+      return { statusCode: 200, headers, body: JSON.stringify({ snapshot }) };
+    } catch (error) {
+      console.error('pending-edit snapshot failure:', error.code || error.name || 'unexpected');
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not load booking' }) };
+    }
   }
 
   let body;
@@ -223,14 +315,16 @@ exports.handler = async (event) => {
     const commissionRate = oldPrice > 0 && oldHostCommission > 0
       ? oldHostCommission / oldPrice : 0;
 
-    // Optional-field preservation: a non-empty submitted value replaces;
-    // a missing/blank one preserves the stored value. Explicitly CLEARING
-    // an optional field is DEFERRED until the editor receives protected
-    // server-side prefill data — until then a blank input cannot be
-    // distinguished from an untouched one.
+    // Optional-field merge: an explicit clear wins (the hydrated editor
+    // saw the stored value and deliberately emptied it); a non-empty
+    // submitted value replaces; a missing/blank one PRESERVES the stored
+    // value — old or partially loaded clients can never erase data.
+    const clearSet = new Set(edit.clearFields);
     const preserved = {};
     for (const [col, submitted] of Object.entries(edit.optional)) {
-      preserved[col] = submitted !== null ? submitted : (current[col] ?? null);
+      preserved[col] = clearSet.has(col)
+        ? null
+        : (submitted !== null ? submitted : (current[col] ?? null));
     }
 
     // Booker pair coherence (create-booking parity): booker_phone may only
