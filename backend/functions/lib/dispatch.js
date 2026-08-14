@@ -31,6 +31,18 @@ const DISPATCH_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, 
   ', price, cancelled_at, cancelled_from_status, ' +
   'cancel_fee_percent, cancel_fee_policy_amount, cancel_fee_collected, cancel_waiver_reason';
 
+// The driver a driver-role event targets. Cancellation events answer to
+// the STORED driver-at-cancellation (recipient_key, stamped by the
+// migration-015 outbox trigger from OLD.assigned_driver): a manual clear
+// or reassignment of the cancelled row must never silence or redirect
+// the stop notice. Every other driver event routes by the live row —
+// its reassignment guard already suppressed any mismatch before routing.
+function driverTargetFor(ev, b) {
+  return notify.CANCELLATION_TYPES.includes(ev.event_type)
+    ? ev.recipient_key
+    : b.assigned_driver;
+}
+
 // Dispatch one due event: refetch the live booking, re-check relevance,
 // transition to in_delivery (a LOST CAS means another process changed the
 // event — stop without sending), claim by insert, send, finalize, roll
@@ -120,7 +132,7 @@ async function dispatchOne(db, ev, nowMs, opts) {
   if (ev.recipient_role !== 'driver') {
     route = { channel: 'telegram' };
   } else {
-    route = await notify.resolveDriverRoute(db, ev, b.assigned_driver);
+    route = await notify.resolveDriverRoute(db, ev, driverTargetFor(ev, b));
     if (route.dbError) {
       dbFail('route resolution', route.dbError);
       return;
@@ -140,7 +152,7 @@ async function dispatchOne(db, ev, nowMs, opts) {
   // suppressed as duplicate_target. A push route proceeds (different
   // surface); a distinct driver chat proceeds (different destination).
   if (ev.event_type === 'ride_cancelled' && route.channel === 'telegram') {
-    const dedupChatId = await notify.resolveDriverChatId(db, b.assigned_driver, dbFail);
+    const dedupChatId = await notify.resolveDriverChatId(db, driverTargetFor(ev, b), dbFail);
     if (dedupChatId && dedupChatId === process.env.ADMIN_TELEGRAM_CHAT_ID) {
       await suppress('duplicate_target');
       return;
@@ -179,7 +191,7 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxA
   if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave for next cycle
 
   const chatId = ev.recipient_role === 'driver'
-    ? await notify.resolveDriverChatId(db, b.assigned_driver, dbFail)
+    ? await notify.resolveDriverChatId(db, driverTargetFor(ev, b), dbFail)
     : process.env.ADMIN_TELEGRAM_CHAT_ID;
   if (!chatId) return; // config gap, not a send failure — leave for next cycle
 

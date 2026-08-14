@@ -226,13 +226,17 @@ exports.handler = async () => {
       }
 
       // Recipient-keyed identity: a replacement driver gets their OWN
-      // events; the old driver's pending rows are retired in ONE update.
+      // events; the old driver's pending CHAIN rows are retired in ONE
+      // update. Scoped to CHAIN_TYPES on purpose: a cancellation stop
+      // notice answers to its STORED driver-at-cancellation and must
+      // survive any later clear/reassign of the row (PR 3B).
       const assignedIds = bookings.filter((b) => b.assigned_driver).map((b) => b.id);
       if (assignedIds.length && !outOfBudget()) {
         const { data: pendingDriverEvents, error: pendError } = await db
           .from('notification_events')
           .select('id, booking_id, recipient_key')
           .eq('recipient_role', 'driver')
+          .in('event_type', notify.CHAIN_TYPES)
           .in('state', ['pending'])
           .in('booking_id', assignedIds);
         if (pendError) {

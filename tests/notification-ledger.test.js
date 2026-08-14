@@ -1394,6 +1394,51 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(ev.state, 'submitted');
   });
 
+  // ---- PR 3B review corrections: the stop notice answers to the STORED
+  // recipient_key (driver-at-cancellation), never the live row's
+  // assigned_driver — a manual clear or reassignment of the cancelled
+  // row must neither silence nor redirect it.
+  freshState();
+  const cxlClearedBooking = mkBooking({
+    status: 'cancelled', trip_id: 'LM-CLEAR', assigned_driver: null,
+    cancelled_from_status: 'confirmed', cancelled_at: iso(-1)
+  });
+  state.bookings.push(cxlClearedBooking);
+  state.push_subscriptions.push(mkSub()); // drv-a's installed device
+  state.notification_events.push({
+    id: 'ev-stop-4', booking_id: cxlClearedBooking.id, event_type: 'ride_cancelled',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('stop notice keyed to driver A survives a cleared assigned_driver: push to A, never duplicate_target', () => {
+    assert.strictEqual(pushCalls.length, 1, 'recipient_key selects the push device');
+    assert.strictEqual(pushCalls[0].endpoint, subs()[0].endpoint, 'driver A\'s own device');
+    assert.strictEqual(fetchCalls.length, 0, 'no Telegram, no admin-chat misroute');
+    const ev = events().find((e) => e.id === 'ev-stop-4');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
+  freshState();
+  const cxlSwappedBooking = mkBooking({
+    status: 'cancelled', trip_id: 'LM-SWAP', assigned_driver: 'drv-b',
+    cancelled_from_status: 'on_the_way', cancelled_at: iso(-1)
+  });
+  state.bookings.push(cxlSwappedBooking);
+  state.notification_events.push({
+    id: 'ev-stop-5', booking_id: cxlSwappedBooking.id, event_type: 'ride_cancelled',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('stop notice keyed to driver A with the row swapped to driver B: A\'s chat, never B\'s', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(telegramChats()[0], 'chat-a', 'the driver who committed, not the current column value');
+    assert.ok(fetchCalls[0].body.text.includes('Do not proceed'));
+    const ev = events().find((e) => e.id === 'ev-stop-5');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {
   console.error('\nFAIL:', e.message);
