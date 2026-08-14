@@ -346,6 +346,9 @@
         const TERMINAL = ['completed', 'cancelled', 'declined'];
         const STEP_ORDER = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress', 'completed'];
         const TRACKING_STATUSES = ['on_the_way', 'arrived', 'in_progress'];
+        // Self-service cancellation (PR 3B): available through Arrived;
+        // in_progress and terminal rides cannot be cancelled here.
+        const CANCELLABLE_STATUSES = ['pending', 'confirmed', 'on_the_way', 'arrived'];
 
         // Vehicle catalog: image + capacity per database vehicle_type
         const VEHICLES = {
@@ -646,13 +649,18 @@
                 $('flightLine').classList.add('hidden');
             }
 
-            // Actions. The 15s pending poll re-renders while the quote
-            // card is open — the outer Cancel button must not resurrect
-            // under it (activeQuote owns the button while the card shows).
+            // Actions. Polls re-render while the quote card is open — the
+            // outer Cancel button must not resurrect under it (activeQuote
+            // owns the button while the card shows), and ANY status change
+            // invalidates an open quote: the terms the passenger was
+            // reviewing no longer describe the ride (e.g. confirmed →
+            // on_the_way). The next tap fetches fresh terms.
             const isPending = b.status === 'pending';
             $('backBtn').classList.toggle('hidden', !isPending);
-            $('cancelBtn').classList.toggle('hidden', !isPending || activeQuote !== null);
-            if (!isPending) hideQuoteCard(); // a status change closes the quote
+            const canCancel = CANCELLABLE_STATUSES.includes(b.status);
+            if (activeQuote && activeQuote.status !== b.status) hideQuoteCard();
+            $('cancelBtn').classList.toggle('hidden', !canCancel || activeQuote !== null);
+            if (!canCancel) hideQuoteCard();
             $('rebookBtn').classList.toggle('hidden', !TERMINAL.includes(b.status));
 
             // Warm human channel once paired: WhatsApp chat with the driver.
@@ -1011,7 +1019,10 @@
             }
         }
 
-        // The server's numbers, verbatim — never computed on the client.
+        // The server's words, verbatim — the client never computes policy.
+        // SILENT PILOT: the server omits fee fields, so the ledger branch
+        // below stays dormant until the CANCEL_FEE_DISPLAY activation flip
+        // makes a nonzero feePercent arrive.
         function renderQuoteLines(q) {
             const fmt = (n) => '$' + Number(n || 0).toFixed(2);
             if (Number(q.feePercent) > 0) {
@@ -1020,10 +1031,17 @@
                     '<strong>Amount due today: ' + fmt(q.dueNow) + '</strong><br>' +
                     'No payment will be collected during the pilot.';
             }
-            // Free bracket (pending): a plain human sentence — the fee
-            // ledger renders only when a real policy amount exists (PR 2's
-            // 50%/100% brackets light up the branch above).
-            return 'Your ride hasn’t been accepted yet, so cancelling is free.';
+            if (q.status === 'arrived') {
+                // The one exception to silence: the driver provably made
+                // it to the pickup. Plants the norm, promises nothing.
+                return 'Your driver has already arrived at the pickup.<br>' +
+                    'Cancelling now doesn’t carry a charge today, but late cancellations may in the future.';
+            }
+            if (q.status === 'pending') {
+                return 'Your ride hasn’t been accepted yet, so cancelling is free.';
+            }
+            // confirmed / on_the_way: simple pilot confirmation.
+            return 'Your driver will be notified right away.';
         }
 
         function showQuoteCard(q) {
@@ -1037,7 +1055,7 @@
         function hideQuoteCard() {
             activeQuote = null;
             $('cancelQuoteCard').classList.add('hidden');
-            if (lastBooking && lastBooking.status === 'pending') {
+            if (lastBooking && CANCELLABLE_STATUSES.includes(lastBooking.status)) {
                 $('cancelBtn').classList.remove('hidden');
             }
             requestAnimationFrame(() => reportHeight('lm-resize'));
@@ -1057,6 +1075,21 @@
             fetchStatus('return'); // standalone: show the cancelled state
         }
 
+        // Not-cancellable verdicts from the server's quote, by reason.
+        function handleNotCancellable(quote) {
+            const reason = quote && quote.reason;
+            if (reason === 'requires_support') {
+                showActionError(`Please contact LinkMia support to cancel this ride — call or text us: ${SUPPORT_PHONE}`);
+                return;
+            }
+            if (reason === 'in_progress') {
+                showActionError(`Your trip has already started — call or text us: ${SUPPORT_PHONE}`);
+                return;
+            }
+            // terminal or unknown: just show live truth.
+            fetchStatus('return');
+        }
+
         function handleCancelFailure(status, body) {
             const current = body && (body.currentStatus || body.status);
             if (status === 401) {
@@ -1068,11 +1101,15 @@
                 return;
             }
             if (status === 409) {
-                // Never success: show live truth. Already-cancelled just
-                // renders the cancelled state; anything else means the
-                // driver moved first.
-                if (current !== 'cancelled') {
-                    showActionError(`Your driver already accepted this ride — call or text us to change plans: ${SUPPORT_PHONE}`);
+                // Never success: show live truth with status-aware copy.
+                if (current === 'cancelled') {
+                    fetchStatus('return');
+                    return;
+                }
+                if (current === 'in_progress') {
+                    showActionError(`Your trip has already started — call or text us: ${SUPPORT_PHONE}`);
+                } else {
+                    showActionError('Your ride\'s status just changed — please review and try again.');
                 }
                 fetchStatus('return');
                 return;
@@ -1101,9 +1138,14 @@
                 const token = await getSessionToken();
                 const res = await cancelApi('quote', null, token);
                 if (res.status === 503) {
-                    // Kill switch: fall back to the legacy flow (same
-                    // server-side authorization, native confirm dialog).
-                    await legacyCancelFlow(token);
+                    // Kill switch: pending keeps the proven legacy flow;
+                    // accepted rides go straight to support — never a
+                    // confirmation dialog that is doomed to fail after.
+                    if (lastBooking && lastBooking.status === 'pending') {
+                        await legacyCancelFlow(token);
+                    } else {
+                        showActionError(`Please contact LinkMia support to cancel this ride — call or text us: ${SUPPORT_PHONE}`);
+                    }
                     return;
                 }
                 if (!res.ok) {
@@ -1112,7 +1154,7 @@
                 }
                 const { quote } = await res.json();
                 if (!quote || !quote.cancellable) {
-                    handleCancelFailure(409, { currentStatus: quote && quote.status });
+                    handleNotCancellable(quote);
                     return;
                 }
                 showQuoteCard(quote);
@@ -1136,25 +1178,30 @@
             btn.disabled = true;
             try {
                 const token = await getSessionToken();
-                const res = await cancelApi('cancel', {
-                    expected: {
-                        status: reviewed.status,
-                        feePercent: reviewed.feePercent,
-                        policyAmount: reviewed.policyAmount,
-                        policyVersion: reviewed.policyVersion,
-                        pickupAt: reviewed.pickupAt
-                    }
-                }, token);
+                // The CAS expectation carries exactly the terms the server
+                // exposed — fee fields join only when the display flag put
+                // them in the reviewed quote; serverTime never travels.
+                const expected = {
+                    status: reviewed.status,
+                    policyVersion: reviewed.policyVersion,
+                    pickupAt: reviewed.pickupAt
+                };
+                if (reviewed.feePercent !== undefined) {
+                    expected.feePercent = reviewed.feePercent;
+                    expected.policyAmount = reviewed.policyAmount;
+                }
+                const res = await cancelApi('cancel', { expected }, token);
                 if (res.ok) {
                     onCancelConfirmed();
                     return;
                 }
                 const body = await res.json().catch(() => null);
-                // Quote drifted but the ride is still pending (rare: a
-                // policy deploy between quote and confirm): show the FRESH
-                // numbers for review instead of a false driver message.
-                if (res.status === 409 && body && body.currentStatus === 'pending' &&
-                    body.quote && body.quote.cancellable) {
+                // Terms drifted but the ride is STILL cancellable (status
+                // advanced within the window, or a policy deploy landed):
+                // show the fresh terms for review — never a false failure,
+                // never a stale confirmation.
+                if (res.status === 409 && body && body.quote && body.quote.cancellable &&
+                    CANCELLABLE_STATUSES.includes(body.currentStatus)) {
                     showActionError('The cancellation details changed — please review again.');
                     showQuoteCard(body.quote);
                     return;

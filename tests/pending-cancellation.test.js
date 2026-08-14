@@ -18,6 +18,8 @@ delete process.env.CANCEL_QUOTE_DISABLED;
 
 const BOOKING_ID = '032f664e-20f6-4faa-bab5-3a5362a7cf06';
 const PICKUP = '2026-08-11T01:30:00+00:00';
+const HOURS = 60 * 60 * 1000;
+const iso = (msFromNow) => new Date(Date.now() + msFromNow).toISOString();
 
 // ---------- mock state ----------
 const state = {};
@@ -39,6 +41,11 @@ function resetState() {
   state.updateError = null;
   state.captured = null;       // { payload, filters, selectFields }
   state.reads = 0;
+  state.events = [];           // notification_events rows (outbox output)
+  state.eventReadError = null;
+  state.dispatchCalls = [];    // stubbed dispatcher invocations
+  state.dispatchBehavior = null; // (ev) => mutate state per event
+  delete process.env.CANCEL_FEE_DISPLAY;
 }
 resetState();
 
@@ -91,6 +98,25 @@ const supabaseMock = {
           }
         };
       }
+      if (table === 'notification_events') {
+        // Thenable filter chain for the endpoint's scoped readbacks.
+        const q = { filters: {}, ins: [] };
+        const chain = {
+          select: () => chain,
+          eq: (col, val) => { q.filters[col] = val; return chain; },
+          in: (col, vals) => { q.ins.push([col, vals]); return chain; },
+          then: (onOk, onErr) => {
+            if (state.eventReadError) {
+              return Promise.resolve({ data: null, error: state.eventReadError }).then(onOk, onErr);
+            }
+            let rows = state.events.filter((e) =>
+              (!q.filters.booking_id || e.booking_id === q.filters.booking_id));
+            for (const [col, vals] of q.ins) rows = rows.filter((e) => vals.includes(e[col]));
+            return Promise.resolve({ data: rows, error: null }).then(onOk, onErr);
+          }
+        };
+        return chain;
+      }
       throw new Error('unexpected table: ' + table);
     }
   })
@@ -99,6 +125,20 @@ const supabaseMock = {
 const supabasePath = require.resolve('@supabase/supabase-js');
 require.cache[supabasePath] = {
   id: supabasePath, filename: supabasePath, loaded: true, exports: supabaseMock
+};
+
+// Stub the shared dispatcher: its OWN behavior is proven in
+// tests/dispatch-module.test.js — here we only verify the endpoint's
+// scoping, honesty, and never-fail-the-cancel discipline around it.
+const dispatchPath = require.resolve('../backend/functions/lib/dispatch.js');
+require.cache[dispatchPath] = {
+  id: dispatchPath, filename: dispatchPath, loaded: true,
+  exports: {
+    dispatchOne: async (db, ev, nowMs, opts) => {
+      state.dispatchCalls.push({ ev, opts });
+      if (state.dispatchBehavior) await state.dispatchBehavior(ev, opts);
+    }
+  }
 };
 
 const core = require('../backend/functions/lib/cancel-core.js');
@@ -142,16 +182,60 @@ async function check(name, fn) {
   });
 
   // ---------- quote ----------
-  await check('guest pending quote (bare UUID): $0, cancellable, versioned', async () => {
+  await check('guest pending quote (bare UUID): cancellable, versioned, SILENT (no fee fields)', async () => {
     const res = await post(cancelBooking, { id: BOOKING_ID, action: 'quote' });
     assert.strictEqual(res.statusCode, 200);
     const { quote } = JSON.parse(res.body);
     assert.strictEqual(quote.cancellable, true);
-    assert.strictEqual(quote.feePercent, 0);
-    assert.strictEqual(quote.policyAmount, 0);
-    assert.strictEqual(quote.dueNow, 0);
     assert.strictEqual(quote.policyVersion, core.POLICY_VERSION);
     assert.strictEqual(quote.pickupAt, PICKUP);
+    for (const hidden of ['feePercent', 'policyAmount', 'waiverAmount', 'dueNow']) {
+      assert.ok(!(hidden in quote), hidden + ' must be silent by default');
+    }
+  });
+
+  await check('clock brackets (internal computeQuote): time decides, status never does', () => {
+    const q = (status, pickupInMs, extra = {}) => core.computeQuote({
+      id: BOOKING_ID, status, customer_id: 'cust-1',
+      pickup_datetime: iso(pickupInMs), price: '55.00', ...extra
+    }, Date.now());
+    assert.strictEqual(q('confirmed', 3 * HOURS).feePercent, 0);
+    assert.strictEqual(q('confirmed', 3 * HOURS).reason, 'accepted_free_window');
+    assert.strictEqual(q('confirmed', 2 * HOURS).feePercent, 50, 'exactly 2h is inside the window');
+    assert.strictEqual(q('confirmed', 30 * 60 * 1000).feePercent, 50);
+    assert.strictEqual(q('confirmed', -5 * 60 * 1000).feePercent, 100, 'past pickup -> 100');
+    assert.strictEqual(q('on_the_way', 90 * 60 * 1000).feePercent, 50, 'on_the_way inside 2h is 50 — checkpoints never set the percent');
+    assert.strictEqual(q('on_the_way', 3 * HOURS).feePercent, 0, 'on_the_way far out is FREE by the clock');
+    assert.strictEqual(q('arrived', -10 * 60 * 1000).feePercent, 100);
+    assert.strictEqual(q('arrived', 3 * HOURS).feePercent, 0, 'arrived far out is FREE by the clock');
+    assert.strictEqual(q('confirmed', 90 * 60 * 1000).policyAmount, 27.5);
+    assert.strictEqual(q('confirmed', -1).policyAmount, 55);
+    // Invalid price never fabricates $0; a real $0 fare stays $0.
+    assert.strictEqual(q('confirmed', 30 * 60 * 1000, { price: 'garbage' }).policyAmount, null);
+    assert.strictEqual(q('confirmed', 30 * 60 * 1000, { price: 0 }).policyAmount, 0);
+    // Eligibility gates
+    assert.strictEqual(q('in_progress', -1).cancellable, false);
+    assert.strictEqual(q('in_progress', -1).reason, 'in_progress');
+    assert.strictEqual(q('assigned', 3 * HOURS).reason, 'requires_support');
+    const guest = core.computeQuote({ id: BOOKING_ID, status: 'confirmed', customer_id: null,
+      pickup_datetime: iso(3 * HOURS), price: '55.00' }, Date.now());
+    assert.strictEqual(guest.cancellable, false);
+    assert.strictEqual(guest.reason, 'requires_support');
+  });
+
+  await check('visibleQuote strips fees by default; CANCEL_FEE_DISPLAY restores them', () => {
+    const full = core.computeQuote({ id: BOOKING_ID, status: 'confirmed', customer_id: 'cust-1',
+      pickup_datetime: iso(30 * 60 * 1000), price: '55.00' }, Date.now());
+    const silent = core.visibleQuote(full);
+    for (const hidden of ['feePercent', 'policyAmount', 'waiverAmount', 'dueNow']) {
+      assert.ok(!(hidden in silent));
+    }
+    assert.ok('serverTime' in silent, 'serverTime stays visible (informational, never compared)');
+    process.env.CANCEL_FEE_DISPLAY = '1';
+    const shown = core.visibleQuote(full);
+    assert.strictEqual(shown.feePercent, 50);
+    assert.strictEqual(shown.policyAmount, 27.5);
+    delete process.env.CANCEL_FEE_DISPLAY;
   });
 
   await check('account-owned pending quote WITHOUT token -> 401 (leaked UUID is not enough)', async () => {
@@ -180,13 +264,25 @@ async function check(name, fn) {
     assert.strictEqual(res.statusCode, 500);
   });
 
-  await check('confirmed ride -> not self-service in 1A (unsupported_status)', async () => {
+  await check('legacy-guest CONFIRMED ride -> requires_support (a bare UUID never cancels a committed driver)', async () => {
     state.bookingRow.status = 'confirmed';
+    state.bookingRow.customer_id = null;
     const res = await post(cancelBooking, { id: BOOKING_ID, action: 'quote' });
     assert.strictEqual(res.statusCode, 200);
     const { quote } = JSON.parse(res.body);
     assert.strictEqual(quote.cancellable, false);
-    assert.strictEqual(quote.reason, 'unsupported_status');
+    assert.strictEqual(quote.reason, 'requires_support');
+  });
+
+  await check('owner-authenticated CONFIRMED ride -> cancellable, silent', async () => {
+    state.bookingRow.status = 'confirmed';
+    state.bookingRow.customer_id = 'cust-1';
+    state.bookingRow.pickup_datetime = iso(3 * HOURS);
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'quote' }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200);
+    const { quote } = JSON.parse(res.body);
+    assert.strictEqual(quote.cancellable, true);
+    assert.ok(!('feePercent' in quote), 'silent for accepted rides too');
   });
 
   await check('terminal ride -> reason terminal', async () => {
@@ -201,7 +297,7 @@ async function check(name, fn) {
     assert.strictEqual(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.strictEqual(body.success, true);
-    assert.strictEqual(body.applied.dueNow, 0);
+    assert.ok(!('applied' in body), 'silence extends to the final response by default');
     assert.strictEqual(body.notificationQueued, true);
     assert.strictEqual(body.immediateSubmission, 'deferred');
     const { payload, filters, selectFields } = state.captured;
@@ -237,14 +333,33 @@ async function check(name, fn) {
     assert.strictEqual(state.captured, null);
   });
 
-  await check('stale expected (wrong fee) -> 409 + fresh quote, nothing written', async () => {
+  await check('stale expected (policyVersion drift) -> 409 + fresh SILENT quote, nothing written', async () => {
     const exp = goodExpected();
-    exp.feePercent = 50;
+    exp.policyVersion = 'pilot-1999-01';
     const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp });
     assert.strictEqual(res.statusCode, 409);
     const body = JSON.parse(res.body);
     assert.strictEqual(body.error, 'stale_quote');
     assert.ok(body.quote && body.quote.cancellable === true);
+    assert.ok(!('feePercent' in body.quote), '409 payloads are silent too');
+    assert.strictEqual(state.captured, null);
+  });
+
+  await check('CAS: fee extras from older tabs are ignored while silent; serverTime never compared', async () => {
+    const exp = goodExpected(); // carries feePercent/policyAmount extras
+    exp.feePercent = 50;        // wrong on purpose — must be IGNORED (not exposed)
+    exp.serverTime = '1999-01-01T00:00:00Z';
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp });
+    assert.strictEqual(res.statusCode, 200, 'extras and serverTime must not block the cancel');
+  });
+
+  await check('CAS with CANCEL_FEE_DISPLAY on: fee terms become load-bearing again', async () => {
+    process.env.CANCEL_FEE_DISPLAY = '1';
+    const exp = goodExpected();
+    exp.feePercent = 50; // pending is 0 — displayed drift must 409
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp });
+    delete process.env.CANCEL_FEE_DISPLAY;
+    assert.strictEqual(res.statusCode, 409);
     assert.strictEqual(state.captured, null);
   });
 
@@ -427,15 +542,142 @@ async function check(name, fn) {
       pickup_datetime: PICKUP, cancelled_from_status: 'confirmed'
     });
     assert.ok(!text.includes('Policy:'));
-    assert.strictEqual(notify.renderEvent('ride_cancelled', {}), null);
+    assert.strictEqual(notify.renderEvent('never_a_real_event', {}), null);
+  });
+
+  await check('driver stop-notice: honest copy on both channels, no rideId deep link, readiness tag reuse', () => {
+    const b = { id: BOOKING_ID, trip_id: 'LM-HXA5', pickup_datetime: PICKUP };
+    const text = notify.renderEvent('ride_cancelled', b);
+    assert.ok(text.includes('cancelled by the passenger'));
+    assert.ok(text.includes('Do not proceed'));
+    assert.ok(text.includes('No action is required'));
+    const payload = notify.pushPayloadFor('ride_cancelled', b);
+    assert.ok(payload.body.includes('Do not proceed'));
+    assert.ok(!('rideId' in payload), 'no deep link to a ride that no longer renders — click opens /driver');
+    assert.strictEqual(payload.tag, notify.readinessTopic(b), 'replaces any queued stale readiness banner');
+    assert.ok(!/\+1|@|phone|address/i.test(payload.body), 'no PII in push payloads');
   });
 
   await check('CANCELLATION_TYPES exported and outside CHAIN_TYPES/DRIVER_ASKS', () => {
-    assert.deepStrictEqual(notify.CANCELLATION_TYPES, ['ride_cancelled_admin']);
+    assert.deepStrictEqual(notify.CANCELLATION_TYPES, ['ride_cancelled', 'ride_cancelled_admin']);
     for (const t of notify.CANCELLATION_TYPES) {
       assert.ok(!notify.CHAIN_TYPES.includes(t));
       assert.ok(!notify.DRIVER_ASKS.includes(t));
     }
+  });
+
+  // ---- PR 3B: accepted-ride cancel with scoped immediate dispatch ----
+  await check('owner cancels confirmed ride: audit waiver stamped, dispatch scoped to THIS booking, honest submitted', async () => {
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
+      customer_id: 'cust-1', pickup_datetime: iso(30 * 60 * 1000), price: '55.00'
+    };
+    // The outbox trigger's rows (plus an unrelated booking's event that
+    // must NOT be dispatched by this request).
+    state.events = [
+      { id: 'ev-a', booking_id: BOOKING_ID, event_type: 'ride_cancelled_admin', state: 'pending' },
+      { id: 'ev-d', booking_id: BOOKING_ID, event_type: 'ride_cancelled', state: 'pending' },
+      { id: 'ev-x', booking_id: 'ffffffff-0000-4000-8000-000000000000', event_type: 'ride_cancelled_admin', state: 'pending' }
+    ];
+    state.dispatchBehavior = (ev) => { ev.state = 'submitted'; };
+    const exp = { status: 'confirmed', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.immediateSubmission, 'submitted', 'stored truth says both events landed');
+    assert.ok(!('applied' in body));
+    assert.strictEqual(state.dispatchCalls.length, 2, 'ONLY this booking\'s two events are dispatched');
+    assert.ok(state.dispatchCalls.every((c) => c.ev.booking_id === BOOKING_ID));
+    assert.ok(state.dispatchCalls.every((c) => Number.isInteger(c.opts.maxAttempts) && c.opts.maxAttempts >= 1));
+    const p = state.captured.payload;
+    assert.strictEqual(p.cancelled_from_status, 'confirmed');
+    assert.strictEqual(p.cancelled_by, 'passenger_auth');
+    assert.strictEqual(p.cancel_fee_percent, 50);
+    assert.strictEqual(p.cancel_fee_policy_amount, 27.5);
+    assert.strictEqual(p.cancel_fee_collected, 0);
+    assert.strictEqual(p.cancel_waiver_reason, 'pilot_waiver');
+    assert.strictEqual(p.cancel_waived_by, 'system');
+    assert.strictEqual(p.driver_lat, null);
+    assert.ok(!('assigned_driver' in p), 'assigned driver is preserved for audit and routing');
+  });
+
+  await check('dispatch failure NEVER fails the committed cancel: 200 with deferred', async () => {
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'on_the_way',
+      customer_id: 'cust-1', pickup_datetime: iso(-5 * 60 * 1000), price: '55.00'
+    };
+    state.events = [
+      { id: 'ev-a', booking_id: BOOKING_ID, event_type: 'ride_cancelled_admin', state: 'pending' },
+      { id: 'ev-d', booking_id: BOOKING_ID, event_type: 'ride_cancelled', state: 'pending' }
+    ];
+    state.dispatchBehavior = () => { throw new Error('provider exploded'); };
+    const exp = { status: 'on_the_way', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200, 'a committed cancellation never reports failure');
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.success, true);
+    assert.strictEqual(body.immediateSubmission, 'deferred', 'the watchdog recovers the pending events');
+    assert.strictEqual(state.dispatchCalls.length, 1, 'a throw breaks the pass — the second event is the watchdog\'s');
+    assert.strictEqual(state.captured.payload.cancel_fee_percent, 100, 'past pickup -> 100 regardless of status');
+  });
+
+  await check('first dispatch DB failure stops the immediate pass: second event untouched, still 200 deferred', async () => {
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
+      customer_id: 'cust-1', pickup_datetime: iso(30 * 60 * 1000), price: '55.00'
+    };
+    state.events = [
+      { id: 'ev-a', booking_id: BOOKING_ID, event_type: 'ride_cancelled_admin', state: 'pending' },
+      { id: 'ev-d', booking_id: BOOKING_ID, event_type: 'ride_cancelled', state: 'pending' }
+    ];
+    // The dispatcher surfaces a broken database via dbFail (watchdog
+    // contract) — the endpoint must break exactly like the watchdog loop.
+    state.dispatchBehavior = (ev, opts) => { opts.dbFail('dispatch refetch', new Error('db down')); };
+    const exp = { status: 'confirmed', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200, 'a committed cancellation never reports failure');
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.success, true);
+    assert.strictEqual(body.immediateSubmission, 'deferred');
+    assert.strictEqual(state.dispatchCalls.length, 1, 'no second dispatch on broken truth');
+  });
+
+  await check('NULL and blank stored price record NULL amount (never a fabricated $0); real zero stays $0.00', async () => {
+    // Number(null) and Number('') are both 0 — absence must be rejected
+    // BEFORE conversion (bookings.price is nullable in the schema).
+    const q = (price) => core.computeQuote({
+      id: BOOKING_ID, status: 'confirmed', customer_id: 'cust-1',
+      pickup_datetime: iso(30 * 60 * 1000), price
+    }, Date.now());
+    assert.strictEqual(q(null).policyAmount, null, 'NULL price -> NULL amount');
+    assert.strictEqual(q(undefined).policyAmount, null, 'missing price -> NULL amount');
+    assert.strictEqual(q('').policyAmount, null, 'blank price -> NULL amount');
+    assert.strictEqual(q('   ').policyAmount, null, 'whitespace price -> NULL amount');
+    assert.strictEqual(q(0).policyAmount, 0, 'a real $0 fare stays $0.00');
+    assert.strictEqual(q('0').policyAmount, 0, 'a real "0" fare stays $0.00');
+    // End to end: a NULL-price accepted cancel stamps percent 50, amount NULL.
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
+      customer_id: 'cust-1', pickup_datetime: iso(30 * 60 * 1000), price: null
+    };
+    const exp = { status: 'confirmed', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200, 'an absent price never blocks cancellation');
+    assert.strictEqual(state.captured.payload.cancel_fee_percent, 50);
+    assert.strictEqual(state.captured.payload.cancel_fee_policy_amount, null);
+  });
+
+  await check('invalid stored price on an accepted cancel: NULL amount recorded, cancel proceeds', async () => {
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
+      customer_id: 'cust-1', pickup_datetime: iso(30 * 60 * 1000), price: 'not-a-number'
+    };
+    const exp = { status: 'confirmed', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(state.captured.payload.cancel_fee_percent, 50);
+    assert.strictEqual(state.captured.payload.cancel_fee_policy_amount, null, 'never a fabricated $0');
+    assert.strictEqual(state.captured.payload.cancel_waiver_reason, 'pilot_waiver');
   });
 
   await check('dispatcher wiring: DISPATCH_FIELDS refetch + not_cancelled relevance gate', () => {

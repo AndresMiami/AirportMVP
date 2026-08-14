@@ -31,6 +31,18 @@ const DISPATCH_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, 
   ', price, cancelled_at, cancelled_from_status, ' +
   'cancel_fee_percent, cancel_fee_policy_amount, cancel_fee_collected, cancel_waiver_reason';
 
+// The driver a driver-role event targets. Cancellation events answer to
+// the STORED driver-at-cancellation (recipient_key, stamped by the
+// migration-015 outbox trigger from OLD.assigned_driver): a manual clear
+// or reassignment of the cancelled row must never silence or redirect
+// the stop notice. Every other driver event routes by the live row —
+// its reassignment guard already suppressed any mismatch before routing.
+function driverTargetFor(ev, b) {
+  return notify.CANCELLATION_TYPES.includes(ev.event_type)
+    ? ev.recipient_key
+    : b.assigned_driver;
+}
+
 // Dispatch one due event: refetch the live booking, re-check relevance,
 // transition to in_delivery (a LOST CAS means another process changed the
 // event — stop without sending), claim by insert, send, finalize, roll
@@ -120,7 +132,7 @@ async function dispatchOne(db, ev, nowMs, opts) {
   if (ev.recipient_role !== 'driver') {
     route = { channel: 'telegram' };
   } else {
-    route = await notify.resolveDriverRoute(db, ev, b.assigned_driver);
+    route = await notify.resolveDriverRoute(db, ev, driverTargetFor(ev, b));
     if (route.dbError) {
       dbFail('route resolution', route.dbError);
       return;
@@ -129,6 +141,28 @@ async function dispatchOne(db, ev, nowMs, opts) {
       const { error } = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
         { state: route.done });
       if (error) dbFail('rollup routed', error);
+      return;
+    }
+  }
+
+  // Cancellation dedup (PR 3B): when the driver's stop-notice would go
+  // out via Telegram AND land in the ADMIN chat (no distinct driver
+  // chat configured), the admin cancellation event already owns that
+  // destination — a second copy of the same news in the same chat is
+  // suppressed as duplicate_target. A push route proceeds (different
+  // surface); a distinct driver chat proceeds (different destination).
+  if (ev.event_type === 'ride_cancelled' && route.channel === 'telegram') {
+    const dedup = await notify.resolveDriverChatId(db, driverTargetFor(ev, b));
+    if (dedup.dbError) {
+      // Unknown truth must never become a TERMINAL suppression: the
+      // driver may have a distinct chat the failed lookup couldn't see.
+      // Surface and stop — the event stays recoverable and the watchdog
+      // retries from stored truth.
+      dbFail('dedup chat lookup', dedup.dbError);
+      return;
+    }
+    if (dedup.chatId && dedup.chatId === process.env.ADMIN_TELEGRAM_CHAT_ID) {
+      await suppress('duplicate_target');
       return;
     }
   }
@@ -164,9 +198,22 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxA
   const nowIso = new Date(nowMs).toISOString();
   if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave for next cycle
 
-  const chatId = ev.recipient_role === 'driver'
-    ? await notify.resolveDriverChatId(db, b.assigned_driver, dbFail)
-    : process.env.ADMIN_TELEGRAM_CHAT_ID;
+  let chatId;
+  if (ev.recipient_role === 'driver') {
+    const resolved = await notify.resolveDriverChatId(db, driverTargetFor(ev, b));
+    if (resolved.dbError) {
+      dbFail('resolveDriverChatId', resolved.dbError);
+      if (notify.CANCELLATION_TYPES.includes(ev.event_type)) {
+        // The stop notice must reach THE driver: on unknown chat truth,
+        // stop recoverable rather than misroute it to the admin chat.
+        // Chain reminders keep the fallback (admin beats silence).
+        return;
+      }
+    }
+    chatId = resolved.chatId;
+  } else {
+    chatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
+  }
   if (!chatId) return; // config gap, not a send failure — leave for next cycle
 
   const text = notify.renderEvent(ev.event_type, b);

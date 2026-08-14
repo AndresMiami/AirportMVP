@@ -14,10 +14,20 @@
 //     auth verification is unreachable (never mislabeled as expired —
 //     create-booking discipline).
 //
-// Policy (PR 1A): pending cancels are FREE — feePercent 0, dueNow $0.
-// Confirmed/on_the_way/arrived are NOT cancellable through this core yet
-// ('unsupported_status' -> support path); PR 2 brings the real fee
-// brackets. Terminal rows answer 'terminal'.
+// Policy (PR 3B — CLOCK-based, SILENT): pending / confirmed / on_the_way
+// / arrived are self-service cancellable. The shadow percentage comes
+// from the SERVER clock vs pickup_datetime ONLY — driver-controlled
+// checkpoints never move it: accepted >2h out -> 0; from T-2h through
+// pickup -> 50; at/after pickup -> 100. in_progress and terminals are
+// not cancellable; legacy guest ACCEPTED rows (customer_id NULL, no way
+// to authenticate ownership) -> 'requires_support'.
+//
+// SILENCE: the fee numbers are computed and AUDITED on every
+// cancellation but never shown — visibleQuote() strips them from every
+// passenger-facing payload (quote, 409s, applied) unless
+// CANCEL_FEE_DISPLAY is set (the future activation lever). An invalid
+// stored price never blocks cancellation and never fabricates $0: the
+// hypothetical amount is recorded as NULL (a real $0 fare stays $0.00).
 //
 // Audit: every cancellation stamps the migration-013 shadow-audit columns
 // in the SAME guarded UPDATE as the status flip. The 013 outbox trigger
@@ -44,6 +54,36 @@ const PASSENGER_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location
 const CANCEL_READ_FIELDS = 'id, trip_id, status, customer_id, pickup_datetime, price';
 
 const TERMINAL_STATUSES = ['completed', 'cancelled', 'declined'];
+
+// Self-service cancellable statuses (eligibility — never the percent).
+const SELF_SERVICE_STATUSES = ['pending', 'confirmed', 'on_the_way', 'arrived'];
+
+// The clock line: strictly MORE than 2h before pickup is free.
+const FREE_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+// Activation lever for the fee DISPLAY (never collection — that stays
+// impossible via the migration-013 CHECK until its own future PR).
+function feeDisplayEnabled() {
+  return process.env.CANCEL_FEE_DISPLAY === '1' || process.env.CANCEL_FEE_DISPLAY === 'true';
+}
+
+// Fields the CAS compares. serverTime is NEVER compared (it changes
+// between requests by nature); fee fields join only while displayed.
+function casFields() {
+  return feeDisplayEnabled()
+    ? ['status', 'pickupAt', 'policyVersion', 'feePercent', 'policyAmount']
+    : ['status', 'pickupAt', 'policyVersion'];
+}
+
+// The passenger-facing projection of a quote: with display OFF the fee
+// arithmetic is absent from EVERY response — quote, 409 conflicts, and
+// the final applied summary alike.
+function visibleQuote(quote) {
+  if (!quote) return quote;
+  if (feeDisplayEnabled()) return quote;
+  const { feePercent, policyAmount, waiverAmount, dueNow, ...visible } = quote;
+  return visible;
+}
 
 async function readBookingForCancel(db, id) {
   const { data, error } = await db
@@ -103,8 +143,8 @@ async function authorizeCancel(event, booking, { supabaseUrl, anonKey, db }) {
   }
 }
 
-// Server-computed cancellation quote. PR 1A: pending is free; accepted
-// statuses are not yet self-service (PR 2 brings the 50%/100% brackets).
+// Server-computed cancellation quote — the INTERNAL truth. Callers must
+// pass it through visibleQuote() before it reaches a passenger.
 function computeQuote(booking, nowMs) {
   const base = {
     status: booking.status,
@@ -112,33 +152,92 @@ function computeQuote(booking, nowMs) {
     pickupAt: booking.pickup_datetime,
     serverTime: new Date(nowMs).toISOString()
   };
-  if (booking.status === 'pending') {
-    return {
-      ...base,
-      cancellable: true,
-      reason: 'pending_free',
-      feePercent: 0,
-      policyAmount: 0,
-      waiverAmount: 0,
-      dueNow: 0
-    };
-  }
   if (TERMINAL_STATUSES.includes(booking.status)) {
     return { ...base, cancellable: false, reason: 'terminal' };
   }
-  // confirmed / on_the_way / arrived / in_progress / legacy 'assigned'
-  return { ...base, cancellable: false, reason: 'unsupported_status' };
+  if (booking.status === 'in_progress') {
+    return { ...base, cancellable: false, reason: 'in_progress' };
+  }
+  if (!SELF_SERVICE_STATUSES.includes(booking.status)) {
+    // legacy 'assigned' and any future surprise: support path.
+    return { ...base, cancellable: false, reason: 'requires_support' };
+  }
+  if (booking.status !== 'pending' && !booking.customer_id) {
+    // Legacy guest ACCEPTED ride: no way to authenticate ownership, and
+    // a bare UUID must never cancel a committed driver's ride.
+    return { ...base, cancellable: false, reason: 'requires_support' };
+  }
+
+  // Shadow percentage: SERVER clock vs the scheduled pickup, nothing
+  // else. Checkpoints gate eligibility above, never the percent.
+  let feePercent;
+  let reason;
+  if (booking.status === 'pending') {
+    feePercent = 0;
+    reason = 'pending_free';
+  } else {
+    const pickupMs = Date.parse(booking.pickup_datetime);
+    if (!Number.isFinite(pickupMs)) {
+      // Defensive only (pickup_datetime is NOT NULL timestamptz): an
+      // unclockable pickup records NULL percent/amount, never a guess.
+      feePercent = null;
+      reason = 'accepted_unclocked';
+    } else if (nowMs >= pickupMs) {
+      feePercent = 100;
+      reason = 'after_pickup_time';
+    } else if (pickupMs - nowMs > FREE_WINDOW_MS) {
+      feePercent = 0;
+      reason = 'accepted_free_window';
+    } else {
+      feePercent = 50;
+      reason = 'accepted_late';
+    }
+  }
+
+  // Hypothetical amount: an invalid stored price records NULL — never a
+  // fabricated $0 — while a real zero-dollar fare stays $0.00. Absence
+  // is rejected BEFORE conversion: Number(null) and Number('') are both
+  // 0, and bookings.price is nullable.
+  const rawPrice = booking.price;
+  const priceAbsent = rawPrice === null || rawPrice === undefined ||
+    (typeof rawPrice === 'string' && rawPrice.trim() === '');
+  const priceNum = priceAbsent ? NaN : Number(rawPrice);
+  const priceValid = Number.isFinite(priceNum) && priceNum >= 0;
+  const policyAmount = (feePercent === null || !priceValid)
+    ? null
+    : Math.round(priceNum * feePercent) / 100;
+
+  return {
+    ...base,
+    cancellable: true,
+    reason,
+    feePercent,
+    policyAmount,
+    waiverAmount: policyAmount,
+    dueNow: 0
+  };
 }
 
 // Compare the quote the passenger reviewed against a fresh computation.
 // Values are NEVER policy inputs — only a compare-and-set expectation.
+// INTERSECTION rule: exactly the casFields() are compared; extra client
+// fields are ignored (an already-open older trip tab may still send fee
+// fields the silent server no longer exposes); serverTime is never
+// compared (it changes between requests by nature).
 function expectedMatchesQuote(expected, quote) {
   if (!expected || typeof expected !== 'object') return false;
-  return expected.status === quote.status &&
-    Number(expected.feePercent) === quote.feePercent &&
-    Number(expected.policyAmount) === quote.policyAmount &&
-    expected.policyVersion === quote.policyVersion &&
-    Date.parse(expected.pickupAt) === Date.parse(quote.pickupAt);
+  for (const field of casFields()) {
+    if (!(field in expected)) return false;
+    if (field === 'pickupAt') {
+      if (Date.parse(expected.pickupAt) !== Date.parse(quote.pickupAt)) return false;
+    } else if (field === 'feePercent' || field === 'policyAmount') {
+      const exp = expected[field] === null ? null : Number(expected[field]);
+      if (exp !== quote[field]) return false;
+    } else if (expected[field] !== quote[field]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Guarded cancellation: status flip + full shadow audit + coordinate
@@ -184,9 +283,12 @@ module.exports = {
   UUID_RE,
   PASSENGER_FIELDS,
   TERMINAL_STATUSES,
+  SELF_SERVICE_STATUSES,
   readBookingForCancel,
   authorizeCancel,
   computeQuote,
   expectedMatchesQuote,
-  performCancel
+  performCancel,
+  visibleQuote,
+  feeDisplayEnabled
 };

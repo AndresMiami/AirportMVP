@@ -112,7 +112,8 @@ verified checkpoint locations all live in the web app backed by Supabase.
 
 `pending → confirmed → on_the_way → arrived → in_progress → completed`
 Terminals: `declined` (legacy/admin-only — driver-side decline was removed),
-`cancelled` (passenger, pending-only). Transitions are server-enforced in
+`cancelled` (passenger self-service through `arrived`; in_progress and
+terminals only via admin SQL). Transitions are server-enforced in
 `update-booking-status.js`: Accept wins only an UNASSIGNED pending request
 and stamps `assigned_driver` atomically; every later action requires an
 EXACT ownership match. A stale/foreign action matches 0 rows → the backend
@@ -120,23 +121,41 @@ answers 200 `{idempotent:true}` ONLY when status AND owner both match
 (verified duplicate), else 409 with `currentStatus` — the client never
 interprets a 409 as success. Legacy status `assigned` kept for old rows.
 
-Passenger cancellation (PR 1A, pending only — Blacklane-style policy,
-pilot = shadow fees): authorization lives in `lib/cancel-core.js`, shared
-verbatim by `/api/cancel-booking` (quote + guarded cancel) and the legacy
-`/api/booking-status` cancel action so the rules can never diverge.
-`customer_id` set → signed-in OWNER required (401/403/500, auth-outage
-discipline); `customer_id` NULL (legacy guest) → the unguessable UUID
-remains the capability. Every cancellation stamps the migration-013
-shadow audit (from-status, pickup snapshot, policy version `pilot-2026-08`,
-fee %/amount, collected $0 — DB CHECK enforced — waiver, actor role +
-auth UUID) in the SAME guarded UPDATE as the status flip, and the 013
-outbox TRIGGER inserts the `ride_cancelled_admin` ledger event in the
-SAME transaction (manual admin SQL cancels get it free). Delivery is the
-watchdog's (~5 min); PR 1A has NO immediate dispatch — the API honestly
-reports `immediateSubmission:'deferred'`. Confirmed/on_the_way/arrived
-self-service cancellation (50%/100% shadow brackets), the driver
-`ride_cancelled` push event, and the shared-dispatcher extraction are
-PR 2/3 per the Codex-approved progression.
+Passenger cancellation (PR 3B — CLOCK-based SILENT shadow policy):
+self-service through `arrived`. Authorization lives in
+`lib/cancel-core.js`, shared verbatim by `/api/cancel-booking` (quote +
+guarded cancel) and the legacy `/api/booking-status` cancel action
+(pending-only) so the rules can never diverge. `customer_id` set →
+signed-in OWNER required (401/403/500, auth-outage discipline);
+`customer_id` NULL → bare-UUID capability for PENDING only; legacy-guest
+ACCEPTED rows answer `requires_support`. The shadow percentage comes
+from the SERVER clock vs `pickup_datetime` ONLY (accepted >2h out 0%,
+T-2h→pickup 50%, at/after pickup 100%) — driver checkpoints gate
+eligibility and notifications, never the percent. SILENCE: fee numbers
+are stripped from EVERY passenger payload (quote, 409s, applied) unless
+`CANCEL_FEE_DISPLAY` is set (future activation lever); the CAS compares
+status/pickupAt/policyVersion (fee terms only while displayed, extras
+ignored, `serverTime` never). Invalid stored price → hypothetical
+amount recorded NULL (a real $0 fare stays $0), cancellation never
+blocked. Every cancellation stamps the migration-013 audit (collected
+$0 DB-CHECK-enforced, `pilot_waiver/system` when the percent > 0) in
+the SAME guarded UPDATE; the outbox TRIGGER (013 admin + 015 driver)
+inserts the ledger events in the SAME transaction — manual admin SQL
+cancels included. After commit the endpoint gives THIS booking's
+cancellation events one bounded pass through `lib/dispatch.js`
+(`immediateSubmission` reports submitted/deferred from STORED truth; a
+notification failure never fails a committed cancel; watchdog recovers
+≤ ~5 min). The driver stop-notice routes push-first with honest copy
+("Do not proceed. No action is required."), no rideId deep link (click
+opens /driver), readiness-topic reuse (replaces stale readiness
+banners), and dispatch-time `duplicate_target` dedup when its Telegram
+fallback would land in the admin chat. Trip-sheet card: pending "hasn't
+been accepted yet — cancelling is free"; confirmed/on_the_way "your
+driver will be notified right away"; arrived adds the soft "driver has
+already arrived… late cancellations may in the future" line;
+in_progress/terminal cannot cancel. Kill switch `CANCEL_QUOTE_DISABLED`:
+pending falls back to the legacy flow, accepted rides get the support
+message (never a doomed dialog).
 
 Checkpoint model (5 statuses, 3 verified locations, 1 cleanup): `on_my_way`,
 `arrived`, `start_trip` may carry `lat`/`lng`, stamped atomically with the
