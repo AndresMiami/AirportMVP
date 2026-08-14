@@ -1327,6 +1327,73 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(ev.suppress_reason, 'not_cancelled');
   });
 
+  // ---- PR 3B: driver ride_cancelled through the REAL dispatch loop ----
+  freshState();
+  const cxlDriverBooking = mkBooking({
+    status: 'cancelled', trip_id: 'LM-STOP', assigned_driver: 'drv-a',
+    cancelled_from_status: 'on_the_way', cancelled_at: iso(-1)
+  });
+  state.bookings.push(cxlDriverBooking);
+  state.push_subscriptions.push(mkSub());
+  state.notification_events.push({
+    id: 'ev-stop-1', booking_id: cxlDriverBooking.id, event_type: 'ride_cancelled',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('driver stop-notice routes PUSH-first: honest copy, no rideId deep link, readiness tag reuse', () => {
+    assert.strictEqual(pushCalls.length, 1, 'push-first like every driver event');
+    assert.ok(pushCalls[0].payload.body.includes('Do not proceed'));
+    assert.ok(!('rideId' in pushCalls[0].payload), 'click must open the general driver page');
+    assert.strictEqual(pushCalls[0].payload.tag, notify.readinessTopic(cxlDriverBooking),
+      'replaces a queued stale readiness banner');
+    assert.strictEqual(fetchCalls.length, 0, 'never both channels');
+    const ev = events().find((e) => e.id === 'ev-stop-1');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
+  freshState();
+  state.drivers.push({ id: 'drv-nochat', name: 'NoChat', telegram_chat_id: null });
+  const cxlDedupBooking = mkBooking({
+    status: 'cancelled', trip_id: 'LM-DEDUP', assigned_driver: 'drv-nochat',
+    cancelled_from_status: 'confirmed', cancelled_at: iso(-1)
+  });
+  state.bookings.push(cxlDedupBooking);
+  state.notification_events.push({
+    id: 'ev-stop-2', booking_id: cxlDedupBooking.id, event_type: 'ride_cancelled',
+    recipient_role: 'driver', recipient_key: 'drv-nochat', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('duplicate_target: no push device + no distinct driver chat -> suppressed, zero sends (admin event owns that chat)', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 0, 'the admin chat must not receive the same news twice');
+    const ev = events().find((e) => e.id === 'ev-stop-2');
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'duplicate_target');
+  });
+
+  freshState();
+  const cxlChatBooking = mkBooking({
+    status: 'cancelled', trip_id: 'LM-CHAT', assigned_driver: 'drv-a',
+    cancelled_from_status: 'confirmed', cancelled_at: iso(-1)
+  });
+  state.bookings.push(cxlChatBooking);
+  state.notification_events.push({
+    id: 'ev-stop-3', booking_id: cxlChatBooking.id, event_type: 'ride_cancelled',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('distinct driver chat proceeds on the Telegram fallback with the stop copy', () => {
+    assert.strictEqual(pushCalls.length, 0, 'no subscription on file');
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(telegramChats()[0], 'chat-a', 'the DRIVER\'s own chat, not the admin\'s');
+    assert.ok(fetchCalls[0].body.text.includes('Do not proceed'));
+    const ev = events().find((e) => e.id === 'ev-stop-3');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {
   console.error('\nFAIL:', e.message);

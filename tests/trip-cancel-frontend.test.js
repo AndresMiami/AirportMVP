@@ -53,11 +53,16 @@ check('quote is requested BEFORE cancel, both against /api/cancel-booking', () =
   assert.ok(tripScript.includes("fetch('/api/cancel-booking'"));
 });
 
-check('final cancel carries the full reviewed expectation', () => {
-  const block = tripScript.slice(tripScript.indexOf('expected: {'));
-  for (const key of ['status:', 'feePercent:', 'policyAmount:', 'policyVersion:', 'pickupAt:']) {
-    assert.ok(block.slice(0, 400).includes(key), `expected.${key.replace(':', '')} missing`);
+check('final cancel carries exactly the visible terms: base CAS always, fee terms only when displayed, never serverTime', () => {
+  const at = tripScript.indexOf('const expected = {');
+  assert.ok(at > -1, 'expected builder missing');
+  const block = tripScript.slice(at, at + 600);
+  for (const key of ['status:', 'policyVersion:', 'pickupAt:']) {
+    assert.ok(block.includes(key), `expected.${key.replace(':', '')} missing`);
   }
+  assert.ok(block.includes('reviewed.feePercent !== undefined'),
+    'fee terms join only when the server displayed them');
+  assert.ok(!block.includes('serverTime'), 'serverTime must never travel in expected');
 });
 
 check('pending card is a plain free-cancellation sentence; the fee ledger waits for real amounts', () => {
@@ -74,10 +79,22 @@ check('client never computes policy numbers (server values verbatim)', () => {
     'no client-side fee math');
 });
 
-check('401 gets an honest sign-in message; 409 is never success', () => {
+check('401 gets an honest sign-in message; 409 is never success and is status-aware', () => {
   assert.ok(tripScript.includes('Please sign in to your LinkMia account to cancel'));
-  assert.ok(tripScript.includes("if (current !== 'cancelled')"));
-  assert.ok(tripScript.includes('Your driver already accepted this ride'));
+  assert.ok(tripScript.includes("if (current === 'cancelled')"), 'already-cancelled renders truth silently');
+  assert.ok(tripScript.includes('Your trip has already started'), 'in_progress gets its own copy');
+  assert.ok(tripScript.includes('status just changed — please review and try again'));
+  assert.ok(!tripScript.includes('Your driver already accepted this ride'),
+    'the old pending-era message is gone — acceptance no longer ends cancellability');
+});
+
+check('not-cancellable verdicts route by reason: support path and in-progress copy', () => {
+  const fn = tripScript.slice(tripScript.indexOf('function handleNotCancellable'));
+  const body = fn.slice(0, fn.indexOf('function handleCancelFailure'));
+  assert.ok(body.includes("reason === 'requires_support'"));
+  assert.ok(body.includes('Please contact LinkMia support'));
+  assert.ok(body.includes("reason === 'in_progress'"));
+  assert.ok(body.includes("fetchStatus('return')"), 'terminal/unknown shows live truth');
 });
 
 check('kill switch: 503 falls back to the legacy flow with the same auth header', () => {
@@ -98,10 +115,21 @@ check('session loader: lazy, deadline-bounded, degrades to guest on failure', ()
   assert.ok(body.includes('return null;'), 'failures resolve to the guest path');
 });
 
-check('status change closes the quote card; poll re-render cannot resurrect Cancel under it', () => {
-  assert.ok(tripScript.includes('if (!isPending) hideQuoteCard()'));
-  assert.ok(tripScript.includes("classList.toggle('hidden', !isPending || activeQuote !== null)"),
+check('all four self-service statuses can cancel; the card owns the button; any status change invalidates an open quote', () => {
+  assert.ok(tripScript.includes("const CANCELLABLE_STATUSES = ['pending', 'confirmed', 'on_the_way', 'arrived']"));
+  assert.ok(tripScript.includes('const canCancel = CANCELLABLE_STATUSES.includes(b.status)'));
+  assert.ok(tripScript.includes("classList.toggle('hidden', !canCancel || activeQuote !== null)"),
     'the open-card state must own the outer Cancel button across re-renders');
+  assert.ok(tripScript.includes('if (activeQuote && activeQuote.status !== b.status) hideQuoteCard()'),
+    'e.g. confirmed -> on_the_way must invalidate the open quote');
+  assert.ok(tripScript.includes('if (!canCancel) hideQuoteCard()'));
+});
+
+check('per-status card sentences: arrived soft warning, notify sentence, pending unchanged — zero fee text by default', () => {
+  assert.ok(tripScript.includes('Your driver has already arrived at the pickup.'));
+  assert.ok(tripScript.includes('Cancelling now doesn’t carry a charge today, but late cancellations may in the future.'));
+  assert.ok(tripScript.includes('Your driver will be notified right away.'));
+  assert.ok(tripScript.includes('Your ride hasn’t been accepted yet, so cancelling is free.'));
 });
 
 check('embedded success still hands off via lm-cancelled to the parent reset', () => {
@@ -118,9 +146,18 @@ check('network catch never claims certainty; a status check reveals the truth', 
     'the old false-certainty wording must be gone');
 });
 
-check('stale quote while still pending re-shows fresh numbers, not a false driver message', () => {
-  assert.ok(tripScript.includes("body.currentStatus === 'pending'"));
+check('stale quote on a still-cancellable ride re-shows fresh terms, not a false failure', () => {
+  assert.ok(tripScript.includes('CANCELLABLE_STATUSES.includes(body.currentStatus)'));
   assert.ok(tripScript.includes('The cancellation details changed — please review again.'));
+});
+
+check('kill switch: pending falls back to legacy; accepted rides go straight to support — no doomed dialog', () => {
+  const at = tripScript.indexOf('res.status === 503');
+  assert.ok(at > -1);
+  const block = tripScript.slice(at, at + 700);
+  assert.ok(block.includes("lastBooking.status === 'pending'"));
+  assert.ok(block.includes('legacyCancelFlow(token)'));
+  assert.ok(block.includes('Please contact LinkMia support'));
 });
 
 check('polling seals untouched: cadences, budget, cutoffs, no manual refresh', () => {
