@@ -91,7 +91,10 @@ verified checkpoint locations all live in the web app backed by Supabase.
   never reassigned across accounts — 409 + fresh resubscribe), push-first
   with Telegram fallback (never both; ADMIN-role events are Telegram-only —
   driver events, the urgent ask included, route push-first: verified
-  against the shipped routing, watchdog dispatchOne),
+  against the shipped routing — per-event execution lives in the SHARED
+  dispatcher `lib/dispatch.js` since PR 3A, used by the watchdog and,
+  next, the cancellation endpoint; only dispatchOne is exported and its
+  options {summary, dbFail, maxAttempts} are validated up front),
   absolute TTLs + per-booking Topic/Tag, durable failure_class routing,
   PUSH_DISABLED kill switch. Clicks deep-link to /driver?ride=<id>;
   notifications never mutate ride state.
