@@ -438,18 +438,25 @@ async function check(name, fn) {
     }
   });
 
-  await check('watchdog wiring: DISPATCH_FIELDS refetch + not_cancelled relevance gate', () => {
+  await check('dispatcher wiring: DISPATCH_FIELDS refetch + not_cancelled relevance gate', () => {
+    // Location check only — the BEHAVIOR is proven in
+    // tests/notification-ledger.test.js (cancelled row dispatches /
+    // non-cancelled row suppresses, through the real loop) and
+    // tests/dispatch-module.test.js (direct module semantics). Since PR 3A
+    // the per-event execution lives in the shared lib/dispatch.js.
     const fs = require('fs');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'backend/functions/notification-watchdog.js'), 'utf8');
-    assert.ok(src.includes("const DISPATCH_FIELDS = SWEEP_FIELDS + ', price, cancelled_at, cancelled_from_status"),
+    const src = fs.readFileSync(path.join(__dirname, '..', 'backend/functions/lib/dispatch.js'), 'utf8');
+    assert.ok(src.includes("', price, cancelled_at, cancelled_from_status, '"),
       'dispatch refetch must include the audit fields');
     assert.ok(src.includes('.select(DISPATCH_FIELDS).eq(\'id\', ev.booking_id)'),
       'dispatchOne must refetch with DISPATCH_FIELDS');
     assert.ok(src.includes("notify.CANCELLATION_TYPES.includes(ev.event_type) && b.status !== 'cancelled'"),
       'cancellation events must be suppressed unless the row is cancelled');
     assert.ok(src.match(/suppress\('not_cancelled'\)/), 'not_cancelled suppress reason present');
-    // The sweep itself stays lean
-    assert.ok(src.includes('.select(SWEEP_FIELDS)'), 'sweep must still use SWEEP_FIELDS');
+    // The watchdog keeps its lean sweep and delegates per-event execution
+    const wd = fs.readFileSync(path.join(__dirname, '..', 'backend/functions/notification-watchdog.js'), 'utf8');
+    assert.ok(wd.includes('.select(SWEEP_FIELDS)'), 'sweep must still use SWEEP_FIELDS');
+    assert.ok(wd.includes('dispatch.dispatchOne(db, ev, nowMs'), 'watchdog must delegate to the shared dispatcher');
   });
 
   await check('migration 013: trigger, ON CONFLICT idempotency, pilot CHECKs, smoke test', () => {
