@@ -397,16 +397,20 @@ async function resolveDriverRoute(db, ev, driverId) {
 
 // Driver Telegram target: drivers.telegram_chat_id, falling back to the
 // admin chat (driver = admin in today's one-driver operation). A lookup
-// failure is REPORTED via onDbError but still falls back — a reminder to
-// the admin chat beats silence while the DB hiccups.
-async function resolveDriverChatId(db, driverId, onDbError) {
+// FAILURE travels back as dbError ALONGSIDE the fallback — the caller
+// decides what unknown truth means: chain reminders may still use the
+// admin chat (a reminder there beats silence while the DB hiccups), but
+// a cancellation decision must never treat the error-fallback as the
+// driver's real chat.
+async function resolveDriverChatId(db, driverId) {
+  const fallback = process.env.ADMIN_TELEGRAM_CHAT_ID || null;
   if (driverId) {
     const { data, error } = await db.from('drivers')
       .select('telegram_chat_id').eq('id', driverId).maybeSingle();
-    if (error && onDbError) onDbError('resolveDriverChatId', error);
-    if (data && data.telegram_chat_id) return data.telegram_chat_id;
+    if (error) return { chatId: fallback, dbError: error };
+    if (data && data.telegram_chat_id) return { chatId: data.telegram_chat_id, dbError: null };
   }
-  return process.env.ADMIN_TELEGRAM_CHAT_ID || null;
+  return { chatId: fallback, dbError: null };
 }
 
 function isUniqueViolation(error) {

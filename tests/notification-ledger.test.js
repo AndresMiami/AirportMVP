@@ -1439,6 +1439,41 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(ev.state, 'submitted');
   });
 
+  // A drivers-table failure during the dedup lookup must NEVER become a
+  // terminal duplicate_target — the driver may have a distinct chat the
+  // failed read couldn't see. Fail closed, stay recoverable, deliver on
+  // the next healed cycle.
+  freshState();
+  const cxlLookupBooking = mkBooking({
+    status: 'cancelled', trip_id: 'LM-LOOKUP', assigned_driver: 'drv-a',
+    cancelled_from_status: 'confirmed', cancelled_at: iso(-1)
+  });
+  state.bookings.push(cxlLookupBooking);
+  state.notification_events.push({
+    id: 'ev-stop-6', booking_id: cxlLookupBooking.id, event_type: 'ride_cancelled',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  state.inject.push({ op: 'select', table: 'drivers', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('drivers lookup failure during dedup: surfaced dbError, zero sends, event stays recoverable — never duplicate_target', () => {
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(pushCalls.length, 0);
+    assert.ok(JSON.parse(r.body).dbErrors >= 1, 'the failure is surfaced, not swallowed');
+    const ev = events().find((e) => e.id === 'ev-stop-6');
+    assert.strictEqual(ev.state, 'pending', 'unknown truth must not decide the event');
+    assert.strictEqual(ev.suppress_reason, null);
+  });
+
+  r = await wd.handler({});
+  check('healed lookup: the SAME event now delivers to the driver\'s own chat', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(telegramChats()[0], 'chat-a');
+    assert.ok(fetchCalls[0].body.text.includes('Do not proceed'));
+    const ev = events().find((e) => e.id === 'ev-stop-6');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {
   console.error('\nFAIL:', e.message);

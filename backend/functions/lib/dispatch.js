@@ -152,8 +152,16 @@ async function dispatchOne(db, ev, nowMs, opts) {
   // suppressed as duplicate_target. A push route proceeds (different
   // surface); a distinct driver chat proceeds (different destination).
   if (ev.event_type === 'ride_cancelled' && route.channel === 'telegram') {
-    const dedupChatId = await notify.resolveDriverChatId(db, driverTargetFor(ev, b), dbFail);
-    if (dedupChatId && dedupChatId === process.env.ADMIN_TELEGRAM_CHAT_ID) {
+    const dedup = await notify.resolveDriverChatId(db, driverTargetFor(ev, b));
+    if (dedup.dbError) {
+      // Unknown truth must never become a TERMINAL suppression: the
+      // driver may have a distinct chat the failed lookup couldn't see.
+      // Surface and stop — the event stays recoverable and the watchdog
+      // retries from stored truth.
+      dbFail('dedup chat lookup', dedup.dbError);
+      return;
+    }
+    if (dedup.chatId && dedup.chatId === process.env.ADMIN_TELEGRAM_CHAT_ID) {
       await suppress('duplicate_target');
       return;
     }
@@ -190,9 +198,22 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxA
   const nowIso = new Date(nowMs).toISOString();
   if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave for next cycle
 
-  const chatId = ev.recipient_role === 'driver'
-    ? await notify.resolveDriverChatId(db, driverTargetFor(ev, b), dbFail)
-    : process.env.ADMIN_TELEGRAM_CHAT_ID;
+  let chatId;
+  if (ev.recipient_role === 'driver') {
+    const resolved = await notify.resolveDriverChatId(db, driverTargetFor(ev, b));
+    if (resolved.dbError) {
+      dbFail('resolveDriverChatId', resolved.dbError);
+      if (notify.CANCELLATION_TYPES.includes(ev.event_type)) {
+        // The stop notice must reach THE driver: on unknown chat truth,
+        // stop recoverable rather than misroute it to the admin chat.
+        // Chain reminders keep the fallback (admin beats silence).
+        return;
+      }
+    }
+    chatId = resolved.chatId;
+  } else {
+    chatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
+  }
   if (!chatId) return; // config gap, not a send failure — leave for next cycle
 
   const text = notify.renderEvent(ev.event_type, b);
