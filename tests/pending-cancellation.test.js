@@ -136,7 +136,7 @@ require.cache[dispatchPath] = {
   exports: {
     dispatchOne: async (db, ev, nowMs, opts) => {
       state.dispatchCalls.push({ ev, opts });
-      if (state.dispatchBehavior) await state.dispatchBehavior(ev);
+      if (state.dispatchBehavior) await state.dispatchBehavior(ev, opts);
     }
   }
 };
@@ -617,7 +617,29 @@ async function check(name, fn) {
     const body = JSON.parse(res.body);
     assert.strictEqual(body.success, true);
     assert.strictEqual(body.immediateSubmission, 'deferred', 'the watchdog recovers the pending events');
+    assert.strictEqual(state.dispatchCalls.length, 1, 'a throw breaks the pass — the second event is the watchdog\'s');
     assert.strictEqual(state.captured.payload.cancel_fee_percent, 100, 'past pickup -> 100 regardless of status');
+  });
+
+  await check('first dispatch DB failure stops the immediate pass: second event untouched, still 200 deferred', async () => {
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
+      customer_id: 'cust-1', pickup_datetime: iso(30 * 60 * 1000), price: '55.00'
+    };
+    state.events = [
+      { id: 'ev-a', booking_id: BOOKING_ID, event_type: 'ride_cancelled_admin', state: 'pending' },
+      { id: 'ev-d', booking_id: BOOKING_ID, event_type: 'ride_cancelled', state: 'pending' }
+    ];
+    // The dispatcher surfaces a broken database via dbFail (watchdog
+    // contract) — the endpoint must break exactly like the watchdog loop.
+    state.dispatchBehavior = (ev, opts) => { opts.dbFail('dispatch refetch', new Error('db down')); };
+    const exp = { status: 'confirmed', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200, 'a committed cancellation never reports failure');
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.success, true);
+    assert.strictEqual(body.immediateSubmission, 'deferred');
+    assert.strictEqual(state.dispatchCalls.length, 1, 'no second dispatch on broken truth');
   });
 
   await check('invalid stored price on an accepted cancel: NULL amount recorded, cancel proceeds', async () => {

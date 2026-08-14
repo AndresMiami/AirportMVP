@@ -161,23 +161,37 @@ exports.handler = async (event) => {
         .in('state', ['pending']);
       if (!eventsError && pendingEvents) {
         const dispatchSummary = { attempts: 0, submitted: 0 };
-        const dispatchFail = (site, err) =>
+        // Watchdog discipline (its per-event loop does the same): the
+        // FIRST database failure — reported via dbFail or thrown — ends
+        // the pass. Truth is broken; no further event may act on it.
+        // The cancellation stays committed and reports 'deferred'; the
+        // watchdog re-dispatches the remainder from stored truth.
+        let dispatchDbErrors = 0;
+        const dispatchFail = (site, err) => {
+          dispatchDbErrors++;
           console.error(`❌ cancel dispatch @ ${site}:`, (err && err.message) || err);
+        };
         for (const evRow of pendingEvents) {
           try {
             await dispatch.dispatchOne(db, evRow, Date.now(),
               { summary: dispatchSummary, dbFail: dispatchFail, maxAttempts: 4 });
           } catch (dispatchError) {
+            dispatchDbErrors++;
             console.error('❌ cancel dispatch failed:', dispatchError.message);
           }
+          if (dispatchDbErrors > 0) break;
         }
         // Honest submission state from STORED truth, not local counters.
         // 'suppressed' counts as handled (duplicate_target is a
-        // deliberate terminal decision, not a miss).
-        const { data: after, error: afterError } = await readCancellationEvents();
-        if (!afterError && after && after.length > 0 &&
-            after.every((e) => e.state === 'submitted' || e.state === 'suppressed')) {
-          immediateSubmission = 'submitted';
+        // deliberate terminal decision, not a miss). A broken pass never
+        // claims submission — deferred is the honest answer even if the
+        // failure hit only the final rollup.
+        if (dispatchDbErrors === 0) {
+          const { data: after, error: afterError } = await readCancellationEvents();
+          if (!afterError && after && after.length > 0 &&
+              after.every((e) => e.state === 'submitted' || e.state === 'suppressed')) {
+            immediateSubmission = 'submitted';
+          }
         }
       }
     } catch (notifyError) {
