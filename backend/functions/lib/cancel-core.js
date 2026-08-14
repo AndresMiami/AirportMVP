@@ -195,8 +195,13 @@ function computeQuote(booking, nowMs) {
   }
 
   // Hypothetical amount: an invalid stored price records NULL — never a
-  // fabricated $0 — while a real zero-dollar fare stays $0.00.
-  const priceNum = Number(booking.price);
+  // fabricated $0 — while a real zero-dollar fare stays $0.00. Absence
+  // is rejected BEFORE conversion: Number(null) and Number('') are both
+  // 0, and bookings.price is nullable.
+  const rawPrice = booking.price;
+  const priceAbsent = rawPrice === null || rawPrice === undefined ||
+    (typeof rawPrice === 'string' && rawPrice.trim() === '');
+  const priceNum = priceAbsent ? NaN : Number(rawPrice);
   const priceValid = Number.isFinite(priceNum) && priceNum >= 0;
   const policyAmount = (feePercent === null || !priceValid)
     ? null

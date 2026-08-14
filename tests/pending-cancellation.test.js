@@ -642,6 +642,31 @@ async function check(name, fn) {
     assert.strictEqual(state.dispatchCalls.length, 1, 'no second dispatch on broken truth');
   });
 
+  await check('NULL and blank stored price record NULL amount (never a fabricated $0); real zero stays $0.00', async () => {
+    // Number(null) and Number('') are both 0 — absence must be rejected
+    // BEFORE conversion (bookings.price is nullable in the schema).
+    const q = (price) => core.computeQuote({
+      id: BOOKING_ID, status: 'confirmed', customer_id: 'cust-1',
+      pickup_datetime: iso(30 * 60 * 1000), price
+    }, Date.now());
+    assert.strictEqual(q(null).policyAmount, null, 'NULL price -> NULL amount');
+    assert.strictEqual(q(undefined).policyAmount, null, 'missing price -> NULL amount');
+    assert.strictEqual(q('').policyAmount, null, 'blank price -> NULL amount');
+    assert.strictEqual(q('   ').policyAmount, null, 'whitespace price -> NULL amount');
+    assert.strictEqual(q(0).policyAmount, 0, 'a real $0 fare stays $0.00');
+    assert.strictEqual(q('0').policyAmount, 0, 'a real "0" fare stays $0.00');
+    // End to end: a NULL-price accepted cancel stamps percent 50, amount NULL.
+    state.bookingRow = {
+      id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
+      customer_id: 'cust-1', pickup_datetime: iso(30 * 60 * 1000), price: null
+    };
+    const exp = { status: 'confirmed', policyVersion: core.POLICY_VERSION, pickupAt: state.bookingRow.pickup_datetime };
+    const res = await post(cancelBooking, { id: BOOKING_ID, action: 'cancel', expected: exp }, 'owner-token');
+    assert.strictEqual(res.statusCode, 200, 'an absent price never blocks cancellation');
+    assert.strictEqual(state.captured.payload.cancel_fee_percent, 50);
+    assert.strictEqual(state.captured.payload.cancel_fee_policy_amount, null);
+  });
+
   await check('invalid stored price on an accepted cancel: NULL amount recorded, cancel proceeds', async () => {
     state.bookingRow = {
       id: BOOKING_ID, trip_id: 'LM-HXA5', status: 'confirmed',
