@@ -133,6 +133,20 @@ async function dispatchOne(db, ev, nowMs, opts) {
     }
   }
 
+  // Cancellation dedup (PR 3B): when the driver's stop-notice would go
+  // out via Telegram AND land in the ADMIN chat (no distinct driver
+  // chat configured), the admin cancellation event already owns that
+  // destination — a second copy of the same news in the same chat is
+  // suppressed as duplicate_target. A push route proceeds (different
+  // surface); a distinct driver chat proceeds (different destination).
+  if (ev.event_type === 'ride_cancelled' && route.channel === 'telegram') {
+    const dedupChatId = await notify.resolveDriverChatId(db, b.assigned_driver, dbFail);
+    if (dedupChatId && dedupChatId === process.env.ADMIN_TELEGRAM_CHAT_ID) {
+      await suppress('duplicate_target');
+      return;
+    }
+  }
+
   const marked = await notify.setEventState(db, ev.id, ['pending', 'in_delivery'],
     { state: 'in_delivery' });
   if (marked.error) {

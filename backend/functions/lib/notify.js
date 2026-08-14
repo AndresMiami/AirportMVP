@@ -59,13 +59,14 @@ const DRIVER_ASKS = ['driver_ready_ask_1', 'driver_ready_ask_2', 'driver_ready_u
 
 const CHAIN_TYPES = READINESS_CHAIN.map((s) => s.type);
 
-// One-shot cancellation events, produced by the migration-013 outbox
-// trigger ATOMICALLY with the status flip — never derived by the watchdog.
-// Deliberately NOT in CHAIN_TYPES (their booking is terminal — the
-// status!=confirmed relevance gate must not suppress them) and NOT in
-// DRIVER_ASKS (never chain-collapsed). PR 1A ships the admin event only;
-// PR 2 adds 'ride_cancelled' (assigned driver, push-first) here.
-const CANCELLATION_TYPES = ['ride_cancelled_admin'];
+// One-shot cancellation events, produced by the outbox trigger
+// ATOMICALLY with the status flip (admin: migration 013; driver:
+// migration 015) — never derived by the watchdog. Deliberately NOT in
+// CHAIN_TYPES (their booking is terminal — the status!=confirmed
+// relevance gate must not suppress them) and NOT in DRIVER_ASKS (never
+// chain-collapsed). 'ride_cancelled' routes push-first like every
+// driver event, with the duplicate_target dedup in lib/dispatch.js.
+const CANCELLATION_TYPES = ['ride_cancelled', 'ride_cancelled_admin'];
 
 const MAX_ATTEMPTS_PER_CHANNEL = 3;
 const CLAIM_EXPIRY_MS = 3 * 60 * 1000;
@@ -126,6 +127,10 @@ function renderEvent(eventType, b) {
       return `🚨 Ride ${code} (${b.pickup_location} → ${b.dropoff_location}) at ${at}: driver has NOT confirmed readiness by T-120.`;
     case 'at_risk_mark':
       return `⚠️ AT RISK — ride ${code} at ${at}: no driver readiness by T-105. Marked at-risk in the database; consider calling.`;
+    case 'ride_cancelled':
+      // The driver's "stop" — honest and closed: the ride is gone from
+      // My Rides, so no link promises details that no longer render.
+      return `🚫 Ride ${code} was cancelled by the passenger. Do not proceed. No action is required.`;
     case 'ride_cancelled_admin': {
       // Renders ONLY from the row's stamped migration-013 audit fields —
       // the notification claims database truth, never a recomputation.
@@ -265,8 +270,22 @@ function readinessTopic(b) {
 
 // Minimal payload: trip code + generic action line ONLY — never passenger
 // name, phone, address, or notes. The authenticated app fetches details.
+// ride_cancelled deliberately OMITS rideId: the cancelled ride is gone
+// from My Rides, so the click opens the general driver page (driver-sw
+// falls back to /driver when rideId is absent) instead of deep-linking
+// to a card that no longer exists. It reuses the per-booking readiness
+// tag/topic so a queued stale readiness reminder is REPLACED by the stop
+// notice at the push service and in the notification tray.
 function pushPayloadFor(eventType, b) {
   const code = tripCode(b);
+  if (eventType === 'ride_cancelled') {
+    return {
+      type: 'ride',
+      title: 'LinkMia Driver',
+      body: `Ride ${code} was cancelled by the passenger. Do not proceed. No action is required.`,
+      tag: readinessTopic(b)
+    };
+  }
   const body = eventType === 'driver_ready_ask_2'
     ? `Ride ${code} is still not confirmed ready. Open to confirm.`
     : `Ride ${code} — readiness check due. Open to confirm.`;
