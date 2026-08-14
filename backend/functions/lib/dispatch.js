@@ -45,8 +45,9 @@ async function dispatchOne(db, ev, nowMs, opts) {
   }
   const { summary, dbFail, maxAttempts } = opts;
   if (!summary || typeof summary !== 'object' ||
-      !Number.isFinite(summary.attempts) || !Number.isFinite(summary.submitted)) {
-    throw new Error('dispatchOne: summary with attempts/submitted counters required');
+      !Number.isInteger(summary.attempts) || summary.attempts < 0 ||
+      !Number.isInteger(summary.submitted) || summary.submitted < 0) {
+    throw new Error('dispatchOne: summary attempts/submitted must be non-negative integers');
   }
   if (typeof dbFail !== 'function') {
     throw new Error('dispatchOne: dbFail callback required');

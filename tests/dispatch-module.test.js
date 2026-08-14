@@ -211,7 +211,11 @@ async function check(name, fn) {
       { summary: { attempts: 0, submitted: 0 }, dbFail, maxAttempts: '15' },   // not an integer
       { summary: { attempts: 0, submitted: 0 }, dbFail, maxAttempts: NaN },
       { summary: { attempts: 0, submitted: 0 }, maxAttempts: 15 },             // no dbFail
-      { dbFail, maxAttempts: 15 }                                              // no summary
+      { dbFail, maxAttempts: 15 },                                             // no summary
+      { summary: { attempts: -1, submitted: 0 }, dbFail, maxAttempts: 15 },
+      { summary: { attempts: 0.5, submitted: 0 }, dbFail, maxAttempts: 15 },
+      { summary: { attempts: 0, submitted: -1 }, dbFail, maxAttempts: 15 },
+      { summary: { attempts: 0, submitted: 0.5 }, dbFail, maxAttempts: 15 }
     ];
     for (const opts of bad) {
       await assert.rejects(() => dispatch.dispatchOne(db, ev, Date.now(), opts),
@@ -248,6 +252,22 @@ async function check(name, fn) {
     assert.ok(!oplog.includes('telegram_send') && !oplog.includes('push_send'));
     assert.strictEqual(dbFailCalls.length, 0, 'a lost race is not a failure');
     assert.strictEqual(ev.state, 'suppressed', 'the other worker\'s decision stands');
+  });
+
+  await check('cancelled notice is suppressed when the live booking is not cancelled', async () => {
+    freshState();
+    const ev = mkEvent({
+      event_type: 'ride_cancelled_admin', recipient_role: 'admin', recipient_key: 'admin'
+    });
+    const summary = { attempts: 0, submitted: 0 };
+    await run(ev, summary);
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'not_cancelled');
+    assert.strictEqual(state.deliveries.length, 0, 'irrelevant event must not create a delivery');
+    assert.strictEqual(telegramCalls.length, 0, 'irrelevant event must not call Telegram');
+    assert.ok(!oplog.includes('push_send'), 'irrelevant event must not call Web Push');
+    assert.strictEqual(summary.attempts, 0);
+    assert.strictEqual(summary.submitted, 0);
   });
 
   await check('push ambiguity is terminal: exhausted, NEVER a Telegram fallback', async () => {
@@ -287,6 +307,29 @@ async function check(name, fn) {
     assert.strictEqual(ev.state, 'submitted');
     assert.strictEqual(summary.attempts, 2, 'both provider calls counted');
     assert.strictEqual(summary.submitted, 1);
+  });
+
+  await check('definitive push finalization failure stops before disable or Telegram fallback', async () => {
+    freshState();
+    const sub = mkSub();
+    const ev = mkEvent();
+    state.failDeliveryUpdate = true;
+    pushBehavior = async () => { const e = new Error('410'); e.statusCode = 410; throw e; };
+    const summary = { attempts: 0, submitted: 0 };
+    await run(ev, summary);
+    const pushDelivery = state.deliveries.find((d) => d.channel === 'webpush');
+    assert.ok(pushDelivery, 'the Push attempt is durably claimed before sending');
+    assert.strictEqual(pushDelivery.state, 'claimed', 'failed finalization leaves truth unknown');
+    assert.ok(dbFailCalls.some((c) => c.site === 'finalize push definitive'),
+      'failed definitive finalization must surface through dbFail');
+    assert.strictEqual(sub.disabled_at, null, 'subscription must stay active when failure was not persisted');
+    assert.ok(!oplog.includes('sub_update'), 'subscription disable must not be attempted');
+    assert.strictEqual(state.deliveries.filter((d) => d.channel === 'telegram').length, 0,
+      'Telegram fallback must not be claimed');
+    assert.strictEqual(telegramCalls.length, 0, 'Telegram fallback must not be sent');
+    assert.strictEqual(ev.state, 'in_delivery', 'event must not roll up on unknown delivery truth');
+    assert.strictEqual(summary.attempts, 1);
+    assert.strictEqual(summary.submitted, 0);
   });
 
   await check('finalization failure STOPS everything: dbFail surfaced, no rollup, no further writes', async () => {
