@@ -47,10 +47,11 @@ CREATE TABLE booking_releases (
   dropoff_location_at_release TEXT NOT NULL,
   price_at_release            NUMERIC,
   driver_name_at_release      TEXT NOT NULL,
-  -- Payment state AT release: the live row's payment_status is RESET to
-  -- 'unpaid' by the RPC (the replacement driver must never inherit a
-  -- PAID stamp for money the releaser collected); a non-unpaid snapshot
-  -- makes the admin notice carry a reconcile warning.
+  -- Payment state AT release. MVP decision (Codex review round 2): the
+  -- live payment stamp is PRESERVED through a release — a passenger who
+  -- already paid must never be asked to pay twice; the snapshot plus the
+  -- admin notice's reconcile warning route the money question to the
+  -- human referee instead.
   payment_status_at_release   TEXT,
   payment_method_at_release   TEXT,
   reason                      TEXT NOT NULL CHECK (reason IN
@@ -95,24 +96,17 @@ DECLARE
   v_method  TEXT;
   v_name    TEXT;
 BEGIN
-  -- Lock the row FIRST and capture the pre-release payment state:
-  -- payment_status is about to be modified, so it cannot come from
-  -- RETURNING (which sees NEW values); FOR UPDATE serializes against a
-  -- concurrent 'Payment collected' tap so snapshot and reset can never
-  -- disagree. A missing row simply falls through to the 0-row UPDATE.
-  SELECT payment_status, payment_method INTO v_pay, v_method
-  FROM bookings WHERE id = p_booking_id FOR UPDATE;
-
   -- Guarded flip + FULL commitment-state clear. A re-accepted ride must
   -- present as never-driven: acceptance, readiness, at-risk, checkpoint
-  -- anchors, coordinates, AND the payment stamp all reset (the
-  -- replacement driver must see the fare as uncollected; the pre-release
-  -- payment state is snapshotted and, when not 'unpaid', flagged to
-  -- admin for reconciliation). Deliberately NO details_version CAS
+  -- anchors, and coordinates all reset. The PAYMENT stamp is
+  -- deliberately PRESERVED (MVP decision, Codex review round 2): a
+  -- passenger who already paid must never be charged twice — the
+  -- snapshot below plus the admin reconcile warning route the money
+  -- question to the human referee. Deliberately NO details_version CAS
   -- (Codex-approved): a driver escaping right after a passenger edit is
   -- the moment release matters most; the live version is RECORDED,
-  -- never required. The other RETURNING columns are unmodified by this
-  -- UPDATE, so NEW == OLD for them.
+  -- never required. Every RETURNING column is unmodified by this
+  -- UPDATE, so NEW == OLD for all of them — no pre-read, no extra lock.
   UPDATE bookings SET
     status = 'pending',
     assigned_driver = NULL,
@@ -126,13 +120,13 @@ BEGIN
     started_at = NULL,
     driver_lat = NULL,
     driver_lng = NULL,
-    driver_location_at = NULL,
-    payment_status = 'unpaid'
+    driver_location_at = NULL
   WHERE id = p_booking_id
     AND status = 'confirmed'
     AND assigned_driver = p_driver_id
-  RETURNING details_version, pickup_datetime, pickup_location, dropoff_location, price
-    INTO v_version, v_pickup, v_from, v_to, v_price;
+  RETURNING details_version, pickup_datetime, pickup_location, dropoff_location,
+            price, payment_status, payment_method
+    INTO v_version, v_pickup, v_from, v_to, v_price, v_pay, v_method;
 
   -- Non-STRICT INTO + FOUND: zero rows is a CLEAN concurrency conflict
   -- (the endpoint answers 409 from live truth), never an exception.
@@ -258,27 +252,54 @@ BEGIN
     END IF;
   END LOOP;
   IF has_function_privilege('anon', 'public.release_booking(uuid,uuid,text,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.release_booking(uuid,uuid,text,text)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: client roles can execute release_booking';
+     OR has_function_privilege('authenticated', 'public.release_booking(uuid,uuid,text,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.booking_releases_outbox()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.booking_releases_outbox()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.bookings_release_reaccept_guard()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.bookings_release_reaccept_guard()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: client roles can execute a release function';
   END IF;
   IF NOT has_function_privilege('service_role', 'public.release_booking(uuid,uuid,text,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'ASSERTION FAILED: service_role cannot execute release_booking';
   END IF;
 
-  -- 5b. Both triggers present and enabled.
+  -- 5b. Table lockdown: RLS enabled with ZERO policies and ZERO client
+  -- grants (default-deny), while service_role keeps SELECT (the
+  -- endpoint's exclusion lookup and the dispatcher's enrichment read
+  -- depend on it — a failed assert here aborts BEFORE any deploy).
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class WHERE relname = 'booking_releases' AND relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: RLS not enabled on booking_releases';
+  END IF;
+  SELECT count(*) INTO n FROM pg_policies
+  WHERE schemaname = 'public' AND tablename = 'booking_releases';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: booking_releases must have ZERO policies (default-deny), found %', n;
+  END IF;
+  IF has_table_privilege('anon', 'public.booking_releases', 'SELECT, INSERT, UPDATE, DELETE')
+     OR has_table_privilege('authenticated', 'public.booking_releases', 'SELECT, INSERT, UPDATE, DELETE') THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: client roles hold grants on booking_releases';
+  END IF;
+  IF NOT has_table_privilege('service_role', 'public.booking_releases', 'SELECT') THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: service_role cannot SELECT booking_releases';
+  END IF;
+
+  -- 5b2. Both triggers present AND enabled (tgenabled 'O' = fires in
+  -- the default replication role).
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
     WHERE c.relname = 'booking_releases' AND t.tgname = 'trg_booking_releases_outbox'
-      AND NOT t.tgisinternal
+      AND NOT t.tgisinternal AND t.tgenabled = 'O'
   ) THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: outbox trigger missing on booking_releases';
+    RAISE EXCEPTION 'ASSERTION FAILED: outbox trigger missing or disabled on booking_releases';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
     WHERE c.relname = 'bookings' AND t.tgname = 'trg_bookings_release_reaccept_guard'
-      AND NOT t.tgisinternal
+      AND NOT t.tgisinternal AND t.tgenabled = 'O'
   ) THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: reaccept guard trigger missing on bookings';
+    RAISE EXCEPTION 'ASSERTION FAILED: reaccept guard trigger missing or disabled on bookings';
   END IF;
 
   -- 5c. THROWAWAY smoke drivers — never borrow real drivers rows.
@@ -311,9 +332,9 @@ BEGIN
     AND driver_ready_source IS NULL AND at_risk_at IS NULL
     AND on_the_way_at IS NULL AND arrived_at IS NULL AND started_at IS NULL
     AND driver_lat IS NULL AND driver_lng IS NULL AND driver_location_at IS NULL
-    AND payment_status = 'unpaid';
+    AND payment_status = 'paid_by_guest';
   IF n <> 1 THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: release did not clear all commitment state (payment stamp included)';
+    RAISE EXCEPTION 'ASSERTION FAILED: release must clear commitment state but PRESERVE the payment stamp';
   END IF;
 
   SELECT count(*) INTO n FROM booking_releases
@@ -439,6 +460,11 @@ BEGIN
 
   RAISE NOTICE 'RELEASE RIDE VERIFIED: guarded RPC-only release with indivisible audit+event, reaccept guard, six-hour leash, multi-driver history, clean teardown.';
 END $$;
+
+-- Tell PostgREST to reload its schema cache NOW (Supabase listens on
+-- this channel) so the new table and RPC are servable the moment the
+-- transaction commits — the WATCHDOG_DISABLED window stays belt.
+NOTIFY pgrst, 'reload schema';
 
 COMMIT;
 

@@ -604,6 +604,7 @@
         // response): silent refresh reconciles, doAction precedent. All
         // listeners registered ONCE; focus restored on every close path.
         let releaseReturnFocus = null;
+        let releaseReturnFocusId = null; // booking id — survives poll re-renders
         let currentReleaseId = null;
         let releaseSubmitting = false;
 
@@ -617,13 +618,19 @@
             $('relNoteHint').textContent = needsNote ? '(required for Other)' : '(optional)';
             const valid = !!reason && (!needsNote || $('relNote').value.trim() !== '');
             $('relConfirm').disabled = !valid || releaseSubmitting;
+            $('relConfirm').textContent = releaseSubmitting ? 'Releasing…' : 'Release ride';
+            // While a release is in flight, "Keep the ride" would be a lie —
+            // the request cannot be stopped. Disabled until the outcome.
+            $('relCancel').disabled = releaseSubmitting;
         }
         function openReleaseSheet(bookingId) {
+            if (releaseSubmitting) return; // one release at a time — a new
+            // context must never appear under an in-flight submission
             const b = lastBookings.find((x) => x.id === bookingId);
             if (!b || b.status !== 'confirmed') return;
             releaseReturnFocus = document.activeElement;
+            releaseReturnFocusId = bookingId;
             currentReleaseId = bookingId;
-            releaseSubmitting = false;
             document.querySelectorAll('input[name="relReason"]').forEach((r) => { r.checked = false; });
             $('relNote').value = '';
             $('relError').classList.add('hidden');
@@ -638,14 +645,37 @@
             $('relBackdrop').classList.add('hidden');
             $('relSheet').classList.add('hidden');
             currentReleaseId = null;
-            if (releaseReturnFocus && releaseReturnFocus.isConnected) releaseReturnFocus.focus();
+            // Polling re-renders replace card DOM between open and close:
+            // when the original button is gone, find the SAME ride's
+            // release button again by booking id (it survives re-renders
+            // of an unchanged card; after a successful release the card
+            // itself is gone and focus stays put).
+            if (releaseReturnFocus && releaseReturnFocus.isConnected) {
+                releaseReturnFocus.focus();
+            } else if (releaseReturnFocusId) {
+                const btn = document.querySelector(`button[data-release-id="${releaseReturnFocusId}"]`);
+                if (btn) btn.focus();
+            }
             releaseReturnFocus = null;
+            releaseReturnFocusId = null;
+        }
+        function requestCloseReleaseSheet() {
+            // User-initiated close paths only: NEVER while a release is in
+            // flight — the sheet closing cannot stop the request, so
+            // pretending to "keep the ride" would be dishonest.
+            if (releaseSubmitting) return;
+            closeReleaseSheet();
         }
         async function submitRelease() {
             if (releaseSubmitting || !currentReleaseId) return;
             const reason = releaseSelectedReason();
             const note = $('relNote').value.trim();
             if (!reason || (reason === 'other' && !note)) return;
+            // Capture EVERYTHING before the first await: the awaits below
+            // yield to the event loop, and sheet globals must never leak
+            // between contexts — the request releases exactly the ride the
+            // driver confirmed, whatever happens to the sheet meanwhile.
+            const bookingId = currentReleaseId;
             releaseSubmitting = true;
             updateReleaseForm();
             let res = null;
@@ -655,11 +685,13 @@
                 res = await fetch('/api/release-booking', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` },
-                    body: JSON.stringify({ bookingId: currentReleaseId, reason, note: note || undefined })
+                    body: JSON.stringify({ bookingId, reason, note: note || undefined })
                 });
                 data = await res.json().catch(() => null);
             } catch (e) { /* network failure — res stays null */ }
 
+            releaseSubmitting = false;
+            updateReleaseForm();
             if (res && (res.ok || res.status === 409)) {
                 // Success — or the ride moved on (including a lost-response
                 // release that actually committed). Either way this driver
@@ -668,18 +700,16 @@
                 await refresh();
                 return;
             }
-            releaseSubmitting = false;
-            updateReleaseForm();
             $('relError').textContent = (data && data.error) || 'Could not release the ride. Please try again.';
             $('relError').classList.remove('hidden');
         }
-        $('relCancel').addEventListener('click', closeReleaseSheet);
-        $('relBackdrop').addEventListener('click', closeReleaseSheet);
+        $('relCancel').addEventListener('click', requestCloseReleaseSheet);
+        $('relBackdrop').addEventListener('click', requestCloseReleaseSheet);
         $('relConfirm').addEventListener('click', submitRelease);
         $('relReasons').addEventListener('change', updateReleaseForm);
         $('relNote').addEventListener('input', updateReleaseForm);
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !$('relSheet').classList.contains('hidden')) closeReleaseSheet();
+            if (e.key === 'Escape' && !$('relSheet').classList.contains('hidden')) requestCloseReleaseSheet();
         });
 
         // ===== Driver PWA Push =====

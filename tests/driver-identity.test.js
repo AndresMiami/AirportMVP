@@ -40,6 +40,7 @@ let listResult = [];
 let currentBookingResult = { data: null, error: { message: 'none' } };
 let releasesResult = { data: [], error: null }; // booking_releases rows (PR 3C-1)
 let releasesQueried = null;    // captured eq filter on the releases lookup
+let driversLookupError = null; // injectable drivers maybeSingle failure
 
 const supabaseMock = {
   createClient: () => ({
@@ -58,6 +59,13 @@ const supabaseMock = {
                 return Promise.resolve(row
                   ? { data: row, error: null }
                   : { data: null, error: { message: 'none' } });
+              },
+              // booking-status's identity lookup (PR 3C-1: fail-closed on
+              // ERROR, tolerant on ABSENCE — maybeSingle separates the two)
+              maybeSingle: () => {
+                if (driversLookupError) return Promise.resolve({ data: null, error: driversLookupError });
+                const row = col === 'user_id' ? DRIVERS_BY_USER[val] : DRIVERS_BY_ID[val];
+                return Promise.resolve({ data: row || null, error: null });
               }
             })
           })
@@ -433,12 +441,22 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
   // ---------- PR 3C-1: release reaccept guard + feed exclusion ----------
   updateResult = { data: null, error: { code: 'P0001', message: 'released_by_this_driver' } };
+  currentBookingResult = { data: { status: 'confirmed', details_version: 4 }, error: null };
   r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
-  check('accept blocked by the DB reaccept guard -> honest 409, never a 500', () => {
+  check('accept blocked by the DB reaccept guard -> honest 409 WITH live truth, never a 500', () => {
     assert.strictEqual(r.statusCode, 409);
     const body = JSON.parse(r.body);
     assert.strictEqual(body.code, 'released_by_you');
     assert.ok(/released this ride/i.test(body.error));
+    assert.strictEqual(body.currentStatus, 'confirmed', 'the conflict re-read reports live status');
+    assert.strictEqual(body.currentDetailsVersion, 4);
+  });
+
+  updateResult = { data: null, error: { code: 'P0001', message: 'released_by_this_driver' } };
+  currentBookingResult = { data: null, error: { message: 'db down' } };
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
+  check('guard conflict with a FAILED re-read -> 500, never a guessed 409', () => {
+    assert.strictEqual(r.statusCode, 500);
   });
 
   updateResult = { data: null, error: { code: '57014', message: 'statement timeout' } };
@@ -508,6 +526,23 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(r.statusCode, 500);
   });
   releasesResult = { data: [], error: null };
+
+  // ---------- PR 3C-1: driver identity lookup is fail-closed ----------
+  driversLookupError = { message: 'db down' };
+  currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-c' }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('booking-status: driver identity lookup FAILURE on an assigned ride -> 500, never a silent driver-less payload', () => {
+    assert.strictEqual(r.statusCode, 500);
+  });
+  driversLookupError = null;
+
+  currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-gone' }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('booking-status: genuinely ABSENT drivers row stays tolerated (legacy data) — 200, no driver key', () => {
+    assert.strictEqual(r.statusCode, 200);
+    const body = JSON.parse(r.body);
+    assert.ok(!('driver' in body) || body.driver === undefined);
+  });
 
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {

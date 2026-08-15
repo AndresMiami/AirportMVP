@@ -33,14 +33,31 @@ async function requireDriver(event, supabaseUrl, anonKey, db) {
 
   const authClient = createClient(supabaseUrl, anonKey);
   const { data: userData, error: userError } = await authClient.auth.getUser(token);
-  if (userError || !userData?.user) return { status: 401, error: 'Invalid session' };
+  if (userError) {
+    // Outage discipline (cancel-core parity): a network/service failure
+    // is a 500, never mislabeled as an expired session.
+    const retryable = userError.name === 'AuthRetryableFetchError' ||
+      !userError.status || userError.status >= 500;
+    if (retryable) {
+      console.error('❌ Release auth verification unavailable:', userError.message);
+      return { status: 500, error: 'Could not verify sign-in' };
+    }
+    return { status: 401, error: 'Invalid session' };
+  }
+  if (!userData?.user) return { status: 401, error: 'Invalid session' };
 
+  // maybeSingle separates "lookup failed" (500) from "no drivers row"
+  // (an honest 403) — an outage must never read as a revoked account.
   const { data: driver, error: driverError } = await db
     .from('drivers')
     .select('id, name, status')
     .eq('user_id', userData.user.id)
-    .single();
-  if (driverError || !driver) return { status: 403, error: 'No driver account' };
+    .maybeSingle();
+  if (driverError) {
+    console.error('❌ Release driver lookup failed:', driverError.message || driverError);
+    return { status: 500, error: 'Could not verify driver account' };
+  }
+  if (!driver) return { status: 403, error: 'No driver account' };
   if (driver.status !== 'active' && driver.status !== 'busy') {
     return { status: 403, error: 'Driver account inactive' };
   }

@@ -45,24 +45,29 @@ function resetState() {
   state.eventReadError = null;
   state.dispatchCalls = [];
   state.dispatchBehavior = null;
+  state.authOutage = false;
+  state.driversError = null;
 }
 resetState();
 
 const supabaseMock = {
   createClient: () => ({
     auth: {
-      getUser: async (token) => TOKENS[token]
-        ? { data: { user: TOKENS[token] }, error: null }
-        : { data: { user: null }, error: { message: 'bad token' } }
+      getUser: async (token) => {
+        if (state.authOutage) return { data: { user: null }, error: { name: 'AuthRetryableFetchError', message: 'fetch failed' } };
+        return TOKENS[token]
+          ? { data: { user: TOKENS[token] }, error: null }
+          : { data: { user: null }, error: { status: 401, message: 'bad token' } };
+      }
     },
     from: (table) => {
       if (table === 'drivers') {
         return {
           select: () => ({
             eq: (col, val) => ({
-              single: async () => {
-                const row = DRIVERS_BY_USER[val];
-                return row ? { data: row, error: null } : { data: null, error: { message: 'none' } };
+              maybeSingle: async () => {
+                if (state.driversError) return { data: null, error: state.driversError };
+                return { data: DRIVERS_BY_USER[val] || null, error: null };
               }
             })
           })
@@ -163,6 +168,18 @@ async function check(name, fn) {
     r = await post({ bookingId: BID, reason: 'emergency' }, 'tok-inactive');
     assert.strictEqual(r.statusCode, 403);
     assert.strictEqual(state.rpcCalls.length, 0, 'auth failures never reach the RPC');
+  });
+  await check('auth OUTAGE -> 500, never mislabeled as an expired session', async () => {
+    state.authOutage = true;
+    const r = await post({ bookingId: BID, reason: 'emergency' }, 'tok-active');
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(state.rpcCalls.length, 0);
+  });
+  await check('drivers lookup FAILURE -> 500, never mislabeled as a revoked account', async () => {
+    state.driversError = { message: 'db down' };
+    const r = await post({ bookingId: BID, reason: 'emergency' }, 'tok-active');
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(state.rpcCalls.length, 0);
   });
 
   // ---------- validation (all rejected BEFORE the RPC) ----------
@@ -321,10 +338,13 @@ async function check(name, fn) {
     assert.ok(/res\.ok \|\| res\.status === 409/.test(driverHtml), '409 -> close + refresh (doAction precedent)');
     assert.ok(driverHtml.includes("You won't be able to take it back"), 'warning copy present');
   });
-  await check('driver.html: release sheet closes on Escape/backdrop and restores focus', async () => {
-    assert.ok(/Escape' && !\$\('relSheet'\)\.classList\.contains\('hidden'\)\) closeReleaseSheet/.test(driverHtml));
-    assert.ok(driverHtml.includes("$('relBackdrop').addEventListener('click', closeReleaseSheet)"));
+  await check('driver.html: release sheet closes on Escape/backdrop via the GUARDED close, restores focus', async () => {
+    assert.ok(/Escape' && !\$\('relSheet'\)\.classList\.contains\('hidden'\)\) requestCloseReleaseSheet/.test(driverHtml),
+      'Escape must go through the in-flight guard');
+    assert.ok(driverHtml.includes("$('relBackdrop').addEventListener('click', requestCloseReleaseSheet)"));
+    assert.ok(driverHtml.includes("$('relCancel').addEventListener('click', requestCloseReleaseSheet)"));
     assert.ok(/releaseReturnFocus && releaseReturnFocus\.isConnected/.test(driverHtml));
+    assert.ok(driverHtml.includes('releaseReturnFocusId'), 'focus restoration must survive poll re-renders by booking id');
   });
 
   // ---------- routing + migration static shape ----------
@@ -342,10 +362,10 @@ async function check(name, fn) {
                        'payment_status_at_release', 'payment_method_at_release']) {
       assert.ok(sql.includes(col), `missing column ${col}`);
     }
-    assert.ok(sql.includes("payment_status = 'unpaid'"),
-      'release must RESET the live payment stamp for the replacement driver');
-    assert.ok(sql.includes('FOR UPDATE'),
-      'the payment snapshot read must lock the row before the guarded update');
+    assert.ok(sql.includes('driver_location_at = NULL\n  WHERE id = p_booking_id'),
+      'the RPC clear-list must END at driver_location_at — payment_status is PRESERVED (MVP: a paid passenger is never charged twice)');
+    assert.ok(sql.includes("AND payment_status = 'paid_by_guest'"),
+      'the smoke must prove the paid stamp SURVIVES the release');
     assert.ok(sql.includes('UNIQUE (booking_id, driver_id)'));
     assert.ok(sql.includes('char_length(note) <= 500'));
     assert.ok(sql.includes("CHECK (reason <> 'other' OR (note IS NOT NULL AND btrim(note) <> ''))"));
@@ -368,6 +388,15 @@ async function check(name, fn) {
     assert.ok(/BEFORE UPDATE ON bookings\s*\n?\s*FOR EACH ROW/.test(sql),
       'reaccept guard must be FOR EACH ROW (WHEN with OLD/NEW is invalid without it)');
     assert.ok(sql.includes('released_by_this_driver'));
+    assert.ok(sql.includes("NOTIFY pgrst, 'reload schema';"),
+      'PostgREST schema-cache reload signal before COMMIT');
+    assert.ok(sql.includes('relrowsecurity'), 'verification must assert RLS is enabled');
+    assert.ok(sql.includes('FROM pg_policies'), 'verification must assert ZERO policies');
+    assert.ok(sql.includes("tgenabled = 'O'"), 'verification must assert triggers are ENABLED');
+    assert.ok(sql.includes("has_table_privilege('service_role', 'public.booking_releases', 'SELECT')"),
+      'verification must assert service_role can read the table (endpoint + dispatcher depend on it)');
+    assert.ok(sql.includes("has_function_privilege('anon', 'public.booking_releases_outbox()', 'EXECUTE')"),
+      'verification must cover EXECUTE revocation on ALL three functions');
   });
   await check('migration 016: throwaway smoke drivers, negative sub-blocks, duplicate proof, rollback', async () => {
     const sql = fs.readFileSync(path.join(repoRoot, 'database/migrations/016_release_ride.sql'), 'utf8');
@@ -378,6 +407,187 @@ async function check(name, fn) {
     assert.ok(sql.includes('EXCEPTION WHEN unique_violation'), 'the UNIQUE is proven by direct tampering');
     assert.ok(sql.includes('DELETE FROM drivers WHERE id IN (drv_a, drv_b)'), 'throwaway drivers torn down');
     assert.ok(sql.includes('-- DROP TABLE IF EXISTS booking_releases;'), 'rollback section present');
+  });
+
+  // ---------- driver.html release sheet: BEHAVIORAL harness ----------
+  // The REAL inline script runs under vm (passenger-polling precedent).
+  // Static checks missed the submit race — these prove the fixes by
+  // exercising the actual functions.
+  const vm = require('vm');
+  const driverScriptSrc = [...driverHtml.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].at(-1)[1];
+
+  function createDriverHarness() {
+    class FakeClassList {
+      constructor(initial = []) { this.values = new Set(initial); }
+      add(...n) { n.forEach((x) => this.values.add(x)); }
+      remove(...n) { n.forEach((x) => this.values.delete(x)); }
+      contains(n) { return this.values.has(n); }
+      toggle(n, force) {
+        const on = force === undefined ? !this.contains(n) : !!force;
+        if (on) this.add(n); else this.remove(n);
+        return on;
+      }
+    }
+    const focusLog = [];
+    class FakeEl {
+      constructor(id, hidden = false) {
+        this.id = id;
+        this.classList = new FakeClassList(hidden ? ['hidden'] : []);
+        this.listeners = {};
+        this.dataset = {};
+        this.style = {};
+        this.value = '';
+        this.textContent = '';
+        this.innerHTML = '';
+        this.disabled = false;
+        this.isConnected = true;
+      }
+      addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+      focus() { focusLog.push(this.id); harness.activeElement = this; }
+      click() { (this.listeners.click || []).forEach((fn) => fn({ target: this, preventDefault() {} })); }
+    }
+    const elements = new Map();
+    const hiddenIds = new Set(['relSheet', 'relBackdrop', 'relError', 'msgSheet', 'msgBackdrop', 'msgCustomArea', 'app', 'pushCard', 'pushEnableBtn']);
+    const element = (id) => {
+      if (!elements.has(id)) elements.set(id, new FakeEl(id, hiddenIds.has(id)));
+      return elements.get(id);
+    };
+    const radios = ['schedule_conflict', 'ride_details_changed', 'vehicle_issue', 'emergency', 'other']
+      .map((value) => {
+        const r = new FakeEl('radio-' + value);
+        r.checked = false;
+        r.value = value;
+        return r;
+      });
+    const releaseButtons = new Map(); // booking id -> current button element
+    const docListeners = {};
+    const fetchLog = [];
+    const harness = { activeElement: null };
+
+    const documentObj = {
+      visibilityState: 'visible',
+      body: new FakeEl('body'),
+      getElementById: element,
+      querySelector: (sel) => {
+        if (sel === 'input[name="relReason"]:checked') return radios.find((r) => r.checked) || null;
+        if (sel === 'input[name="relReason"]') return radios[0];
+        const m = sel.match(/^button\[data-release-id="(.+)"\]$/);
+        if (m) return releaseButtons.get(m[1]) || null;
+        return new FakeEl('qs');
+      },
+      querySelectorAll: (sel) => (sel === 'input[name="relReason"]' ? radios : []),
+      createElement: () => new FakeEl('created'),
+      addEventListener: (type, fn) => { (docListeners[type] = docListeners[type] || []).push(fn); },
+      get activeElement() { return harness.activeElement; }
+    };
+
+    const context = {
+      console,
+      document: documentObj,
+      location: { search: '', href: '', origin: 'https://linkmia.com' },
+      localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+      navigator: {},
+      URLSearchParams,
+      Date, Math, Number, JSON, Promise,
+      encodeURIComponent,
+      setTimeout, clearTimeout,
+      alert() {}, confirm: () => true,
+      fetch: async (url, opts) => {
+        fetchLog.push({ url, body: opts && opts.body ? JSON.parse(opts.body) : null });
+        return { ok: true, status: 200, json: async () => ({ success: true }) };
+      },
+      window: {}
+    };
+    context.window.window = context.window;
+    context.window.addEventListener = () => {};
+    context.window.matchMedia = () => ({ matches: false, addEventListener() {} });
+    vm.createContext(context);
+    vm.runInContext(driverScriptSrc, context, { filename: 'driver.html:inline-script' });
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    return {
+      context, element, radios, releaseButtons, docListeners, fetchLog, focusLog, harness,
+      async settle() { await settle(); await settle(); await settle(); },
+      evaluate: (src) => vm.runInContext(src, context),
+      fireKeydown(key) { (docListeners.keydown || []).forEach((fn) => fn({ key })); }
+    };
+  }
+
+  await check('BEHAVIOR: in-flight release posts the CAPTURED ride — sheet churn can never redirect it', async () => {
+    const h = createDriverHarness();
+    h.evaluate(`lastBookings = [
+      { id: 'ride-a', status: 'confirmed' },
+      { id: 'ride-b', status: 'confirmed' }
+    ]`);
+    h.evaluate(`openReleaseSheet('ride-a')`);
+    assert.ok(!h.element('relSheet').classList.contains('hidden'), 'sheet open for ride A');
+    h.radios[3].checked = true; // emergency
+    h.evaluate('updateReleaseForm()');
+    assert.strictEqual(h.element('relConfirm').disabled, false);
+    // Deferred session token: the submit parks on this await — the exact
+    // window the destructive race lived in.
+    let releaseToken;
+    const tokenGate = new Promise((resolve) => { releaseToken = resolve; });
+    h.context.window.supabaseClient = {
+      auth: { getSession: () => tokenGate.then(() => ({ data: { session: { access_token: 'tok' } } })) }
+    };
+    h.evaluate('submitRelease()');
+    await h.settle();
+    assert.strictEqual(h.element('relConfirm').textContent, 'Releasing…');
+    // Adversarial churn during the await: force-close and try to open
+    // ride B's sheet (openReleaseSheet must REFUSE mid-flight).
+    h.evaluate('closeReleaseSheet()');
+    h.evaluate(`openReleaseSheet('ride-b')`);
+    assert.strictEqual(h.evaluate('currentReleaseId'), null, 'no new context under an in-flight submission');
+    releaseToken();
+    await h.settle();
+    assert.strictEqual(h.fetchLog.length, 1, 'exactly one release request');
+    assert.strictEqual(h.fetchLog[0].body.bookingId, 'ride-a',
+      'the request releases the ride the driver CONFIRMED — never the churned context');
+    assert.strictEqual(h.fetchLog[0].body.reason, 'emergency');
+  });
+
+  await check('BEHAVIOR: "Keep the ride", backdrop, and Escape are ALL refused while a release is in flight', async () => {
+    const h = createDriverHarness();
+    h.evaluate(`lastBookings = [{ id: 'ride-a', status: 'confirmed' }]`);
+    h.evaluate(`openReleaseSheet('ride-a')`);
+    h.radios[0].checked = true;
+    h.evaluate('updateReleaseForm()');
+    let releaseToken;
+    const tokenGate = new Promise((resolve) => { releaseToken = resolve; });
+    h.context.window.supabaseClient = {
+      auth: { getSession: () => tokenGate.then(() => ({ data: { session: { access_token: 'tok' } } })) }
+    };
+    h.evaluate('submitRelease()');
+    await h.settle();
+    assert.strictEqual(h.element('relCancel').disabled, true, 'Keep the ride is disabled in flight');
+    h.element('relCancel').click();
+    h.element('relBackdrop').click();
+    h.fireKeydown('Escape');
+    assert.ok(!h.element('relSheet').classList.contains('hidden'),
+      'the sheet must not pretend the release can be stopped');
+    releaseToken();
+    await h.settle();
+    assert.ok(h.element('relSheet').classList.contains('hidden'), 'sheet closes on the real outcome');
+    assert.strictEqual(h.element('relCancel').disabled, false, 're-enabled after the flight');
+  });
+
+  await check('BEHAVIOR: focus restores by booking id after polling replaced the original button', async () => {
+    const h = createDriverHarness();
+    h.evaluate(`lastBookings = [{ id: 'ride-a', status: 'confirmed' }]`);
+    // The button the driver tapped, registered as the pre-open focus.
+    const originalBtn = h.evaluate('document.createElement("button")');
+    h.harness.activeElement = originalBtn;
+    h.evaluate(`openReleaseSheet('ride-a')`);
+    // A poll re-render replaces the card DOM: the original node is gone,
+    // a NEW button for the same ride exists.
+    originalBtn.isConnected = false;
+    const newBtn = h.evaluate('document.createElement("button")');
+    newBtn.id = 'new-release-btn';
+    h.releaseButtons.set('ride-a', newBtn);
+    h.evaluate('requestCloseReleaseSheet()');
+    assert.ok(h.element('relSheet').classList.contains('hidden'));
+    assert.strictEqual(h.focusLog.at(-1), 'new-release-btn',
+      'focus lands on the SAME ride\'s new button, not into the void');
   });
 
   if (failures.length) {

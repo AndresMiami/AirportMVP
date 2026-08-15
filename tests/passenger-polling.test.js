@@ -368,10 +368,17 @@ function check(name, fn) {
     assert.strictEqual(swap.evaluate('DRIVER.phone'), '13055551212');
   });
   await swap.runNextTimer();
-  check('release payload wipes the former driver: defaults restored, WhatsApp hidden, notice shown', () => {
-    assert.strictEqual(swap.evaluate('DRIVER.name'), 'Andres');
+  check('release payload wipes the former driver to a NEUTRAL identity: no name, NO phone, WhatsApp hidden, notice shown', () => {
+    assert.strictEqual(swap.evaluate('DRIVER.name'), 'your driver',
+      'never a real person\'s name for a ride nobody holds');
+    assert.strictEqual(swap.evaluate('DRIVER.phone'), null,
+      'never a real phone number — the WhatsApp button must have nothing to link');
     assert.ok(swap.element('waBtn').classList.contains('hidden'), 'pending shows no driver contact');
     assert.ok(!swap.element('reassignCard').classList.contains('hidden'));
+  });
+  check('the status subtitle agrees with the reassignment notice — never "we\'ve notified your driver"', () => {
+    assert.match(swap.element('statusSub').textContent, /finding you a new driver/i);
+    assert.ok(!/notified your driver/i.test(swap.element('statusSub').textContent));
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

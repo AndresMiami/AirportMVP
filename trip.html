@@ -611,6 +611,11 @@
             } else if (TRACKING_STATUSES.includes(b.status)) {
                 sub = `${view.sub} No verified location for this checkpoint.`;
             }
+            // A released booking must not claim "we've notified your
+            // driver" — the subtitle agrees with the reassignment notice.
+            if (b.status === 'pending' && b.reassigning === true) {
+                sub = 'We\'re finding you a new driver — your ride details are unchanged.';
+            }
             $('statusSub').textContent = sub.replace('{driver}', DRIVER.name);
 
             // Reassignment notice: explicit, pending-only, no former-driver
@@ -952,15 +957,16 @@
                 } else if (booking.status === 'pending') {
                     // Driver-less PENDING payload (released or never
                     // assigned): never retain a former driver's identity —
-                    // revert to the page defaults. Gated on pending ON
-                    // PURPOSE: an ACTIVE ride's payload can lack the driver
-                    // key on a transient server-side lookup blip, and
-                    // resetting there would route the WhatsApp button to
-                    // the default number while another driver owns the ride
-                    // (decision 10 forbids exactly that fallback) — for
-                    // active rides the last-known driver stays.
-                    DRIVER.name = 'Andres';
-                    DRIVER.phone = '17865093955';
+                    // clear to a NEUTRAL identity with NO phone (never the
+                    // page defaults: a real person's number must not be
+                    // presented as "your driver" for a ride they don't
+                    // hold). Gated on pending ON PURPOSE: an ACTIVE ride's
+                    // payload could only lack the driver key on a server
+                    // fault, and resetting there would swap the WhatsApp
+                    // target mid-ride (decision 10) — active rides keep
+                    // the last-known driver.
+                    DRIVER.name = 'your driver';
+                    DRIVER.phone = null;
                 }
                 failStreak = 0;
                 failurePaused = false;

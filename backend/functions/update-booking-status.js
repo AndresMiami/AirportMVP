@@ -279,15 +279,28 @@ exports.handler = async (event) => {
     if (error) {
       // Release reaccept guard (migration 016): the database refuses to
       // assign a booking to a driver who previously released it — on ANY
-      // path, this endpoint included. Surface it as an honest conflict,
-      // not a server failure. Everything else stays a real 500.
+      // path, this endpoint included. Surface it as an honest conflict
+      // WITH live truth (the 409 re-read discipline; a failed re-read is
+      // a real 500, never a guessed conflict). Everything else stays a
+      // real 500.
       if (error.code === 'P0001' && /released_by_this_driver/.test(error.message || '')) {
+        const { data: current, error: rereadError } = await supabase
+          .from('bookings')
+          .select('status, details_version')
+          .eq('id', bookingId)
+          .maybeSingle();
+        if (rereadError) {
+          console.error('❌ reaccept-guard conflict re-read failed:', rereadError.message || rereadError);
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
+        }
         return {
           statusCode: 409,
           headers,
           body: JSON.stringify({
             error: 'You released this ride — it\'s now with other drivers',
-            code: 'released_by_you'
+            code: 'released_by_you',
+            currentStatus: current?.status || 'unknown',
+            currentDetailsVersion: current?.details_version ?? null
           })
         };
       }

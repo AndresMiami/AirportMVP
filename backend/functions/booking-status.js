@@ -64,15 +64,22 @@ exports.handler = async (event) => {
       }
 
       // Personalization: resolve the assigned driver's public identity
-      // (name + phone only — never internal fields). Absent or failed
-      // lookup -> no driver key; the page falls back to its defaults.
+      // (name + phone only — never internal fields). FAIL CLOSED on a
+      // lookup FAILURE (PR 3C-1): a silent driver-less payload for an
+      // ASSIGNED ride would make the page misattribute the ride — a 500
+      // lets the sealed polling retry instead. A genuinely ABSENT
+      // drivers row (legacy data) stays tolerated: no driver key.
       let driverInfo;
       if (data.assigned_driver) {
-        const { data: drv } = await supabase
+        const { data: drv, error: drvError } = await supabase
           .from('drivers')
           .select('name, phone')
           .eq('id', data.assigned_driver)
-          .single();
+          .maybeSingle();
+        if (drvError) {
+          console.error('❌ Driver identity lookup failed:', drvError);
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
+        }
         if (drv && drv.name) driverInfo = { name: drv.name, phone: drv.phone || '' };
       }
       delete data.assigned_driver; // internal id — not for the public payload

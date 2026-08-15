@@ -129,10 +129,11 @@ terminals only via admin SQL). One BACKWARD transition exists (PR 3C-1):
 booking_releases audit row + admin `ride_released` outbox event, one
 transaction; raw status-flip SQL is NOT a supported release). Rules: the
 releasing driver + structured reason + pickup/ROUTE/price/name/PAYMENT
-SNAPSHOTS are recorded; the live payment_status is RESET to 'unpaid'
-(the replacement driver never inherits a PAID stamp for money the
-releaser collected — a non-unpaid snapshot adds a reconcile warning to
-the admin notice); a DB trigger blocks the releaser from EVER re-accepting; the
+SNAPSHOTS are recorded; the live payment stamp is PRESERVED through a
+release (MVP decision: a paid passenger must never be charged twice —
+a non-unpaid snapshot adds a reconcile warning to the admin notice and
+the human referees the money between drivers); a DB trigger blocks the
+releaser from EVER re-accepting; the
 re-pooled request is hidden from their feed (fail-closed lookup); the
 passenger sees an explicit "We're finding you a new driver" notice
 (never the reason, no former-driver traces); admin Telegram includes
