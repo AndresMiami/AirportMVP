@@ -211,6 +211,14 @@
         }
         .paused-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
         .paused-note { font-size: 12px; color: var(--text-light); margin-top: 8px; }
+        .reassign-card {
+            background: rgba(50, 215, 75, 0.08);
+            border: 1px solid rgba(50, 215, 75, 0.30);
+            border-radius: 13px; padding: 14px; margin-bottom: 14px;
+            text-align: center;
+        }
+        .reassign-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+        .reassign-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
         .hidden { display: none !important; }
         .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
         .center-msg a { color: var(--orange); font-weight: 600; text-decoration: none; }
@@ -230,6 +238,14 @@
             <div class="paused-card hidden" id="pausedCard">
                 <div class="paused-text" id="pausedText">Automatic updates paused. Your booking is still active — the status checks again when you come back to this page.</div>
                 <div class="paused-note hidden" id="pausedNote"></div>
+            </div>
+
+            <!-- Reassignment notice (PR 3C-1): shown on a pending booking
+                 whose driver RELEASED it. Explicit by design — never a
+                 silent return to pending. No reason, no former driver. -->
+            <div class="reassign-card hidden" id="reassignCard">
+                <div class="reassign-title">We're finding you a new driver</div>
+                <div class="reassign-text">Your ride details are unchanged. We'll update this page when another driver accepts.</div>
             </div>
 
             <div class="steps" id="steps">
@@ -595,7 +611,17 @@
             } else if (TRACKING_STATUSES.includes(b.status)) {
                 sub = `${view.sub} No verified location for this checkpoint.`;
             }
+            // A released booking must not claim "we've notified your
+            // driver" — the subtitle agrees with the reassignment notice.
+            if (b.status === 'pending' && b.reassigning === true) {
+                sub = 'We\'re finding you a new driver — your ride details are unchanged.';
+            }
             $('statusSub').textContent = sub.replace('{driver}', DRIVER.name);
+
+            // Reassignment notice: explicit, pending-only, no former-driver
+            // traces (all DRIVER surfaces are already status-gated away).
+            $('reassignCard').classList.toggle('hidden',
+                !(b.status === 'pending' && b.reassigning === true));
 
             // Stepper (hidden for declined/cancelled)
             const showSteps = !['declined', 'cancelled'].includes(b.status);
@@ -704,18 +730,31 @@
         // checkpoint stamp wins when it exists (reload-proof by construction);
         // otherwise localStorage keeps a reload from restarting an expired
         // budget, with an in-memory fallback if storage is unavailable.
+        //
+        // Reassignment (PR 3C-1): for a pending booking the anchor identity
+        // also includes the server's reassigningSince — a PERSISTENT value
+        // (the latest release moment) that survives reloads. A driver
+        // release therefore grants ONE fresh pending window per release
+        // (the identity changed), while a reload during the reassignment
+        // wait matches the stored record and reuses it — never a fresh
+        // window per reload. The REQUEST BUDGET is untouched on purpose:
+        // release re-anchors the window, never the persistent spend.
         function anchorFor(b) {
             if (TRACKING_STATUSES.includes(b.status) && b.driver_location_at) {
                 return new Date(b.driver_location_at).getTime();
             }
-            if (!memAnchor || memAnchor.status !== b.status) {
+            const since = b.status === 'pending' ? (b.reassigningSince || null) : null;
+            if (!memAnchor || memAnchor.status !== b.status ||
+                (memAnchor.reassigningSince || null) !== since) {
                 memAnchor = null;
                 try {
                     const rec = JSON.parse(localStorage.getItem('lm_poll_anchor:' + bookingId) || 'null');
-                    if (rec && rec.status === b.status) memAnchor = rec;
+                    if (rec && rec.status === b.status &&
+                        (rec.reassigningSince || null) === since) memAnchor = rec;
                 } catch (e) { /* storage unavailable */ }
                 if (!memAnchor) {
                     memAnchor = { status: b.status, at: Date.now() };
+                    if (since) memAnchor.reassigningSince = since;
                     try { localStorage.setItem('lm_poll_anchor:' + bookingId, JSON.stringify(memAnchor)); } catch (e) {}
                 }
             }
@@ -899,7 +938,14 @@
                     recordPollFailure(kind);
                     return;
                 }
-                const { booking, driver } = await res.json();
+                const payload = await res.json();
+                const booking = payload.booking;
+                const driver = payload.driver;
+                // Reassignment flags ride WITH the booking object so every
+                // consumer (render, anchorFor) sees one coherent snapshot.
+                booking.reassigning = payload.reassigning === true;
+                booking.reassigningSince = booking.reassigning
+                    ? (payload.reassigningSince || null) : null;
                 // Personalization: the assigned driver's real name + phone.
                 // A KNOWN driver with a missing/malformed phone gets phone
                 // null — the WhatsApp button hides rather than ever routing
@@ -908,6 +954,19 @@
                     DRIVER.name = driver.name;
                     const digits = String(driver.phone || '').replace(/\D/g, '');
                     DRIVER.phone = digits.length >= 10 ? digits : null;
+                } else if (booking.status === 'pending') {
+                    // Driver-less PENDING payload (released or never
+                    // assigned): never retain a former driver's identity —
+                    // clear to a NEUTRAL identity with NO phone (never the
+                    // page defaults: a real person's number must not be
+                    // presented as "your driver" for a ride they don't
+                    // hold). Gated on pending ON PURPOSE: an ACTIVE ride's
+                    // payload could only lack the driver key on a server
+                    // fault, and resetting there would swap the WhatsApp
+                    // target mid-ride (decision 10) — active rides keep
+                    // the last-known driver.
+                    DRIVER.name = 'your driver';
+                    DRIVER.phone = null;
                 }
                 failStreak = 0;
                 failurePaused = false;

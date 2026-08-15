@@ -64,20 +64,62 @@ exports.handler = async (event) => {
       }
 
       // Personalization: resolve the assigned driver's public identity
-      // (name + phone only — never internal fields). Absent or failed
-      // lookup -> no driver key; the page falls back to its defaults.
+      // (name + phone only — never internal fields). FAIL CLOSED on a
+      // lookup FAILURE (PR 3C-1): a silent driver-less payload for an
+      // ASSIGNED ride would make the page misattribute the ride — a 500
+      // lets the sealed polling retry instead. A genuinely ABSENT
+      // drivers row (legacy data) stays tolerated: no driver key.
       let driverInfo;
       if (data.assigned_driver) {
-        const { data: drv } = await supabase
+        const { data: drv, error: drvError } = await supabase
           .from('drivers')
           .select('name, phone')
           .eq('id', data.assigned_driver)
-          .single();
+          .maybeSingle();
+        if (drvError) {
+          console.error('❌ Driver identity lookup failed:', drvError);
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
+        }
         if (drv && drv.name) driverInfo = { name: drv.name, phone: drv.phone || '' };
       }
       delete data.assigned_driver; // internal id — not for the public payload
 
-      return { statusCode: 200, headers, body: JSON.stringify({ booking: data, driver: driverInfo }) };
+      // Reassignment notice (PR 3C-1): a pending booking WITH release
+      // history is waiting for a replacement driver — the trip page shows
+      // the explicit notice and re-anchors its pending poll window to
+      // reassigningSince (the latest release moment: a persistent
+      // identity across reloads — a reload with the same value reuses
+      // the stored anchor; only a NEW release grants a fresh window).
+      // FAIL CLOSED: a lookup failure is a real 500, never a silently
+      // wrong flag. Additive fields — older pages ignore them.
+      let reassigning = false;
+      let reassigningSince = null;
+      if (data.status === 'pending') {
+        const { data: releases, error: releasesError } = await supabase
+          .from('booking_releases')
+          .select('released_at')
+          .eq('booking_id', id)
+          .order('released_at', { ascending: false })
+          .limit(1);
+        if (releasesError) {
+          console.error('❌ Release lookup failed:', releasesError);
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
+        }
+        if (releases && releases.length > 0) {
+          reassigning = true;
+          reassigningSince = releases[0].released_at;
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          booking: data,
+          driver: driverInfo,
+          ...(reassigning ? { reassigning: true, reassigningSince } : {})
+        })
+      };
     }
 
     if (event.httpMethod === 'POST') {

@@ -67,6 +67,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/release-booking"
+  to = "/.netlify/functions/release-booking"
+  status = 200
+
+[[redirects]]
   from = "/api/profile"
   to = "/.netlify/functions/profile"
   status = 200

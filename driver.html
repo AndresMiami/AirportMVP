@@ -193,6 +193,55 @@
         .msg-meta { font-size: 12px; color: #6b6b76; text-align: right; margin: 4px 2px 8px; }
         .msg-safety { font-size: 12px; color: #6b6b76; text-align: center; margin-top: 8px; }
         #msgCustomSend:disabled { opacity: 0.5; cursor: default; }
+        /* Release-ride bottom sheet (PR 3C-1) — same house conventions */
+        #relBackdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50;
+        }
+        #relSheet {
+            position: fixed; left: 0; right: 0; bottom: 0; margin: 0 auto;
+            width: 100%; max-width: 576px; background: white;
+            border-radius: 20px 20px 0 0;
+            padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+            z-index: 51; animation: sheetUp 0.3s ease;
+            max-height: 85vh;
+            max-height: 85dvh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+        }
+        #relSheet, #relSheet * { box-sizing: border-box; }
+        .rel-warning { font-size: 13px; color: #6b6b76; line-height: 1.5; margin-bottom: 12px; }
+        .rel-reason {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 14px; margin-bottom: 8px; min-height: 44px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            font-size: 14px; color: #1a1a2e; cursor: pointer;
+        }
+        .rel-reason input { width: 18px; height: 18px; accent-color: #FF5733; }
+        #relNote {
+            width: 100%; min-height: 56px; padding: 12px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            /* 16px prevents iOS Safari focus auto-zoom (msgCustomText parity) */
+            font-size: 16px; font-family: inherit; color: #1a1a2e;
+            resize: vertical;
+        }
+        .rel-error { font-size: 13px; color: #d70015; margin-top: 8px; }
+        .btn-release {
+            display: block; width: 100%; margin-top: 8px; padding: 12px;
+            min-height: 44px;
+            background: white; border: 1.5px solid #e2b4ad; border-radius: 10px;
+            color: #c0392b; font-size: 14px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+        }
+        .btn-release-confirm {
+            display: block; width: 100%; padding: 13px; min-height: 44px;
+            margin-top: 12px;
+            background: #c0392b; border: none; border-radius: 12px;
+            color: white; font-size: 15px; font-weight: 700;
+            cursor: pointer; font-family: inherit;
+        }
+        .btn-release-confirm:disabled { opacity: 0.5; cursor: default; }
         .msg-composer-nav {
             display: flex; align-items: center; justify-content: space-between;
             gap: 8px; margin-bottom: 8px;
@@ -308,6 +357,23 @@
                 <div class="msg-safety" id="msgSafety">Use messaging only when safely parked.</div>
             </div>
             <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
+        </div>
+        <div id="relBackdrop" class="hidden"></div>
+        <div id="relSheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="relTitle">
+            <div class="msg-title" id="relTitle">Release this ride?</div>
+            <div class="rel-warning">The ride returns to the shared feed immediately and the passenger is told we're finding a new driver. You won't be able to take it back.</div>
+            <div id="relReasons">
+                <label class="rel-reason"><input type="radio" name="relReason" value="schedule_conflict"> Schedule conflict</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="ride_details_changed"> Ride details changed</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="vehicle_issue"> Vehicle issue</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="emergency"> Emergency</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="other"> Other</label>
+            </div>
+            <label class="msg-label" for="relNote">Note <span id="relNoteHint">(optional)</span></label>
+            <textarea id="relNote" rows="2" maxlength="500" placeholder="Anything LinkMia should know…"></textarea>
+            <div class="rel-error hidden" id="relError" role="alert" aria-live="assertive"></div>
+            <button class="btn-release-confirm" id="relConfirm" type="button" disabled>Release ride</button>
+            <button class="msg-cancel" id="relCancel" type="button">Keep the ride</button>
         </div>
         <main>
             <div class="view-tabs">
@@ -527,6 +593,189 @@
         // stack duplicates. Escape closes only while the sheet is visible.
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !$('msgSheet').classList.contains('hidden')) closeMessageSheet();
+        });
+
+        // ---- Release ride (PR 3C-1) ----
+        // CONFIRMED rides only. The sheet collects a structured reason
+        // (note REQUIRED for Other) and posts /api/release-booking — the
+        // migration-016 RPC is the only path that flips the booking, so
+        // success is never client-declared. On 409 the ride moved on
+        // (checkpoint, cancel, or the release already committed on a lost
+        // response): silent refresh reconciles, doAction precedent. All
+        // listeners registered ONCE; focus restored on every close path.
+        let releaseReturnFocus = null;
+        let releaseReturnFocusId = null; // booking id — survives poll re-renders
+        let currentReleaseId = null;
+        let releaseSubmitting = false;
+        let releaseOutcomeUnknown = false;
+        const RELEASE_AUTH_TIMEOUT_MS = 8000;
+        const RELEASE_RESPONSE_TIMEOUT_MS = 20000;
+
+        function releaseDeadline(promise, timeoutMs, code, onTimeout) {
+            let timer = null;
+            const deadline = new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    if (onTimeout) onTimeout();
+                    const error = new Error(code);
+                    error.code = code;
+                    reject(error);
+                }, timeoutMs);
+            });
+            return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+        }
+
+        function releaseSelectedReason() {
+            const checked = document.querySelector('input[name="relReason"]:checked');
+            return checked ? checked.value : null;
+        }
+        function updateReleaseForm() {
+            const reason = releaseSelectedReason();
+            const needsNote = reason === 'other';
+            $('relNoteHint').textContent = needsNote ? '(required for Other)' : '(optional)';
+            const valid = !!reason && (!needsNote || $('relNote').value.trim() !== '');
+            const locked = releaseSubmitting || releaseOutcomeUnknown;
+            document.querySelectorAll('input[name="relReason"]').forEach((r) => { r.disabled = locked; });
+            $('relNote').disabled = locked;
+            $('relConfirm').disabled = releaseOutcomeUnknown ? false : (!valid || releaseSubmitting);
+            $('relConfirm').textContent = releaseOutcomeUnknown
+                ? 'Refresh My rides'
+                : (releaseSubmitting ? 'Releasing…' : 'Release ride');
+            // While a release is in flight, "Keep the ride" would be a lie —
+            // the request cannot be stopped. Disabled until the outcome.
+            $('relCancel').disabled = locked;
+            $('relCancel').classList.toggle('hidden', releaseOutcomeUnknown);
+        }
+        function openReleaseSheet(bookingId) {
+            if (releaseSubmitting || releaseOutcomeUnknown) return; // one release at a time — a new
+            // context must never appear under an in-flight submission
+            const b = lastBookings.find((x) => x.id === bookingId);
+            if (!b || b.status !== 'confirmed') return;
+            releaseReturnFocus = document.activeElement;
+            releaseReturnFocusId = bookingId;
+            currentReleaseId = bookingId;
+            releaseOutcomeUnknown = false;
+            document.querySelectorAll('input[name="relReason"]').forEach((r) => { r.checked = false; });
+            $('relNote').value = '';
+            $('relError').classList.add('hidden');
+            $('relError').textContent = '';
+            updateReleaseForm();
+            $('relBackdrop').classList.remove('hidden');
+            $('relSheet').classList.remove('hidden');
+            const first = document.querySelector('input[name="relReason"]');
+            if (first) first.focus();
+        }
+        function closeReleaseSheet(restoreFocus = true) {
+            $('relBackdrop').classList.add('hidden');
+            $('relSheet').classList.add('hidden');
+            currentReleaseId = null;
+            // Polling re-renders replace card DOM between open and close:
+            // when the original button is gone, find the SAME ride's
+            // release button again by booking id (it survives re-renders
+            // of an unchanged card; after a successful release the card
+            // itself is gone and focus stays put).
+            if (restoreFocus) {
+                if (releaseReturnFocus && releaseReturnFocus.isConnected) {
+                    releaseReturnFocus.focus();
+                } else if (releaseReturnFocusId) {
+                    const btn = document.querySelector(`button[data-release-id="${releaseReturnFocusId}"]`);
+                    if (btn) btn.focus();
+                }
+            }
+            releaseReturnFocus = null;
+            releaseReturnFocusId = null;
+        }
+        function requestCloseReleaseSheet() {
+            // User-initiated close paths only: NEVER while a release is in
+            // flight — the sheet closing cannot stop the request, so
+            // pretending to "keep the ride" would be dishonest.
+            if (releaseSubmitting || releaseOutcomeUnknown) return;
+            closeReleaseSheet();
+        }
+        async function submitRelease() {
+            if (releaseSubmitting || releaseOutcomeUnknown || !currentReleaseId) return;
+            const reason = releaseSelectedReason();
+            const note = $('relNote').value.trim();
+            if (!reason || (reason === 'other' && !note)) return;
+            // Capture EVERYTHING before the first await: the awaits below
+            // yield to the event loop, and sheet globals must never leak
+            // between contexts — the request releases exactly the ride the
+            // driver confirmed, whatever happens to the sheet meanwhile.
+            const bookingId = currentReleaseId;
+            releaseSubmitting = true;
+            $('relError').classList.add('hidden');
+            $('relError').textContent = '';
+            updateReleaseForm();
+            let token = null;
+            try {
+                token = await releaseDeadline(authToken(), RELEASE_AUTH_TIMEOUT_MS, 'release_auth_timeout');
+                if (!token) throw new Error('release_auth_missing');
+            } catch (e) {
+                // Nothing was transmitted, so retrying or keeping the ride
+                // is truthful. This is intentionally different from a POST
+                // timeout, where the server may already have committed.
+                releaseSubmitting = false;
+                updateReleaseForm();
+                $('relError').textContent = 'Release was not sent. Please try again.';
+                $('relError').classList.remove('hidden');
+                return;
+            }
+
+            let res = null;
+            let data = null;
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            try {
+                const outcome = await releaseDeadline((async () => {
+                    const response = await fetch('/api/release-booking', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ bookingId, reason, note: note || undefined }),
+                        ...(controller ? { signal: controller.signal } : {})
+                    });
+                    const payload = await response.json().catch(() => null);
+                    return { response, payload };
+                })(), RELEASE_RESPONSE_TIMEOUT_MS, 'release_outcome_unknown', () => controller?.abort());
+                res = outcome.response;
+                data = outcome.payload;
+            } catch (e) {
+                // The POST was invoked: timeout/network loss is ambiguous.
+                // Never offer Keep or a second destructive request. A hard
+                // refresh is the only honest path back to server truth.
+                releaseOutcomeUnknown = true;
+                updateReleaseForm();
+                $('relError').textContent = 'We couldn’t confirm the outcome—refresh My rides before acting.';
+                $('relError').classList.remove('hidden');
+                return;
+            }
+
+            releaseSubmitting = false;
+            updateReleaseForm();
+            if (res && (res.ok || res.status === 409)) {
+                // Success — or the ride moved on (including a lost-response
+                // release that actually committed). Either way this driver
+                // no longer owns it as-was: reconcile from server truth.
+                closeReleaseSheet(false);
+                switchView('rides');
+                $('tabRides').focus();
+                await refresh();
+                $('tabRides').focus();
+                return;
+            }
+            $('relError').textContent = (data && data.error) || 'Could not release the ride. Please try again.';
+            $('relError').classList.remove('hidden');
+        }
+        $('relCancel').addEventListener('click', requestCloseReleaseSheet);
+        $('relBackdrop').addEventListener('click', requestCloseReleaseSheet);
+        $('relConfirm').addEventListener('click', () => {
+            if (releaseOutcomeUnknown) {
+                window.location.reload();
+                return;
+            }
+            submitRelease();
+        });
+        $('relReasons').addEventListener('change', updateReleaseForm);
+        $('relNote').addEventListener('input', updateReleaseForm);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !$('relSheet').classList.contains('hidden')) requestCloseReleaseSheet();
         });
 
         // ===== Driver PWA Push =====
@@ -855,11 +1104,17 @@
                     const msgBtn = MESSAGE_STATUSES.includes(b.status) && validPhoneDigits(b)
                         ? `<button class="btn-message" data-message-id="${esc(b.id)}">💬 Message passenger</button>`
                         : '';
+                    // Release ride (PR 3C-1): CONFIRMED only — after On my
+                    // way the passenger has been told someone is coming, so
+                    // releasing needs dispatch/admin intervention.
+                    const releaseBtn = b.status === 'confirmed'
+                        ? `<button class="btn-release" data-release-id="${esc(b.id)}">↩️ Release ride</button>`
+                        : '';
                     return rideCard(b, `
                         <div class="btn-row">
                             ${payBtn}
                             <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
-                        </div>${readinessBlock(b)}${msgBtn}${geoNote}`,
+                        </div>${readinessBlock(b)}${msgBtn}${releaseBtn}${geoNote}`,
                         `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
                     );
                 }).join('')
@@ -1105,6 +1360,8 @@
         document.addEventListener('click', (e) => {
             const msg = e.target.closest('button[data-message-id]');
             if (msg) { openMessageSheet(msg.dataset.messageId); return; }
+            const rel = e.target.closest('button[data-release-id]');
+            if (rel) { openReleaseSheet(rel.dataset.releaseId); return; }
             const btn = e.target.closest('button[data-action]');
             if (!btn) return;
             btn.disabled = true;

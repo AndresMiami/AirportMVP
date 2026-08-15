@@ -52,12 +52,14 @@ function response(status, body = {}) {
   };
 }
 
-function createHarness(responses) {
+// `storage` may be shared between harnesses to simulate a RELOAD of the
+// same browser (persistent localStorage identity — poll anchor + budget).
+function createHarness(responses, storage = new Map()) {
   const elements = new Map();
   const hiddenIds = new Set([
     'tripView', 'pausedCard', 'pausedNote', 'mapCard', 'liveMap', 'waBtn',
     'backBtn', 'cancelBtn', 'rebookBtn', 'actionError', 'rideDuration',
-    'etaTime', 'flightLine'
+    'etaTime', 'flightLine', 'reassignCard', 'cancelQuoteCard'
   ]);
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new FakeElement(hiddenIds.has(id)));
@@ -83,7 +85,6 @@ function createHarness(responses) {
     }
   };
 
-  const storage = new Map();
   const context = {
     console,
     document,
@@ -125,6 +126,7 @@ function createHarness(responses) {
     context,
     document,
     element,
+    storage,
     timers,
     get fetchCount() { return fetchCount; },
     async settle() { await settle(); await settle(); },
@@ -267,6 +269,117 @@ function check(name, fn) {
   });
   finishSlowRequest(response(200, { booking: pendingBooking, driver: null }));
   await overlap.settle();
+
+  // ---- PR 3C-1: reassignment notice + persistent polling identity ----
+  const SINCE_1 = '2026-08-14T20:00:00.000Z';
+  const SINCE_2 = '2026-08-14T21:30:00.000Z';
+
+  const rea = createHarness([
+    response(200, { booking: pendingBooking, driver: null }),
+    response(200, { booking: pendingBooking, driver: null, reassigning: true, reassigningSince: SINCE_1 })
+  ]);
+  await rea.settle();
+  check('ordinary pending shows NO reassignment notice', () => {
+    assert.ok(rea.element('reassignCard').classList.contains('hidden'));
+  });
+  await rea.runNextTimer();
+  check('released booking (reassigning payload) shows the explicit notice', () => {
+    assert.ok(!rea.element('reassignCard').classList.contains('hidden'));
+    assert.strictEqual(rea.timers.size, 1, 'pending cadence continues while a new driver is found');
+  });
+  check('the poll anchor carries the persistent reassigningSince identity', () => {
+    const rec = JSON.parse(rea.storage.get('lm_poll_anchor:test-booking'));
+    assert.strictEqual(rec.status, 'pending');
+    assert.strictEqual(rec.reassigningSince, SINCE_1);
+  });
+
+  // RELOAD with the SAME reassigningSince: the stored anchor is REUSED —
+  // a reload never grants a fresh pending window (seal 1).
+  const agedAt = Date.now() - 9 * 60000;
+  rea.storage.set('lm_poll_anchor:test-booking',
+    JSON.stringify({ status: 'pending', at: agedAt, reassigningSince: SINCE_1 }));
+  const reloaded = createHarness([
+    response(200, { booking: pendingBooking, driver: null, reassigning: true, reassigningSince: SINCE_1 })
+  ], rea.storage);
+  await reloaded.settle();
+  check('reload with the SAME reassigningSince reuses the aged anchor — no fresh window per reload', () => {
+    const rec = JSON.parse(reloaded.storage.get('lm_poll_anchor:test-booking'));
+    assert.strictEqual(rec.at, agedAt, 'the anchor must survive the reload untouched');
+    assert.strictEqual(rec.reassigningSince, SINCE_1);
+  });
+  const secondRelease = createHarness([
+    response(200, { booking: pendingBooking, driver: null, reassigning: true, reassigningSince: SINCE_2 })
+  ], rea.storage);
+  await secondRelease.settle();
+  check('a NEW release (new reassigningSince) re-anchors exactly one fresh pending window', () => {
+    const rec = JSON.parse(secondRelease.storage.get('lm_poll_anchor:test-booking'));
+    assert.strictEqual(rec.reassigningSince, SINCE_2);
+    assert.ok(rec.at > agedAt, 'fresh window for the new release');
+  });
+
+  // Seal 4: release can NEVER reset the persistent request budget. With
+  // the budget spent, the reassigning payload changes nothing — one
+  // human-bounded initial render fetch, then the paused card, no timers,
+  // and the spend record survives untouched.
+  const spentStorage = new Map([['lm_poll_spent:test-booking', '500']]);
+  const budget = createHarness([
+    response(200, { booking: pendingBooking, driver: null, reassigning: true, reassigningSince: SINCE_1 })
+  ], spentStorage);
+  await budget.settle();
+  check('spent budget survives a release: one initial fetch, paused, budget note, zero timers', () => {
+    assert.strictEqual(budget.fetchCount, 1, 'the fresh-page initial render fetch only');
+    assert.strictEqual(budget.storage.get('lm_poll_spent:test-booking'), '501',
+      'the reassigning payload must never clear or reset the spend record');
+    assert.strictEqual(budget.timers.size, 0);
+    assert.ok(!budget.element('pausedCard').classList.contains('hidden'));
+    assert.match(budget.element('pausedNote').textContent, /update limit reached/i);
+    assert.ok(!budget.element('reassignCard').classList.contains('hidden'),
+      'the notice still renders honestly from the one bounded fetch');
+  });
+  await budget.setVisible(false);
+  await budget.setVisible(true);
+  check('visibility returns get NOTHING past a spent budget, release or not', () => {
+    assert.strictEqual(budget.fetchCount, 1);
+    assert.strictEqual(budget.storage.get('lm_poll_spent:test-booking'), '501');
+    assert.strictEqual(budget.timers.size, 0);
+  });
+
+  // Former-driver identity: a driver-less payload resets DRIVER to the
+  // page defaults — the released driver's name/phone never lingers.
+  const nearConfirmed = {
+    ...pendingBooking,
+    status: 'confirmed',
+    pickup_datetime: new Date(Date.now() + 20 * 60000).toISOString()
+  };
+  const swap = createHarness([
+    response(200, { booking: nearConfirmed, driver: { name: 'Carlos M.', phone: '+13055551212' } }),
+    response(200, { booking: nearConfirmed, driver: null }), // transient lookup blip on an ACTIVE ride
+    response(200, { booking: pendingBooking, driver: null, reassigning: true, reassigningSince: SINCE_1 })
+  ]);
+  await swap.settle();
+  check('assigned driver personalizes the page', () => {
+    assert.strictEqual(swap.evaluate('DRIVER.name'), 'Carlos M.');
+    assert.strictEqual(swap.evaluate('DRIVER.phone'), '13055551212');
+  });
+  await swap.runNextTimer();
+  check('driver-less payload on an ACTIVE ride keeps the last-known driver — never a default-number fallback (decision 10)', () => {
+    assert.strictEqual(swap.evaluate('DRIVER.name'), 'Carlos M.',
+      'a transient server-side lookup blip must not swap the WhatsApp target mid-ride');
+    assert.strictEqual(swap.evaluate('DRIVER.phone'), '13055551212');
+  });
+  await swap.runNextTimer();
+  check('release payload wipes the former driver to a NEUTRAL identity: no name, NO phone, WhatsApp hidden, notice shown', () => {
+    assert.strictEqual(swap.evaluate('DRIVER.name'), 'your driver',
+      'never a real person\'s name for a ride nobody holds');
+    assert.strictEqual(swap.evaluate('DRIVER.phone'), null,
+      'never a real phone number — the WhatsApp button must have nothing to link');
+    assert.ok(swap.element('waBtn').classList.contains('hidden'), 'pending shows no driver contact');
+    assert.ok(!swap.element('reassignCard').classList.contains('hidden'));
+  });
+  check('the status subtitle agrees with the reassignment notice — never "we\'ve notified your driver"', () => {
+    assert.match(swap.element('statusSub').textContent, /finding you a new driver/i);
+    assert.ok(!/notified your driver/i.test(swap.element('statusSub').textContent));
+  });
 
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {
