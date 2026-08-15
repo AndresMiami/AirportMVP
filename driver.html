@@ -193,6 +193,55 @@
         .msg-meta { font-size: 12px; color: #6b6b76; text-align: right; margin: 4px 2px 8px; }
         .msg-safety { font-size: 12px; color: #6b6b76; text-align: center; margin-top: 8px; }
         #msgCustomSend:disabled { opacity: 0.5; cursor: default; }
+        /* Release-ride bottom sheet (PR 3C-1) — same house conventions */
+        #relBackdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50;
+        }
+        #relSheet {
+            position: fixed; left: 0; right: 0; bottom: 0; margin: 0 auto;
+            width: 100%; max-width: 576px; background: white;
+            border-radius: 20px 20px 0 0;
+            padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+            z-index: 51; animation: sheetUp 0.3s ease;
+            max-height: 85vh;
+            max-height: 85dvh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+        }
+        #relSheet, #relSheet * { box-sizing: border-box; }
+        .rel-warning { font-size: 13px; color: #6b6b76; line-height: 1.5; margin-bottom: 12px; }
+        .rel-reason {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 14px; margin-bottom: 8px; min-height: 44px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            font-size: 14px; color: #1a1a2e; cursor: pointer;
+        }
+        .rel-reason input { width: 18px; height: 18px; accent-color: #FF5733; }
+        #relNote {
+            width: 100%; min-height: 56px; padding: 12px;
+            background: #f5f6f8; border: 1px solid #e2e2e8; border-radius: 12px;
+            /* 16px prevents iOS Safari focus auto-zoom (msgCustomText parity) */
+            font-size: 16px; font-family: inherit; color: #1a1a2e;
+            resize: vertical;
+        }
+        .rel-error { font-size: 13px; color: #d70015; margin-top: 8px; }
+        .btn-release {
+            display: block; width: 100%; margin-top: 8px; padding: 12px;
+            min-height: 44px;
+            background: white; border: 1.5px solid #e2b4ad; border-radius: 10px;
+            color: #c0392b; font-size: 14px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+        }
+        .btn-release-confirm {
+            display: block; width: 100%; padding: 13px; min-height: 44px;
+            margin-top: 12px;
+            background: #c0392b; border: none; border-radius: 12px;
+            color: white; font-size: 15px; font-weight: 700;
+            cursor: pointer; font-family: inherit;
+        }
+        .btn-release-confirm:disabled { opacity: 0.5; cursor: default; }
         .msg-composer-nav {
             display: flex; align-items: center; justify-content: space-between;
             gap: 8px; margin-bottom: 8px;
@@ -308,6 +357,23 @@
                 <div class="msg-safety" id="msgSafety">Use messaging only when safely parked.</div>
             </div>
             <button class="msg-cancel" id="msgCancel" type="button">Cancel</button>
+        </div>
+        <div id="relBackdrop" class="hidden"></div>
+        <div id="relSheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="relTitle">
+            <div class="msg-title" id="relTitle">Release this ride?</div>
+            <div class="rel-warning">The ride returns to the shared feed immediately and the passenger is told we're finding a new driver. You won't be able to take it back.</div>
+            <div id="relReasons">
+                <label class="rel-reason"><input type="radio" name="relReason" value="schedule_conflict"> Schedule conflict</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="ride_details_changed"> Ride details changed</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="vehicle_issue"> Vehicle issue</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="emergency"> Emergency</label>
+                <label class="rel-reason"><input type="radio" name="relReason" value="other"> Other</label>
+            </div>
+            <label class="msg-label" for="relNote">Note <span id="relNoteHint">(optional)</span></label>
+            <textarea id="relNote" rows="2" maxlength="500" placeholder="Anything LinkMia should know…"></textarea>
+            <div class="rel-error hidden" id="relError"></div>
+            <button class="btn-release-confirm" id="relConfirm" type="button" disabled>Release ride</button>
+            <button class="msg-cancel" id="relCancel" type="button">Keep the ride</button>
         </div>
         <main>
             <div class="view-tabs">
@@ -527,6 +593,93 @@
         // stack duplicates. Escape closes only while the sheet is visible.
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !$('msgSheet').classList.contains('hidden')) closeMessageSheet();
+        });
+
+        // ---- Release ride (PR 3C-1) ----
+        // CONFIRMED rides only. The sheet collects a structured reason
+        // (note REQUIRED for Other) and posts /api/release-booking — the
+        // migration-016 RPC is the only path that flips the booking, so
+        // success is never client-declared. On 409 the ride moved on
+        // (checkpoint, cancel, or the release already committed on a lost
+        // response): silent refresh reconciles, doAction precedent. All
+        // listeners registered ONCE; focus restored on every close path.
+        let releaseReturnFocus = null;
+        let currentReleaseId = null;
+        let releaseSubmitting = false;
+
+        function releaseSelectedReason() {
+            const checked = document.querySelector('input[name="relReason"]:checked');
+            return checked ? checked.value : null;
+        }
+        function updateReleaseForm() {
+            const reason = releaseSelectedReason();
+            const needsNote = reason === 'other';
+            $('relNoteHint').textContent = needsNote ? '(required for Other)' : '(optional)';
+            const valid = !!reason && (!needsNote || $('relNote').value.trim() !== '');
+            $('relConfirm').disabled = !valid || releaseSubmitting;
+        }
+        function openReleaseSheet(bookingId) {
+            const b = lastBookings.find((x) => x.id === bookingId);
+            if (!b || b.status !== 'confirmed') return;
+            releaseReturnFocus = document.activeElement;
+            currentReleaseId = bookingId;
+            releaseSubmitting = false;
+            document.querySelectorAll('input[name="relReason"]').forEach((r) => { r.checked = false; });
+            $('relNote').value = '';
+            $('relError').classList.add('hidden');
+            $('relError').textContent = '';
+            updateReleaseForm();
+            $('relBackdrop').classList.remove('hidden');
+            $('relSheet').classList.remove('hidden');
+            const first = document.querySelector('input[name="relReason"]');
+            if (first) first.focus();
+        }
+        function closeReleaseSheet() {
+            $('relBackdrop').classList.add('hidden');
+            $('relSheet').classList.add('hidden');
+            currentReleaseId = null;
+            if (releaseReturnFocus && releaseReturnFocus.isConnected) releaseReturnFocus.focus();
+            releaseReturnFocus = null;
+        }
+        async function submitRelease() {
+            if (releaseSubmitting || !currentReleaseId) return;
+            const reason = releaseSelectedReason();
+            const note = $('relNote').value.trim();
+            if (!reason || (reason === 'other' && !note)) return;
+            releaseSubmitting = true;
+            updateReleaseForm();
+            let res = null;
+            let data = null;
+            try {
+                const token = await authToken();
+                res = await fetch('/api/release-booking', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` },
+                    body: JSON.stringify({ bookingId: currentReleaseId, reason, note: note || undefined })
+                });
+                data = await res.json().catch(() => null);
+            } catch (e) { /* network failure — res stays null */ }
+
+            if (res && (res.ok || res.status === 409)) {
+                // Success — or the ride moved on (including a lost-response
+                // release that actually committed). Either way this driver
+                // no longer owns it as-was: reconcile from server truth.
+                closeReleaseSheet();
+                await refresh();
+                return;
+            }
+            releaseSubmitting = false;
+            updateReleaseForm();
+            $('relError').textContent = (data && data.error) || 'Could not release the ride. Please try again.';
+            $('relError').classList.remove('hidden');
+        }
+        $('relCancel').addEventListener('click', closeReleaseSheet);
+        $('relBackdrop').addEventListener('click', closeReleaseSheet);
+        $('relConfirm').addEventListener('click', submitRelease);
+        $('relReasons').addEventListener('change', updateReleaseForm);
+        $('relNote').addEventListener('input', updateReleaseForm);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !$('relSheet').classList.contains('hidden')) closeReleaseSheet();
         });
 
         // ===== Driver PWA Push =====
@@ -855,11 +1008,17 @@
                     const msgBtn = MESSAGE_STATUSES.includes(b.status) && validPhoneDigits(b)
                         ? `<button class="btn-message" data-message-id="${esc(b.id)}">💬 Message passenger</button>`
                         : '';
+                    // Release ride (PR 3C-1): CONFIRMED only — after On my
+                    // way the passenger has been told someone is coming, so
+                    // releasing needs dispatch/admin intervention.
+                    const releaseBtn = b.status === 'confirmed'
+                        ? `<button class="btn-release" data-release-id="${esc(b.id)}">↩️ Release ride</button>`
+                        : '';
                     return rideCard(b, `
                         <div class="btn-row">
                             ${payBtn}
                             <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
-                        </div>${readinessBlock(b)}${msgBtn}${geoNote}`,
+                        </div>${readinessBlock(b)}${msgBtn}${releaseBtn}${geoNote}`,
                         `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
                     );
                 }).join('')
@@ -1105,6 +1264,8 @@
         document.addEventListener('click', (e) => {
             const msg = e.target.closest('button[data-message-id]');
             if (msg) { openMessageSheet(msg.dataset.messageId); return; }
+            const rel = e.target.closest('button[data-release-id]');
+            if (rel) { openReleaseSheet(rel.dataset.releaseId); return; }
             const btn = e.target.closest('button[data-action]');
             if (!btn) return;
             btn.disabled = true;
