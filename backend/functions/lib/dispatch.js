@@ -124,6 +124,36 @@ async function dispatchOne(db, ev, nowMs, opts) {
     }
   }
 
+  // Release enrichment (PR 3C-1): 'ride_released' renders from the
+  // booking_releases SNAPSHOTS (pickup/name/reason at release) — the
+  // live booking is pending again and editable, so it must never
+  // re-classify the release. The read sits HERE deliberately: after the
+  // staleness/type gates (an expired event suppresses without paying
+  // this read) and before routing and the in_delivery CAS (a failed
+  // read dbFails with the event still 'pending' — exactly the state the
+  // watchdog retries from; the fail-closed chat-lookup discipline).
+  let extra;
+  if (notify.RELEASE_TYPES.includes(ev.event_type)) {
+    const { data: release, error: releaseError } = await db
+      .from('booking_releases')
+      .select('*')
+      .eq('booking_id', ev.booking_id)
+      .eq('driver_id', ev.recipient_key)
+      .maybeSingle();
+    if (releaseError) {
+      dbFail('release enrichment', releaseError);
+      return;
+    }
+    if (!release) {
+      // The outbox trigger inserts the event in the SAME transaction as
+      // the history row — absence means manual tampering. Suppress with
+      // zero provider calls.
+      await suppress('release_missing');
+      return;
+    }
+    extra = release;
+  }
+
   // Channel routing. Admin events are Telegram-only, always. Driver
   // events follow the STRICT precedence over delivery history (routing
   // is restart-safe: a crash between a failed push and its fallback is
@@ -185,7 +215,7 @@ async function dispatchOne(db, ev, nowMs, opts) {
   if (route.channel === 'webpush') {
     await executeWebPush(db, ev, b, route.sub, nowMs, summary, dbFail, suppress, maxAttempts);
   } else {
-    await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts);
+    await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts, extra);
   }
 }
 
@@ -194,7 +224,13 @@ async function dispatchOne(db, ev, nowMs, opts) {
 // provider-call cap because a fallback send is a SECOND call in one
 // dispatch. PRIVATE: only dispatchOne may invoke it, preserving the
 // gate-then-claim ordering.
-async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts) {
+// `extra` (optional) is per-event enrichment threaded from dispatchOne
+// (today: the booking_releases row for RELEASE_TYPES). The webpush
+// fallback call site passes undefined — release events are admin-role
+// and never route webpush, so the fallback never carries one; a missing
+// extra on a release event renders null -> terminal no_template
+// suppress, never a wrong or blind send.
+async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts, extra) {
   const nowIso = new Date(nowMs).toISOString();
   if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave for next cycle
 
@@ -216,7 +252,7 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxA
   }
   if (!chatId) return; // config gap, not a send failure — leave for next cycle
 
-  const text = notify.renderEvent(ev.event_type, b);
+  const text = notify.renderEvent(ev.event_type, b, extra);
   if (!text) {
     await suppress('no_template');
     return;

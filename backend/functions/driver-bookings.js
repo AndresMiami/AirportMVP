@@ -80,6 +80,24 @@ exports.handler = async (event) => {
       ? `and(status.eq.pending,assigned_driver.is.null),${ownActive}`
       : ownActive;
 
+    // Release exclusion (PR 3C-1): a booking this driver RELEASED must
+    // not reappear in their Requests feed. FAIL CLOSED: if the lookup
+    // fails we serve nothing rather than an unfiltered feed — the
+    // database reaccept guard is the enforcement; this filter is the
+    // presentation layer that must never lie in the open direction.
+    let releasedIds = new Set();
+    if (auth.driver.status === 'active') {
+      const { data: released, error: releasedError } = await supabase
+        .from('booking_releases')
+        .select('booking_id')
+        .eq('driver_id', auth.driver.id);
+      if (releasedError) {
+        console.error('❌ Release exclusion lookup failed:', releasedError);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to load bookings' }) };
+      }
+      releasedIds = new Set((released || []).map((r) => r.booking_id));
+    }
+
     const { data, error } = await supabase
       .from('bookings')
       .select(DRIVER_FIELDS)
@@ -96,12 +114,13 @@ exports.handler = async (event) => {
     // and flight are revealed only to the driver who accepts. Strip them
     // from pending rows before they leave the server; assigned_driver is
     // never in the whitelist, deleted here as belt-and-braces.
-    const bookings = (data || []).map((b) => {
+    const bookings = (data || []).flatMap((b) => {
       const row = { ...b };
       delete row.assigned_driver;
-      if (row.status !== 'pending') return row;
+      if (row.status !== 'pending') return [row];
+      if (releasedIds.has(row.id)) return []; // released by THIS driver — not their offer
       for (const f of PENDING_PRIVATE_FIELDS) delete row[f];
-      return row;
+      return [row];
     });
 
     return {

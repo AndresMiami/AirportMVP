@@ -68,6 +68,17 @@ const CHAIN_TYPES = READINESS_CHAIN.map((s) => s.type);
 // driver event, with the duplicate_target dedup in lib/dispatch.js.
 const CANCELLATION_TYPES = ['ride_cancelled', 'ride_cancelled_admin'];
 
+// Release events (PR 3C-1), produced by the migration-016 outbox trigger
+// on booking_releases INSERTs — the history row is the notification
+// source. Admin-role (Telegram-only), recipient_key = the RELEASING
+// driver (event identity per release). Deliberately outside CHAIN_TYPES
+// (the booking is pending again — the not-confirmed gate must not
+// suppress the news) and outside CANCELLATION_TYPES (a released ride is
+// NOT cancelled — the not_cancelled gate would wrongly suppress it).
+// A release is historical fact: no status relevance gate at dispatch,
+// bounded only by the trigger's explicit six-hour not_after leash.
+const RELEASE_TYPES = ['ride_released'];
+
 const MAX_ATTEMPTS_PER_CHANNEL = 3;
 const CLAIM_EXPIRY_MS = 3 * 60 * 1000;
 const TELEGRAM_TIMEOUT_MS = 5000;
@@ -112,7 +123,13 @@ function siteUrl() {
 
 // Reminder copy. Driver texts deep-link to the authenticated app — a
 // notification NEVER carries an action that mutates ride state.
-function renderEvent(eventType, b) {
+// `extra` (optional) carries per-event enrichment the booking row cannot
+// provide — today only the booking_releases row for 'ride_released',
+// whose SNAPSHOTS (pickup/name at release) are the rendered truth: the
+// live booking is pending again and editable, so it must never
+// re-classify the release. Without extra, 'ride_released' returns null
+// (-> terminal no_template suppress; never a blind or wrong send).
+function renderEvent(eventType, b, extra) {
   const code = tripCode(b);
   const at = fmtTimeET(b.pickup_datetime);
   const app = `${siteUrl()}/driver`;
@@ -145,6 +162,26 @@ function renderEvent(eventType, b) {
         ? `\nPolicy: ${pct}% = $${amt.toFixed(2)} · pilot waived, $${Number(b.cancel_fee_collected || 0).toFixed(2)} collected`
         : '';
       return `🚫 Ride ${code} CANCELLED (was ${b.cancelled_from_status || 'active'}).\n${route}\nPickup was ${when}.${feeLine}`;
+    }
+    case 'ride_released': {
+      // Renders ONLY from the booking_releases snapshots — trip/route may
+      // come from the live row (identity fields never change) but the
+      // pickup time, driver name, and URGENT classification come from the
+      // IMMUTABLE release record. The private note is dashboard-only.
+      if (!extra || !extra.pickup_at_release || !extra.driver_name_at_release || !extra.reason) {
+        return null;
+      }
+      const releaseReasonLabel = {
+        schedule_conflict: 'schedule conflict',
+        ride_details_changed: 'ride details changed',
+        vehicle_issue: 'vehicle issue',
+        emergency: 'emergency',
+        other: 'other'
+      }[extra.reason] || extra.reason;
+      const releasedRoute = `${b.pickup_location} → ${b.dropoff_location}`;
+      const releasedWhen = fmtWhenET(extra.pickup_at_release);
+      const urgent = Date.parse(extra.pickup_at_release) - Date.now() < 2 * 3600e3;
+      return `${urgent ? '🚨 URGENT — ' : '🔄 '}Ride ${code} RELEASED by ${extra.driver_name_at_release} (${releaseReasonLabel}).\n${releasedRoute}\nPickup ${releasedWhen}.\nThe request is back in the driver feed.`;
     }
     default:
       return null;
@@ -494,6 +531,7 @@ module.exports = {
   DRIVER_ASKS,
   CHAIN_TYPES,
   CANCELLATION_TYPES,
+  RELEASE_TYPES,
   MAX_ATTEMPTS_PER_CHANNEL,
   CLAIM_EXPIRY_MS,
   ASK_DEADLINE_MIN,

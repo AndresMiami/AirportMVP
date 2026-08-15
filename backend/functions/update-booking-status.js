@@ -277,6 +277,20 @@ exports.handler = async (event) => {
     const { data, error } = await query.select();
 
     if (error) {
+      // Release reaccept guard (migration 016): the database refuses to
+      // assign a booking to a driver who previously released it — on ANY
+      // path, this endpoint included. Surface it as an honest conflict,
+      // not a server failure. Everything else stays a real 500.
+      if (error.code === 'P0001' && /released_by_this_driver/.test(error.message || '')) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({
+            error: 'You released this ride — it\'s now with other drivers',
+            code: 'released_by_you'
+          })
+        };
+      }
       console.error(`❌ ${action} failed:`, error);
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Update failed' }) };
     }
