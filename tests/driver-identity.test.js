@@ -38,6 +38,8 @@ let capturedListCols = null;   // captured column list on select()
 let updateResult = { data: [], error: null };
 let listResult = [];
 let currentBookingResult = { data: null, error: { message: 'none' } };
+let releasesResult = { data: [], error: null }; // booking_releases rows (PR 3C-1)
+let releasesQueried = null;    // captured eq filter on the releases lookup
 
 const supabaseMock = {
   createClient: () => ({
@@ -60,6 +62,19 @@ const supabaseMock = {
             })
           })
         };
+      }
+      if (table === 'booking_releases') {
+        // PR 3C-1: the requests-feed exclusion lookup (awaited directly
+        // after .eq) and booking-status's pending reassigning lookup
+        // (.order().limit() thenable).
+        const chain = {
+          select: () => chain,
+          eq: (col, val) => { releasesQueried = { col, val }; return chain; },
+          order: () => chain,
+          limit: () => chain,
+          then: (onOk, onErr) => Promise.resolve(releasesResult).then(onOk, onErr)
+        };
+        return chain;
       }
       // bookings
       return {
@@ -415,6 +430,84 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.deepStrictEqual(body.driver, { name: 'Carlos M.', phone: '' });
   });
   DRIVERS_BY_ID['drv-c'].phone = '+13055551212';
+
+  // ---------- PR 3C-1: release reaccept guard + feed exclusion ----------
+  updateResult = { data: null, error: { code: 'P0001', message: 'released_by_this_driver' } };
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
+  check('accept blocked by the DB reaccept guard -> honest 409, never a 500', () => {
+    assert.strictEqual(r.statusCode, 409);
+    const body = JSON.parse(r.body);
+    assert.strictEqual(body.code, 'released_by_you');
+    assert.ok(/released this ride/i.test(body.error));
+  });
+
+  updateResult = { data: null, error: { code: '57014', message: 'statement timeout' } };
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
+  check('any OTHER update error stays a real 500 (the guard mapping is narrow)', () => {
+    assert.strictEqual(r.statusCode, 500);
+  });
+  updateResult = { data: [], error: null };
+
+  releasesResult = { data: [{ booking_id: 'p-released' }], error: null };
+  listResult = [
+    { id: 'p-released', status: 'pending', details_version: 1, customer_name: 'Sam', assigned_driver: null },
+    { id: 'p-fresh', status: 'pending', details_version: 1, customer_name: 'Kim', assigned_driver: null },
+    { id: 'own-1', status: 'confirmed', details_version: 1, customer_name: 'Pat', assigned_driver: 'drv-a' }
+  ];
+  r = await getList('tok-andres');
+  check('requests feed excludes bookings THIS driver released; other offers + own rides intact', () => {
+    const body = JSON.parse(r.body);
+    const ids = body.bookings.map((b) => b.id);
+    assert.ok(!ids.includes('p-released'), 'a released booking must never be re-offered to its releaser');
+    assert.ok(ids.includes('p-fresh'));
+    assert.ok(ids.includes('own-1'));
+    assert.deepStrictEqual(releasesQueried, { col: 'driver_id', val: 'drv-a' });
+  });
+
+  releasesResult = { data: null, error: { message: 'db down' } };
+  r = await getList('tok-andres');
+  check('release-exclusion lookup failure -> 500, NEVER an unfiltered feed (fail closed)', () => {
+    assert.strictEqual(r.statusCode, 500);
+  });
+  releasesResult = { data: [], error: null };
+
+  releasesQueried = null;
+  listResult = [
+    { id: 'own-b', status: 'confirmed', details_version: 1, customer_name: 'Pat', assigned_driver: 'drv-b' }
+  ];
+  r = await getList('tok-busy');
+  check('busy driver (no pending arm) skips the exclusion lookup entirely', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(releasesQueried, null, 'no releases query without a requests feed');
+  });
+
+  // ---------- PR 3C-1: passenger reassignment flag ----------
+  releasesResult = { data: [{ released_at: '2026-08-14T20:00:00.000Z' }], error: null };
+  currentBookingResult = { data: { id: BID, status: 'pending', assigned_driver: null }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('booking-status: released pending booking answers reassigning + persistent reassigningSince', () => {
+    const body = JSON.parse(r.body);
+    assert.strictEqual(body.reassigning, true);
+    assert.strictEqual(body.reassigningSince, '2026-08-14T20:00:00.000Z');
+    assert.strictEqual(body.driver, undefined, 'no former-driver identity in the payload');
+  });
+
+  releasesQueried = null;
+  currentBookingResult = { data: { id: BID, status: 'confirmed', assigned_driver: 'drv-c' }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('booking-status: non-pending rows never query releases and never carry the flag', () => {
+    const body = JSON.parse(r.body);
+    assert.ok(!('reassigning' in body));
+    assert.strictEqual(releasesQueried, null);
+  });
+
+  releasesResult = { data: null, error: { message: 'db down' } };
+  currentBookingResult = { data: { id: BID, status: 'pending', assigned_driver: null }, error: null };
+  r = await stat.handler({ httpMethod: 'GET', queryStringParameters: { id: BID }, headers: {} });
+  check('booking-status: release lookup failure -> 500 (fail closed, never a silently wrong flag)', () => {
+    assert.strictEqual(r.statusCode, 500);
+  });
+  releasesResult = { data: [], error: null };
 
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {

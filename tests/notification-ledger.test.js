@@ -216,6 +216,7 @@ function freshState({ silenceHeartbeat = true } = {}) {
       ? [{ key: 'last_heartbeat_date', value: todayET() }]
       : [],
     push_subscriptions: [],
+    booking_releases: [],
     inject: [],
     beforeOp: null
   };
@@ -1472,6 +1473,195 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(fetchCalls[0].body.text.includes('Do not proceed'));
     const ev = events().find((e) => e.id === 'ev-stop-6');
     assert.strictEqual(ev.state, 'submitted');
+  });
+
+  // ---- PR 3C-1: ride_released through the REAL dispatch loop ----
+  // The booking_releases row is the notification source: renderEvent
+  // reads its SNAPSHOTS (pickup/name/reason at release), never the live
+  // booking's mutable pickup — a released booking is pending again and
+  // EDITABLE, so the live row must never re-classify the release.
+  function mkRelease(overrides) {
+    return {
+      id: `rel-${++idSeq}`,
+      booking_id: 'set-me',
+      driver_id: 'drv-a',
+      details_version_at_release: 1,
+      pickup_at_release: iso(300),
+      price_at_release: 55,
+      driver_name_at_release: 'Andres',
+      reason: 'schedule_conflict',
+      note: null,
+      released_at: iso(-1),
+      ...overrides
+    };
+  }
+  function mkReleasedEvent(bookingId, driverId, id) {
+    return {
+      id, booking_id: bookingId, event_type: 'ride_released',
+      recipient_role: 'admin', recipient_key: driverId, state: 'pending',
+      due_at: iso(-1), not_after: iso(300), suppress_reason: null
+    };
+  }
+
+  freshState();
+  const relBooking = mkBooking({
+    status: 'pending', trip_id: 'LM-REL', assigned_driver: null,
+    pickup_datetime: iso(300)
+  });
+  state.bookings.push(relBooking);
+  state.booking_releases.push(mkRelease({ booking_id: relBooking.id, pickup_at_release: iso(300) }));
+  state.notification_events.push(mkReleasedEvent(relBooking.id, 'drv-a', 'ev-rel-1'));
+  r = await wd.handler({});
+  check('ride_released: admin chat gets driver name, reason, SNAPSHOT pickup; event submitted end-to-end', () => {
+    assert.strictEqual(fetchCalls.length, 1, 'exactly one Telegram send');
+    assert.strictEqual(telegramChats()[0], 'admin-chat', 'admin events are Telegram-only');
+    const text = fetchCalls[0].body.text;
+    assert.ok(text.includes('LM-REL'));
+    assert.ok(text.includes('RELEASED by Andres'));
+    assert.ok(text.includes('schedule conflict'));
+    assert.ok(!text.includes('🚨'), 'a 5-hour-out snapshot is not urgent');
+    const ev = events().find((e) => e.id === 'ev-rel-1');
+    assert.strictEqual(ev.state, 'submitted', 'submitted pins the extra-threading end-to-end');
+  });
+
+  freshState();
+  const relUrgentBooking = mkBooking({
+    status: 'pending', trip_id: 'LM-URG', assigned_driver: null,
+    pickup_datetime: iso(7 * 24 * 60) // live pickup EDITED a week out post-release
+  });
+  state.bookings.push(relUrgentBooking);
+  state.booking_releases.push(mkRelease({
+    booking_id: relUrgentBooking.id, pickup_at_release: iso(45) // snapshot: 45 min away
+  }));
+  state.notification_events.push(mkReleasedEvent(relUrgentBooking.id, 'drv-a', 'ev-rel-2'));
+  r = await wd.handler({});
+  check('URGENT comes from the IMMUTABLE snapshot — a post-release pickup edit never de-classifies it', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.ok(fetchCalls[0].body.text.includes('🚨 URGENT'), 'snapshot <2h -> urgent');
+    const ev = events().find((e) => e.id === 'ev-rel-2');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
+  freshState();
+  const relFailBooking = mkBooking({ status: 'pending', assigned_driver: null, pickup_datetime: iso(300) });
+  state.bookings.push(relFailBooking);
+  state.booking_releases.push(mkRelease({ booking_id: relFailBooking.id }));
+  state.notification_events.push(mkReleasedEvent(relFailBooking.id, 'drv-a', 'ev-rel-3'));
+  state.inject.push({ op: 'select', table: 'booking_releases', times: 1, skip: 0 });
+  r = await wd.handler({});
+  check('enrichment read failure: surfaced dbError, zero sends, event stays recoverable', () => {
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.ok(JSON.parse(r.body).dbErrors >= 1);
+    const ev = events().find((e) => e.id === 'ev-rel-3');
+    assert.strictEqual(ev.state, 'pending', 'fail-closed: unknown truth never decides the event');
+  });
+  r = await wd.handler({});
+  check('healed enrichment: the SAME release event delivers', () => {
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(telegramChats()[0], 'admin-chat');
+    const ev = events().find((e) => e.id === 'ev-rel-3');
+    assert.strictEqual(ev.state, 'submitted');
+  });
+
+  freshState();
+  const relMissingBooking = mkBooking({ status: 'pending', assigned_driver: null, pickup_datetime: iso(300) });
+  state.bookings.push(relMissingBooking);
+  // No booking_releases row: only manual tampering can produce this.
+  state.notification_events.push(mkReleasedEvent(relMissingBooking.id, 'drv-a', 'ev-rel-4'));
+  r = await wd.handler({});
+  check('missing release row: suppressed release_missing, zero provider calls', () => {
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.strictEqual(pushCalls.length, 0);
+    const ev = events().find((e) => e.id === 'ev-rel-4');
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'release_missing');
+  });
+
+  // ---- stale readiness suppression around a release ----
+  freshState();
+  const relStaleBooking = mkBooking({
+    status: 'pending', assigned_driver: null, pickup_datetime: iso(140)
+  });
+  state.bookings.push(relStaleBooking);
+  state.booking_releases.push(mkRelease({ booking_id: relStaleBooking.id }));
+  // Exactly ONE stale ask (several would chain-collapse to 'superseded').
+  state.notification_events.push({
+    id: 'ev-stale-ask', booking_id: relStaleBooking.id, event_type: 'driver_ready_ask_1',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(140), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('released booking\'s stale readiness ask: suppressed driver_active (the shipped non-confirmed reason), zero sends to A', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 0, 'no release event queued here — the ask alone must die silently');
+    const ev = events().find((e) => e.id === 'ev-stale-ask');
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'driver_active');
+  });
+
+  freshState();
+  const relReacceptBooking = mkBooking({
+    status: 'confirmed', assigned_driver: 'drv-b', pickup_datetime: iso(140),
+    driver_ready_at: iso(-1), driver_ready_by: 'drv-b', driver_ready_source: 'recent_accept'
+  });
+  state.bookings.push(relReacceptBooking);
+  state.booking_releases.push(mkRelease({ booking_id: relReacceptBooking.id }));
+  state.notification_events.push({
+    id: 'ev-stale-ask-2', booking_id: relReacceptBooking.id, event_type: 'driver_ready_ask_1',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(140), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('release -> B re-accepts inside T-180: A\'s stale ask dies via the READINESS gate (driver_ready)', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 0);
+    const ev = events().find((e) => e.id === 'ev-stale-ask-2');
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'driver_ready');
+  });
+
+  freshState();
+  const relEarlyBooking = mkBooking({
+    status: 'confirmed', assigned_driver: 'drv-b', pickup_datetime: iso(300),
+    driver_ready_at: null, driver_ready_by: null, driver_ready_source: null
+  });
+  state.bookings.push(relEarlyBooking);
+  state.booking_releases.push(mkRelease({ booking_id: relEarlyBooking.id }));
+  state.notification_events.push({
+    id: 'ev-stale-ask-3', booking_id: relEarlyBooking.id, event_type: 'driver_ready_ask_1',
+    recipient_role: 'driver', recipient_key: 'drv-a', state: 'pending',
+    due_at: iso(-1), not_after: iso(300), suppress_reason: null
+  });
+  r = await wd.handler({});
+  check('release -> B re-accepted early (no readiness): A\'s ask retired as reassigned (the backstop)', () => {
+    assert.strictEqual(pushCalls.length, 0);
+    assert.strictEqual(fetchCalls.length, 0);
+    const ev = events().find((e) => e.id === 'ev-stale-ask-3');
+    assert.strictEqual(ev.state, 'suppressed');
+    assert.strictEqual(ev.suppress_reason, 'reassigned');
+  });
+
+  freshState();
+  const relMultiBooking = mkBooking({
+    status: 'pending', trip_id: 'LM-MULTI', assigned_driver: null, pickup_datetime: iso(300)
+  });
+  state.bookings.push(relMultiBooking);
+  state.booking_releases.push(
+    mkRelease({ booking_id: relMultiBooking.id, driver_id: 'drv-a', driver_name_at_release: 'Andres' }),
+    mkRelease({ booking_id: relMultiBooking.id, driver_id: 'drv-b', driver_name_at_release: 'Backup', reason: 'vehicle_issue' })
+  );
+  state.notification_events.push(
+    mkReleasedEvent(relMultiBooking.id, 'drv-a', 'ev-rel-a'),
+    mkReleasedEvent(relMultiBooking.id, 'drv-b', 'ev-rel-b')
+  );
+  r = await wd.handler({});
+  check('multi-driver lifetime: both release events deliver, each from its OWN history row', () => {
+    assert.strictEqual(fetchCalls.length, 2);
+    const texts = fetchCalls.map((c) => c.body.text);
+    assert.ok(texts.some((t) => t.includes('RELEASED by Andres') && t.includes('schedule conflict')));
+    assert.ok(texts.some((t) => t.includes('RELEASED by Backup') && t.includes('vehicle issue')));
+    assert.strictEqual(events().find((e) => e.id === 'ev-rel-a').state, 'submitted');
+    assert.strictEqual(events().find((e) => e.id === 'ev-rel-b').state, 'submitted');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);
