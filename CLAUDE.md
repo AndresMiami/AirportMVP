@@ -69,12 +69,22 @@ verified checkpoint locations all live in the web app backed by Supabase.
   page session instead of restarting on later visibility returns. Paused
   card is notice-only (NO manual refresh button — deliberate); hidden tab =
   zero requests; one automatic check on visibility return is the resume path.
+  RELEASED bookings (PR 3C-1): `/api/booking-status` adds `reassigning` +
+  `reassigningSince` on pending rows with release history (fail-closed
+  lookup); the page shows the explicit "We're finding you a new driver"
+  card, wipes former-driver identity to the defaults, and re-anchors the
+  pending poll window ONCE per release via the persistent
+  `reassigningSince` anchor identity (a reload reuses the stored anchor;
+  the request BUDGET is never reset by a release).
 - `driver.html` — GetTransfer-style driver app behind a real login
   (admin-provisioned Supabase accounts, `Authorization: Bearer` session
   JWT — the shared passcode is retired): Requests/My rides tabs show
   unassigned pending requests + ONLY this driver's own rides (busy
   drivers see just their rides and cannot accept; inactive is rejected).
-  No driver-side Decline (shared requests — not accepting IS declining).
+  No driver-side Decline (shared requests — not accepting IS declining);
+  CONFIRMED rides instead carry **Release ride** (PR 3C-1): a bottom-sheet
+  with 5 structured reasons (note required for Other) posting
+  `/api/release-booking` — see the lifecycle section for the full rules.
   Adaptive polling,
   CHECKPOINT capture — On my way / Arrived / Start trip each grab one fresh
   GPS fix (6s bound, maximumAge 0) inside the tap and send it WITH the
@@ -113,7 +123,24 @@ verified checkpoint locations all live in the web app backed by Supabase.
 `pending → confirmed → on_the_way → arrived → in_progress → completed`
 Terminals: `declined` (legacy/admin-only — driver-side decline was removed),
 `cancelled` (passenger self-service through `arrived`; in_progress and
-terminals only via admin SQL). Transitions are server-enforced in
+terminals only via admin SQL). One BACKWARD transition exists (PR 3C-1):
+**Release ride** — `confirmed → pending` via the migration-016
+`release_booking()` RPC ONLY (guarded flip + full commitment-state clear +
+booking_releases audit row + admin `ride_released` outbox event, one
+transaction; raw status-flip SQL is NOT a supported release). Rules: the
+releasing driver + structured reason + pickup/price/name SNAPSHOTS are
+recorded; a DB trigger blocks the releaser from EVER re-accepting; the
+re-pooled request is hidden from their feed (fail-closed lookup); the
+passenger sees an explicit "We're finding you a new driver" notice
+(never the reason, no former-driver traces); admin Telegram includes
+driver/reason/snapshot pickup, URGENT when the SNAPSHOT is <2h out
+(immutable — post-release pending edits never re-classify it). Release
+stays available inside 2h (an emergency surfaced beats one hidden) and
+to busy drivers. DELIBERATE policy: a release resets the passenger's
+cancellation bracket (the row is genuinely pending → cancel free) —
+the driver abandoned the commitment, the passenger never inherits its
+late-cancel bracket. Sequential release→cancel yields BOTH admin
+messages (release is historical fact, no relevance gate). Transitions are server-enforced in
 `update-booking-status.js`: Accept wins only an UNASSIGNED pending request
 and stamps `assigned_driver` atomically; every later action requires an
 EXACT ownership match. A stale/foreign action matches 0 rows → the backend
@@ -303,15 +330,34 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   work record — with passenger contact/notes REDACTED after completion
   (Andres, Aug 2026: contact exists only while the ride is live, same
   principle as pending-offer redaction).
-- Approved, NOT yet built: "Release ride" — a driver returns an accepted
-  ride to the shared pool instead of any driver-side decline. Rules:
-  CONFIRMED-only (after On my way, releasing requires dispatch/admin
-  intervention — the passenger has been told someone is coming); records
-  the releasing driver + reason as history; the re-pooled request is NOT
-  offered back to the releasing driver; the passenger is informed of the
-  driver change; admin is notified on every release. Also approved:
-  invitation-only driver onboarding — emailed invite / password-set flow
-  replacing admin-set passwords. Record only; implement post-RLS.
+- Ride-change roadmap (Codex-approved 2026-08-14, Blacklane principle:
+  "Self-service changes while operationally safe; direct coordination
+  once the driver is committed; human review before declaring a no-show
+  or driver compensation"):
+  * PR 3C-1 Release ride — BUILT (this PR; migration 016). CONFIRMED-only
+    driver escape hatch, rules recorded in the lifecycle section above.
+  * PR 3C-2 pricing/capacity hardening — NEXT: client-calculated price +
+    client-only capacity are BLOCKERS for confirmed editing; server must
+    verify (signed quote on calculate-price.js, or server-side route
+    fetch converging with the Routes API work). One mechanism for both
+    pending and confirmed edits.
+  * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
+    machinery extended (same form/row/details_version CAS), edits
+    immediately authoritative, NO driver approval queue (release is the
+    valve), driver push "ride changed — review My Rides", urgency from
+    the EARLIER of pre/post-edit pickup (>2h normal; ≤2h urgent driver
+    push + admin Telegram; at/after pickup Manage ride closed), shadow
+    REBOOKING audit from the pre-edit ride inside T-2h (0/50/100, $0
+    pilot), before/after revision history (migration 017). NO WhatsApp
+    change workflow — WhatsApp stays exceptional human coordination only.
+  * NO-SHOW principle (record only, never implemented yet): a driver tap
+    must NEVER create a compensated no-show — future review requires an
+    Arrived GPS checkpoint, elapsed waiting time, attempted passenger
+    contact, and explicit LinkMia approval. No driver payout or passenger
+    fee from one status tap.
+- Approved, NOT yet built: invitation-only driver onboarding — emailed
+  invite / password-set flow replacing admin-set passwords. Record only;
+  implement post-RLS.
 - Two-ETA model (Codex-outlined, follows identity) — booking-time estimate
   must use the scheduled pickup as departure time (Railway proxy currently
   uses `now` and its route cache ignores time-of-day); fresh driver→pickup
