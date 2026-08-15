@@ -128,8 +128,11 @@ terminals only via admin SQL). One BACKWARD transition exists (PR 3C-1):
 `release_booking()` RPC ONLY (guarded flip + full commitment-state clear +
 booking_releases audit row + admin `ride_released` outbox event, one
 transaction; raw status-flip SQL is NOT a supported release). Rules: the
-releasing driver + structured reason + pickup/price/name SNAPSHOTS are
-recorded; a DB trigger blocks the releaser from EVER re-accepting; the
+releasing driver + structured reason + pickup/ROUTE/price/name/PAYMENT
+SNAPSHOTS are recorded; the live payment_status is RESET to 'unpaid'
+(the replacement driver never inherits a PAID stamp for money the
+releaser collected — a non-unpaid snapshot adds a reconcile warning to
+the admin notice); a DB trigger blocks the releaser from EVER re-accepting; the
 re-pooled request is hidden from their feed (fail-closed lookup); the
 passenger sees an explicit "We're finding you a new driver" notice
 (never the reason, no former-driver traces); admin Telegram includes
@@ -355,6 +358,15 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     Arrived GPS checkpoint, elapsed waiting time, attempted passenger
     contact, and explicit LinkMia approval. No driver payout or passenger
     fee from one status tap.
+  * KNOWN LIMITATION (recorded 2026-08-14, flagged for Codex): ADMIN-keyed
+    readiness events (at_risk_mark, admin_ready_escalation, recipient_key
+    'admin') are one-shot per booking under the ledger identity — after a
+    release + re-accept, the replacement driver's era re-stamps at_risk_at
+    in the DB and fires fresh DRIVER-keyed asks, but the admin
+    at-risk/escalation PINGS collide with the first era's rows and are
+    silently skipped. Pilot-acceptable (admin already received the
+    ride_released notice); the clean fix needs era-aware admin event
+    identity (its own migration decision, not a patch).
 - Approved, NOT yet built: invitation-only driver onboarding — emailed
   invite / password-set flow replacing admin-set passwords. Record only;
   implement post-RLS.

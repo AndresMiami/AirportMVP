@@ -1487,8 +1487,12 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
       driver_id: 'drv-a',
       details_version_at_release: 1,
       pickup_at_release: iso(300),
+      pickup_location_at_release: 'Snapshot Origin',
+      dropoff_location_at_release: 'Snapshot Dest',
       price_at_release: 55,
       driver_name_at_release: 'Andres',
+      payment_status_at_release: 'unpaid',
+      payment_method_at_release: 'cash',
       reason: 'schedule_conflict',
       note: null,
       released_at: iso(-1),
@@ -1520,6 +1524,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(text.includes('RELEASED by Andres'));
     assert.ok(text.includes('schedule conflict'));
     assert.ok(!text.includes('🚨'), 'a 5-hour-out snapshot is not urgent');
+    assert.ok(!text.includes('⚠️ Payment'), 'no reconcile warning for an unpaid snapshot');
     const ev = events().find((e) => e.id === 'ev-rel-1');
     assert.strictEqual(ev.state, 'submitted', 'submitted pins the extra-threading end-to-end');
   });
@@ -1527,17 +1532,25 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   freshState();
   const relUrgentBooking = mkBooking({
     status: 'pending', trip_id: 'LM-URG', assigned_driver: null,
-    pickup_datetime: iso(7 * 24 * 60) // live pickup EDITED a week out post-release
+    pickup_datetime: iso(7 * 24 * 60),        // live pickup EDITED a week out post-release
+    pickup_location: 'Edited Origin',          // live route EDITED post-release too
+    dropoff_location: 'Edited Dest'
   });
   state.bookings.push(relUrgentBooking);
   state.booking_releases.push(mkRelease({
-    booking_id: relUrgentBooking.id, pickup_at_release: iso(45) // snapshot: 45 min away
+    booking_id: relUrgentBooking.id, pickup_at_release: iso(45), // snapshot: 45 min away
+    payment_status_at_release: 'paid_by_guest', payment_method_at_release: 'zelle'
   }));
   state.notification_events.push(mkReleasedEvent(relUrgentBooking.id, 'drv-a', 'ev-rel-2'));
   r = await wd.handler({});
-  check('URGENT comes from the IMMUTABLE snapshot — a post-release pickup edit never de-classifies it', () => {
+  check('URGENT, route, and the payment warning all come from the IMMUTABLE snapshot — post-release edits never rewrite them', () => {
     assert.strictEqual(fetchCalls.length, 1);
-    assert.ok(fetchCalls[0].body.text.includes('🚨 URGENT'), 'snapshot <2h -> urgent');
+    const text = fetchCalls[0].body.text;
+    assert.ok(text.includes('🚨 URGENT'), 'snapshot <2h -> urgent');
+    assert.ok(text.includes('Snapshot Origin → Snapshot Dest'), 'the route AS RELEASED, never the edited one');
+    assert.ok(!text.includes('Edited Origin'), 'live route must not leak into the release audit message');
+    assert.ok(text.includes('⚠️ Payment was already marked collected'),
+      'a paid snapshot warns admin to reconcile — the live stamp was reset for the replacement driver');
     const ev = events().find((e) => e.id === 'ev-rel-2');
     assert.strictEqual(ev.state, 'submitted');
   });

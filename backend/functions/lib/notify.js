@@ -164,11 +164,14 @@ function renderEvent(eventType, b, extra) {
       return `🚫 Ride ${code} CANCELLED (was ${b.cancelled_from_status || 'active'}).\n${route}\nPickup was ${when}.${feeLine}`;
     }
     case 'ride_released': {
-      // Renders ONLY from the booking_releases snapshots — trip/route may
-      // come from the live row (identity fields never change) but the
-      // pickup time, driver name, and URGENT classification come from the
-      // IMMUTABLE release record. The private note is dashboard-only.
-      if (!extra || !extra.pickup_at_release || !extra.driver_name_at_release || !extra.reason) {
+      // Renders ONLY from the booking_releases snapshots — the booking is
+      // pending again and EDITABLE after release (PR #59), so the pickup
+      // time, ROUTE, driver name, payment state, and the URGENT
+      // classification all come from the IMMUTABLE release record; only
+      // the trip code comes from the live row (true identity). The
+      // private note is dashboard-only.
+      if (!extra || !extra.pickup_at_release || !extra.driver_name_at_release || !extra.reason ||
+          !extra.pickup_location_at_release || !extra.dropoff_location_at_release) {
         return null;
       }
       const releaseReasonLabel = {
@@ -178,10 +181,16 @@ function renderEvent(eventType, b, extra) {
         emergency: 'emergency',
         other: 'other'
       }[extra.reason] || extra.reason;
-      const releasedRoute = `${b.pickup_location} → ${b.dropoff_location}`;
+      const releasedRoute = `${extra.pickup_location_at_release} → ${extra.dropoff_location_at_release}`;
       const releasedWhen = fmtWhenET(extra.pickup_at_release);
       const urgent = Date.parse(extra.pickup_at_release) - Date.now() < 2 * 3600e3;
-      return `${urgent ? '🚨 URGENT — ' : '🔄 '}Ride ${code} RELEASED by ${extra.driver_name_at_release} (${releaseReasonLabel}).\n${releasedRoute}\nPickup ${releasedWhen}.\nThe request is back in the driver feed.`;
+      // The releaser had already stamped the fare collected: the live
+      // stamp was RESET to unpaid for the replacement driver — the human
+      // must reconcile who actually holds the money.
+      const paidWarning = extra.payment_status_at_release && extra.payment_status_at_release !== 'unpaid'
+        ? '\n⚠️ Payment was already marked collected by the releasing driver — reconcile before pickup.'
+        : '';
+      return `${urgent ? '🚨 URGENT — ' : '🔄 '}Ride ${code} RELEASED by ${extra.driver_name_at_release} (${releaseReasonLabel}).\n${releasedRoute}\nPickup ${releasedWhen}.${paidWarning}\nThe request is back in the driver feed.`;
     }
     default:
       return null;

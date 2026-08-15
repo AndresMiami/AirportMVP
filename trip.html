@@ -949,10 +949,16 @@
                     DRIVER.name = driver.name;
                     const digits = String(driver.phone || '').replace(/\D/g, '');
                     DRIVER.phone = digits.length >= 10 ? digits : null;
-                } else {
-                    // Driver-less payload (released or never assigned):
-                    // NEVER retain a former driver's identity — revert to
-                    // the page defaults for legacy/unassigned bookings.
+                } else if (booking.status === 'pending') {
+                    // Driver-less PENDING payload (released or never
+                    // assigned): never retain a former driver's identity —
+                    // revert to the page defaults. Gated on pending ON
+                    // PURPOSE: an ACTIVE ride's payload can lack the driver
+                    // key on a transient server-side lookup blip, and
+                    // resetting there would route the WhatsApp button to
+                    // the default number while another driver owns the ride
+                    // (decision 10 forbids exactly that fallback) — for
+                    // active rides the last-known driver stays.
                     DRIVER.name = 'Andres';
                     DRIVER.phone = '17865093955';
                 }

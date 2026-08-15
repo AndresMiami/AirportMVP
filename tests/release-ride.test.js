@@ -337,9 +337,15 @@ async function check(name, fn) {
     const sql = fs.readFileSync(path.join(repoRoot, 'database/migrations/016_release_ride.sql'), 'utf8');
     assert.ok(sql.includes('CREATE TABLE booking_releases'));
     for (const col of ['pickup_at_release', 'price_at_release', 'driver_name_at_release',
-                       'details_version_at_release', 'released_at']) {
+                       'details_version_at_release', 'released_at',
+                       'pickup_location_at_release', 'dropoff_location_at_release',
+                       'payment_status_at_release', 'payment_method_at_release']) {
       assert.ok(sql.includes(col), `missing column ${col}`);
     }
+    assert.ok(sql.includes("payment_status = 'unpaid'"),
+      'release must RESET the live payment stamp for the replacement driver');
+    assert.ok(sql.includes('FOR UPDATE'),
+      'the payment snapshot read must lock the row before the guarded update');
     assert.ok(sql.includes('UNIQUE (booking_id, driver_id)'));
     assert.ok(sql.includes('char_length(note) <= 500'));
     assert.ok(sql.includes("CHECK (reason <> 'other' OR (note IS NOT NULL AND btrim(note) <> ''))"));

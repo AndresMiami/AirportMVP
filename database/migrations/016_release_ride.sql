@@ -41,10 +41,18 @@ CREATE TABLE booking_releases (
   details_version_at_release  INTEGER NOT NULL,
   -- Immutable snapshots: post-release the booking is pending again and
   -- therefore EDITABLE (PR #59) — the live row must never re-classify
-  -- this release's urgency or audit.
+  -- this release's urgency, route, or audit.
   pickup_at_release           TIMESTAMPTZ NOT NULL,
+  pickup_location_at_release  TEXT NOT NULL,
+  dropoff_location_at_release TEXT NOT NULL,
   price_at_release            NUMERIC,
   driver_name_at_release      TEXT NOT NULL,
+  -- Payment state AT release: the live row's payment_status is RESET to
+  -- 'unpaid' by the RPC (the replacement driver must never inherit a
+  -- PAID stamp for money the releaser collected); a non-unpaid snapshot
+  -- makes the admin notice carry a reconcile warning.
+  payment_status_at_release   TEXT,
+  payment_method_at_release   TEXT,
   reason                      TEXT NOT NULL CHECK (reason IN
     ('schedule_conflict', 'ride_details_changed', 'vehicle_issue', 'emergency', 'other')),
   note                        TEXT CHECK (note IS NULL OR char_length(note) <= 500),
@@ -80,15 +88,31 @@ AS $$
 DECLARE
   v_version INTEGER;
   v_pickup  TIMESTAMPTZ;
+  v_from    TEXT;
+  v_to      TEXT;
   v_price   NUMERIC;
+  v_pay     TEXT;
+  v_method  TEXT;
   v_name    TEXT;
 BEGIN
+  -- Lock the row FIRST and capture the pre-release payment state:
+  -- payment_status is about to be modified, so it cannot come from
+  -- RETURNING (which sees NEW values); FOR UPDATE serializes against a
+  -- concurrent 'Payment collected' tap so snapshot and reset can never
+  -- disagree. A missing row simply falls through to the 0-row UPDATE.
+  SELECT payment_status, payment_method INTO v_pay, v_method
+  FROM bookings WHERE id = p_booking_id FOR UPDATE;
+
   -- Guarded flip + FULL commitment-state clear. A re-accepted ride must
   -- present as never-driven: acceptance, readiness, at-risk, checkpoint
-  -- anchors, and coordinates all reset. Deliberately NO details_version
-  -- CAS (Codex-approved): a driver escaping right after a passenger edit
-  -- is the moment release matters most; the live version is RECORDED,
-  -- never required.
+  -- anchors, coordinates, AND the payment stamp all reset (the
+  -- replacement driver must see the fare as uncollected; the pre-release
+  -- payment state is snapshotted and, when not 'unpaid', flagged to
+  -- admin for reconciliation). Deliberately NO details_version CAS
+  -- (Codex-approved): a driver escaping right after a passenger edit is
+  -- the moment release matters most; the live version is RECORDED,
+  -- never required. The other RETURNING columns are unmodified by this
+  -- UPDATE, so NEW == OLD for them.
   UPDATE bookings SET
     status = 'pending',
     assigned_driver = NULL,
@@ -102,12 +126,13 @@ BEGIN
     started_at = NULL,
     driver_lat = NULL,
     driver_lng = NULL,
-    driver_location_at = NULL
+    driver_location_at = NULL,
+    payment_status = 'unpaid'
   WHERE id = p_booking_id
     AND status = 'confirmed'
     AND assigned_driver = p_driver_id
-  RETURNING details_version, pickup_datetime, price
-    INTO v_version, v_pickup, v_price;
+  RETURNING details_version, pickup_datetime, pickup_location, dropoff_location, price
+    INTO v_version, v_pickup, v_from, v_to, v_price;
 
   -- Non-STRICT INTO + FOUND: zero rows is a CLEAN concurrency conflict
   -- (the endpoint answers 409 from live truth), never an exception.
@@ -123,11 +148,15 @@ BEGIN
   -- notification intention are indivisible.
   INSERT INTO booking_releases
     (booking_id, driver_id, details_version_at_release,
-     pickup_at_release, price_at_release, driver_name_at_release,
+     pickup_at_release, pickup_location_at_release, dropoff_location_at_release,
+     price_at_release, driver_name_at_release,
+     payment_status_at_release, payment_method_at_release,
      reason, note)
   VALUES
     (p_booking_id, p_driver_id, v_version,
-     v_pickup, v_price, COALESCE(v_name, 'Unknown driver'),
+     v_pickup, v_from, v_to,
+     v_price, COALESCE(v_name, 'Unknown driver'),
+     v_pay, v_method,
      p_reason, p_note);
 
   RETURN jsonb_build_object('released', true);
@@ -263,10 +292,12 @@ BEGIN
   INSERT INTO bookings (customer_name, pickup_location, dropoff_location,
                         pickup_datetime, status, price, assigned_driver,
                         accepted_at, driver_ready_at, driver_ready_by,
-                        driver_ready_source, at_risk_at)
+                        driver_ready_source, at_risk_at,
+                        payment_status, payment_method)
   VALUES ('MIGRATION-016-SMOKE', 'smoke-a', 'smoke-b',
           now() + interval '1 day', 'confirmed', 55.00, drv_a,
-          now(), now(), drv_a, 'recent_accept', now())
+          now(), now(), drv_a, 'recent_accept', now(),
+          'paid_by_guest', 'zelle')
   RETURNING id INTO smoke_id;
 
   rel := release_booking(smoke_id, drv_a, 'schedule_conflict', NULL);
@@ -279,18 +310,23 @@ BEGIN
     AND accepted_at IS NULL AND driver_ready_at IS NULL AND driver_ready_by IS NULL
     AND driver_ready_source IS NULL AND at_risk_at IS NULL
     AND on_the_way_at IS NULL AND arrived_at IS NULL AND started_at IS NULL
-    AND driver_lat IS NULL AND driver_lng IS NULL AND driver_location_at IS NULL;
+    AND driver_lat IS NULL AND driver_lng IS NULL AND driver_location_at IS NULL
+    AND payment_status = 'unpaid';
   IF n <> 1 THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: release did not clear all commitment state';
+    RAISE EXCEPTION 'ASSERTION FAILED: release did not clear all commitment state (payment stamp included)';
   END IF;
 
   SELECT count(*) INTO n FROM booking_releases
   WHERE booking_id = smoke_id AND driver_id = drv_a
     AND reason = 'schedule_conflict'
     AND driver_name_at_release = 'MIGRATION-016-SMOKE-A'
-    AND pickup_at_release IS NOT NULL AND details_version_at_release >= 1;
+    AND pickup_at_release IS NOT NULL AND details_version_at_release >= 1
+    AND pickup_location_at_release = 'smoke-a'
+    AND dropoff_location_at_release = 'smoke-b'
+    AND payment_status_at_release = 'paid_by_guest'
+    AND payment_method_at_release = 'zelle';
   IF n <> 1 THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: release history row missing or incomplete';
+    RAISE EXCEPTION 'ASSERTION FAILED: release history row missing or incomplete (route/payment snapshots included)';
   END IF;
 
   SELECT not_after INTO ev_not_after FROM notification_events
@@ -380,8 +416,9 @@ BEGIN
   BEGIN
     INSERT INTO booking_releases
       (booking_id, driver_id, details_version_at_release,
-       pickup_at_release, driver_name_at_release, reason)
-    VALUES (smoke_id, drv_a, 1, now(), 'dup', 'emergency');
+       pickup_at_release, pickup_location_at_release, dropoff_location_at_release,
+       driver_name_at_release, reason)
+    VALUES (smoke_id, drv_a, 1, now(), 'dup-a', 'dup-b', 'dup', 'emergency');
     RAISE EXCEPTION 'ASSERTION FAILED: duplicate (booking, driver) release row was accepted';
   EXCEPTION WHEN unique_violation THEN
     NULL;

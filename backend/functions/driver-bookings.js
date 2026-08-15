@@ -80,11 +80,27 @@ exports.handler = async (event) => {
       ? `and(status.eq.pending,assigned_driver.is.null),${ownActive}`
       : ownActive;
 
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(DRIVER_FIELDS)
+      .or(visibility)
+      .order('pickup_datetime', { ascending: true });
+
+    if (error) {
+      console.error('❌ Driver bookings query failed:', error);
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to load bookings' }) };
+    }
+
     // Release exclusion (PR 3C-1): a booking this driver RELEASED must
-    // not reappear in their Requests feed. FAIL CLOSED: if the lookup
-    // fails we serve nothing rather than an unfiltered feed — the
-    // database reaccept guard is the enforcement; this filter is the
-    // presentation layer that must never lie in the open direction.
+    // not reappear in their Requests feed. Read AFTER the bookings query
+    // ON PURPOSE: the release RPC commits atomically, so any released
+    // booking that appeared as pending in the list above already has its
+    // history row by the time this read runs — the reversed order would
+    // leave a one-cycle window where a just-released ride reappears as
+    // an offer. FAIL CLOSED: if the lookup fails we serve nothing rather
+    // than an unfiltered feed — the database reaccept guard is the
+    // enforcement; this filter is the presentation layer that must never
+    // lie in the open direction.
     let releasedIds = new Set();
     if (auth.driver.status === 'active') {
       const { data: released, error: releasedError } = await supabase
@@ -96,17 +112,6 @@ exports.handler = async (event) => {
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to load bookings' }) };
       }
       releasedIds = new Set((released || []).map((r) => r.booking_id));
-    }
-
-    const { data, error } = await supabase
-      .from('bookings')
-      .select(DRIVER_FIELDS)
-      .or(visibility)
-      .order('pickup_datetime', { ascending: true });
-
-    if (error) {
-      console.error('❌ Driver bookings query failed:', error);
-      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to load bookings' }) };
     }
 
     // Pre-accept privacy: a shared pending request is an OFFER, not a

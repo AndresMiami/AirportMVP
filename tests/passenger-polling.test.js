@@ -353,11 +353,18 @@ function check(name, fn) {
   };
   const swap = createHarness([
     response(200, { booking: nearConfirmed, driver: { name: 'Carlos M.', phone: '+13055551212' } }),
+    response(200, { booking: nearConfirmed, driver: null }), // transient lookup blip on an ACTIVE ride
     response(200, { booking: pendingBooking, driver: null, reassigning: true, reassigningSince: SINCE_1 })
   ]);
   await swap.settle();
   check('assigned driver personalizes the page', () => {
     assert.strictEqual(swap.evaluate('DRIVER.name'), 'Carlos M.');
+    assert.strictEqual(swap.evaluate('DRIVER.phone'), '13055551212');
+  });
+  await swap.runNextTimer();
+  check('driver-less payload on an ACTIVE ride keeps the last-known driver — never a default-number fallback (decision 10)', () => {
+    assert.strictEqual(swap.evaluate('DRIVER.name'), 'Carlos M.',
+      'a transient server-side lookup blip must not swap the WhatsApp target mid-ride');
     assert.strictEqual(swap.evaluate('DRIVER.phone'), '13055551212');
   });
   await swap.runNextTimer();
