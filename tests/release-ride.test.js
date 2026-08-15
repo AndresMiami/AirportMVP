@@ -329,6 +329,8 @@ async function check(name, fn) {
       assert.ok(driverHtml.includes(`value="${reason}"`), `missing reason ${reason}`);
     }
     assert.ok(driverHtml.includes('id="relNote" rows="2" maxlength="500"'));
+    assert.ok(driverHtml.includes('id="relError" role="alert" aria-live="assertive"'),
+      'release failures and unknown outcomes must be announced to assistive technology');
     assert.ok(driverHtml.includes("'(required for Other)'"), 'Other must require the note');
     assert.ok(driverHtml.includes("reason === 'other' && !note"), 'submit must refuse Other without a note');
   });
@@ -371,6 +373,8 @@ async function check(name, fn) {
     assert.ok(sql.includes("CHECK (reason <> 'other' OR (note IS NOT NULL AND btrim(note) <> ''))"));
     assert.ok(sql.includes('CREATE INDEX idx_booking_releases_driver ON booking_releases (driver_id)'));
     assert.ok(sql.includes('ALTER TABLE booking_releases ENABLE ROW LEVEL SECURITY'));
+    assert.ok(sql.includes('GRANT SELECT ON TABLE booking_releases TO service_role'),
+      'service_role SELECT must be explicit, not inherited by accident');
     assert.ok(sql.includes('ON DELETE CASCADE'));
   });
   await check('migration 016: RPC pinned/revoked/service_role-granted; triggers correct; 6h leash', async () => {
@@ -395,6 +399,12 @@ async function check(name, fn) {
     assert.ok(sql.includes("tgenabled = 'O'"), 'verification must assert triggers are ENABLED');
     assert.ok(sql.includes("has_table_privilege('service_role', 'public.booking_releases', 'SELECT')"),
       'verification must assert service_role can read the table (endpoint + dispatcher depend on it)');
+    assert.ok(/FOREACH role_name IN ARRAY ARRAY\['anon','authenticated'\][\s\S]{0,200}FOREACH priv IN ARRAY ARRAY\['SELECT','INSERT','UPDATE','DELETE',\s*'TRUNCATE','REFERENCES','TRIGGER'\]/.test(sql),
+      'verification must test all seven table privileges for both client roles');
+    assert.ok(sql.includes('aclexplode(c.relacl)'), 'verification must reject direct PUBLIC relation grants');
+    assert.ok(sql.includes('aclexplode(att.attacl)'), 'verification must reject column-level client grants');
+    assert.ok(sql.includes("a.grantee = 0 OR a.grantee::regrole::text IN ('anon','authenticated')"),
+      'column ACL verification must cover PUBLIC and both client roles');
     assert.ok(sql.includes("has_function_privilege('anon', 'public.booking_releases_outbox()', 'EXECUTE')"),
       'verification must cover EXECUTE revocation on ALL three functions');
   });
@@ -407,6 +417,9 @@ async function check(name, fn) {
     assert.ok(sql.includes('EXCEPTION WHEN unique_violation'), 'the UNIQUE is proven by direct tampering');
     assert.ok(sql.includes('DELETE FROM drivers WHERE id IN (drv_a, drv_b)'), 'throwaway drivers torn down');
     assert.ok(sql.includes('-- DROP TABLE IF EXISTS booking_releases;'), 'rollback section present');
+    const rollback = sql.slice(sql.indexOf('-- COMPLETE EMERGENCY ROLLBACK'));
+    assert.ok(rollback.includes("-- NOTIFY pgrst, 'reload schema';"),
+      'rollback must also reload PostgREST after removing the RPC/table');
   });
 
   // ---------- driver.html release sheet: BEHAVIORAL harness ----------
@@ -416,7 +429,7 @@ async function check(name, fn) {
   const vm = require('vm');
   const driverScriptSrc = [...driverHtml.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].at(-1)[1];
 
-  function createDriverHarness() {
+  function createDriverHarness(options = {}) {
     class FakeClassList {
       constructor(initial = []) { this.values = new Set(initial); }
       add(...n) { n.forEach((x) => this.values.add(x)); }
@@ -462,7 +475,20 @@ async function check(name, fn) {
     const releaseButtons = new Map(); // booking id -> current button element
     const docListeners = {};
     const fetchLog = [];
+    const reloadLog = [];
+    const timers = [];
+    let nextTimerId = 1;
     const harness = { activeElement: null };
+
+    const fakeSetTimeout = (fn, ms) => {
+      const timer = { id: nextTimerId++, fn, ms, cleared: false };
+      timers.push(timer);
+      return timer.id;
+    };
+    const fakeClearTimeout = (id) => {
+      const timer = timers.find((x) => x.id === id);
+      if (timer) timer.cleared = true;
+    };
 
     const documentObj = {
       visibilityState: 'visible',
@@ -481,34 +507,63 @@ async function check(name, fn) {
       get activeElement() { return harness.activeElement; }
     };
 
+    const locationObj = {
+      search: '', href: '', origin: 'https://linkmia.com',
+      reload() { reloadLog.push('reload'); }
+    };
     const context = {
       console,
       document: documentObj,
-      location: { search: '', href: '', origin: 'https://linkmia.com' },
+      location: locationObj,
       localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
       navigator: {},
       URLSearchParams,
       Date, Math, Number, JSON, Promise,
       encodeURIComponent,
-      setTimeout, clearTimeout,
+      setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout,
+      AbortController,
       alert() {}, confirm: () => true,
       fetch: async (url, opts) => {
         fetchLog.push({ url, body: opts && opts.body ? JSON.parse(opts.body) : null });
-        return { ok: true, status: 200, json: async () => ({ success: true }) };
+        if (url === '/api/release-booking') {
+          if (options.releaseNeverResolves) return new Promise(() => {});
+          const status = options.releaseStatus ?? 200;
+          return {
+            ok: status >= 200 && status < 300,
+            status,
+            json: async () => status === 409 ? { error: 'Ride moved on' } : { success: true }
+          };
+        }
+        if (url === '/api/driver-bookings') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ bookings: options.bookingsAfterRefresh || [], driver: { name: 'Andres' } })
+          };
+        }
+        throw new Error(`unexpected fetch ${url}`);
       },
       window: {}
     };
     context.window.window = context.window;
     context.window.addEventListener = () => {};
     context.window.matchMedia = () => ({ matches: false, addEventListener() {} });
+    context.window.location = locationObj;
     vm.createContext(context);
     vm.runInContext(driverScriptSrc, context, { filename: 'driver.html:inline-script' });
     const settle = () => new Promise((resolve) => setImmediate(resolve));
     return {
       context, element, radios, releaseButtons, docListeners, fetchLog, focusLog, harness,
+      reloadLog, timers,
       async settle() { await settle(); await settle(); await settle(); },
       evaluate: (src) => vm.runInContext(src, context),
-      fireKeydown(key) { (docListeners.keydown || []).forEach((fn) => fn({ key })); }
+      fireKeydown(key) { (docListeners.keydown || []).forEach((fn) => fn({ key })); },
+      fireDeadline(ms) {
+        const timer = timers.find((x) => !x.cleared && x.ms === ms);
+        assert.ok(timer, `no live ${ms}ms deadline`);
+        timer.cleared = true;
+        timer.fn();
+      }
     };
   }
 
@@ -569,6 +624,83 @@ async function check(name, fn) {
     await h.settle();
     assert.ok(h.element('relSheet').classList.contains('hidden'), 'sheet closes on the real outcome');
     assert.strictEqual(h.element('relCancel').disabled, false, 're-enabled after the flight');
+  });
+
+  await check('BEHAVIOR: hung authentication is bounded before transmission — retry/Keep stay truthful', async () => {
+    const h = createDriverHarness();
+    h.evaluate(`lastBookings = [{ id: 'ride-a', status: 'confirmed' }]`);
+    h.evaluate(`openReleaseSheet('ride-a')`);
+    h.radios[0].checked = true;
+    h.evaluate('updateReleaseForm()');
+    h.context.window.supabaseClient = {
+      auth: { getSession: () => new Promise(() => {}) }
+    };
+    h.evaluate('submitRelease()');
+    await h.settle();
+    h.fireDeadline(8000);
+    await h.settle();
+    assert.strictEqual(h.fetchLog.filter((x) => x.url === '/api/release-booking').length, 0,
+      'no destructive request was transmitted');
+    assert.strictEqual(h.element('relError').textContent, 'Release was not sent. Please try again.');
+    assert.strictEqual(h.element('relCancel').disabled, false, 'Keep is truthful because nothing was sent');
+    assert.ok(!h.element('relCancel').classList.contains('hidden'));
+    assert.strictEqual(h.element('relConfirm').textContent, 'Release ride', 'a safe retry is available');
+  });
+
+  await check('BEHAVIOR: hung POST becomes outcome-unknown — no Keep, no retry, hard refresh only', async () => {
+    const h = createDriverHarness({ releaseNeverResolves: true });
+    h.evaluate(`lastBookings = [{ id: 'ride-a', status: 'confirmed' }]`);
+    h.evaluate(`openReleaseSheet('ride-a')`);
+    h.radios[2].checked = true;
+    h.evaluate('updateReleaseForm()');
+    h.context.window.supabaseClient = {
+      auth: { getSession: async () => ({ data: { session: { access_token: 'tok' } } }) }
+    };
+    h.evaluate('submitRelease()');
+    await h.settle();
+    assert.strictEqual(h.fetchLog.filter((x) => x.url === '/api/release-booking').length, 1);
+    h.fireDeadline(20000);
+    await h.settle();
+    assert.strictEqual(h.element('relError').textContent,
+      'We couldn’t confirm the outcome—refresh My rides before acting.');
+    assert.strictEqual(h.element('relConfirm').textContent, 'Refresh My rides');
+    assert.strictEqual(h.element('relConfirm').disabled, false);
+    assert.ok(h.element('relCancel').classList.contains('hidden'), 'Keep is never offered after an ambiguous POST');
+    h.element('relBackdrop').click();
+    h.fireKeydown('Escape');
+    assert.ok(!h.element('relSheet').classList.contains('hidden'), 'ambiguous sheet cannot be dismissed');
+    h.evaluate('submitRelease()');
+    await h.settle();
+    assert.strictEqual(h.fetchLog.filter((x) => x.url === '/api/release-booking').length, 1,
+      'no second destructive request can be sent');
+    h.element('relConfirm').click();
+    assert.deepStrictEqual(h.reloadLog, ['reload'], 'the sole recovery action reloads server truth');
+  });
+
+  await check('BEHAVIOR: success and 409 both refresh truth and focus stable My rides after rerender', async () => {
+    for (const status of [200, 409]) {
+      const h = createDriverHarness({ releaseStatus: status, bookingsAfterRefresh: [] });
+      h.context.document.visibilityState = 'hidden'; // no scheduler timer after refresh
+      h.context.window.supabaseClient = {
+        auth: { getSession: async () => ({ data: { session: { access_token: 'tok' } } }) }
+      };
+      const oldButton = h.evaluate('document.createElement("button")');
+      oldButton.id = `old-release-${status}`;
+      h.harness.activeElement = oldButton;
+      h.evaluate(`pollingEnabled = true; lastBookings = [{ id: 'ride-a', status: 'confirmed' }]`);
+      h.evaluate(`openReleaseSheet('ride-a')`);
+      h.radios[3].checked = true;
+      h.evaluate('updateReleaseForm()');
+      h.evaluate('submitRelease()');
+      await h.settle();
+      assert.deepStrictEqual(h.fetchLog.map((x) => x.url),
+        ['/api/release-booking', '/api/driver-bookings'], `${status}: release then authoritative refresh`);
+      assert.strictEqual(h.evaluate('lastBookings.length'), 0, `${status}: released/moved ride removed by refresh`);
+      assert.ok(h.element('relSheet').classList.contains('hidden'), `${status}: sheet closed`);
+      assert.strictEqual(h.focusLog.at(-1), 'tabRides', `${status}: focus survives card removal`);
+      assert.ok(h.element('tabRides').classList.contains('active'), `${status}: My rides is selected`);
+      assert.ok(!h.focusLog.includes(oldButton.id), `${status}: stale Release button never receives focus`);
+    }
   });
 
   await check('BEHAVIOR: focus restores by booking id after polling replaced the original button', async () => {

@@ -71,6 +71,7 @@ CREATE INDEX idx_booking_releases_driver ON booking_releases (driver_id);
 -- Lockdown (migration-010 discipline): default-deny, zero client grants.
 ALTER TABLE booking_releases ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON booking_releases FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE booking_releases TO service_role;
 
 -- ---------------------------------------------------------------
 -- 2. The ONLY supported release path.
@@ -237,6 +238,8 @@ DECLARE
   drv_b UUID;
   rel JSONB;
   ev_not_after TIMESTAMPTZ;
+  role_name TEXT;
+  priv TEXT;
 BEGIN
   -- 5a. All three functions: SECURITY DEFINER, pinned search_path, no
   -- client EXECUTE. The RPC additionally must be service_role-callable.
@@ -268,7 +271,10 @@ BEGIN
   -- endpoint's exclusion lookup and the dispatcher's enrichment read
   -- depend on it — a failed assert here aborts BEFORE any deploy).
   IF NOT EXISTS (
-    SELECT 1 FROM pg_class WHERE relname = 'booking_releases' AND relrowsecurity
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = 'public' AND c.relname = 'booking_releases'
+      AND c.relkind = 'r' AND c.relrowsecurity
   ) THEN
     RAISE EXCEPTION 'ASSERTION FAILED: RLS not enabled on booking_releases';
   END IF;
@@ -277,9 +283,34 @@ BEGIN
   IF n <> 0 THEN
     RAISE EXCEPTION 'ASSERTION FAILED: booking_releases must have ZERO policies (default-deny), found %', n;
   END IF;
-  IF has_table_privilege('anon', 'public.booking_releases', 'SELECT, INSERT, UPDATE, DELETE')
-     OR has_table_privilege('authenticated', 'public.booking_releases', 'SELECT, INSERT, UPDATE, DELETE') THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: client roles hold grants on booking_releases';
+  FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
+    FOREACH priv IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE',
+                                'TRUNCATE','REFERENCES','TRIGGER'] LOOP
+      IF has_table_privilege(role_name, 'public.booking_releases', priv) THEN
+        RAISE EXCEPTION 'ASSERTION FAILED: % still has % on booking_releases',
+          role_name, priv;
+      END IF;
+    END LOOP;
+  END LOOP;
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    CROSS JOIN LATERAL aclexplode(c.relacl) a
+    WHERE ns.nspname = 'public' AND c.relname = 'booking_releases'
+      AND c.relkind = 'r' AND a.grantee = 0
+  ) THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: direct PUBLIC grants remain on booking_releases';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute att
+    JOIN pg_class c ON c.oid = att.attrelid
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    CROSS JOIN LATERAL aclexplode(att.attacl) a
+    WHERE ns.nspname = 'public' AND c.relname = 'booking_releases'
+      AND att.attacl IS NOT NULL AND att.attnum > 0 AND NOT att.attisdropped
+      AND (a.grantee = 0 OR a.grantee::regrole::text IN ('anon','authenticated'))
+  ) THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: column-level client privileges remain on booking_releases';
   END IF;
   IF NOT has_table_privilege('service_role', 'public.booking_releases', 'SELECT') THEN
     RAISE EXCEPTION 'ASSERTION FAILED: service_role cannot SELECT booking_releases';
@@ -289,14 +320,18 @@ BEGIN
   -- the default replication role).
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-    WHERE c.relname = 'booking_releases' AND t.tgname = 'trg_booking_releases_outbox'
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = 'public' AND c.relname = 'booking_releases'
+      AND t.tgname = 'trg_booking_releases_outbox'
       AND NOT t.tgisinternal AND t.tgenabled = 'O'
   ) THEN
     RAISE EXCEPTION 'ASSERTION FAILED: outbox trigger missing or disabled on booking_releases';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-    WHERE c.relname = 'bookings' AND t.tgname = 'trg_bookings_release_reaccept_guard'
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = 'public' AND c.relname = 'bookings'
+      AND t.tgname = 'trg_bookings_release_reaccept_guard'
       AND NOT t.tgisinternal AND t.tgenabled = 'O'
   ) THEN
     RAISE EXCEPTION 'ASSERTION FAILED: reaccept guard trigger missing or disabled on bookings';
@@ -479,4 +514,5 @@ COMMIT;
 -- DROP FUNCTION IF EXISTS booking_releases_outbox();
 -- DROP FUNCTION IF EXISTS release_booking(UUID, UUID, TEXT, TEXT);
 -- DROP TABLE IF EXISTS booking_releases;
+-- NOTIFY pgrst, 'reload schema';
 -- COMMIT;

@@ -185,8 +185,8 @@ function renderEvent(eventType, b, extra) {
       const releasedWhen = fmtWhenET(extra.pickup_at_release);
       const urgent = Date.parse(extra.pickup_at_release) - Date.now() < 2 * 3600e3;
       // The releaser had already stamped the fare collected: the live
-      // stamp was RESET to unpaid for the replacement driver — the human
-      // must reconcile who actually holds the money.
+      // stamp is PRESERVED so the passenger is never charged twice — the
+      // human must reconcile who actually holds the money.
       const paidWarning = extra.payment_status_at_release && extra.payment_status_at_release !== 'unpaid'
         ? '\n⚠️ Payment was already marked collected by the releasing driver — reconcile before pickup.'
         : '';

@@ -453,6 +453,18 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   });
 
   updateResult = { data: null, error: { code: 'P0001', message: 'released_by_this_driver' } };
+  currentBookingResult = { data: null, error: null };
+  r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
+  check('reaccept-guard re-read finds no booking -> honest 404, never a guessed conflict', () => {
+    assert.strictEqual(r.statusCode, 404);
+    const body = JSON.parse(r.body);
+    assert.deepStrictEqual(body, { error: 'Booking not found' });
+    assert.ok(!('currentStatus' in body));
+    assert.ok(!('currentDetailsVersion' in body));
+    assert.ok(!JSON.stringify(body).includes('unknown'));
+  });
+
+  updateResult = { data: null, error: { code: 'P0001', message: 'released_by_this_driver' } };
   currentBookingResult = { data: null, error: { message: 'db down' } };
   r = await post({ bookingId: BID, action: 'accept', expectedDetailsVersion: 1 }, 'tok-andres');
   check('guard conflict with a FAILED re-read -> 500, never a guessed 409', () => {

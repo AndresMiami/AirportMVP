@@ -262,8 +262,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
    Account continuity is server-backed: after login a normal passenger's
    nearest nonterminal booking reopens automatically, and create-booking
    blocks ordinary stale-tab/device duplicates by returning the existing
-   ride. A truly simultaneous first-insert race remains recorded for the
-   future migration-015 database constraint (013 shipped as the
+   ride. A truly simultaneous first-insert race remains recorded for a
+   future database-constraint migration (013 shipped as the
    cancellation policy; 014 is the pending-edit details_version
    migration). Ambassadors remain explicitly multi-ride.
    Drivers: admin-provisioned only. Session: 30-day inactivity timeout.

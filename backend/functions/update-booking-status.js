@@ -293,14 +293,17 @@ exports.handler = async (event) => {
           console.error('❌ reaccept-guard conflict re-read failed:', rereadError.message || rereadError);
           return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
         }
+        if (!current) {
+          return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
+        }
         return {
           statusCode: 409,
           headers,
           body: JSON.stringify({
             error: 'You released this ride — it\'s now with other drivers',
             code: 'released_by_you',
-            currentStatus: current?.status || 'unknown',
-            currentDetailsVersion: current?.details_version ?? null
+            currentStatus: current.status,
+            currentDetailsVersion: current.details_version ?? null
           })
         };
       }
