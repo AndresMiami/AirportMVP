@@ -237,7 +237,11 @@ function quoteRide(input) {
   }
   const card = rateCard;
 
-  if (typeof vehicle !== 'string' || !card.vehicles[vehicle]) {
+  // Own-property lookup ONLY: a prototype-inherited key ('__proto__',
+  // 'constructor', 'toString', …) must be an unknown vehicle, never a
+  // truthy accident that throws deeper in the pipeline.
+  if (typeof vehicle !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(card.vehicles, vehicle)) {
     return err('unknown_vehicle', `Unknown vehicle '${vehicle}'`, {
       knownVehicles: Object.keys(card.vehicles)
     });
@@ -250,8 +254,12 @@ function quoteRide(input) {
   if (typeof routeMinutes !== 'number' || !Number.isFinite(routeMinutes) || routeMinutes < 0) {
     return err('invalid_route_facts', 'routeMinutes must be a finite nonnegative number');
   }
-  if (typeof pickupAtMs !== 'number' || !Number.isFinite(pickupAtMs)) {
-    return err('invalid_pickup_time', 'pickupAtMs must be a finite epoch-milliseconds number');
+  // JS Dates are only valid within ±8.64e15 ms — a finite value beyond
+  // that produces an Invalid Date and would THROW in the time-zone
+  // formatting, breaking the never-throws contract.
+  if (typeof pickupAtMs !== 'number' || !Number.isFinite(pickupAtMs) ||
+      Math.abs(pickupAtMs) > 8640000000000000) {
+    return err('invalid_pickup_time', 'pickupAtMs must be a finite epoch-milliseconds number within the valid Date range');
   }
   if (bookingMode !== 'pickup' && bookingMode !== 'dropoff') {
     return err('invalid_booking_mode', "bookingMode must be 'pickup' or 'dropoff'");

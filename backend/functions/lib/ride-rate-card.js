@@ -17,12 +17,17 @@
 // configurable markups, and a time-dominant-with-distance-floor card.
 //
 // Validation contract: validateRateCard(card) either returns a deeply
-// frozen, BRANDED clone (the only form ride-quote.js accepts) or throws
-// with a message naming the first violated rule. A card that passed
+// frozen clone REGISTERED in a module-private WeakSet (the only form
+// ride-quote.js accepts — membership is unforgeable) or throws with a
+// message naming the first violated rule. A card that passed
 // validation cannot be mutated afterwards — freezing is part of the
 // contract, not a courtesy.
 
-const VALIDATED = Symbol.for('linkmia.validatedRateCard');
+// Module-private registry of validated cards. A WeakSet membership is
+// UNFORGEABLE (unlike a global-registry Symbol brand, which any caller
+// could stamp) and never walks prototype chains (Object.create of a
+// validated card is NOT validated).
+const VALIDATED_CARDS = new WeakSet();
 
 // Canonical vehicle keys — the ONLY keys a rate card may price. Alias
 // keys (e.g. 'suv') must be resolved by CALLERS before quoting; the
@@ -143,11 +148,16 @@ function deepFreeze(obj) {
   return Object.freeze(obj);
 }
 
-// Validate a rate card and return an immutable, branded clone. Throws
-// on the FIRST violated rule — a malformed configuration must never
-// reach a calculation.
-function validateRateCard(card) {
-  if (!card || typeof card !== 'object') fail('card must be an object');
+// Validate a rate card and return an immutable, registered clone.
+// Throws on the FIRST violated rule — a malformed configuration must
+// never reach a calculation. The CLONE is taken FIRST and validation
+// runs on the clone, so the certified object and the validated object
+// are the same object by construction — a caller's toJSON/getters
+// cannot swap values between the validation read and the clone
+// (verified TOCTOU class from review).
+function validateRateCard(rawCard) {
+  if (!rawCard || typeof rawCard !== 'object') fail('card must be an object');
+  const card = JSON.parse(JSON.stringify(rawCard));
 
   if (typeof card.pricingVersion !== 'string' || card.pricingVersion.trim() === '') {
     fail('pricingVersion must be a nonempty string');
@@ -271,17 +281,23 @@ function validateRateCard(card) {
     fail('psychologicalPricing must have boolean enabled, a known strategy, and integer thresholdCents');
   }
 
-  // Brand BEFORE freezing (defining a property on a frozen object
-  // throws); the clone means later mutation of the CALLER's object can
-  // never alter what was validated.
-  const clone = JSON.parse(JSON.stringify(card));
-  Object.defineProperty(clone, VALIDATED, { value: true, enumerable: false });
-  return deepFreeze(clone);
+  // The validated clone is frozen and registered — later mutation of
+  // the CALLER's object can never alter what was certified.
+  deepFreeze(card);
+  VALIDATED_CARDS.add(card);
+  return card;
 }
 
 function isValidatedRateCard(card) {
-  return Boolean(card && card[VALIDATED] === true);
+  return typeof card === 'object' && card !== null && VALIDATED_CARDS.has(card);
 }
+
+// The exported constants are themselves frozen: mutable module state
+// (e.g. pushing a key into CANONICAL_VEHICLES, or editing a rate on
+// the default card in a warm serverless instance) must never make two
+// identical validateRateCard calls behave differently.
+deepFreeze(LINKMIA_RATE_CARD);
+Object.freeze(CANONICAL_VEHICLES);
 
 module.exports = {
   LINKMIA_RATE_CARD,

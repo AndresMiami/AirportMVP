@@ -92,6 +92,35 @@ function assertParity(vehicle, miles, minutes, dateTime, origin, destination) {
     assert.strictEqual(q.quote.appliedSurcharges[i].amountCents,
       Math.round(g.breakdown.appliedSurcharges[i].amount * 100),
       `surcharge amount mismatch: ${label}`);
+    assert.strictEqual(q.quote.appliedSurcharges[i].rate,
+      g.breakdown.appliedSurcharges[i].rate, `surcharge rate mismatch: ${label}`);
+    assert.strictEqual(q.quote.appliedSurcharges[i].description,
+      g.breakdown.appliedSurcharges[i].description, `surcharge description mismatch: ${label}`);
+  }
+  // Breakdown payload parity — these are the audit/display fields a
+  // future endpoint persists; cent corruption here must not survive.
+  assert.strictEqual(q.quote.tieredTotalCents, Math.round(g.breakdown.tieredTotal * 100),
+    `tieredTotal mismatch: ${label}`);
+  if (g.breakdown.popularRoute) {
+    assert.ok(q.quote.popularRoute, `popularRoute missing on engine side: ${label}`);
+    assert.strictEqual(q.quote.popularRoute.flatRateCents,
+      Math.round(g.breakdown.popularRoute.flatRate * 100), `flat rate mismatch: ${label}`);
+    assert.strictEqual(q.quote.popularRoute.description,
+      g.breakdown.popularRoute.description, `route description mismatch: ${label}`);
+  } else {
+    assert.strictEqual(q.quote.popularRoute, null, `unexpected popularRoute: ${label}`);
+  }
+  if (g.breakdown.tierBreakdown) {
+    assert.strictEqual((q.quote.tierBreakdown || []).length, g.breakdown.tierBreakdown.length,
+      `tierBreakdown length mismatch: ${label}`);
+    for (let i = 0; i < g.breakdown.tierBreakdown.length; i++) {
+      assert.strictEqual(q.quote.tierBreakdown[i].miles, g.breakdown.tierBreakdown[i].miles,
+        `tier miles mismatch: ${label}`);
+      assert.strictEqual(q.quote.tierBreakdown[i].subtotalCents,
+        Math.round(g.breakdown.tierBreakdown[i].subtotal * 100), `tier subtotal mismatch: ${label}`);
+    }
+  } else {
+    assert.strictEqual(q.quote.tierBreakdown, null, `unexpected tierBreakdown: ${label}`);
   }
   assert.strictEqual(q.quote.pricingVersion, CARD.pricingVersion, 'pricingVersion must ride every quote');
   return q.quote;
@@ -160,7 +189,10 @@ async function check(name, fn) {
       miami('2026-08-22T14:00:00'), // Saturday: weekend
       miami('2026-08-23T14:00:00'), // Sunday: weekend
       miami('2026-08-22T23:00:00'), // Saturday night: weekend + night
-      miami('2026-08-23T07:30:00')  // Sunday peak: weekend + peak
+      miami('2026-08-23T07:30:00'), // Sunday peak: weekend + peak
+      miami('2026-08-17T14:00:00'), // MONDAY afternoon: NO weekend — pins the weekday map
+      miami('2026-08-23T23:59:00'), // Sunday 23:59: weekend + night (last weekend minute)
+      miami('2026-08-24T00:30:00')  // Monday 00:30: night only — weekend must have ENDED
     ];
     for (const t of times) {
       for (const vehicle of ['tesla', 'sprinter']) {
@@ -168,6 +200,14 @@ async function check(name, fn) {
         assertParity(vehicle, 8, 20, t);
       }
     }
+    // Pin the weekday map explicitly for the two days the fixture set
+    // exercises at the weekend boundary (a wrong Mon mapping must fail
+    // HERE, not survive as a phantom Monday surcharge).
+    const monday = engineQuote('tesla', 28, 40, miami('2026-08-17T14:00:00').getTime()).quote;
+    assert.deepStrictEqual(monday.appliedSurcharges, [], 'Monday afternoon carries NO surcharges');
+    const mondayNight = engineQuote('tesla', 28, 40, miami('2026-08-24T00:30:00').getTime()).quote;
+    assert.deepStrictEqual(mondayNight.appliedSurcharges.map((s) => s.type), ['night'],
+      'Monday 00:30 is night only — never weekend');
   });
 
   await check('GOLDEN + PRESERVED QUIRK: holiday matches the UTC date, not the Miami date', async () => {
@@ -238,6 +278,27 @@ async function check(name, fn) {
           `unexpected ending for $${dollars}`);
       }
     }
+    // Band coverage must be REAL, not accidental: each raw pre-rounding
+    // price must land in the intended band (a future rate change that
+    // collapses the fixtures into fewer bands must fail loudly).
+    const bandOf = (baseCents) => {
+      const d = baseCents / 100;
+      return d < 50 ? '<50' : d < 150 ? '50-150' : d < 500 ? '150-500' : '500+';
+    };
+    const observedBands = new Set(cases.map(([vehicle, miles, minutes]) =>
+      bandOf(engineQuote(vehicle, miles, minutes, NEUTRAL.getTime()).quote.baseCents)));
+    assert.deepStrictEqual([...observedBands].sort(),
+      ['150-500', '50-150', '500+', '<50'].sort(), 'fixtures must cover all four bands');
+    // The two documented discontinuity edges that only exact values can
+    // pin: a raw price of exactly $500.00 uses the 45/95 band (not the
+    // 150-500 band), and exactly $10.00 is AT the threshold (rounds to
+    // $9, not passed through). Both engineered via exact hourly bases.
+    const edge500 = assertParity('sprinter', 0, 200, NEUTRAL); // hourly: 200/60*150 = $500.00
+    assert.strictEqual(edge500.baseCents, 50000);
+    assert.strictEqual(edge500.finalCents, 54500, 'raw $500.00 must round UP into the 45/95 band ($545)');
+    const edge10 = assertParity('tesla', 0, 6, NEUTRAL); // hourly: 6/60*100 = $10.00
+    assert.strictEqual(edge10.baseCents, 1000);
+    assert.strictEqual(edge10.finalCents, 900, 'raw $10.00 is at the threshold and rounds to $9');
   });
 
   await check('GOLDEN: DST transitions price identically to the live calculator', async () => {
@@ -266,10 +327,13 @@ async function check(name, fn) {
 
   // ---------- ride-input validation ----------
   await check('unknown vehicle refused with the known-vehicle list (no silent alias mapping)', async () => {
-    for (const bad of ['suv', 'sedan', 'TESLA', '', null, undefined, 42]) {
+    // Prototype-inherited keys are the never-throws regression: a plain
+    // chain lookup would find Object.prototype members and crash later.
+    for (const bad of ['suv', 'sedan', 'TESLA', '', null, undefined, 42,
+      '__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
       const q = engineQuote(bad, 10, 20, NEUTRAL.getTime());
       assert.strictEqual(q.ok, false, `vehicle ${String(bad)} must be refused`);
-      assert.strictEqual(q.error.code, 'unknown_vehicle');
+      assert.strictEqual(q.error.code, 'unknown_vehicle', `vehicle ${String(bad)}`);
       assert.deepStrictEqual(q.error.details.knownVehicles, ['tesla', 'escalade', 'sprinter']);
     }
   });
@@ -285,6 +349,11 @@ async function check(name, fn) {
       [{ pickupAtMs: NaN }, 'invalid_pickup_time'],
       [{ pickupAtMs: '2026-08-18' }, 'invalid_pickup_time'],
       [{ pickupAtMs: undefined }, 'invalid_pickup_time'],
+      // Finite but beyond the valid Date range: must be a structured
+      // refusal, never a RangeError from the timezone formatting.
+      [{ pickupAtMs: 8640000000000001 }, 'invalid_pickup_time'],
+      [{ pickupAtMs: -8640000000000001 }, 'invalid_pickup_time'],
+      [{ pickupAtMs: Number.MAX_VALUE }, 'invalid_pickup_time'],
       [{ bookingMode: 'hourly' }, 'invalid_booking_mode']
     ];
     for (const [patch, code] of bads) {
@@ -296,6 +365,9 @@ async function check(name, fn) {
       assert.strictEqual(q.ok, false, JSON.stringify(patch));
       assert.strictEqual(q.error.code, code, JSON.stringify(patch));
     }
+    // The exact Date-range boundary itself stays quotable.
+    const atLimit = engineQuote('tesla', 10, 20, 8640000000000000);
+    assert.strictEqual(atLimit.ok, true, 'the maximum representable instant must still price');
   });
 
   await check('passenger/bag counts: integers only, at least one passenger, never fractional', async () => {
@@ -367,6 +439,48 @@ async function check(name, fn) {
     }
     assert.ok(isValidatedRateCard(CARD));
     assert.ok(!isValidatedRateCard(LINKMIA_RATE_CARD));
+    // The registry is UNFORGEABLE: stamping the old-style symbol brand
+    // onto a rigged card gains nothing, and a prototype child of a
+    // validated card is NOT validated (WeakSet membership never walks
+    // the prototype chain).
+    const forged = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    forged.vehicles.tesla.tiers[0].ratePerMileCents = 1;
+    Object.defineProperty(forged, Symbol.for('linkmia.validatedRateCard'), { value: true });
+    const fq = quoteRide({
+      vehicle: 'tesla', routeMiles: 10, routeMinutes: 20,
+      pickupAtMs: NEUTRAL.getTime(), passengers: 1, bags: 0, rateCard: forged
+    });
+    assert.strictEqual(fq.ok, false);
+    assert.strictEqual(fq.error.code, 'rate_card_not_validated');
+    assert.ok(!isValidatedRateCard(Object.create(CARD)),
+      'a prototype child of a validated card is not itself validated');
+  });
+
+  await check('TOCTOU closed: validation certifies the CLONE — toJSON cannot swap values after the checks', async () => {
+    const sneaky = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    const rigged = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    rigged.vehicles.tesla.tiers[0].ratePerMileCents = 1;
+    Object.defineProperty(sneaky, 'toJSON', { value: () => rigged, enumerable: false });
+    // Clone-first: what gets VALIDATED is what toJSON produced — so the
+    // rigged card is validated on its own (structurally valid) merits
+    // and certified AS the rigged card, never as a lie about `sneaky`.
+    const certified = validateRateCard(sneaky);
+    assert.strictEqual(certified.vehicles.tesla.tiers[0].ratePerMileCents, 1,
+      'the certified object IS the validated object — no divergence window');
+    // And a toJSON that produces an INVALID card is simply rejected.
+    const invalid = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    const brokenTarget = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    brokenTarget.pricingVersion = '';
+    Object.defineProperty(invalid, 'toJSON', { value: () => brokenTarget, enumerable: false });
+    assert.throws(() => validateRateCard(invalid), /Invalid rate card/);
+  });
+
+  await check('exported constants are frozen: module state cannot drift between validations', async () => {
+    const { CANONICAL_VEHICLES } = require(path.join(repoRoot, 'backend/functions/lib/ride-rate-card.js'));
+    assert.ok(Object.isFrozen(LINKMIA_RATE_CARD));
+    assert.ok(Object.isFrozen(LINKMIA_RATE_CARD.vehicles.tesla.tiers[0]));
+    assert.ok(Object.isFrozen(CANONICAL_VEHICLES));
+    assert.throws(() => { 'use strict'; CANONICAL_VEHICLES.push('limo'); }, TypeError);
   });
 
   await check('validateRateCard rejects every malformed configuration class', async () => {
