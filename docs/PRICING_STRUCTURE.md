@@ -8,8 +8,8 @@
 
 | Layer | Where | Status |
 |---|---|---|
-| **Live booking authority** | `pricing.js` (browser, loaded by `indexMVP.html`) | **This is what passengers are charged today.** Unchanged by 3C-2A. |
-| **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A. Cent-exact parity with `pricing.js`, proven by golden tests. **NOT wired to any live path yet** — invisible infrastructure. |
+| **Live booking authority** | `pricing.js` (browser, loaded by `indexMVP.html`) | **This computes the fare passengers see and the amount stored on the booking.** Nothing is charged automatically — payment is cash/Zelle collected at ride time (Stripe disabled). Unchanged by 3C-2A. |
+| **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A. Cent-exact parity with `pricing.js` **as run in an America/New_York (Miami-local) browser** — the canonical case; a passenger booking from another timezone can see different surcharges from the live calculator (a recorded quirk below). **NOT wired to any live path yet** — invisible infrastructure. |
 | Legacy server endpoint | `backend/functions/calculate-price.js` | Pre-dates the tiered system; **drifted** (flat per-mile rates, older base prices) and is not the booking authority. Untouched. |
 
 During 3C-2A nothing about production behavior changes. The server engine

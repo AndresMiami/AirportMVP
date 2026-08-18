@@ -122,6 +122,17 @@ function assertParity(vehicle, miles, minutes, dateTime, origin, destination) {
   } else {
     assert.strictEqual(q.quote.tierBreakdown, null, `unexpected tierBreakdown: ${label}`);
   }
+  // Canonical echoes + identity parity.
+  assert.strictEqual(q.quote.vehicleName, g.vehicleName, `vehicleName mismatch: ${label}`);
+  assert.strictEqual(q.quote.vehicle, vehicle);
+  assert.strictEqual(q.quote.routeMiles, g.distance, `distance echo mismatch: ${label}`);
+  assert.strictEqual(q.quote.routeMinutes, g.duration, `duration echo mismatch: ${label}`);
+  if (g.breakdown.tierBreakdown) {
+    for (let i = 0; i < g.breakdown.tierBreakdown.length; i++) {
+      assert.strictEqual(q.quote.tierBreakdown[i].ratePerMileCents,
+        Math.round(g.breakdown.tierBreakdown[i].rate * 100), `tier rate mismatch: ${label}`);
+    }
+  }
   assert.strictEqual(q.quote.pricingVersion, CARD.pricingVersion, 'pricingVersion must ride every quote');
   return q.quote;
 }
@@ -299,6 +310,41 @@ async function check(name, fn) {
     const edge10 = assertParity('tesla', 0, 6, NEUTRAL); // hourly: 6/60*100 = $10.00
     assert.strictEqual(edge10.baseCents, 1000);
     assert.strictEqual(edge10.finalCents, 900, 'raw $10.00 is at the threshold and rounds to $9');
+    // Exact before/at/after triplets around the $50 and $150 band
+    // edges, engineered via exact hourly bases (sprinter $150/h and
+    // tesla $100/h): the auto strategy is DISCONTINUOUS here and each
+    // side must be pinned, not just sampled.
+    const b4995 = assertParity('sprinter', 0, 19.998, NEUTRAL); // $49.995 -> <50 band
+    assert.strictEqual(b4995.finalCents, 4900, 'raw $49.995 rounds to $50 then band-1 gives $49');
+    const b50 = assertParity('sprinter', 0, 20, NEUTRAL);       // $50.00 -> 50-150 band
+    assert.strictEqual(b50.finalCents, 4500, 'raw $50.00 lands in band 2 and gives $45');
+    const b5001 = assertParity('sprinter', 0, 20.004, NEUTRAL); // $50.01 -> 50-150 band
+    assert.strictEqual(b5001.finalCents, 4500);
+    const b1499 = assertParity('tesla', 0, 89.94, NEUTRAL);     // $149.90 -> 50-150 band
+    assert.strictEqual(b1499.finalCents, 14500, 'raw $149.90 rounds to $150, band-2 %10<3 gives $145');
+    const b150 = assertParity('tesla', 0, 90, NEUTRAL);         // $150.00 -> 150-500 band
+    assert.strictEqual(b150.finalCents, 14900, 'raw $150.00 lands in band 3 and gives $149');
+    const b1501 = assertParity('tesla', 0, 90.06, NEUTRAL);     // $150.10 -> 150-500 band
+    assert.strictEqual(b1501.finalCents, 14900);
+  });
+
+  await check('static config parity: names, capacities, cancellation fee match the live calculator', async () => {
+    for (const key of ['tesla', 'escalade', 'sprinter']) {
+      const gv = golden.getVehicleConfig(key);
+      const cv = CARD.vehicles[key];
+      assert.strictEqual(cv.name, gv.name, `${key} name`);
+      assert.strictEqual(cv.capacity.passengers, gv.capacity.passengers, `${key} passengers`);
+      assert.strictEqual(cv.capacity.bags, gv.capacity.bags, `${key} bags`);
+      assert.strictEqual(cv.airportFeeCents, Math.round(gv.airportFee * 100), `${key} airport fee`);
+      assert.strictEqual(cv.hourlyProtectionCentsPerHour, Math.round(gv.hourlyProtection * 100), `${key} hourly`);
+      assert.strictEqual(cv.maxDistanceMiles, gv.maxDistance, `${key} max distance`);
+      for (let i = 0; i < gv.priceTiers.length; i++) {
+        assert.strictEqual(cv.tiers[i].minMiles, gv.priceTiers[i].minMiles, `${key} tier ${i} min`);
+        assert.strictEqual(cv.tiers[i].maxMiles, gv.priceTiers[i].maxMiles, `${key} tier ${i} max`);
+        assert.strictEqual(cv.tiers[i].ratePerMileCents, Math.round(gv.priceTiers[i].rate * 100), `${key} tier ${i} rate`);
+      }
+    }
+    assert.strictEqual(CARD.cancellationFeeCents, Math.round(golden.getCancellationFee() * 100));
   });
 
   await check('GOLDEN: DST transitions price identically to the live calculator', async () => {
@@ -368,6 +414,116 @@ async function check(name, fn) {
     // The exact Date-range boundary itself stays quotable.
     const atLimit = engineQuote('tesla', 10, 20, 8640000000000000);
     assert.strictEqual(atLimit.ok, true, 'the maximum representable instant must still price');
+  });
+
+  await check('MONEY SAFETY: unbounded durations refused — Number.MAX_VALUE can never mint Infinity money', async () => {
+    for (const minutes of [Number.MAX_VALUE, 1e15, 10081]) {
+      const q = engineQuote('sprinter', 10, minutes, NEUTRAL.getTime());
+      assert.strictEqual(q.ok, false, `minutes=${minutes} must be refused`);
+      assert.strictEqual(q.error.code, 'invalid_route_facts');
+    }
+    const week = engineQuote('sprinter', 10, 10080, NEUTRAL.getTime());
+    assert.strictEqual(week.ok, true, 'the one-week bound itself still prices');
+    assert.ok(Number.isSafeInteger(week.quote.finalCents));
+  });
+
+  await check('MONEY SAFETY: unsafe or unbounded cent values never validate; extreme bounded cards stay safe', async () => {
+    const reject = (fn) => {
+      const c = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+      fn(c);
+      assert.throws(() => validateRateCard(c), /Invalid rate card/);
+    };
+    reject((c) => { c.vehicles.tesla.tiers[0].ratePerMileCents = 2 ** 53; });     // unsafe integer
+    reject((c) => { c.vehicles.tesla.tiers[0].ratePerMileCents = 100000001; });   // beyond the $1M bound
+    reject((c) => { c.vehicles.tesla.hourlyProtectionCentsPerHour = 2 ** 53; });
+    reject((c) => { c.cancellationFeeCents = Number.MAX_SAFE_INTEGER + 2; });
+    reject((c) => { c.popularRoutes['MIA-MCO'].flatRateCents.tesla = 100000001; });
+    reject((c) => { c.surcharges.holiday.rate = 11; });                            // multiplier bound
+    reject((c) => { c.airportFeeScaling[0].factor = 101; });                       // factor bound
+    reject((c) => { c.airportFeeScalingBeyondFactor = Infinity; });
+    reject((c) => { c.maxDistanceMiles = 10001; });
+    reject((c) => { c.vehicles.tesla.capacity.passengers = 1001; });
+    // The EXTREME-but-bounded card: every value at its cap must still
+    // produce safe-integer money at the worst-case inputs.
+    const extreme = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    for (const v of Object.values(extreme.vehicles)) {
+      v.tiers.forEach((t) => { t.ratePerMileCents = 100000000; });
+      v.airportFeeCents = 100000000;
+      v.hourlyProtectionCentsPerHour = 100000000;
+    }
+    for (const s of Object.values(extreme.surcharges)) { if (s.rate) s.rate = 10; }
+    extreme.surcharges.night.rate = 10; extreme.surcharges.weekend.rate = 10;
+    extreme.surcharges.peak.rate = 10; extreme.surcharges.holiday.rate = 10;
+    const extremeCard = validateRateCard(extreme);
+    const worst = quoteRide({
+      vehicle: 'sprinter', routeMiles: 280, routeMinutes: 10080,
+      pickupAtMs: miami('2026-07-04T08:30:00').getTime(), // weekend+peak+holiday stack
+      passengers: 1, bags: 0, rateCard: extremeCard
+    });
+    assert.strictEqual(worst.ok, true);
+    for (const c of [worst.quote.finalCents, worst.quote.baseCents, worst.quote.hourlyPriceCents]) {
+      assert.ok(Number.isSafeInteger(c) && c >= 0, `unsafe money at the extreme: ${c}`);
+    }
+  });
+
+  await check('NEVER THROWS: Symbol/array/null-proto/hostile inputs get structured refusals', async () => {
+    const sym = Symbol('tesla');
+    const symQ = engineQuote(sym, 10, 20, NEUTRAL.getTime());
+    assert.strictEqual(symQ.ok, false);
+    assert.strictEqual(symQ.error.code, 'unknown_vehicle');
+    assert.ok(!symQ.error.message.includes('Symbol'), 'no coercion of the hostile value into the message');
+
+    const hostileCodes = [
+      [Symbol('MIA'), 'MCO'],
+      ['MIA', Symbol('MCO')],
+      [['MIA'], 'MCO'],
+      [Object.create(null), 'MCO'],
+      [{ toString() { throw new Error('boom'); } }, 'MCO'],
+      ['MIA', undefined],            // one-sided: both or neither
+      [undefined, 'MCO'],
+      ['', 'MCO'],                   // below the 2-char bound
+      ['MIA', 'X'.repeat(13)],       // beyond the 12-char bound
+      ['MIA', 'ChIJ0X8Q1234567890abcdefgh'] // place_id-shaped: refused, never silent
+    ];
+    for (const [o, d] of hostileCodes) {
+      const q = engineQuote('tesla', 10, 20, NEUTRAL.getTime(), { originCode: o, destinationCode: d });
+      assert.strictEqual(q.ok, false, `codes ${String(typeof o)}/${String(typeof d)} must be refused`);
+      assert.strictEqual(q.error.code, 'invalid_route_codes');
+    }
+    // Valid-but-unmatched codes (the production 'CUSTOM' placeholder
+    // shape) still quote via tiered pricing.
+    const custom = engineQuote('tesla', 10, 20, NEUTRAL.getTime(),
+      { originCode: 'MIA', destinationCode: 'CUSTOM' });
+    assert.strictEqual(custom.ok, true);
+    assert.strictEqual(custom.quote.popularRoute, null);
+    // Inherited-looking keys can never match a route (own-property).
+    const proto = engineQuote('tesla', 10, 20, NEUTRAL.getTime(),
+      { originCode: 'constructor', destinationCode: 'toString' });
+    assert.strictEqual(proto.ok, true);
+    assert.strictEqual(proto.quote.popularRoute, null);
+  });
+
+  await check('SEMANTIC card validation: impossible dates, incoherent windows, contradictions, serialization failures', async () => {
+    const reject = (fn) => {
+      const c = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+      fn(c);
+      assert.throws(() => validateRateCard(c), /Invalid rate card/);
+    };
+    reject((c) => { c.holidaysUtc.push('2026-02-30'); });   // shape-valid, calendar-impossible
+    reject((c) => { c.holidaysUtc.push('2026-13-01'); });
+    reject((c) => { c.surcharges.peak.startHour = 9; c.surcharges.peak.endHour = 7; }); // never fires
+    reject((c) => { c.surcharges.peak.startHour = 9; c.surcharges.peak.endHour = 9; });
+    reject((c) => { c.surcharges.night.startHour = 6; c.surcharges.night.endHour = 6; }); // covers all hours
+    reject((c) => { c.psychologicalPricing.enabled = true; c.psychologicalPricing.strategy = 'disabled'; });
+    // Serialization failures normalize into the SAME error contract.
+    const circular = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    circular.self = circular;
+    assert.throws(() => validateRateCard(circular), /Invalid rate card/);
+    const bigint = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    bigint.vehicles.tesla.airportFeeCents = 1000n;
+    assert.throws(() => validateRateCard(bigint), /Invalid rate card/);
+    const primitive = { toJSON: () => 'not-a-card' };
+    assert.throws(() => validateRateCard(primitive), /Invalid rate card/);
   });
 
   await check('passenger/bag counts: integers only, at least one passenger, never fractional', async () => {

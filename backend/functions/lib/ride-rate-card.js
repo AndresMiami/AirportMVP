@@ -129,12 +129,19 @@ function fail(rule) {
   throw new Error(`Invalid rate card: ${rule}`);
 }
 
+// MONEY SAFETY: every cents value must be a SAFE integer (IEEE-exact)
+// within a generous but hard bound — $1,000,000 in cents. Bounded card
+// values × the bounded service limit and duration keep every
+// intermediate product far inside Number.MAX_SAFE_INTEGER, so no valid
+// card can ever overflow a quote.
+const MAX_CENTS = 100000000;
+
 function isIntCents(v) {
-  return Number.isInteger(v) && Number.isFinite(v) && v >= 0;
+  return Number.isSafeInteger(v) && v >= 0 && v <= MAX_CENTS;
 }
 
 function isPositiveInt(v) {
-  return Number.isInteger(v) && v > 0;
+  return Number.isSafeInteger(v) && v > 0;
 }
 
 function isFiniteNonNeg(v) {
@@ -157,14 +164,29 @@ function deepFreeze(obj) {
 // (verified TOCTOU class from review).
 function validateRateCard(rawCard) {
   if (!rawCard || typeof rawCard !== 'object') fail('card must be an object');
-  const card = JSON.parse(JSON.stringify(rawCard));
+  // Cloning/serialization failures (circular references, BigInt, a
+  // toJSON that explodes) are CONFIGURATION errors and surface through
+  // the same documented contract as every other violation.
+  let card;
+  try {
+    card = JSON.parse(JSON.stringify(rawCard));
+  } catch (e) {
+    fail(`card is not JSON-serializable (${e.message})`);
+  }
+  // A toJSON can lawfully replace the object with a primitive — the
+  // CLONE is what gets certified, so the clone must be an object too.
+  if (!card || typeof card !== 'object' || Array.isArray(card)) {
+    fail('card must serialize to a plain object');
+  }
 
   if (typeof card.pricingVersion !== 'string' || card.pricingVersion.trim() === '') {
     fail('pricingVersion must be a nonempty string');
   }
   if (!KNOWN_STRATEGIES.includes(card.strategy)) fail(`unknown strategy '${card.strategy}'`);
-  if (!isPositiveInt(card.maxDistanceMiles)) fail('maxDistanceMiles must be a positive integer');
-  if (!isIntCents(card.cancellationFeeCents)) fail('cancellationFeeCents must be integer cents');
+  if (!isPositiveInt(card.maxDistanceMiles) || card.maxDistanceMiles > 10000) {
+    fail('maxDistanceMiles must be a positive integer <= 10000');
+  }
+  if (!isIntCents(card.cancellationFeeCents)) fail('cancellationFeeCents must be bounded safe-integer cents');
 
   if (!card.vehicles || typeof card.vehicles !== 'object') fail('vehicles missing');
   const keys = Object.keys(card.vehicles);
@@ -180,8 +202,9 @@ function validateRateCard(rawCard) {
     if (!isIntCents(v.hourlyProtectionCentsPerHour) || v.hourlyProtectionCentsPerHour === 0) {
       fail(`vehicle ${key} hourlyProtectionCentsPerHour must be positive integer cents`);
     }
-    if (!v.capacity || !isPositiveInt(v.capacity.passengers) || !isPositiveInt(v.capacity.bags)) {
-      fail(`vehicle ${key} capacity must be positive integers`);
+    if (!v.capacity || !isPositiveInt(v.capacity.passengers) || v.capacity.passengers > 1000 ||
+        !isPositiveInt(v.capacity.bags) || v.capacity.bags > 1000) {
+      fail(`vehicle ${key} capacity must be positive integers <= 1000`);
     }
     if (!isPositiveInt(v.maxDistanceMiles)) fail(`vehicle ${key} maxDistanceMiles must be a positive integer`);
     if (v.maxDistanceMiles !== card.maxDistanceMiles) {
@@ -214,21 +237,23 @@ function validateRateCard(rawCard) {
   }
   let prevMax = 0;
   for (const s of card.airportFeeScaling) {
-    if (!s || !Number.isFinite(s.maxMiles) || s.maxMiles <= prevMax) {
-      fail('airportFeeScaling thresholds must be strictly increasing');
+    if (!s || !Number.isFinite(s.maxMiles) || s.maxMiles <= prevMax || s.maxMiles > 100000) {
+      fail('airportFeeScaling thresholds must be strictly increasing and bounded');
     }
-    if (!isFiniteNonNeg(s.factor)) fail('airportFeeScaling factors must be finite and nonnegative');
+    if (!isFiniteNonNeg(s.factor) || s.factor > 100) {
+      fail('airportFeeScaling factors must be finite, nonnegative, and bounded');
+    }
     prevMax = s.maxMiles;
   }
-  if (!isFiniteNonNeg(card.airportFeeScalingBeyondFactor)) {
-    fail('airportFeeScalingBeyondFactor must be finite and nonnegative');
+  if (!isFiniteNonNeg(card.airportFeeScalingBeyondFactor) || card.airportFeeScalingBeyondFactor > 100) {
+    fail('airportFeeScalingBeyondFactor must be finite, nonnegative, and bounded');
   }
 
   if (!card.surcharges || typeof card.surcharges !== 'object') fail('surcharges missing');
   for (const name of ['night', 'weekend', 'peak', 'holiday']) {
     const s = card.surcharges[name];
-    if (!s || !Number.isFinite(s.rate) || s.rate < 1) {
-      fail(`surcharge ${name} rate must be a finite multiplier >= 1`);
+    if (!s || !Number.isFinite(s.rate) || s.rate < 1 || s.rate > 10) {
+      fail(`surcharge ${name} rate must be a finite multiplier between 1 and 10`);
     }
     if (typeof s.description !== 'string' || s.description.trim() === '') {
       fail(`surcharge ${name} needs a description`);
@@ -241,6 +266,17 @@ function validateRateCard(rawCard) {
       fail(`surcharge ${name} hours must be integers 0-23`);
     }
   }
+  // Window coherence: peak is a non-wrapping window (hour >= start &&
+  // hour < end) — start >= end can never fire. Night deliberately WRAPS
+  // midnight (hour >= start || hour < end) — but start === end would
+  // cover every hour of every day, which is a misconfiguration, not a
+  // surcharge.
+  if (card.surcharges.peak.startHour >= card.surcharges.peak.endHour) {
+    fail('surcharge peak window is incoherent (startHour must be before endHour)');
+  }
+  if (card.surcharges.night.startHour === card.surcharges.night.endHour) {
+    fail('surcharge night window is incoherent (startHour equals endHour covers all hours)');
+  }
   if (!Array.isArray(card.surcharges.weekend.days) ||
       card.surcharges.weekend.days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
     fail('surcharge weekend days must be integers 0-6');
@@ -250,6 +286,12 @@ function validateRateCard(rawCard) {
   for (const h of card.holidaysUtc) {
     if (typeof h !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(h)) {
       fail(`holiday '${h}' must be a YYYY-MM-DD date string`);
+    }
+    // The date must EXIST on the calendar: '2026-02-30' or '2026-13-01'
+    // pass the shape test but could never match a real pickup.
+    const roundTrip = new Date(h + 'T00:00:00Z');
+    if (Number.isNaN(roundTrip.getTime()) || roundTrip.toISOString().slice(0, 10) !== h) {
+      fail(`holiday '${h}' is not a real calendar date`);
     }
   }
   if (new Set(card.holidaysUtc).size !== card.holidaysUtc.length) {
@@ -278,7 +320,12 @@ function validateRateCard(rawCard) {
   const p = card.psychologicalPricing;
   if (!p || typeof p.enabled !== 'boolean' || !KNOWN_PSYCH_STRATEGIES.includes(p.strategy) ||
       !isIntCents(p.thresholdCents)) {
-    fail('psychologicalPricing must have boolean enabled, a known strategy, and integer thresholdCents');
+    fail('psychologicalPricing must have boolean enabled, a known strategy, and bounded safe-integer thresholdCents');
+  }
+  // Contradiction guard: 'disabled' as an ENABLED strategy is a config
+  // that says two opposite things; disable via the flag instead.
+  if (p.enabled && p.strategy === 'disabled') {
+    fail("psychologicalPricing is contradictory (enabled with strategy 'disabled')");
   }
 
   // The validated clone is frozen and registered — later mutation of

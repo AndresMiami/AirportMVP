@@ -239,10 +239,13 @@ function quoteRide(input) {
 
   // Own-property lookup ONLY: a prototype-inherited key ('__proto__',
   // 'constructor', 'toString', …) must be an unknown vehicle, never a
-  // truthy accident that throws deeper in the pipeline.
+  // truthy accident that throws deeper in the pipeline. The error
+  // message interpolates the value ONLY when it is already a string —
+  // a Symbol (or a hostile toString) must never reach coercion.
   if (typeof vehicle !== 'string' ||
       !Object.prototype.hasOwnProperty.call(card.vehicles, vehicle)) {
-    return err('unknown_vehicle', `Unknown vehicle '${vehicle}'`, {
+    const shown = typeof vehicle === 'string' ? ` '${vehicle}'` : '';
+    return err('unknown_vehicle', `Unknown vehicle${shown}`, {
       knownVehicles: Object.keys(card.vehicles)
     });
   }
@@ -251,8 +254,13 @@ function quoteRide(input) {
   if (typeof routeMiles !== 'number' || !Number.isFinite(routeMiles) || routeMiles < 0) {
     return err('invalid_route_facts', 'routeMiles must be a finite nonnegative number');
   }
-  if (typeof routeMinutes !== 'number' || !Number.isFinite(routeMinutes) || routeMinutes < 0) {
-    return err('invalid_route_facts', 'routeMinutes must be a finite nonnegative number');
+  // Bounded on purpose (money safety): an unbounded finite duration
+  // (e.g. Number.MAX_VALUE) would overflow the hourly-protection
+  // arithmetic into Infinity. One week covers any ride LinkMia could
+  // ever quote; the output seal below is the belt behind this check.
+  if (typeof routeMinutes !== 'number' || !Number.isFinite(routeMinutes) ||
+      routeMinutes < 0 || routeMinutes > 10080) {
+    return err('invalid_route_facts', 'routeMinutes must be a finite nonnegative number of minutes (max one week)');
   }
   // JS Dates are only valid within ±8.64e15 ms — a finite value beyond
   // that produces an Invalid Date and would THROW in the time-zone
@@ -301,13 +309,28 @@ function quoteRide(input) {
       });
   }
 
+  // Route codes: BOTH absent, or BOTH canonical bounded strings —
+  // nothing else. No coercion ever (a Symbol, array, null-prototype
+  // object, or hostile toString must produce a structured refusal,
+  // never a throw or a silent no-match). Deliberate strictness beyond
+  // pricing.js, which crashes on non-strings.
+  const codeAbsent = (c) => c === null || c === undefined;
+  const codeValid = (c) => typeof c === 'string' && /^[A-Za-z0-9]{2,12}$/.test(c);
+  if (!(codeAbsent(originCode) && codeAbsent(destinationCode)) &&
+      !(codeValid(originCode) && codeValid(destinationCode))) {
+    return err('invalid_route_codes',
+      'originCode and destinationCode must both be absent or both be 2-12 character alphanumeric route codes');
+  }
+
   // ---- fare (production float pipeline, in exact production order) ----
   let popularRoute = null;
   let tieredDollars = 0;
   let tierBreakdown = null;
-  if (originCode && destinationCode) {
-    const key = `${String(originCode).toUpperCase()}-${String(destinationCode).toUpperCase()}`;
-    const route = card.popularRoutes[key];
+  if (!codeAbsent(originCode)) {
+    const key = `${originCode.toUpperCase()}-${destinationCode.toUpperCase()}`;
+    // Own-property lookup: an inherited key can never match a route.
+    const route = Object.prototype.hasOwnProperty.call(card.popularRoutes, key)
+      ? card.popularRoutes[key] : null;
     if (route) {
       popularRoute = { key, description: route.description, flatRateCents: route.flatRateCents[vehicle] };
       tieredDollars = route.flatRateCents[vehicle] / 100;
@@ -327,6 +350,21 @@ function quoteRide(input) {
 
   const { finalDollars, applied } = applySurcharges(card, baseDollars, pickupAtMs);
   const psychDollars = psychologicalDollars(card.psychologicalPricing, finalDollars);
+
+  // MONEY SEAL (fail closed): every monetary output must be a finite,
+  // nonnegative SAFE integer number of cents. Bounded cards and bounded
+  // inputs should make this unreachable — if arithmetic ever produces
+  // anything else, the quote is refused, never emitted.
+  const moneyOutputs = [
+    toCents(tieredDollars), toCents(feeDollars), toCents(hourlyDollars),
+    toCents(baseDollars), toCents(psychDollars),
+    ...applied.map((s) => s.amountCents),
+    ...(tierBreakdown || []).map((t) => t.subtotalCents)
+  ];
+  if (moneyOutputs.some((c) => !Number.isSafeInteger(c) || c < 0)) {
+    return err('unrepresentable_fare',
+      'Calculated fare is not representable as safe nonnegative integer cents — quote refused');
+  }
 
   return {
     ok: true,
