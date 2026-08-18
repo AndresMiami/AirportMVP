@@ -338,13 +338,34 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   "Self-service changes while operationally safe; direct coordination
   once the driver is committed; human review before declaring a no-show
   or driver compensation"):
-  * PR 3C-1 Release ride — BUILT (this PR; migration 016). CONFIRMED-only
+  * PR 3C-1 Release ride — SHIPPED (merge 4512a17, migration 016) and
+    PRODUCTION FIELD-TESTED (2026-08-17, multi-driver): sequential
+    Andres/Jose releases, permanent reaccept exclusion, replacement
+    accept, passenger reassignment messaging, urgent-from-snapshot,
+    paid-stamp survival + reconcile warning, post-release cancel
+    pending/free, push/Telegram/watchdog all verified. CONFIRMED-only
     driver escape hatch, rules recorded in the lifecycle section above.
-  * PR 3C-2 pricing/capacity hardening — NEXT: client-calculated price +
-    client-only capacity are BLOCKERS for confirmed editing; server must
-    verify (signed quote on calculate-price.js, or server-side route
-    fetch converging with the Routes API work). One mechanism for both
-    pending and confirmed edits.
+    FUTURE operational follow-up (record only): when every eligible
+    driver has released a booking, LinkMia may eventually need an
+    explicit audited admin-assignment capability. It must preserve
+    every release record and must not weaken the rule preventing
+    drivers from reclaiming their own released commitments.
+  * PR 3C-2A server pricing engine — BUILT (this PR): the canonical,
+    PURE server-side pricing/capacity engine
+    (backend/functions/lib/ride-rate-card.js + ride-quote.js) — a
+    validated, versioned, frozen RATE CARD separated from the
+    calculation machinery; integer cents; America/New_York pinned;
+    cent-exact golden parity with pricing.js (quirks preserved and
+    recorded, never silently fixed — see docs/PRICING_STRUCTURE.md).
+    DARK by design: **pricing.js remains the live booking authority**
+    until the later coordinated enforcement — the server engine is NOT
+    authoritative in production yet. Future Supabase pricing profiles /
+    ambassador dashboard / markups and the time-dominant rate card are
+    architecturally supported and explicitly deferred.
+  * PR 3C-2B/2C — NEXT: authoritative server route/quote service
+    (signed quotes, Routes API convergence), then endpoint enforcement
+    in create-booking/update-pending-booking. One mechanism for both
+    pending and confirmed edits; blockers for confirmed editing.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
     machinery extended (same form/row/details_version CAS), edits
     immediately authoritative, NO driver approval queue (release is the
