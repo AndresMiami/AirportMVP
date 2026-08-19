@@ -362,10 +362,45 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     authoritative in production yet. Future Supabase pricing profiles /
     ambassador dashboard / markups and the time-dominant rate card are
     architecturally supported and explicitly deferred.
-  * PR 3C-2B/2C — NEXT: authoritative server route/quote service
-    (signed quotes, Routes API convergence), then endpoint enforcement
-    in create-booking/update-pending-booking. One mechanism for both
-    pending and confirmed edits; blockers for confirmed editing.
+  * PR 3C-2B1 server quote service — BUILT (this PR): DARK
+    `/api/quote-ride` (nothing calls it). Trusted-INTENT boundary
+    (strict field allowlist; airportCode + Google place_id resolved
+    SERVER-side to one identity for routing and the future stored
+    address; client route facts/coordinates/bags rejected by name);
+    Routes API computeRoutes with place_id waypoints both sides,
+    TRAFFIC_AWARE, minimal field mask incl. fallbackInfo, 8s timeout,
+    strict "123s" duration parsing, ONE attempt; departureTime rule:
+    >5min-past pickups 400 (never re-routed as now), ±5min omits
+    departureTime, future passes the contractual instant verbatim;
+    quantization mirrors indexMVP getRouteData exactly (0.1mi /
+    whole minutes); routeQuality 'traffic_aware'|'fallback' stamped
+    in response AND token (2B2 owes a deliberate decision before
+    displaying fallback pricing); all-vehicles response with honest
+    passengerCapacityChecked:true / luggageCapacityChecked:false
+    (bags DELIBERATELY dormant — the UI collects no bag count);
+    rate-card-resolver seam (code card today; documented future
+    fail-closed override contract); signed tokens (HMAC v1, kid
+    rotation via QUOTE_SIGNING_CURRENT/PREVIOUS_ID+SECRET, purpose
+    'create' only, dual auth-user+customer binding, intentHash instead
+    of location data, 15-min price-hold TTL — replay within TTL is a
+    stated stateless-HMAC property, jti deferred to 2C); dark-phase
+    QUOTE_SHADOW_ALLOWLIST (auth user ids) before any Google call;
+    sanitized telemetry (no addresses/place_ids/identities/raw
+    provider errors); kill switch QUOTE_SERVICE_DISABLED. ROLLOUT
+    GATES (not code): two restricted server keys
+    (GOOGLE_ROUTES_API_KEY, GOOGLE_PLACES_SERVER_API_KEY), GCP quota
+    caps, and the baseline Google policy review INCLUDING any
+    Terms/Privacy/attribution work it requires — complete BEFORE
+    enabling the production endpoint. Storage-specific Google review
+    remains the 2C gate (2B1 stores nothing).
+  * PR 3C-2B2/2C — NEXT: browser integration (server quotes displayed,
+    explicit passenger acceptance of price differences, allowlist
+    removal, indexMVP must retain autocomplete's place_id), then
+    endpoint enforcement in create-booking/update-pending-booking
+    (verify-or-reject, snapshot migration, strictness fixes,
+    calculate-price.js retirement, eventual pricing.js deletion). One
+    mechanism for both pending and confirmed edits; blockers for
+    confirmed editing.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
     machinery extended (same form/row/details_version CAS), edits
     immediately authoritative, NO driver approval queue (release is the
