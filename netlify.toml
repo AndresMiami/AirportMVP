@@ -72,6 +72,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/quote-ride"
+  to = "/.netlify/functions/quote-ride"
+  status = 200
+
+[[redirects]]
   from = "/api/profile"
   to = "/.netlify/functions/profile"
   status = 200
