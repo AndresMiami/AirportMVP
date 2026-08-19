@@ -6,6 +6,14 @@
 // store. Clients never supply coordinates or free text, so the routed
 // place and the stored place can never silently differ.
 //
+// ONE CANONICAL ID: Google may answer a Place Details lookup with a
+// DIFFERENT place id than the one submitted (ids are refreshed and
+// superseded over time). The resolved id is therefore the canonical
+// one, and the caller must use it for routing, for the response, and
+// for the intentHash alike — never a mix. The response returns it so
+// 2B2 resubmits the canonical id and 2C's intentHash recomputation
+// matches without a second Places call.
+//
 // Server-side ONLY: the Places API (New) call uses the dedicated
 // GOOGLE_PLACES_SERVER_API_KEY (restricted to Places API (New)) —
 // never the browser-recoverable maps key. One attempt, bounded
@@ -14,6 +22,15 @@
 // LinkMia's service airports — server-known identities (place IDs and
 // canonical display data mirror the Railway proxy's pre-cache, the
 // same identities the autocomplete surfaces to passengers today).
+//
+// OPERATIONAL RISK, RECORDED: these three ids are PINNED and never pass
+// through resolvePlace, even though this module's whole premise is that
+// Google supersedes place ids. Every route request uses one of them as
+// an endpoint, so if Google retires one, EVERY quote for that airport
+// fails — surfacing only as a generic routing refusal. There is no code
+// fix worth a per-request Places call for a static list; the control is
+// operational: verify all three resolve as part of the rollout smoke
+// matrix, and re-verify whenever quotes for one airport start failing.
 const AIRPORTS = Object.freeze({
   MIA: Object.freeze({
     code: 'MIA',
@@ -35,49 +52,90 @@ const AIRPORTS = Object.freeze({
   })
 });
 
-// Google place_id shape: opaque token, typically 27-80 chars. Bounded
-// and character-restricted — never interpolated into logs or errors.
-const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,256}$/;
+// Google place_id shape: an opaque token. Google documents NO maximum
+// length, so MAX_PLACE_ID_LEN is an operational bound of our own (a
+// request body sane enough to route and log), not a spec limit. The
+// character class is a submitted-input whitelist; the value is also
+// URL-encoded at the call site, so neither the bound nor the class is
+// the only thing standing between a client string and a request URL.
+const MAX_PLACE_ID_LEN = 512;
+const PLACE_ID_RE = new RegExp(`^[A-Za-z0-9_-]{10,${MAX_PLACE_ID_LEN}}$`);
 
 const PLACES_TIMEOUT_MS = 8000;
 
+// Own-property lookup ONLY: a bare `AIRPORTS[code]` answers truthily for
+// 'constructor', 'toString', '__proto__' and every other prototype
+// member, which would carry an unknown code past the whitelist and on
+// into paid Places and Routes calls.
 function airportByCode(code) {
   if (typeof code !== 'string') return null;
-  return AIRPORTS[code] || null;
+  if (!Object.prototype.hasOwnProperty.call(AIRPORTS, code)) return null;
+  return AIRPORTS[code];
 }
 
 function isValidPlaceId(placeId) {
   return typeof placeId === 'string' && PLACE_ID_RE.test(placeId);
 }
 
-// Resolve a place_id to its canonical formatted address via Places API
-// (New). Returns { ok:true, placeId, formattedAddress } or
-// { ok:false, reason } — reasons are sanitized classes, never raw
-// provider text. fetchImpl is injectable for tests.
-async function resolvePlace(placeId, { apiKey, fetchImpl }) {
+// Google's OWN id is trusted provider output, not client input: it is
+// bounded and non-empty checked, but not held to our submitted-input
+// character class (that class is our assumption, and rejecting a
+// legitimate provider id would fail an honest booking). It never
+// reaches a URL — only the routing body, the response, and the hash.
+function usableResolvedId(id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= MAX_PLACE_ID_LEN;
+}
+
+// Resolve a place_id to its canonical identity via Places API (New).
+// Returns { ok:true, placeId, requestedPlaceId, substituted, formattedAddress }
+// or { ok:false, reason } — reasons are sanitized classes, never raw
+// provider text. `placeId` is the CANONICAL id: Google's returned id
+// when usable, otherwise the submitted one. fetchImpl is injectable.
+async function resolvePlace(placeId, { apiKey, fetchImpl, deadlineMs }) {
   if (!isValidPlaceId(placeId)) {
     return { ok: false, reason: 'invalid_place_id' };
   }
   const doFetch = fetchImpl || fetch;
+  // The per-call bound never outlives the caller's SHARED budget: two
+  // independent 8s waits would exceed the platform's synchronous
+  // function limit and get the invocation killed AFTER the paid calls.
+  const budget = Number.isFinite(deadlineMs)
+    ? Math.min(PLACES_TIMEOUT_MS, deadlineMs - Date.now())
+    : PLACES_TIMEOUT_MS;
+  if (budget <= 0) return { ok: false, reason: 'places_timeout' };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PLACES_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), budget);
   try {
-    const res = await doFetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-      method: 'GET',
-      headers: {
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'id,formattedAddress'
-      },
-      signal: controller.signal
-    });
+    const res = await doFetch(
+      `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`,
+      {
+        method: 'GET',
+        headers: {
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'id,formattedAddress'
+        },
+        signal: controller.signal
+      }
+    );
     if (!res.ok) {
-      return { ok: false, reason: res.status >= 500 ? 'places_5xx' : 'places_4xx' };
+      if (res.status >= 500) return { ok: false, reason: 'places_5xx' };
+      // 408/429 are TRANSIENT; a 404/400 means this id is dead and no
+      // amount of retrying (or paying) will resolve it.
+      if (res.status === 429 || res.status === 408) return { ok: false, reason: 'places_rate_limited' };
+      return { ok: false, reason: 'places_4xx' };
     }
     const body = await res.json().catch(() => null);
     if (!body || typeof body.formattedAddress !== 'string' || body.formattedAddress.trim() === '') {
       return { ok: false, reason: 'places_parse_error' };
     }
-    return { ok: true, placeId, formattedAddress: body.formattedAddress };
+    const resolvedId = usableResolvedId(body.id) ? body.id : placeId;
+    return {
+      ok: true,
+      placeId: resolvedId,
+      requestedPlaceId: placeId,
+      substituted: resolvedId !== placeId,
+      formattedAddress: body.formattedAddress
+    };
   } catch (e) {
     return { ok: false, reason: e && e.name === 'AbortError' ? 'places_timeout' : 'places_network_error' };
   } finally {
@@ -85,4 +143,10 @@ async function resolvePlace(placeId, { apiKey, fetchImpl }) {
   }
 }
 
-module.exports = { AIRPORTS, airportByCode, isValidPlaceId, resolvePlace };
+module.exports = {
+  AIRPORTS,
+  airportByCode,
+  isValidPlaceId,
+  resolvePlace,
+  MAX_PLACE_ID_LEN
+};

@@ -25,9 +25,16 @@ const DEFAULT_CARD = validateRateCard(LINKMIA_RATE_CARD);
 
 // Context: { authUserId, customerId, hostId, pickupAtMs } — accepted
 // and currently unused (the future override lookup keys on it).
-// Returns { ok:true, card, source, resolvedVersion }.
+// Returns a Promise of { ok:true, card, source, resolvedVersion }.
+//
+// ASYNC BY CONTRACT, even though today's answer is synchronous: the
+// override lookup this seam exists for is a database call. Declaring it
+// async now is what actually makes the "slot in without any caller
+// changing" promise true — a sync function whose caller does not await
+// cannot be replaced by a Supabase-backed one without touching every
+// call site.
 // eslint-disable-next-line no-unused-vars
-function resolveRateCard(context) {
+async function resolveRateCard(context) {
   return {
     ok: true,
     card: DEFAULT_CARD,

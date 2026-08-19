@@ -389,13 +389,56 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     provider errors); kill switch QUOTE_SERVICE_DISABLED. ROLLOUT
     GATES (not code): two restricted server keys
     (GOOGLE_ROUTES_API_KEY, GOOGLE_PLACES_SERVER_API_KEY), GCP quota
-    caps, and the baseline Google policy review INCLUDING any
+    caps sized at **Compute Routes Pro** pricing (TRAFFIC_AWARE sets
+    that floor; the minimal field mask only holds the Enterprise
+    ceiling), and the baseline Google policy review INCLUDING any
     Terms/Privacy/attribution work it requires — complete BEFORE
     enabling the production endpoint. Storage-specific Google review
     remains the 2C gate (2B1 stores nothing).
+    CORRECTION ROUND (post-review, same PR) — five contract rules that
+    2B2/2C MUST honor: (1) CANONICAL PLACE ID — Google may answer Place
+    Details with a REPLACEMENT id (address-range and subpremise inputs,
+    i.e. LinkMia's condo/hotel class). The resolved id is canonical and
+    is used for routing, the response, and intentHash alike; 2B2 must
+    resubmit `quote.intent.placeId` VERBATIM (not autocomplete's
+    original id) or 2C's hash recomputation will reject honest
+    bookings. (2) NO `vehicle` REQUEST FIELD — this is an all-vehicles
+    contract, so each token's intentHash covers ITS OWN vehicle; a
+    shared preference hash gave zero vehicle binding (a cheap sibling
+    token priced an expensive vehicle) and no fixed 2C recomputation
+    rule could serve both request shapes. A client that sends `vehicle`
+    now gets a 400. (3) TOKEN VERIFICATION FAILS CLOSED — exact v1
+    schema (an unsigned extra property is a rejection), mandatory
+    expectations incl. vehicle + intentHash, finite clock, exact TTL,
+    inclusive `nowMs >= exp`, strict canonical base64url. (4) SIGNING
+    KEYS resolve through ONE canonical `resolveSigningKeys` (32-byte
+    floor, bounded key id, all-or-nothing distinct previous pair) that
+    2C's verification MUST reuse — this is also what finally makes the
+    advertised env-driven rotation real in runtime code. (5) ATOMIC
+    TOKEN CONSUMPTION (single-use jti or an equivalent idempotency key
+    written in the booking transaction) is a MANDATORY 2C gate: the
+    one-nonterminal-booking check is check-then-insert and ambassadors
+    are exempt, so it is NOT a replay defense and must never be cited
+    as one. The token STRING is canonical (one quote = one valid
+    string), so a jti/dedup gate finally has a stable key.
+    THREE MORE 2C GATES surfaced by the same pass: (a) the ADDRESS a
+    booking stores is bound by nothing — `bookings` has no place_id
+    column and pickup/dropoff_location are client free text, so 2C must
+    persist the quoted canonical place_id (migration) or the signed
+    quote guarantees a price for a route the stored address need not
+    match; (b) intentHash is an UNKEYED digest over a small guessable
+    domain and the payload carries pickupAtMs/vehicle in plaintext — a
+    leaked token is an address-CONFIRMATION oracle, so 2C should decide
+    deliberately whether to key it (HMAC); (c) the three pinned airport
+    place ids never pass through resolvePlace — verify they resolve in
+    the rollout smoke matrix, since a retired id silently kills every
+    quote for that airport.
   * PR 3C-2B2/2C — NEXT: browser integration (server quotes displayed,
     explicit passenger acceptance of price differences, allowlist
-    removal, indexMVP must retain autocomplete's place_id), then
+    removal, indexMVP must retain autocomplete's place_id AND then
+    resubmit the quote's CANONICAL placeId; pickupAt must carry a UTC
+    offset — an offset-less instant is reinterpreted in the server's
+    zone and silently reprices), then
     endpoint enforcement in create-booking/update-pending-booking
     (verify-or-reject, snapshot migration, strictness fixes,
     calculate-price.js retirement, eventual pricing.js deletion). One

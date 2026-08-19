@@ -1,6 +1,6 @@
 // Server quote endpoint (PR 3C-2B1) — DARK by design.
 //   POST /api/quote-ride { mode, airportCode, placeId, pickupAt,
-//                          passengers, vehicle? }
+//                          passengers }
 //     -> all-vehicles server quote, each with a signed token.
 //
 // Nothing in production calls this endpoint: it exists so the
@@ -17,6 +17,20 @@
 // place_id to ONE identity used for routing and the future stored
 // address alike.
 //
+// ALL VEHICLES, NO PREFERENCE: this endpoint prices every vehicle on
+// the card and signs one token per vehicle, each bound to ITS OWN
+// vehicle through both the payload field and the intentHash. There is
+// deliberately no `vehicle` request field — in an all-vehicles contract
+// a "preference" could only perturb the hash, which is exactly the
+// incoherence that would let a token's payload vehicle and its
+// intentHash disagree. The passenger's choice is expressed by which
+// token they present at 2C.
+//
+// CANONICAL PLACE ID: the response echoes the id Google RESOLVED, not
+// the id submitted (Google may supersede an id). 2B2 must resubmit
+// `quote.intent.placeId` verbatim so 2C's intentHash recomputation
+// matches without a second Places call.
+//
 // ACCESS (dark phase): signed-in customer AND the explicit
 // QUOTE_SHADOW_ALLOWLIST of auth user ids — "signed-in" is every
 // passenger, and a dark endpoint must not let curiosity spend Google
@@ -29,14 +43,63 @@ const { createClient } = require('@supabase/supabase-js');
 const { airportByCode, isValidPlaceId, resolvePlace } = require('./lib/place-identity');
 const { computeRouteFacts, isMeaningfullyPast } = require('./lib/route-facts');
 const { resolveRateCard } = require('./lib/rate-card-resolver');
-const { computeIntentHash, signQuoteToken, QUOTE_TTL_MS } = require('./lib/quote-token');
+const { computeIntentHash, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require('./lib/quote-token');
 const { quoteRide } = require('./lib/ride-quote');
 
 // The strict intent allowlist — the boundary is enforced, not advisory.
-const ALLOWED_FIELDS = ['mode', 'airportCode', 'placeId', 'pickupAt', 'passengers', 'vehicle'];
+const ALLOWED_FIELDS = ['mode', 'airportCode', 'placeId', 'pickupAt', 'passengers'];
+
+// RFC 3339 with a MANDATORY offset. `Date.parse` would happily accept
+// '2026-08-20' and '2026-08-20T10:00:00' — the latter is interpreted in
+// the SERVER's local zone, so the same submitted string would mean a
+// different contractual instant depending on where the function runs
+// (13 hours apart between UTC and Asia/Tokyo). A pickup instant is a
+// contract; it must be unambiguous on its face.
+const RFC3339_RE = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:[Zz]|[+-]\d{2}:\d{2})$/;
+
+// Parse a strict RFC 3339 instant, or NaN. The calendar is checked
+// explicitly because Date.parse SILENTLY ROLLS OVER an impossible date
+// — '2099-02-30T10:00:00Z' becomes March 2 rather than an error, which
+// would book a different day than the passenger wrote.
+function parseRfc3339(value) {
+  if (typeof value !== 'string') return NaN;
+  const m = RFC3339_RE.exec(value);
+  if (!m) return NaN;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return NaN;
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return NaN;
+  return Date.parse(value);
+}
 
 function authUnavailable(error) {
   return error?.name === 'AuthRetryableFetchError' || !error?.status || error.status >= 500;
+}
+
+// One SHARED budget for both provider calls. Netlify's synchronous
+// function limit (10s by default, and netlify.toml sets no override) is
+// LESS than two independent 8s waits, so an unbudgeted pair can be
+// killed by the platform AFTER both calls are billed — losing the
+// telemetry for spend that already happened. 7s leaves headroom for the
+// two Supabase round trips and the response.
+const PROVIDER_BUDGET_MS = 7000;
+
+// Permanent, client-caused failures must NOT look retryable: a 502
+// invites a retry that buys another Places + Compute Routes Pro pair
+// and can never succeed.
+// A dead/unknown place id and an unroutable pair are permanent. A rate
+// limit, a 5xx, a timeout, or a response we could not parse are NOT the
+// client's fault and stay 502.
+const PLACE_INPUT_FAILURES = new Set(['invalid_place_id', 'places_4xx']);
+const NO_ROUTE_FAILURES = new Set(['routes_4xx', 'routes_no_route']);
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 exports.handler = async (event) => {
@@ -61,12 +124,17 @@ exports.handler = async (event) => {
   const anonKey = process.env.SUPABASE_ANON_KEY;
   const routesKey = process.env.GOOGLE_ROUTES_API_KEY;
   const placesKey = process.env.GOOGLE_PLACES_SERVER_API_KEY;
-  const signingId = process.env.QUOTE_SIGNING_CURRENT_ID;
-  const signingSecret = process.env.QUOTE_SIGNING_CURRENT_SECRET;
   const allowlistRaw = process.env.QUOTE_SHADOW_ALLOWLIST;
-  if (!supabaseUrl || !serviceKey || !anonKey || !routesKey || !placesKey ||
-      !signingId || !signingSecret || !allowlistRaw) {
+  if (!supabaseUrl || !serviceKey || !anonKey || !routesKey || !placesKey || !allowlistRaw) {
     console.error('❌ quote-ride configuration incomplete');
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
+  }
+  // Signing keys go through the ONE canonical resolver that 2C's
+  // verification will also use: a present-but-weak secret is NOT
+  // configured, and a half-configured rotation is a refusal.
+  const signing = resolveSigningKeys(process.env);
+  if (!signing.ok) {
+    console.error('❌ quote-ride signing key configuration invalid:', signing.reason);
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
   const db = createClient(supabaseUrl, serviceKey);
@@ -119,14 +187,21 @@ exports.handler = async (event) => {
     } catch (e) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) };
     }
+    // A JSON null, array, or primitive is a malformed REQUEST, not a
+    // server fault: answer 400 rather than letting Object.keys(null)
+    // throw into the 500 catch.
+    if (!isPlainObject(body)) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Body must be a JSON object' }) };
+    }
     for (const key of Object.keys(body)) {
       if (!ALLOWED_FIELDS.includes(key)) {
-        // Route facts, prices, coordinates, bags — anything beyond the
-        // intent — is rejected by NAME so the boundary is visible.
+        // Route facts, prices, coordinates, bags, vehicle preference —
+        // anything beyond the intent — is rejected by NAME so the
+        // boundary is visible.
         return { statusCode: 400, headers, body: JSON.stringify({ error: `Unexpected field '${String(key).slice(0, 40)}' — this endpoint accepts intent only` }) };
       }
     }
-    const { mode, airportCode, placeId, pickupAt, passengers, vehicle } = body;
+    const { mode, airportCode, placeId, pickupAt, passengers } = body;
 
     if (mode !== 'pickup' && mode !== 'dropoff') {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "mode must be 'pickup' or 'dropoff'" }) };
@@ -138,9 +213,9 @@ exports.handler = async (event) => {
     if (!isValidPlaceId(placeId)) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid place identity' }) };
     }
-    const pickupAtMs = typeof pickupAt === 'string' ? Date.parse(pickupAt) : NaN;
+    const pickupAtMs = parseRfc3339(pickupAt);
     if (!Number.isFinite(pickupAtMs)) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'pickupAt must be an ISO datetime' }) };
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'pickupAt must be a real RFC 3339 datetime with a UTC offset (e.g. 2026-08-20T14:00:00Z)' }) };
     }
     const nowMs = Date.now();
     if (isMeaningfullyPast(pickupAtMs, nowMs)) {
@@ -151,43 +226,73 @@ exports.handler = async (event) => {
     if (!Number.isInteger(passengers) || passengers < 1 || passengers > 100) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'passengers must be a positive integer' }) };
     }
-    const card0 = resolveRateCard({ authUserId, customerId: customer.id, pickupAtMs });
-    if (!card0.ok) {
+    const card0 = await resolveRateCard({ authUserId, customerId: customer.id, pickupAtMs });
+    if (!card0 || !card0.ok) {
       console.error('❌ quote-ride rate card resolution failed');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Pricing unavailable' }) };
     }
-    if (vehicle !== undefined && !Object.prototype.hasOwnProperty.call(card0.card.vehicles, vehicle)) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unknown vehicle' }) };
+    // The card is in hand and it already knows every seat count, so a
+    // party no vehicle can carry is refused HERE — for free — instead of
+    // buying a Places call and a Compute Routes Pro call only for the
+    // engine to refuse all three vehicles afterwards.
+    const maxSeats = Math.max(
+      ...Object.values(card0.card.vehicles).map((v) => v.capacity.passengers)
+    );
+    if (passengers > maxSeats) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: `No vehicle seats ${passengers} passengers (maximum ${maxSeats})` })
+      };
     }
 
     // ---- place identity: ONE identity for routing and storage ----
+    const providerDeadline = Date.now() + PROVIDER_BUDGET_MS;
     const placesStart = Date.now();
-    const place = await resolvePlace(placeId, { apiKey: placesKey });
+    const place = await resolvePlace(placeId, { apiKey: placesKey, deadlineMs: providerDeadline });
     placesMs = Date.now() - placesStart;
     if (!place.ok) {
       logTelemetry({ startedMs, placesMs, routesMs, outcome: place.reason });
-      return { statusCode: place.reason === 'invalid_place_id' ? 400 : 502, headers, body: JSON.stringify({ error: 'Could not resolve the address' }) };
+      const permanent = PLACE_INPUT_FAILURES.has(place.reason);
+      return {
+        statusCode: permanent ? 400 : 502,
+        headers,
+        body: JSON.stringify({
+          error: permanent
+            ? 'That address could not be resolved — please reselect it'
+            : 'Could not resolve the address right now'
+        })
+      };
     }
+    // The CANONICAL id — used for routing, for the response, and for
+    // the intentHash alike. Never a mix.
+    const canonicalPlaceId = place.placeId;
 
     // ---- server route facts (place_id waypoints, both sides) ----
-    const originPlaceId = mode === 'dropoff' ? placeId : airport.placeId;
-    const destinationPlaceId = mode === 'dropoff' ? airport.placeId : placeId;
+    const originPlaceId = mode === 'dropoff' ? canonicalPlaceId : airport.placeId;
+    const destinationPlaceId = mode === 'dropoff' ? airport.placeId : canonicalPlaceId;
     const routesStart = Date.now();
     const route = await computeRouteFacts(
       { originPlaceId, destinationPlaceId, pickupAtMs, nowMs },
-      { apiKey: routesKey }
+      { apiKey: routesKey, deadlineMs: providerDeadline }
     );
     routesMs = Date.now() - routesStart;
     if (!route.ok) {
       logTelemetry({ startedMs, placesMs, routesMs, outcome: route.reason });
-      return { statusCode: 502, headers, body: JSON.stringify({ error: 'Could not compute the route' }) };
+      const noRoute = NO_ROUTE_FAILURES.has(route.reason);
+      return {
+        statusCode: noRoute ? 422 : 502,
+        headers,
+        body: JSON.stringify({
+          error: noRoute
+            ? 'No drivable route between those places'
+            : 'Could not compute the route right now'
+        })
+      };
     }
 
     // ---- price every vehicle on the card ----
     const { card, resolvedVersion } = card0;
-    const intentHash = computeIntentHash({
-      mode, airportCode, placeId, pickupAtMs, passengers, vehicle: vehicle ?? null
-    });
 
     const vehicles = {};
     const centsByVehicle = {};
@@ -211,6 +316,16 @@ exports.handler = async (event) => {
         vehicles[key] = { ok: false, error: q.error };
         continue;
       }
+      // Each token's intentHash covers ITS OWN vehicle, so a payload
+      // vehicle and its hash can never disagree.
+      const intentHash = computeIntentHash({
+        mode,
+        airportCode,
+        placeId: canonicalPlaceId,
+        pickupAtMs,
+        passengers,
+        vehicle: key
+      });
       const quoteToken = signQuoteToken({
         purpose: 'create',
         authUserId,
@@ -223,7 +338,7 @@ exports.handler = async (event) => {
         pricingVersion: q.quote.pricingVersion,
         engineVersion: q.quote.engineVersion,
         resolvedVersion
-      }, { keyId: signingId, secret: signingSecret, nowMs });
+      }, { keyId: signing.current.id, secret: signing.current.secret, nowMs });
       vehicles[key] = {
         ok: true,
         vehicleName: q.quote.vehicleName,
@@ -245,6 +360,9 @@ exports.handler = async (event) => {
       routeQuality: route.routeQuality,
       miles: Math.round(route.routeMiles),
       minutes: Math.round(route.routeMinutes / 5) * 5,
+      // Whether Google superseded the submitted id — a boolean, never
+      // either id.
+      placeIdSubstituted: place.substituted === true,
       vehiclesOk,
       vehiclesRefused: Object.keys(card.vehicles).length - vehiclesOk,
       cents: centsByVehicle
@@ -258,7 +376,8 @@ exports.handler = async (event) => {
           intent: {
             mode,
             airportCode,
-            placeId,
+            // CANONICAL — 2B2 resubmits this verbatim.
+            placeId: canonicalPlaceId,
             formattedAddress: place.formattedAddress,
             airportName: airport.formattedAddress,
             pickupAt: new Date(pickupAtMs).toISOString(),
@@ -270,6 +389,12 @@ exports.handler = async (event) => {
             quality: route.routeQuality
           },
           vehicles,
+          // A consumer must not have to iterate `vehicles` to discover
+          // that nothing is bookable (e.g. a route beyond the service
+          // area refuses every vehicle while still answering 200).
+          vehiclesOk,
+          vehiclesRefused: Object.keys(card.vehicles).length - vehiclesOk,
+          bookable: vehiclesOk > 0,
           pricingVersion: card.pricingVersion,
           resolvedVersion,
           cardSource: card0.source,

@@ -15,10 +15,14 @@ process.env.SUPABASE_SERVICE_KEY = 'service-key';
 process.env.SUPABASE_ANON_KEY = 'anon-key';
 process.env.GOOGLE_ROUTES_API_KEY = 'routes-key-test';
 process.env.GOOGLE_PLACES_SERVER_API_KEY = 'places-key-test';
+// Signing secrets must clear the resolver's 32-byte floor: a present
+// but weak secret is NOT a configured key (resolveSigningKeys).
+const CURRENT_SECRET = 'current-secret-0123456789abcdef01234567';
+const PREVIOUS_SECRET = 'previous-secret-0123456789abcdef0123456';
 process.env.QUOTE_SIGNING_CURRENT_ID = 'k-2026-08';
-process.env.QUOTE_SIGNING_CURRENT_SECRET = 'current-secret';
+process.env.QUOTE_SIGNING_CURRENT_SECRET = CURRENT_SECRET;
 process.env.QUOTE_SIGNING_PREVIOUS_ID = 'k-2026-07';
-process.env.QUOTE_SIGNING_PREVIOUS_SECRET = 'previous-secret';
+process.env.QUOTE_SIGNING_PREVIOUS_SECRET = PREVIOUS_SECRET;
 process.env.QUOTE_SHADOW_ALLOWLIST = 'auth-andres, auth-second';
 delete process.env.QUOTE_SERVICE_DISABLED;
 
@@ -98,8 +102,9 @@ global.fetch = async (url, options) => {
 
 const quoteRideEndpoint = require(path.join(repoRoot, 'backend/functions/quote-ride.js'));
 const { quantizeMiles, quantizeMinutes, FIELD_MASK } = require(path.join(repoRoot, 'backend/functions/lib/route-facts.js'));
-const { computeIntentHash, verifyQuoteToken, signQuoteToken, QUOTE_TTL_MS } = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
+const { computeIntentHash, verifyQuoteToken, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
 const { resolveRateCard } = require(path.join(repoRoot, 'backend/functions/lib/rate-card-resolver.js'));
+const { airportByCode } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
 const { quoteRide: engineQuote } = require(path.join(repoRoot, 'backend/functions/lib/ride-quote.js'));
 
 const FUTURE_PICKUP = () => new Date(Date.now() + 24 * 3600e3).toISOString();
@@ -199,7 +204,10 @@ async function check(name, fn) {
       ['routeMiles', 10], ['routeMinutes', 20], ['distance', 10], ['duration', 20],
       ['durationMinutes', 20], ['price', 85], ['bags', 2], ['lat', 25.7],
       ['lng', -80.2], ['coordinates', { lat: 1, lng: 2 }], ['address', '123 Main St'],
-      ['origin', 'MIA'], ['destination', 'x'], ['token', 'abc']
+      ['origin', 'MIA'], ['destination', 'x'], ['token', 'abc'],
+      // vehicle preference is REMOVED from the contract: in an
+      // all-vehicles response it could only perturb the intentHash.
+      ['vehicle', 'tesla']
     ]) {
       const r = await post(goodIntent({ [field]: value }));
       assert.strictEqual(r.statusCode, 400, `field ${field} must be rejected`);
@@ -208,13 +216,12 @@ async function check(name, fn) {
     assert.strictEqual(googleCalls(), 0);
   });
 
-  await check('intent validation: mode/airport/placeId/pickupAt/passengers/vehicle each refuse malformed values', async () => {
+  await check('intent validation: mode/airport/placeId/pickupAt/passengers each refuse malformed values', async () => {
     const bads = [
       [{ mode: 'hourly' }], [{ airportCode: 'JFK' }], [{ airportCode: null }],
-      [{ placeId: 'x' }], [{ placeId: 'bad place id!' }], [{ placeId: 'C'.repeat(300) }],
+      [{ placeId: 'x' }], [{ placeId: 'bad place id!' }], [{ placeId: 'C'.repeat(600) }],
       [{ placeId: 42 }], [{ pickupAt: 'tomorrow' }], [{ pickupAt: 12345 }],
-      [{ passengers: 0 }], [{ passengers: 2.5 }], [{ passengers: '2' }],
-      [{ vehicle: 'suv' }], [{ vehicle: 'TESLA' }]
+      [{ passengers: 0 }], [{ passengers: 2.5 }], [{ passengers: '2' }]
     ];
     for (const [patch] of bads) {
       const r = await post(goodIntent(patch));
@@ -266,28 +273,78 @@ async function check(name, fn) {
     assert.strictEqual(state.routesCalls[0].body.destination.placeId, ADDRESS_PLACE_ID);
   });
 
-  await check('provider failures are honest 502s, never fabricated prices; Places failure skips Routes', async () => {
+  await check('provider failures are classified: permanent 400/422 vs transient 502, ONE attempt', async () => {
+    // Transient — a retry might work, so 502 is honest.
     state.placesResponse = () => ({ ok: false, status: 500, json: async () => ({}) });
     let r = await post(goodIntent());
     assert.strictEqual(r.statusCode, 502);
     assert.strictEqual(state.routesCalls.length, 0, 'no route call after a failed identity resolution');
     resetState();
-    state.routesResponse = () => { const e = new Error('abort'); e.name = 'AbortError'; throw e; };
-    r = await post(goodIntent());
-    assert.strictEqual(r.statusCode, 502);
+    state.placesResponse = () => ({ ok: false, status: 429, json: async () => ({}) });
+    assert.strictEqual((await post(goodIntent())).statusCode, 502, 'rate limiting is transient');
     resetState();
+    // PERMANENT — a dead place id can never resolve, and a 502 would
+    // invite retries that each buy another Places + Routes Pro pair.
+    state.placesResponse = () => ({ ok: false, status: 404, json: async () => ({}) });
+    r = await post(goodIntent());
+    assert.strictEqual(r.statusCode, 400, 'a dead place id is permanent, not a bad gateway');
+    assert.strictEqual(state.routesCalls.length, 0);
+    resetState();
+    // Routes: no drivable route is an ANSWER (422), not a malfunction.
+    state.routesResponse = () => ({ ok: true, status: 200, json: async () => ({ routes: [] }) });
+    r = await post(goodIntent());
+    assert.strictEqual(r.statusCode, 422);
+    assert.ok(/no drivable route/i.test(JSON.parse(r.body).error));
+    resetState();
+    state.routesResponse = () => ({ ok: false, status: 400, json: async () => ({}) });
+    assert.strictEqual((await post(goodIntent())).statusCode, 422, 'an unroutable pair is permanent');
+    resetState();
+    // Transient route failures stay 502, and there is exactly ONE attempt.
+    state.routesResponse = () => ({ ok: false, status: 429, json: async () => ({}) });
+    r = await post(goodIntent());
+    assert.strictEqual(r.statusCode, 502, 'rate limiting is transient, never "no route"');
+    assert.strictEqual(state.routesCalls.length, 1, 'exactly ONE attempt — no blind retries');
+    resetState();
+    state.routesResponse = () => { const e = new Error('abort'); e.name = 'AbortError'; throw e; };
+    assert.strictEqual((await post(goodIntent())).statusCode, 502);
+    resetState();
+    // A response we cannot understand is OUR problem, not the client's.
     state.routesResponse = () => ({ ok: true, status: 200, json: async () => ({ routes: [{ distanceMeters: 16093, duration: '28min' }] }) });
     r = await post(goodIntent());
     assert.strictEqual(r.statusCode, 502, 'malformed duration format must refuse — strict parsing');
+    assert.ok(!/price|fare|\$/i.test(r.body), 'never a fabricated price');
+  });
+
+  await check('a party no vehicle can seat is refused BEFORE any paid Google call', async () => {
+    // The rate card is already in hand and knows every seat count, so
+    // 13..100 passengers must not buy a Places call plus a Compute
+    // Routes Pro call only for the engine to refuse all three vehicles.
+    for (const passengers of [13, 50, 100]) {
+      const r = await post(goodIntent({ passengers }));
+      assert.strictEqual(r.statusCode, 400, `${passengers} passengers must refuse`);
+      assert.ok(/seats/i.test(JSON.parse(r.body).error));
+    }
+    assert.strictEqual(googleCalls(), 0, 'zero Google spend on an impossible party size');
+    // The largest vehicle still quotes at its exact capacity.
+    assert.strictEqual((await post(goodIntent({ passengers: 12 }))).statusCode, 200);
+  });
+
+  await check('the response says whether anything is bookable, without iterating vehicles', async () => {
+    let q = JSON.parse((await post(goodIntent())).body).quote;
+    assert.strictEqual(q.bookable, true);
+    assert.strictEqual(q.vehiclesOk, 3);
+    assert.strictEqual(q.vehiclesRefused, 0);
     resetState();
-    state.routesResponse = () => ({ ok: true, status: 200, json: async () => ({ routes: [] }) });
-    r = await post(goodIntent());
-    assert.strictEqual(r.statusCode, 502);
-    resetState();
-    state.routesResponse = () => ({ ok: false, status: 429, json: async () => ({}) });
-    r = await post(goodIntent());
-    assert.strictEqual(r.statusCode, 502);
-    assert.strictEqual(state.routesCalls.length, 1, 'exactly ONE attempt — no blind retries');
+    // A route beyond the service area refuses every vehicle — but still
+    // answers 200, so the consumer needs an explicit flag.
+    state.routesResponse = () => ({ ok: true, status: 200, json: async () => ({ routes: [{ distanceMeters: 1200000, duration: '40000s' }] }) });
+    const r = await post(goodIntent());
+    assert.strictEqual(r.statusCode, 200);
+    q = JSON.parse(r.body).quote;
+    assert.strictEqual(q.bookable, false, 'nothing is bookable and the response says so');
+    assert.strictEqual(q.vehiclesOk, 0);
+    assert.strictEqual(q.vehiclesRefused, 3);
+    for (const v of Object.values(q.vehicles)) assert.strictEqual(v.ok, false);
   });
 
   await check('routeQuality: fallbackInfo stamps "fallback" into response AND token; absence stamps traffic_aware', async () => {
@@ -327,7 +384,7 @@ async function check(name, fn) {
     const pickupAt = FUTURE_PICKUP();
     const r = await post(goodIntent({ pickupAt, passengers: 5 }));
     const q = JSON.parse(r.body).quote;
-    const { card } = resolveRateCard({});
+    const { card } = await resolveRateCard({});
     // 5 passengers: tesla refuses, escalade + sprinter quote.
     assert.strictEqual(q.vehicles.tesla.ok, false);
     assert.strictEqual(q.vehicles.tesla.error.code, 'passenger_capacity_exceeded');
@@ -365,9 +422,10 @@ async function check(name, fn) {
     assert.strictEqual(p.finalCents, q.vehicles.sprinter.finalCents);
     const expectedHash = computeIntentHash({
       mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-      pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: null
+      pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: 'sprinter'
     });
-    assert.strictEqual(p.intentHash, expectedHash, 'the token binds the EXACT intent by hash');
+    assert.strictEqual(p.intentHash, expectedHash,
+      'each token binds the EXACT intent INCLUDING its own vehicle');
     const raw = JSON.stringify(p);
     assert.ok(!raw.includes(ADDRESS_PLACE_ID) && !raw.includes('Test St') && !raw.includes('lat'),
       'no place IDs, addresses, or coordinates may transit the client inside a token');
@@ -378,39 +436,385 @@ async function check(name, fn) {
     assert.strictEqual(q.ttlMinutes, 15, 'TTL is the deliberate 15-minute price-hold policy');
   });
 
-  await check('token verification: current + previous keys, tamper/expiry/purpose/identity rejections', async () => {
+  await check('token verification FAILS CLOSED: exact v1 schema, mandatory expectations, strict encoding', async () => {
     const keys = [
-      { id: 'k-2026-08', secret: 'current-secret' },
-      { id: 'k-2026-07', secret: 'previous-secret' }
+      { id: 'k-2026-08', secret: CURRENT_SECRET },
+      { id: 'k-2026-07', secret: PREVIOUS_SECRET }
     ];
+    const HASH = 'a1b2c3d4'.repeat(8); // a real 64-char hex digest shape
     const base = {
       purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', pickupAtMs: Date.now() + 3600e3, intentHash: 'h'.repeat(64),
+      vehicle: 'tesla', pickupAtMs: Date.now() + 3600e3, intentHash: HASH,
       routeQuality: 'traffic_aware',
       finalCents: 4500, pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
     };
     const now = Date.now();
-    const current = signQuoteToken(base, { keyId: 'k-2026-08', secret: 'current-secret', nowMs: now });
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now + 60000, expected: { purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres' } }).ok, true);
+    const EXPECT = {
+      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', intentHash: HASH
+    };
+    const current = signQuoteToken(base, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
+    const ok = verifyQuoteToken(current, { keys, nowMs: now + 60000, expected: EXPECT });
+    assert.strictEqual(ok.ok, true);
+    assert.ok(Object.isFrozen(ok.payload), 'the returned projection is frozen');
+
     // Rotation: a token signed by the PREVIOUS key still verifies.
-    const previous = signQuoteToken(base, { keyId: 'k-2026-07', secret: 'previous-secret', nowMs: now });
-    assert.strictEqual(verifyQuoteToken(previous, { keys, nowMs: now + 60000, expected: {} }).ok, true);
+    const previous = signQuoteToken(base, { keyId: 'k-2026-07', secret: PREVIOUS_SECRET, nowMs: now });
+    assert.strictEqual(verifyQuoteToken(previous, { keys, nowMs: now + 60000, expected: EXPECT }).ok, true);
+
     // Unknown kid refuses.
-    const foreign = signQuoteToken(base, { keyId: 'k-9999', secret: 'x', nowMs: now });
-    assert.strictEqual(verifyQuoteToken(foreign, { keys, nowMs: now }).reason, 'unknown_key');
+    const foreign = signQuoteToken(base, { keyId: 'k-9999', secret: 'x'.repeat(40), nowMs: now });
+    assert.strictEqual(verifyQuoteToken(foreign, { keys, nowMs: now, expected: EXPECT }).reason, 'unknown_key');
+
     // Tampered cents break the seal.
     const [payloadB64, sig] = current.split('.');
     const tampered = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
     tampered.finalCents = 100;
     const forged = Buffer.from(JSON.stringify(tampered)).toString('base64url') + '.' + sig;
-    assert.strictEqual(verifyQuoteToken(forged, { keys, nowMs: now }).reason, 'bad_signature');
-    // Expiry honors the 15-minute hold.
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now + QUOTE_TTL_MS + 1, expected: {} }).reason, 'expired');
-    // Purpose and identity binding.
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { purpose: 'edit' } }).reason, 'wrong_purpose');
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { customerId: 'cust-other' } }).reason, 'wrong_identity');
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { authUserId: 'auth-other' } }).reason, 'wrong_identity');
-    assert.strictEqual(verifyQuoteToken('garbage', { keys, nowMs: now }).reason, 'malformed');
+    assert.strictEqual(verifyQuoteToken(forged, { keys, nowMs: now, expected: EXPECT }).reason, 'bad_signature');
+
+    // UNSIGNED EXTRA FIELDS: canonicalPayload MACs only the known
+    // fields, so an appended property keeps the signature valid. It
+    // must be REFUSED, never returned to a consumer as if signed.
+    const withExtra = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+    withExtra.bookingId = 'attacker-supplied';
+    const extraTok = Buffer.from(JSON.stringify(withExtra)).toString('base64url') + '.' + sig;
+    assert.strictEqual(verifyQuoteToken(extraTok, { keys, nowMs: now, expected: EXPECT }).reason, 'schema_invalid',
+      'an unsigned extra property is a rejection, not a passenger');
+
+    // An injected OWN '__proto__' key (JSON.parse creates it as an own
+    // property, unlike assignment) is unsigned AND would re-parent a
+    // consumer that Object.assign'd the payload. The exact key count
+    // refuses it before any of that.
+    const payloadText = Buffer.from(payloadB64, 'base64url').toString();
+    const poisoned = payloadText.replace(/^\{/, '{"__proto__":{"polluted":true},');
+    const poisonTok = Buffer.from(poisoned).toString('base64url') + '.' + sig;
+    assert.strictEqual(verifyQuoteToken(poisonTok, { keys, nowMs: now, expected: EXPECT }).reason, 'schema_invalid');
+    assert.notStrictEqual({}.polluted, true, 'no prototype pollution reaches the process');
+
+    // INCOMPLETE payload refuses too.
+    const missing = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+    delete missing.vehicle;
+    const missTok = Buffer.from(JSON.stringify(missing)).toString('base64url') + '.' + sig;
+    assert.strictEqual(verifyQuoteToken(missTok, { keys, nowMs: now, expected: EXPECT }).reason, 'schema_invalid');
+
+    // CANONICALIZATION COLLISION: JSON.parse('1e999') is Infinity and
+    // JSON.stringify(Infinity) is 'null', so '"exp":1e999' and
+    // '"exp":null' MAC identically — an immortal token if exp is only
+    // typeof-checked. The exact-schema projection kills it.
+    const canonNull = JSON.stringify({
+      v: 1, kid: 'k-2026-08', purpose: 'create', authUserId: 'auth-andres',
+      customerId: 'cust-andres', vehicle: 'tesla', pickupAtMs: 1, intentHash: HASH,
+      routeQuality: 'traffic_aware', finalCents: 4500, pricingVersion: 'v',
+      engineVersion: 'e', resolvedVersion: 'v', iat: 0, exp: null
+    });
+    const collisionSig = require('crypto').createHmac('sha256', CURRENT_SECRET).update(canonNull).digest();
+    const collision = Buffer.from(canonNull.replace('"exp":null', '"exp":1e999')).toString('base64url') +
+      '.' + Buffer.from(collisionSig).toString('base64url');
+    assert.strictEqual(verifyQuoteToken(collision, { keys, nowMs: now, expected: EXPECT }).reason, 'schema_invalid',
+      'a non-finite exp that canonicalizes to null must never verify');
+
+    // EXPIRY is inclusive at exp, and the TTL is exact.
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now + QUOTE_TTL_MS - 1, expected: EXPECT }).ok, true);
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now + QUOTE_TTL_MS, expected: EXPECT }).reason, 'expired',
+      'expiry is nowMs >= exp — at exp the price hold is over');
+
+    // A token minted in the future is refused rather than trusted.
+    const future = signQuoteToken(base, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now + 5 * 60000 });
+    assert.strictEqual(verifyQuoteToken(future, { keys, nowMs: now, expected: EXPECT }).reason, 'not_yet_valid');
+
+    // CLOCK must be finite — a NaN clock previously made every token
+    // immortal (NaN > exp is false).
+    for (const bad of [NaN, undefined, null, 'abc', Infinity]) {
+      assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: bad, expected: EXPECT }).reason, 'invalid_clock',
+        `nowMs ${String(bad)} must refuse, never silently skip expiry`);
+    }
+
+    // EXPECTATIONS are mandatory — the old contract silently skipped
+    // every binding check when they were omitted.
+    for (const bad of [undefined, null, {}, { purpose: 'create' },
+      { purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres' },
+      { purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres', vehicle: 'tesla' }]) {
+      const r = verifyQuoteToken(current, { keys, nowMs: now, expected: bad });
+      assert.strictEqual(r.reason, 'missing_expectations',
+        `incomplete expectations must refuse, not pass: ${JSON.stringify(bad)}`);
+    }
+    assert.strictEqual(verifyQuoteToken(current, { keys: [], nowMs: now, expected: EXPECT }).reason, 'no_keys');
+
+    // Every binding is enforced, including the two that were silently dropped.
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, purpose: 'edit' } }).reason, 'wrong_purpose');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, customerId: 'cust-other' } }).reason, 'wrong_identity');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, authUserId: 'auth-other' } }).reason, 'wrong_identity');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, vehicle: 'sprinter' } }).reason, 'wrong_vehicle',
+      'a vehicle expectation must be ENFORCED, never silently dropped');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, intentHash: 'f'.repeat(64) } }).reason, 'wrong_intent',
+      'an intentHash expectation must be ENFORCED, never silently dropped');
+
+    // STRICT encoding: exactly two canonical base64url segments.
+    for (const bad of ['garbage', current + '.extra', current + '=', current.replace('.', '.='),
+      ' ' + current, current + '\n', '.' + current, current + '.']) {
+      assert.strictEqual(verifyQuoteToken(bad, { keys, nowMs: now, expected: EXPECT }).reason, 'malformed',
+        `non-canonical token encoding must refuse: ${JSON.stringify(bad.slice(-12))}`);
+    }
+  });
+
+  await check('signing key configuration is validated centrally: weak secrets are NOT configured', async () => {
+    const good = 'a'.repeat(40);
+    // A one-character secret previously signed real tokens — from one
+    // issued token the secret is brute-forceable, and forged prices verify.
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: 'x' }).reason, 'current_secret_weak');
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: 'a'.repeat(31) }).reason, 'current_secret_weak');
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: 'a b'.repeat(20) }).reason, 'current_secret_weak');
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_SECRET: good }).reason, 'current_key_id_invalid');
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k'.repeat(65), QUOTE_SIGNING_CURRENT_SECRET: good }).reason, 'current_key_id_invalid');
+    // Real operator formats must NOT be false-rejected.
+    for (const secret of ['a'.repeat(32), 'f'.repeat(64), 'A1b2C3d4'.repeat(8)]) {
+      assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: secret }).ok, true);
+    }
+    // The previous pair is ALL-OR-NOTHING with a DISTINCT id.
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: good, QUOTE_SIGNING_PREVIOUS_ID: 'k0' }).reason, 'previous_pair_incomplete');
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: good, QUOTE_SIGNING_PREVIOUS_SECRET: good }).reason, 'previous_pair_incomplete');
+    assert.strictEqual(resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: good, QUOTE_SIGNING_PREVIOUS_ID: 'k1', QUOTE_SIGNING_PREVIOUS_SECRET: 'b'.repeat(40) }).reason, 'previous_key_id_duplicate');
+    const rotated = resolveSigningKeys({ QUOTE_SIGNING_CURRENT_ID: 'k1', QUOTE_SIGNING_CURRENT_SECRET: good, QUOTE_SIGNING_PREVIOUS_ID: 'k0', QUOTE_SIGNING_PREVIOUS_SECRET: 'b'.repeat(40) });
+    assert.strictEqual(rotated.keys.length, 2);
+    assert.strictEqual(rotated.current.id, 'k1', 'the CURRENT key signs');
+
+    // The endpoint refuses to boot on a weak secret — and spends no quota.
+    const saved = process.env.QUOTE_SIGNING_CURRENT_SECRET;
+    process.env.QUOTE_SIGNING_CURRENT_SECRET = 'short';
+    const r = await post(goodIntent());
+    process.env.QUOTE_SIGNING_CURRENT_SECRET = saved;
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(googleCalls(), 0, 'a misconfigured signer never reaches Google');
+  });
+
+  // ---------- canonical place identity ----------
+  await check('the RESOLVED place id is canonical: routing, response, and intentHash all use it', async () => {
+    // Google documents that Place Details MAY answer with a different
+    // id (address-range inference, subpremise components — exactly
+    // LinkMia's condo/hotel input class). The submitted id must not
+    // then be routed while the resolved place supplies the address.
+    const RESOLVED = 'ChIJRESOLVEDreplacementID99';
+    state.placesResponse = () => ({
+      ok: true, status: 200,
+      json: async () => ({ id: RESOLVED, formattedAddress: '900 Resolved Ave, Miami, FL 33139' })
+    });
+    const pickupAt = FUTURE_PICKUP();
+    const r = await post(goodIntent({ pickupAt }));
+    assert.strictEqual(r.statusCode, 200);
+    const q = JSON.parse(r.body).quote;
+
+    // Places was asked with the SUBMITTED id...
+    assert.ok(state.placesCalls[0].url.includes(ADDRESS_PLACE_ID));
+    // ...but routing uses the RESOLVED one.
+    assert.strictEqual(state.routesCalls[0].body.origin.placeId, RESOLVED,
+      'routing must use the resolved id, never the superseded submitted id');
+    assert.strictEqual(state.routesCalls[0].body.destination.placeId, MIA_PLACE_ID);
+    // ...and so does the response the client will resubmit.
+    assert.strictEqual(q.intent.placeId, RESOLVED,
+      '2B2 resubmits quote.intent.placeId verbatim — it must be canonical');
+    // ...and so does every token's intentHash.
+    const p = decodeTokenPayload(q.vehicles.tesla.token);
+    assert.strictEqual(p.intentHash, computeIntentHash({
+      mode: 'dropoff', airportCode: 'MIA', placeId: RESOLVED,
+      pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: 'tesla'
+    }), 'the hash 2C recomputes must cover the canonical id');
+    // Substitution is observable in telemetry as a BOOLEAN, never an id.
+    const tel = state.logLines.find((l) => l.includes('quote_telemetry'));
+    assert.ok(tel.includes('"placeIdSubstituted":true'));
+    assert.ok(!tel.includes(RESOLVED) && !tel.includes(ADDRESS_PLACE_ID));
+  });
+
+  await check('place ids are bounded operationally, not by a guessed 256 cap; long ids still quote', async () => {
+    // Google documents NO maximum length for place IDs, so a 256-char
+    // cap could refuse an address that books fine today.
+    const LONG = 'C'.repeat(300);
+    state.placesResponse = () => ({
+      ok: true, status: 200,
+      json: async () => ({ id: LONG, formattedAddress: '1 Long Id Way, Miami, FL' })
+    });
+    const r = await post(goodIntent({ placeId: LONG }));
+    assert.strictEqual(r.statusCode, 200, 'a 300-char place id must not be refused');
+    assert.strictEqual(JSON.parse(r.body).quote.intent.placeId, LONG);
+    // The operational bound still exists.
+    assert.strictEqual((await post(goodIntent({ placeId: 'C'.repeat(600) }))).statusCode, 400);
+  });
+
+  await check('every vehicle token binds its OWN vehicle in both the payload and the intentHash', async () => {
+    const pickupAt = FUTURE_PICKUP();
+    const q = JSON.parse((await post(goodIntent({ pickupAt }))).body).quote;
+    const hashes = new Set();
+    for (const key of Object.keys(q.vehicles)) {
+      if (!q.vehicles[key].ok) continue;
+      const p = decodeTokenPayload(q.vehicles[key].token);
+      assert.strictEqual(p.vehicle, key);
+      assert.strictEqual(p.intentHash, computeIntentHash({
+        mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
+        pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: key
+      }), `${key}'s hash must cover ${key}, not a shared preference`);
+      hashes.add(p.intentHash);
+      // The token verifies ONLY against its own vehicle.
+      const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
+      const expected = {
+        purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+        vehicle: key, intentHash: p.intentHash
+      };
+      assert.strictEqual(verifyQuoteToken(q.vehicles[key].token, { keys, nowMs: Date.now(), expected }).ok, true);
+    }
+    assert.strictEqual(hashes.size, Object.keys(q.vehicles).filter((k) => q.vehicles[k].ok).length,
+      'each vehicle gets a DISTINCT hash — never one shared, contradictory hash');
+  });
+
+  // ---------- input strictness ----------
+  await check('pickupAt must be RFC 3339 WITH an offset — an ambiguous instant is never assumed', async () => {
+    const day = new Date(Date.now() + 24 * 3600e3).toISOString().slice(0, 10);
+    for (const bad of [day, `${day}T10:00:00`, `${day}T10:00`, 'August 20, 2099',
+      `${day} 10:00:00Z`, `${day}T10:00:00+04`, '']) {
+      const r = await post(goodIntent({ pickupAt: bad }));
+      assert.strictEqual(r.statusCode, 400, `offset-less/ambiguous pickupAt must refuse: ${bad}`);
+    }
+    // A real datetime that the regex admits but the calendar rejects.
+    assert.strictEqual((await post(goodIntent({ pickupAt: '2099-02-30T10:00:00Z' }))).statusCode, 400);
+    assert.strictEqual(googleCalls(), 0);
+    // Offset forms are accepted and mean exactly what they say.
+    const withOffset = new Date(Date.now() + 6 * 3600e3).toISOString().replace('Z', '+00:00');
+    assert.strictEqual((await post(goodIntent({ pickupAt: withOffset }))).statusCode, 200);
+  });
+
+  await check('a JSON null, array, or primitive body is a 400 request error, never a 500', async () => {
+    for (const raw of ['null', '[]', '[{"mode":"dropoff"}]', '"str"', '5', 'true']) {
+      const r = await post(raw);
+      assert.strictEqual(r.statusCode, 400, `body ${raw} must be a 400`);
+      assert.ok(!/Internal error/.test(r.body), `body ${raw} must not surface as a server fault`);
+    }
+    assert.strictEqual(googleCalls(), 0);
+  });
+
+  await check('airport codes are matched by OWN property — prototype members never reach a paid call', async () => {
+    // A bare AIRPORTS[code] answers truthily for 'constructor',
+    // 'toString' and '__proto__', carrying an unknown code past the
+    // whitelist and into billable Places + Routes calls.
+    for (const code of ['constructor', 'toString', '__proto__', 'valueOf', 'hasOwnProperty']) {
+      const r = await post(goodIntent({ airportCode: code }));
+      assert.strictEqual(r.statusCode, 400, `${code} must be rejected as an unknown airport`);
+      assert.ok(/airport/i.test(JSON.parse(r.body).error));
+    }
+    assert.strictEqual(googleCalls(), 0, 'a prototype-member code must spend ZERO Google quota');
+    assert.strictEqual(airportByCode('constructor'), null);
+    assert.ok(airportByCode('MIA'));
+  });
+
+  await check('provider values are validated at the boundary: integer metres, protobuf duration, bounded', async () => {
+    const bad = [
+      { distanceMeters: 16093.7, duration: '1680s' },
+      { distanceMeters: '16093', duration: '1680s' },
+      { distanceMeters: 0, duration: '1680s' },
+      { distanceMeters: -5, duration: '1680s' },
+      { distanceMeters: 20000001, duration: '1680s' },
+      { distanceMeters: Number.MAX_VALUE, duration: '1680s' },
+      { distanceMeters: 16093, duration: '1680' },
+      { distanceMeters: 16093, duration: '1680.1234567891s' },
+      { distanceMeters: 16093, duration: '1e3s' },
+      { distanceMeters: 16093, duration: '604801s' },
+      { distanceMeters: 16093, duration: 1680 }
+    ];
+    for (const route of bad) {
+      state.routesResponse = () => ({ ok: true, status: 200, json: async () => ({ routes: [route] }) });
+      const r = await post(goodIntent());
+      assert.strictEqual(r.statusCode, 502, `must refuse ${JSON.stringify(route)} rather than price it`);
+      assert.ok(!/NaN|Infinity/.test(r.body));
+    }
+    // Fractional-second precision within protobuf range is fine.
+    state.routesResponse = () => ({ ok: true, status: 200, json: async () => ({ routes: [{ distanceMeters: 16093, duration: '1680.123456789s' }] }) });
+    assert.strictEqual((await post(goodIntent())).statusCode, 200);
+  });
+
+  await check('the token STRING is canonical — one quote cannot mint many valid strings', async () => {
+    // Without a byte-equality check the verifier MACs a RE-SERIALIZED
+    // copy, so a token holder can mint unlimited DISTINCT strings for
+    // one quote (reordered keys, whitespace, 4.5e3 for 4500) that all
+    // verify — leaving 2C's mandated single-use gate no stable key.
+    const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
+    const HASH = 'a1b2c3d4'.repeat(8);
+    const now = Date.now();
+    const tok = signQuoteToken({
+      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', pickupAtMs: now + 3600e3, intentHash: HASH,
+      routeQuality: 'traffic_aware', finalCents: 4500,
+      pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
+    }, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
+    const EXPECT = {
+      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', intentHash: HASH
+    };
+    const [pb, sig] = tok.split('.');
+    const obj = JSON.parse(Buffer.from(pb, 'base64url').toString());
+    const variants = {
+      'pretty-printed': JSON.stringify(obj, null, 2),
+      'reversed key order': JSON.stringify(Object.fromEntries(Object.entries(obj).reverse())),
+      'exponent notation': JSON.stringify(obj).replace('"finalCents":4500', '"finalCents":4.5e3'),
+      'trailing whitespace': JSON.stringify(obj) + ' '
+    };
+    for (const [label, text] of Object.entries(variants)) {
+      const variant = Buffer.from(text).toString('base64url') + '.' + sig;
+      assert.notStrictEqual(variant, tok, `${label} must be a DIFFERENT string`);
+      assert.strictEqual(verifyQuoteToken(variant, { keys, nowMs: now, expected: EXPECT }).reason, 'not_canonical',
+        `${label} must not verify — the token string is canonical`);
+    }
+    assert.strictEqual(verifyQuoteToken(tok, { keys, nowMs: now, expected: EXPECT }).ok, true);
+  });
+
+  await check('an expectation key outside the contract is refused, never silently dropped', async () => {
+    const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
+    const HASH = 'a1b2c3d4'.repeat(8);
+    const now = Date.now();
+    const tok = signQuoteToken({
+      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', pickupAtMs: now + 3600e3, intentHash: HASH,
+      routeQuality: 'traffic_aware', finalCents: 4500,
+      pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
+    }, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
+    const EXPECT = {
+      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', intentHash: HASH
+    };
+    // A 2C author who "pins" the price or the instant this way would
+    // otherwise get ok:true with neither actually enforced.
+    for (const extra of [{ finalCents: 999999 }, { pickupAtMs: 1 }, { routeQuality: 'fallback' }]) {
+      assert.strictEqual(
+        verifyQuoteToken(tok, { keys, nowMs: now, expected: { ...EXPECT, ...extra } }).reason,
+        'unknown_expectation',
+        `expected.${Object.keys(extra)[0]} must fail loudly rather than be ignored`);
+    }
+    // What a consumer legitimately wants is on the frozen projection.
+    assert.strictEqual(verifyQuoteToken(tok, { keys, nowMs: now, expected: EXPECT }).payload.finalCents, 4500);
+  });
+
+  await check('a rotation that reuses the same secret under a new id is refused', async () => {
+    const leaked = 'a'.repeat(40);
+    assert.strictEqual(resolveSigningKeys({
+      QUOTE_SIGNING_CURRENT_ID: 'k2', QUOTE_SIGNING_CURRENT_SECRET: leaked,
+      QUOTE_SIGNING_PREVIOUS_ID: 'k1', QUOTE_SIGNING_PREVIOUS_SECRET: leaked
+    }).reason, 'previous_secret_duplicate',
+      'moving a leaked secret to a new key id rotates nothing');
+  });
+
+  await check('provider calls share ONE deadline — two 8s waits cannot outlive the platform limit', async () => {
+    const { resolvePlace } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
+    const { computeRouteFacts } = require(path.join(repoRoot, 'backend/functions/lib/route-facts.js'));
+    let called = 0;
+    const spy = async () => { called++; return { ok: true, status: 200, json: async () => ({}) }; };
+    // An already-spent budget refuses WITHOUT dispatching a paid call.
+    const past = Date.now() - 1;
+    assert.strictEqual((await resolvePlace(ADDRESS_PLACE_ID, { apiKey: 'k', fetchImpl: spy, deadlineMs: past })).reason, 'places_timeout');
+    assert.strictEqual((await computeRouteFacts({ originPlaceId: 'a', destinationPlaceId: 'b', pickupAtMs: Date.now() + 3600e3, nowMs: Date.now() }, { apiKey: 'k', fetchImpl: spy, deadlineMs: past })).reason, 'routes_timeout');
+    assert.strictEqual(called, 0, 'an exhausted budget spends nothing');
+    // The endpoint passes a real shared deadline to both providers.
+    const endpoint = require('fs').readFileSync(path.join(repoRoot, 'backend/functions/quote-ride.js'), 'utf8');
+    assert.ok(/PROVIDER_BUDGET_MS\s*=\s*(\d+)/.test(endpoint));
+    assert.ok(Number(RegExp.$1) < 10000, 'the shared budget must fit inside the platform timeout');
+    assert.strictEqual((endpoint.match(/deadlineMs: providerDeadline/g) || []).length, 2,
+      'BOTH provider calls share the one deadline');
   });
 
   // ---------- telemetry ----------
