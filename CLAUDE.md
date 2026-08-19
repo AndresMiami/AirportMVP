@@ -390,9 +390,10 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     GATES (not code): two restricted server keys
     (GOOGLE_ROUTES_API_KEY, GOOGLE_PLACES_SERVER_API_KEY), GCP quota
     caps sized at **Compute Routes Pro** pricing (TRAFFIC_AWARE sets
-    that floor; the minimal field mask only holds the Enterprise
-    ceiling), and the baseline Google policy review INCLUDING any
-    Terms/Privacy/attribution work it requires — complete BEFORE
+    that floor; the minimal request shape and field mask jointly avoid
+    Enterprise triggers), and the baseline Google policy review
+    INCLUDING any Terms/Privacy/attribution work it requires — complete
+    BEFORE
     enabling the production endpoint. Storage-specific Google review
     remains the 2C gate (2B1 stores nothing).
     CORRECTION ROUNDS (post-review, same PR) — contract rules that
@@ -440,15 +441,16 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     place ids never pass through resolvePlace — verify they resolve in
     the rollout smoke matrix, since a retired id silently kills every
     quote for that airport.
-    PROVIDER FAILURES ARE NARROWLY CLASSIFIED (round 2): ONLY an
-    obsolete/unknown place id (Places 404) is passenger-correctable
-    400, and ONLY a successful Routes 200 with an empty routes array is
-    422 "no drivable route". Authentication/permission (401/403),
-    malformed-server-request (400), quota, timeout, network and 5xx are
-    sanitized 502 server/upstream failures with distinct telemetry
-    classes (places_denied / routes_denied / *_bad_request /
-    *_rate_limited). Rationale: rollout stands up two BRAND-NEW
-    restricted keys, so a wrong restriction is the likeliest early
+    PROVIDER FAILURES ARE NARROWLY CLASSIFIED (round 3): Places 400
+    (INVALID_REQUEST: an invalid/truncated/modified id) and 404
+    (obsolete/unknown id) are permanent passenger-correctable identity
+    refusals; ONLY a successful Routes 200 with an empty routes array is
+    422 "no drivable route". Authentication/permission (401/403), quota,
+    timeout, network and 5xx remain sanitized 502 server/upstream
+    failures with distinct telemetry classes (places_invalid_request /
+    places_not_found / places_denied / routes_denied /
+    *_bad_request / *_rate_limited). Rationale: rollout stands up two
+    BRAND-NEW restricted keys, so a wrong restriction is the likeliest early
     failure — it must read as an outage, never as "reselect your
     address" or "no drivable route". The 7s shared provider budget is a
     PRODUCT latency/cost guard, NOT a platform limit (Netlify's

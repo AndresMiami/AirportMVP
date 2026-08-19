@@ -58,10 +58,11 @@ const AIRPORTS = Object.freeze({
 // refused a place ID straight out of Google's own documentation. So
 // MAX_PLACE_ID_LEN is a declared operational bound of OURS (a request
 // body sane enough to route and log), set well clear of any published
-// example. The character class matches Google's URL-safe-base64 form,
-// including that long example; the value is also URL-encoded at the
-// call site, so neither the bound nor the class is the only thing
-// standing between a client string and a request URL.
+// example. The character class is LinkMia's operational whitelist,
+// based on Google's documented examples rather than a published
+// alphabet guarantee; the value is also URL-encoded at the call site,
+// so neither the bound nor the class is the only thing standing between
+// a client string and a request URL.
 //
 // ONE CONTRACT, BOTH DIRECTIONS: this is the ONLY place-id validator,
 // applied identically to a client's submitted id and to Google's
@@ -103,9 +104,10 @@ async function resolvePlace(placeId, { apiKey, fetchImpl, deadlineMs }) {
     return { ok: false, reason: 'invalid_place_id' };
   }
   const doFetch = fetchImpl || fetch;
-  // The per-call bound never outlives the caller's SHARED budget: two
-  // independent 8s waits would exceed the platform's synchronous
-  // function limit and get the invocation killed AFTER the paid calls.
+  // The per-call cap never outlives the caller's SHARED product budget.
+  // Netlify permits a much longer synchronous invocation; the tighter
+  // deadline is LinkMia's latency/cost guard so one quote cannot wait
+  // through two independent provider timeouts after paid calls begin.
   const budget = Number.isFinite(deadlineMs)
     ? Math.min(PLACES_TIMEOUT_MS, deadlineMs - Date.now())
     : PLACES_TIMEOUT_MS;
@@ -125,13 +127,14 @@ async function resolvePlace(placeId, { apiKey, fetchImpl, deadlineMs }) {
       }
     );
     if (!res.ok) {
-      // NARROW classification. Only an obsolete/unknown place id is the
-      // PASSENGER's to correct. A 401/403 means a broken key, a wrong
-      // API restriction, or a disabled API; a 400 means WE built a bad
-      // request. Telling a passenger to "reselect the address" because
-      // a server key is misconfigured hides an outage as user error —
-      // and a fresh restricted key is exactly what rollout provisions.
+      // NARROW classification. Only invalid/obsolete place-identity
+      // outcomes are the PASSENGER's to correct. Google documents INVALID_REQUEST
+      // for a truncated or modified place id, so HTTP 400 is a permanent
+      // identity refusal rather than a retryable outage. A 401/403 means
+      // a broken key, a wrong API restriction, or a disabled API and
+      // remains a server/configuration failure.
       if (res.status >= 500) return { ok: false, reason: 'places_5xx' };
+      if (res.status === 400) return { ok: false, reason: 'places_invalid_request' };
       if (res.status === 404) return { ok: false, reason: 'places_not_found' };
       if (res.status === 401 || res.status === 403) return { ok: false, reason: 'places_denied' };
       if (res.status === 429 || res.status === 408) return { ok: false, reason: 'places_rate_limited' };

@@ -672,7 +672,7 @@ async function check(name, fn) {
       'the canonical id the service returns must be resubmittable');
   });
 
-  await check('provider CONFIGURATION failures are never blamed on the passenger', async () => {
+  await check('provider failures keep passenger-correctable identity separate from configuration outages', async () => {
     // Rollout provisions two brand-new restricted keys, so a wrong
     // restriction is the single most likely early failure. It must read
     // as a server fault, not as "reselect your address".
@@ -683,9 +683,16 @@ async function check(name, fn) {
       assert.ok(!/reselect/i.test(r.body), `Places ${status} must not be dressed up as passenger error`);
       resetState();
     }
-    // A 400 means WE sent a malformed request.
+    // Google documents INVALID_REQUEST for a truncated or modified
+    // place id. It is permanent and reselecting is actionable; it must
+    // not become a retryable-looking 502 that rebuys the same call.
     state.placesResponse = () => ({ ok: false, status: 400, json: async () => ({}) });
-    assert.strictEqual((await post(goodIntent())).statusCode, 502);
+    const r400 = await post(goodIntent());
+    assert.strictEqual(r400.statusCode, 400);
+    assert.ok(/reselect/i.test(r400.body));
+    assert.strictEqual(state.routesCalls.length, 0);
+    assert.ok(state.logLines.some((line) => line.includes('places_invalid_request')),
+      'Places 400 keeps its own sanitized telemetry class');
     resetState();
     // ONLY an obsolete/unknown place id is the passenger's to correct.
     state.placesResponse = () => ({ ok: false, status: 404, json: async () => ({}) });

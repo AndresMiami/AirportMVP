@@ -2,9 +2,10 @@
 // applies?" and "what does the ride cost?". Today it always returns
 // the validated in-code LinkMia card. Its SIGNATURE is future-shaped:
 // context in (even though it is ignored today), validated card +
-// provenance out, so Supabase-stored pricing profiles, per-customer or
-// per-fleet overrides, and the Pricing Studio can slot in behind this
-// function without any caller changing.
+// provenance out, so Supabase-stored customer/time pricing profiles can
+// slot in behind this function without caller changes. Host/fleet
+// pricing still requires the caller to supply that scope explicitly;
+// the limitation is recorded below rather than implied away.
 //
 // FUTURE FAIL-CLOSED CONTRACT (documented now, testable only when the
 // Supabase resolver exists — deliberately NOT overclaimed by any

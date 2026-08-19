@@ -25,11 +25,13 @@
 //     mask can undo that. Budget and quota planning must use Pro
 //     pricing — a gate to clear BEFORE the dark-phase allowlist is
 //     removed and real passenger volume reaches this call.
-//   * the minimal field mask holds the CEILING: tolls, traffic-on-
-//     polyline, speed-reading intervals and eco-routing are all
-//     Enterprise-tier triggers that live in the mask. Keeping it
-//     minimal is what stops a future field addition from silently
-//     repricing every call upward.
+//   * the request shape AND field mask jointly hold the CEILING.
+//     Enterprise triggers include TWO_WHEELER routing, toll calculation,
+//     and traffic-on-polyline; they require request features such as
+//     travelMode/extraComputations as well as their response fields.
+//     Eco-routing is Pro (it requires TRAFFIC_AWARE_OPTIMAL), not
+//     Enterprise. Keeping both surfaces minimal prevents a future
+//     feature addition from silently repricing every call upward.
 // Two traps for whoever tries to "reduce cost" here: dropping to
 // TRAFFIC_UNAWARE would move real prices (routeMinutes feeds the
 // engine's hourly-protection floor) and would make the whole

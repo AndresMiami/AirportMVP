@@ -90,17 +90,18 @@ function authUnavailable(error) {
 // while leaving headroom for the two Supabase round trips.
 const PROVIDER_BUDGET_MS = 7000;
 
-// Permanent, client-caused failures must NOT look retryable: a 502
+// Permanent place-identity failures must NOT look retryable: a 502
 // invites a retry that buys another Places + Compute Routes Pro pair
-// and can never succeed.
-// EXACTLY the outcomes a passenger can act on. Everything else — a
-// denied or restricted key, a malformed request of ours, a quota trip,
-// a timeout, a network fault, a 5xx, a response we cannot parse — is a
-// server/upstream failure reported as 502 with sanitized text. A
+// and can never succeed. These are exactly the identity outcomes a
+// passenger can act on. Denied/restricted keys, quota, timeout, network,
+// 5xx, and unparseable provider responses remain sanitized 502s. A
 // misconfigured key must never surface as "reselect your address" or
-// as "no drivable route"; those messages would hide an outage as user
-// error precisely when rollout is standing up two fresh restricted keys.
-const PLACE_INPUT_FAILURES = new Set(['invalid_place_id', 'places_not_found']);
+// "no drivable route"; that would hide an outage as passenger error.
+const PLACE_INPUT_FAILURES = new Set([
+  'invalid_place_id',
+  'places_invalid_request',
+  'places_not_found'
+]);
 const NO_ROUTE_FAILURES = new Set(['routes_no_route']);
 
 function isPlainObject(value) {
