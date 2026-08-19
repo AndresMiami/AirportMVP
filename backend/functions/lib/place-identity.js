@@ -52,13 +52,23 @@ const AIRPORTS = Object.freeze({
   })
 });
 
-// Google place_id shape: an opaque token. Google documents NO maximum
-// length, so MAX_PLACE_ID_LEN is an operational bound of our own (a
-// request body sane enough to route and log), not a spec limit. The
-// character class is a submitted-input whitelist; the value is also
-// URL-encoded at the call site, so neither the bound nor the class is
-// the only thing standing between a client string and a request URL.
-const MAX_PLACE_ID_LEN = 512;
+// Google place_id shape: an opaque token. Google states verbatim that
+// "there is no maximum length for place IDs", and the documented
+// long-form example runs past 600 characters — a 512 bound would have
+// refused a place ID straight out of Google's own documentation. So
+// MAX_PLACE_ID_LEN is a declared operational bound of OURS (a request
+// body sane enough to route and log), set well clear of any published
+// example. The character class matches Google's URL-safe-base64 form,
+// including that long example; the value is also URL-encoded at the
+// call site, so neither the bound nor the class is the only thing
+// standing between a client string and a request URL.
+//
+// ONE CONTRACT, BOTH DIRECTIONS: this is the ONLY place-id validator,
+// applied identically to a client's submitted id and to Google's
+// returned id. Validating them differently is what lets the service
+// hand the browser a "canonical" id that its own next request would
+// reject with 400.
+const MAX_PLACE_ID_LEN = 2048;
 const PLACE_ID_RE = new RegExp(`^[A-Za-z0-9_-]{10,${MAX_PLACE_ID_LEN}}$`);
 
 const PLACES_TIMEOUT_MS = 8000;
@@ -77,20 +87,17 @@ function isValidPlaceId(placeId) {
   return typeof placeId === 'string' && PLACE_ID_RE.test(placeId);
 }
 
-// Google's OWN id is trusted provider output, not client input: it is
-// bounded and non-empty checked, but not held to our submitted-input
-// character class (that class is our assumption, and rejecting a
-// legitimate provider id would fail an honest booking). It never
-// reaches a URL — only the routing body, the response, and the hash.
-function usableResolvedId(id) {
-  return typeof id === 'string' && id.length > 0 && id.length <= MAX_PLACE_ID_LEN;
-}
-
 // Resolve a place_id to its canonical identity via Places API (New).
 // Returns { ok:true, placeId, requestedPlaceId, substituted, formattedAddress }
 // or { ok:false, reason } — reasons are sanitized classes, never raw
-// provider text. `placeId` is the CANONICAL id: Google's returned id
-// when usable, otherwise the submitted one. fetchImpl is injectable.
+// provider text. `placeId` is the CANONICAL id: the one Google
+// returned, which we REQUIRE. A successful response that omits `id`
+// (we ask for it in the field mask) or returns one that fails the
+// shared contract is a response we do not understand — it fails as
+// places_parse_error. It must NEVER fall back to the submitted id
+// while keeping the resolved place's address: that silent pairing is
+// exactly the identity split this module exists to prevent.
+// fetchImpl is injectable.
 async function resolvePlace(placeId, { apiKey, fetchImpl, deadlineMs }) {
   if (!isValidPlaceId(placeId)) {
     return { ok: false, reason: 'invalid_place_id' };
@@ -118,17 +125,26 @@ async function resolvePlace(placeId, { apiKey, fetchImpl, deadlineMs }) {
       }
     );
     if (!res.ok) {
+      // NARROW classification. Only an obsolete/unknown place id is the
+      // PASSENGER's to correct. A 401/403 means a broken key, a wrong
+      // API restriction, or a disabled API; a 400 means WE built a bad
+      // request. Telling a passenger to "reselect the address" because
+      // a server key is misconfigured hides an outage as user error —
+      // and a fresh restricted key is exactly what rollout provisions.
       if (res.status >= 500) return { ok: false, reason: 'places_5xx' };
-      // 408/429 are TRANSIENT; a 404/400 means this id is dead and no
-      // amount of retrying (or paying) will resolve it.
+      if (res.status === 404) return { ok: false, reason: 'places_not_found' };
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'places_denied' };
       if (res.status === 429 || res.status === 408) return { ok: false, reason: 'places_rate_limited' };
-      return { ok: false, reason: 'places_4xx' };
+      return { ok: false, reason: 'places_bad_request' };
     }
     const body = await res.json().catch(() => null);
     if (!body || typeof body.formattedAddress !== 'string' || body.formattedAddress.trim() === '') {
       return { ok: false, reason: 'places_parse_error' };
     }
-    const resolvedId = usableResolvedId(body.id) ? body.id : placeId;
+    if (!isValidPlaceId(body.id)) {
+      return { ok: false, reason: 'places_parse_error' };
+    }
+    const resolvedId = body.id;
     return {
       ok: true,
       placeId: resolvedId,

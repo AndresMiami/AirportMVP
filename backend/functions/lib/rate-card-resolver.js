@@ -23,8 +23,16 @@ const { LINKMIA_RATE_CARD, validateRateCard } = require('./ride-rate-card');
 // registered clone, so this instance is immutable for the process.
 const DEFAULT_CARD = validateRateCard(LINKMIA_RATE_CARD);
 
-// Context: { authUserId, customerId, hostId, pickupAtMs } — accepted
-// and currently unused (the future override lookup keys on it).
+// Context: { authUserId, customerId, pickupAtMs } — what the endpoint
+// ACTUALLY supplies today, accepted and currently unused (the future
+// override lookup keys on it).
+//
+// SCOPE LIMIT, RECORDED HONESTLY: customer-scoped and time-scoped cards
+// can slot in behind this seam untouched, but HOST/FLEET-scoped pricing
+// cannot — no caller passes a hostId, so an ambassador- or fleet-scoped
+// card needs the caller to look one up and pass it. The "no caller
+// changes" promise covers the context that exists, not every scope the
+// Pricing Studio may eventually want.
 // Returns a Promise of { ok:true, card, source, resolvedVersion }.
 //
 // ASYNC BY CONTRACT, even though today's answer is synchronous: the

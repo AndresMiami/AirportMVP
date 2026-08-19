@@ -395,14 +395,21 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     Terms/Privacy/attribution work it requires — complete BEFORE
     enabling the production endpoint. Storage-specific Google review
     remains the 2C gate (2B1 stores nothing).
-    CORRECTION ROUND (post-review, same PR) — five contract rules that
+    CORRECTION ROUNDS (post-review, same PR) — contract rules that
     2B2/2C MUST honor: (1) CANONICAL PLACE ID — Google may answer Place
     Details with a REPLACEMENT id (address-range and subpremise inputs,
     i.e. LinkMia's condo/hotel class). The resolved id is canonical and
     is used for routing, the response, and intentHash alike; 2B2 must
     resubmit `quote.intent.placeId` VERBATIM (not autocomplete's
     original id) or 2C's hash recomputation will reject honest
-    bookings. (2) NO `vehicle` REQUEST FIELD — this is an all-vehicles
+    bookings. ONE validator governs BOTH the submitted and the returned
+    id (a looser rule for provider output would hand the browser a
+    "canonical" id the next request rejects); Google's returned `id` is
+    REQUIRED — a successful response without a usable one fails as
+    places_parse_error and NEVER falls back to the submitted id while
+    keeping the resolved place's address. Length bound is 2048, a
+    DECLARED operational bound of ours: Google documents no maximum and
+    its own long-form example exceeds 600 characters. (2) NO `vehicle` REQUEST FIELD — this is an all-vehicles
     contract, so each token's intentHash covers ITS OWN vehicle; a
     shared preference hash gave zero vehicle binding (a cheap sibling
     token priced an expensive vehicle) and no fixed 2C recomputation
@@ -433,6 +440,19 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     place ids never pass through resolvePlace — verify they resolve in
     the rollout smoke matrix, since a retired id silently kills every
     quote for that airport.
+    PROVIDER FAILURES ARE NARROWLY CLASSIFIED (round 2): ONLY an
+    obsolete/unknown place id (Places 404) is passenger-correctable
+    400, and ONLY a successful Routes 200 with an empty routes array is
+    422 "no drivable route". Authentication/permission (401/403),
+    malformed-server-request (400), quota, timeout, network and 5xx are
+    sanitized 502 server/upstream failures with distinct telemetry
+    classes (places_denied / routes_denied / *_bad_request /
+    *_rate_limited). Rationale: rollout stands up two BRAND-NEW
+    restricted keys, so a wrong restriction is the likeliest early
+    failure — it must read as an outage, never as "reselect your
+    address" or "no drivable route". The 7s shared provider budget is a
+    PRODUCT latency/cost guard, NOT a platform limit (Netlify's
+    synchronous limit is 60s and not configurable).
   * PR 3C-2B2/2C — NEXT: browser integration (server quotes displayed,
     explicit passenger acceptance of price differences, allowlist
     removal, indexMVP must retain autocomplete's place_id AND then

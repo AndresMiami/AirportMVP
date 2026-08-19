@@ -81,22 +81,27 @@ function authUnavailable(error) {
   return error?.name === 'AuthRetryableFetchError' || !error?.status || error.status >= 500;
 }
 
-// One SHARED budget for both provider calls. Netlify's synchronous
-// function limit (10s by default, and netlify.toml sets no override) is
-// LESS than two independent 8s waits, so an unbudgeted pair can be
-// killed by the platform AFTER both calls are billed — losing the
-// telemetry for spend that already happened. 7s leaves headroom for the
-// two Supabase round trips and the response.
+// One SHARED budget for both provider calls. This is OUR product
+// choice, not a platform constraint: Netlify's synchronous limit is 60s
+// and is not configurable, so the platform would happily wait out two
+// independent 8s calls. The budget exists because a passenger-facing
+// quote must not hang, and because an invocation that dies late still
+// pays for every Google call it already made. 7s bounds the worst case
+// while leaving headroom for the two Supabase round trips.
 const PROVIDER_BUDGET_MS = 7000;
 
 // Permanent, client-caused failures must NOT look retryable: a 502
 // invites a retry that buys another Places + Compute Routes Pro pair
 // and can never succeed.
-// A dead/unknown place id and an unroutable pair are permanent. A rate
-// limit, a 5xx, a timeout, or a response we could not parse are NOT the
-// client's fault and stay 502.
-const PLACE_INPUT_FAILURES = new Set(['invalid_place_id', 'places_4xx']);
-const NO_ROUTE_FAILURES = new Set(['routes_4xx', 'routes_no_route']);
+// EXACTLY the outcomes a passenger can act on. Everything else — a
+// denied or restricted key, a malformed request of ours, a quota trip,
+// a timeout, a network fault, a 5xx, a response we cannot parse — is a
+// server/upstream failure reported as 502 with sanitized text. A
+// misconfigured key must never surface as "reselect your address" or
+// as "no drivable route"; those messages would hide an outage as user
+// error precisely when rollout is standing up two fresh restricted keys.
+const PLACE_INPUT_FAILURES = new Set(['invalid_place_id', 'places_not_found']);
+const NO_ROUTE_FAILURES = new Set(['routes_no_route']);
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -219,7 +219,7 @@ async function check(name, fn) {
   await check('intent validation: mode/airport/placeId/pickupAt/passengers each refuse malformed values', async () => {
     const bads = [
       [{ mode: 'hourly' }], [{ airportCode: 'JFK' }], [{ airportCode: null }],
-      [{ placeId: 'x' }], [{ placeId: 'bad place id!' }], [{ placeId: 'C'.repeat(600) }],
+      [{ placeId: 'x' }], [{ placeId: 'bad place id!' }], [{ placeId: 'C'.repeat(3000) }],
       [{ placeId: 42 }], [{ pickupAt: 'tomorrow' }], [{ pickupAt: 12345 }],
       [{ passengers: 0 }], [{ passengers: 2.5 }], [{ passengers: '2' }]
     ];
@@ -296,9 +296,16 @@ async function check(name, fn) {
     assert.strictEqual(r.statusCode, 422);
     assert.ok(/no drivable route/i.test(JSON.parse(r.body).error));
     resetState();
-    state.routesResponse = () => ({ ok: false, status: 400, json: async () => ({}) });
-    assert.strictEqual((await post(goodIntent())).statusCode, 422, 'an unroutable pair is permanent');
-    resetState();
+    // A Routes 400 means WE built a bad request; 401/403 means a broken
+    // or wrongly-restricted key. Neither is the passenger's routing
+    // problem, and neither may be dressed up as "no drivable route".
+    for (const status of [400, 401, 403]) {
+      state.routesResponse = () => ({ ok: false, status, json: async () => ({}) });
+      const rr = await post(goodIntent());
+      assert.strictEqual(rr.statusCode, 502, `Routes ${status} is a server/upstream failure`);
+      assert.ok(!/drivable route/i.test(rr.body), `Routes ${status} must not be reported as "no route"`);
+      resetState();
+    }
     // Transient route failures stay 502, and there is exactly ONE attempt.
     state.routesResponse = () => ({ ok: false, status: 429, json: async () => ({}) });
     r = await post(goodIntent());
@@ -625,19 +632,66 @@ async function check(name, fn) {
     assert.ok(!tel.includes(RESOLVED) && !tel.includes(ADDRESS_PLACE_ID));
   });
 
-  await check('place ids are bounded operationally, not by a guessed 256 cap; long ids still quote', async () => {
-    // Google documents NO maximum length for place IDs, so a 256-char
-    // cap could refuse an address that books fine today.
-    const LONG = 'C'.repeat(300);
+  await check('place ids follow ONE contract in both directions; Google-documented long ids quote', async () => {
+    // Google states verbatim that there is no maximum length for place
+    // IDs, and its own documented long-form example runs past 600
+    // characters — a 512 bound would refuse a place ID straight out of
+    // the documentation.
+    const LONG = 'Ep' + 'A1b2C3d4_-'.repeat(70); // 702 chars, Google's URL-safe-base64 shape
+    assert.ok(LONG.length > 600);
     state.placesResponse = () => ({
       ok: true, status: 200,
       json: async () => ({ id: LONG, formattedAddress: '1 Long Id Way, Miami, FL' })
     });
     const r = await post(goodIntent({ placeId: LONG }));
-    assert.strictEqual(r.statusCode, 200, 'a 300-char place id must not be refused');
+    assert.strictEqual(r.statusCode, 200, 'a 700-char place id must not be refused');
     assert.strictEqual(JSON.parse(r.body).quote.intent.placeId, LONG);
-    // The operational bound still exists.
-    assert.strictEqual((await post(goodIntent({ placeId: 'C'.repeat(600) }))).statusCode, 400);
+    // A declared operational bound still exists, well clear of Google's example.
+    assert.strictEqual((await post(goodIntent({ placeId: 'C'.repeat(3000) }))).statusCode, 400);
+
+    // ONE CONTRACT: whatever the service returns as canonical must
+    // satisfy the SAME rules its own next request will apply. Anything
+    // Google returns that fails them is a response we do not
+    // understand — never a silent fallback to the submitted id while
+    // keeping the resolved place's address.
+    for (const badId of ['ChIJ+has+plus', 'short', 'id.with.dots', 'has/slash', 'ünicode', 'C'.repeat(3000), '', null, undefined, 42]) {
+      resetState();
+      state.placesResponse = () => ({
+        ok: true, status: 200,
+        json: async () => ({ id: badId, formattedAddress: '9 Split Identity Rd, Miami, FL' })
+      });
+      const rr = await post(goodIntent());
+      assert.strictEqual(rr.statusCode, 502, `a returned id of ${JSON.stringify(badId)} must fail closed`);
+      assert.strictEqual(state.routesCalls.length, 0, 'never route on an identity we could not pin');
+      assert.ok(!/Split Identity/.test(rr.body), 'never pair the resolved address with the submitted id');
+    }
+    // Every id the service DOES hand back round-trips through its own validator.
+    resetState();
+    const q = JSON.parse((await post(goodIntent())).body).quote;
+    assert.strictEqual((await post(goodIntent({ placeId: q.intent.placeId }))).statusCode, 200,
+      'the canonical id the service returns must be resubmittable');
+  });
+
+  await check('provider CONFIGURATION failures are never blamed on the passenger', async () => {
+    // Rollout provisions two brand-new restricted keys, so a wrong
+    // restriction is the single most likely early failure. It must read
+    // as a server fault, not as "reselect your address".
+    for (const status of [401, 403]) {
+      state.placesResponse = () => ({ ok: false, status, json: async () => ({}) });
+      const r = await post(goodIntent());
+      assert.strictEqual(r.statusCode, 502, `Places ${status} is a configuration failure`);
+      assert.ok(!/reselect/i.test(r.body), `Places ${status} must not be dressed up as passenger error`);
+      resetState();
+    }
+    // A 400 means WE sent a malformed request.
+    state.placesResponse = () => ({ ok: false, status: 400, json: async () => ({}) });
+    assert.strictEqual((await post(goodIntent())).statusCode, 502);
+    resetState();
+    // ONLY an obsolete/unknown place id is the passenger's to correct.
+    state.placesResponse = () => ({ ok: false, status: 404, json: async () => ({}) });
+    const r404 = await post(goodIntent());
+    assert.strictEqual(r404.statusCode, 400);
+    assert.ok(/reselect/i.test(r404.body));
   });
 
   await check('every vehicle token binds its OWN vehicle in both the payload and the intentHash', async () => {
@@ -799,7 +853,7 @@ async function check(name, fn) {
       'moving a leaked secret to a new key id rotates nothing');
   });
 
-  await check('provider calls share ONE deadline — two 8s waits cannot outlive the platform limit', async () => {
+  await check('provider calls share ONE deadline — a quote is bounded by OUR latency budget', async () => {
     const { resolvePlace } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
     const { computeRouteFacts } = require(path.join(repoRoot, 'backend/functions/lib/route-facts.js'));
     let called = 0;
@@ -810,9 +864,16 @@ async function check(name, fn) {
     assert.strictEqual((await computeRouteFacts({ originPlaceId: 'a', destinationPlaceId: 'b', pickupAtMs: Date.now() + 3600e3, nowMs: Date.now() }, { apiKey: 'k', fetchImpl: spy, deadlineMs: past })).reason, 'routes_timeout');
     assert.strictEqual(called, 0, 'an exhausted budget spends nothing');
     // The endpoint passes a real shared deadline to both providers.
+    // The budget is a PRODUCT choice, not a platform constraint —
+    // Netlify's synchronous limit is 60s and is not configurable, so
+    // nothing external forces this number. It exists so a
+    // passenger-facing quote cannot hang, and so a late-dying
+    // invocation cannot first pay for two Google calls.
     const endpoint = require('fs').readFileSync(path.join(repoRoot, 'backend/functions/quote-ride.js'), 'utf8');
     assert.ok(/PROVIDER_BUDGET_MS\s*=\s*(\d+)/.test(endpoint));
-    assert.ok(Number(RegExp.$1) < 10000, 'the shared budget must fit inside the platform timeout');
+    const budget = Number(RegExp.$1);
+    assert.ok(budget > 0 && budget <= 15000, 'the shared budget is a deliberate latency guard');
+    assert.ok(!/10s|10 ?second/i.test(endpoint), 'no stale 10-second platform-limit rationale');
     assert.strictEqual((endpoint.match(/deadlineMs: providerDeadline/g) || []).length, 2,
       'BOTH provider calls share the one deadline');
   });

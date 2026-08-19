@@ -109,12 +109,15 @@ async function computeRouteFacts(
       signal: controller.signal
     });
     if (!res.ok) {
-      // 408/429 are TRANSIENT (retry may succeed); other 4xx mean this
-      // place pair will never route, and must not be reported as a
-      // retryable fault.
+      // NARROW classification. The genuine "no route" answer is a 200
+      // with an empty routes array (below) — NOT an HTTP error. A 400
+      // here means WE sent a malformed request, and 401/403 means a
+      // broken key or a wrong API restriction. Neither is a passenger's
+      // routing problem, and neither may be reported as one.
       if (res.status >= 500) return { ok: false, reason: 'routes_5xx' };
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'routes_denied' };
       if (res.status === 429 || res.status === 408) return { ok: false, reason: 'routes_rate_limited' };
-      return { ok: false, reason: 'routes_4xx' };
+      return { ok: false, reason: 'routes_bad_request' };
     }
     const payload = await res.json().catch(() => null);
     if (!payload || !Array.isArray(payload.routes)) {
