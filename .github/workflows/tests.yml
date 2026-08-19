@@ -1,0 +1,107 @@
+# Committed test suites — machine-attested.
+#
+# Until now the suite totals in PR bodies were author-reported: Claude and
+# Codex each ran `node tests/<file>.test.js` locally and compared numbers.
+# That caught nothing that a reviewer forgot to re-run. This runs every
+# suite on every PR and on main.
+#
+# Node 20 matches production exactly (netlify.toml NODE_VERSION = "20").
+#
+# The timezone matrix is the point, not decoration. LinkMia's functions run
+# in UTC while every passenger-facing time is America/New_York, and the
+# pricing engine's golden parity is defined against a Miami-local browser —
+# so a date bug can hide in one zone and surface in another. The three legs
+# are: America/New_York (the business/parity zone), UTC (what Netlify
+# actually runs), and Asia/Tokyo (the adversarial far side of the date
+# line, which has caught real bugs in this repo).
+
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A superseded push should not keep burning minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [America/New_York, UTC, Asia/Tokyo]
+    name: suites (TZ=${{ matrix.tz }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # Lockfile-exact install: CI must not silently resolve a different
+      # dependency tree than production.
+      - run: npm ci
+
+      - name: Run all test suites
+        env:
+          TZ: ${{ matrix.tz }}
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          total=0; suites=0; failed=0
+
+          for f in tests/*.test.js; do
+            suites=$((suites + 1))
+            if out=$(node "$f" 2>&1); then
+              n=$(printf '%s\n' "$out" | grep -oE 'ALL [0-9]+ CHECKS PASS' | grep -oE '[0-9]+' | tail -1)
+              if [ -z "$n" ]; then
+                # Exit 0 without the sentinel means the suite did not
+                # actually run its checks — a silent pass is a failure.
+                echo "::error file=$f::exited 0 but never printed 'ALL n CHECKS PASS'"
+                printf '%s\n' "$out" | tail -20
+                failed=$((failed + 1))
+              else
+                echo "  ok  $(basename "$f")  ($n checks)"
+                total=$((total + n))
+              fi
+            else
+              echo "::error file=$f::suite failed"
+              printf '%s\n' "$out" | tail -30
+              failed=$((failed + 1))
+            fi
+          done
+
+          echo "TZ=$TZ  suites=$suites  checks=$total  failed=$failed"
+          echo "**TZ \`$TZ\`** — $suites suites, $total checks, $failed failed" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::$failed suite(s) failed under TZ=$TZ"
+            exit 1
+          fi
+
+          # Guard against a suite being deleted or renamed out of discovery:
+          # a green run over 3 suites is not the same assurance as 16.
+          # Raise this floor when suites are added, never lower it to pass.
+          if [ "$suites" -lt 16 ]; then
+            echo "::error::only $suites suites discovered, expected at least 16 — was one deleted or renamed?"
+            exit 1
+          fi
+
+      - name: Syntax-check backend functions
+        run: |
+          set -euo pipefail
+          count=0
+          while IFS= read -r f; do
+            node --check "$f"
+            count=$((count + 1))
+          done < <(find backend/functions -name '*.js' -not -path '*/node_modules/*')
+          echo "node --check clean over $count files"
