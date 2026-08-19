@@ -217,19 +217,30 @@ function quoteRide(input) {
   if (!input || typeof input !== 'object') {
     return err('invalid_input', 'quoteRide requires an input object');
   }
-  const {
-    vehicle,
-    routeMiles,
-    routeMinutes,
-    pickupAtMs,
-    passengers,
-    bags,
-    vehiclesRequested = 1,
-    bookingMode = 'dropoff',
-    originCode = null,
-    destinationCode = null,
-    rateCard
-  } = input;
+  // Property EXTRACTION is guarded: a hostile input can back any
+  // property with a throwing getter, and destructuring invokes getters.
+  // Only the reads are wrapped — an internal calculation bug later in
+  // the pipeline must still throw loudly, never masquerade as bad
+  // input.
+  let vehicle, routeMiles, routeMinutes, pickupAtMs, passengers, bags,
+    vehiclesRequested, bookingMode, originCode, destinationCode, rateCard;
+  try {
+    ({
+      vehicle,
+      routeMiles,
+      routeMinutes,
+      pickupAtMs,
+      passengers,
+      bags,
+      vehiclesRequested = 1,
+      bookingMode = 'dropoff',
+      originCode = null,
+      destinationCode = null,
+      rateCard
+    } = input);
+  } catch (e) {
+    return err('invalid_input', 'quoteRide input properties could not be read');
+  }
 
   if (!isValidatedRateCard(rateCard)) {
     return err('rate_card_not_validated',
@@ -352,9 +363,11 @@ function quoteRide(input) {
   const psychDollars = psychologicalDollars(card.psychologicalPricing, finalDollars);
 
   // MONEY SEAL (fail closed): every monetary output must be a finite,
-  // nonnegative SAFE integer number of cents. Bounded cards and bounded
-  // inputs should make this unreachable — if arithmetic ever produces
-  // anything else, the quote is refused, never emitted.
+  // nonnegative SAFE integer number of cents. Realistic cards never
+  // trip this; an extreme card that maxes every bounded field at once
+  // CAN (huge service limit × max rates × stacked surcharges) — and
+  // the guarantee is that such a quote is REFUSED with a structured
+  // error, never emitted with unsafe money and never thrown.
   const moneyOutputs = [
     toCents(tieredDollars), toCents(feeDollars), toCents(hourlyDollars),
     toCents(baseDollars), toCents(psychDollars),

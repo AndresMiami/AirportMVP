@@ -131,9 +131,14 @@ function fail(rule) {
 
 // MONEY SAFETY: every cents value must be a SAFE integer (IEEE-exact)
 // within a generous but hard bound — $1,000,000 in cents. Bounded card
-// values × the bounded service limit and duration keep every
-// intermediate product far inside Number.MAX_SAFE_INTEGER, so no valid
-// card can ever overflow a quote.
+// values × the bounded service limit and duration keep realistic cards
+// far inside Number.MAX_SAFE_INTEGER. The bounds are per-field, NOT a
+// cross-field worst-case proof: a card that maxes every field at once
+// (huge service limit × maximum rates × stacked 10x surcharges) can
+// still push a quote past safe-integer cents — the engine's output
+// seal then REFUSES that quote ('unrepresentable_fare') rather than
+// emitting unsafe money. Safety is guaranteed by refusal, not by a
+// promise that every bounded combination quotes successfully.
 const MAX_CENTS = 100000000;
 
 function isIntCents(v) {
@@ -171,7 +176,10 @@ function validateRateCard(rawCard) {
   try {
     card = JSON.parse(JSON.stringify(rawCard));
   } catch (e) {
-    fail(`card is not JSON-serializable (${e.message})`);
+    // FIXED sanitized message: the thrown value is hostile-controlled
+    // (a toJSON can throw an object whose .message getter itself
+    // throws), so it is never read or interpolated.
+    fail('card is not JSON-serializable');
   }
   // A toJSON can lawfully replace the object with a primitive — the
   // CLONE is what gets certified, so the clone must be an object too.
@@ -267,15 +275,17 @@ function validateRateCard(rawCard) {
     }
   }
   // Window coherence: peak is a non-wrapping window (hour >= start &&
-  // hour < end) — start >= end can never fire. Night deliberately WRAPS
-  // midnight (hour >= start || hour < end) — but start === end would
-  // cover every hour of every day, which is a misconfiguration, not a
-  // surcharge.
+  // hour < end) — start >= end can never fire. Night is evaluated as
+  // (hour >= start || hour < end), which means ANY startHour <= endHour
+  // configuration covers every hour of every day (hours below start
+  // satisfy the second half, hours at/above satisfy the first): night
+  // MUST wrap midnight, so startHour > endHour is required, not merely
+  // startHour !== endHour.
   if (card.surcharges.peak.startHour >= card.surcharges.peak.endHour) {
     fail('surcharge peak window is incoherent (startHour must be before endHour)');
   }
-  if (card.surcharges.night.startHour === card.surcharges.night.endHour) {
-    fail('surcharge night window is incoherent (startHour equals endHour covers all hours)');
+  if (card.surcharges.night.startHour <= card.surcharges.night.endHour) {
+    fail('surcharge night window is incoherent (it must wrap midnight: startHour > endHour, e.g. 22 -> 6)');
   }
   if (!Array.isArray(card.surcharges.weekend.days) ||
       card.surcharges.weekend.days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {

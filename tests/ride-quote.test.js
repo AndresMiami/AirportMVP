@@ -443,15 +443,17 @@ async function check(name, fn) {
     reject((c) => { c.airportFeeScalingBeyondFactor = Infinity; });
     reject((c) => { c.maxDistanceMiles = 10001; });
     reject((c) => { c.vehicles.tesla.capacity.passengers = 1001; });
-    // The EXTREME-but-bounded card: every value at its cap must still
-    // produce safe-integer money at the worst-case inputs.
+    // Per-field bounds are NOT a cross-field worst-case proof — the
+    // guarantee is SAFE REFUSAL, not that every bounded combination
+    // quotes. Two extremes pin both halves of that contract:
+    // (1) max rates on the PRODUCTION 280-mile structure still quote
+    //     with safe-integer money;
     const extreme = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
     for (const v of Object.values(extreme.vehicles)) {
       v.tiers.forEach((t) => { t.ratePerMileCents = 100000000; });
       v.airportFeeCents = 100000000;
       v.hourlyProtectionCentsPerHour = 100000000;
     }
-    for (const s of Object.values(extreme.surcharges)) { if (s.rate) s.rate = 10; }
     extreme.surcharges.night.rate = 10; extreme.surcharges.weekend.rate = 10;
     extreme.surcharges.peak.rate = 10; extreme.surcharges.holiday.rate = 10;
     const extremeCard = validateRateCard(extreme);
@@ -464,6 +466,33 @@ async function check(name, fn) {
     for (const c of [worst.quote.finalCents, worst.quote.baseCents, worst.quote.hourlyPriceCents]) {
       assert.ok(Number.isSafeInteger(c) && c >= 0, `unsafe money at the extreme: ${c}`);
     }
+    // (2) a validly-bounded card that maxes EVERYTHING at once (10000-mile
+    //     service limit, $1M/mile, four stacked 10x surcharges via wide
+    //     valid windows) overflows safe-integer cents — and the output
+    //     seal REFUSES it with a structured error: never unsafe money,
+    //     never a throw.
+    const abyss = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    abyss.maxDistanceMiles = 10000;
+    for (const v of Object.values(abyss.vehicles)) {
+      v.maxDistanceMiles = 10000;
+      v.tiers = [{ minMiles: 0, maxMiles: 10000, ratePerMileCents: 100000000 }];
+      v.airportFeeCents = 100000000;
+      v.hourlyProtectionCentsPerHour = 100000000;
+    }
+    abyss.surcharges.night = { startHour: 23, endHour: 22, rate: 10, description: 'night (wraps, all but 22:00)' };
+    abyss.surcharges.peak = { startHour: 0, endHour: 23, rate: 10, description: 'peak (0-22)' };
+    abyss.surcharges.weekend.rate = 10;
+    abyss.surcharges.holiday.rate = 10;
+    const abyssCard = validateRateCard(abyss); // individually bounded: validates
+    const refused = quoteRide({
+      vehicle: 'sprinter', routeMiles: 10000, routeMinutes: 10080,
+      // Sat Jul 4 2026, 01:00 Miami (05:00Z, UTC date 2026-07-04):
+      // night + peak + weekend + holiday all fire -> x10,000.
+      pickupAtMs: miami('2026-07-04T01:00:00').getTime(),
+      passengers: 1, bags: 0, rateCard: abyssCard
+    });
+    assert.strictEqual(refused.ok, false, 'the overflow combination must be refused, not quoted');
+    assert.strictEqual(refused.error.code, 'unrepresentable_fare');
   });
 
   await check('NEVER THROWS: Symbol/array/null-proto/hostile inputs get structured refusals', async () => {
@@ -514,6 +543,16 @@ async function check(name, fn) {
     reject((c) => { c.surcharges.peak.startHour = 9; c.surcharges.peak.endHour = 7; }); // never fires
     reject((c) => { c.surcharges.peak.startHour = 9; c.surcharges.peak.endHour = 9; });
     reject((c) => { c.surcharges.night.startHour = 6; c.surcharges.night.endHour = 6; }); // covers all hours
+    // The subtle one (Codex round 3): night is evaluated as
+    // (hour >= start || hour < end), so ANY start < end ALSO covers all
+    // 24 hours — 06->22 would surcharge every ride ever. Night must WRAP.
+    reject((c) => { c.surcharges.night.startHour = 6; c.surcharges.night.endHour = 22; });
+    reject((c) => { c.surcharges.night.startHour = 0; c.surcharges.night.endHour = 23; });
+    // The canonical wrapping window stays valid.
+    const canonical = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+    assert.strictEqual(canonical.surcharges.night.startHour, 22);
+    assert.strictEqual(canonical.surcharges.night.endHour, 6);
+    assert.ok(validateRateCard(canonical), 'the shipped 22->6 night window must validate');
     reject((c) => { c.psychologicalPricing.enabled = true; c.psychologicalPricing.strategy = 'disabled'; });
     // Serialization failures normalize into the SAME error contract.
     const circular = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
@@ -524,6 +563,38 @@ async function check(name, fn) {
     assert.throws(() => validateRateCard(bigint), /Invalid rate card/);
     const primitive = { toJSON: () => 'not-a-card' };
     assert.throws(() => validateRateCard(primitive), /Invalid rate card/);
+    // The serialization catch must never read the hostile thrown value:
+    // a toJSON that throws an object whose .message getter ITSELF
+    // throws still yields the fixed sanitized error.
+    const boobyTrapped = {
+      toJSON: () => {
+        const evil = {};
+        Object.defineProperty(evil, 'message', { get() { throw new Error('secondary'); } });
+        throw evil;
+      }
+    };
+    assert.throws(() => validateRateCard(boobyTrapped),
+      /^Error: Invalid rate card: card is not JSON-serializable$/);
+  });
+
+  await check('NEVER THROWS: input properties backed by throwing getters get a structured invalid_input', async () => {
+    const hostile = {};
+    for (const prop of ['vehicle', 'routeMiles', 'rateCard']) {
+      const h = {
+        vehicle: 'tesla', routeMiles: 10, routeMinutes: 20,
+        pickupAtMs: NEUTRAL.getTime(), passengers: 1, bags: 0, rateCard: CARD
+      };
+      Object.defineProperty(h, prop, { get() { throw new Error('gotcha'); }, enumerable: true });
+      const q = quoteRide(h);
+      assert.strictEqual(q.ok, false, `throwing getter on ${prop} must not throw out`);
+      assert.strictEqual(q.error.code, 'invalid_input');
+    }
+    // The guard covers extraction ONLY — a normal input still quotes.
+    assert.ok(quoteRide({
+      vehicle: 'tesla', routeMiles: 10, routeMinutes: 20,
+      pickupAtMs: NEUTRAL.getTime(), passengers: 1, bags: 0, rateCard: CARD
+    }).ok);
+    void hostile;
   });
 
   await check('passenger/bag counts: integers only, at least one passenger, never fractional', async () => {
