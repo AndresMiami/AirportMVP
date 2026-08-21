@@ -1,8 +1,10 @@
 # LinkMia — Miami Airport Transfers
 
-Chat-free, web-app-centric ride dispatch platform. Owner (Andres) is currently
-admin + the only driver. Passengers book on the web; dispatch, statuses, and
-verified checkpoint locations all live in the web app backed by Supabase.
+Chat-free, web-app-centric ride dispatch platform. Owner (Andres) is the admin
+and also drives; as of 2026-08-21 the `drivers` table holds FOUR active drivers
+(verified against production — the earlier "only driver" note is stale).
+Passengers book on the web; dispatch, statuses, and verified checkpoint
+locations all live in the web app backed by Supabase.
 
 ## Architecture (one path, one database)
 
@@ -475,6 +477,30 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     calculate-price.js retirement, eventual pricing.js deletion). One
     mechanism for both pending and confirmed edits; blockers for
     confirmed editing.
+  * NORTH-STAR DESIGN, NOT A SCHEDULE (2026-08-21): the operator console
+    mockup lives at `docs/prototypes/operations-console.html` with its
+    rationale in `docs/prototypes/README.md`. It is WIRED TO NOTHING —
+    no import, no link, no function reference. It exists so the
+    destination is agreed; it does NOT reorder the work. Andres
+    confirmed the sequence stays: (1) 3C-2B2 browser shows server
+    prices, (2) 3C-2C endpoints enforce + store the accepted quote,
+    (3) store route facts + pricing version on each booking, (4) THEN
+    convert only the three strongest pricing screens (fare board,
+    simulator, price receipt) into real tools, (5) broader operations
+    screens and real moving-vehicle tracking last. Steps 1-3 are strict
+    prerequisites — a pricing dashboard before 2C is a control panel
+    wired to nothing, since create-booking still takes `price` from the
+    browser. Findings the prototype encodes, all produced by RUNNING the
+    engine: a +10% Tesla per-mile edit moves five real routes by +25.6%,
+    -8.2%, 0%, +10.1%, +52.6% (an increase producing a CUT — uneven
+    rounding bands); validateRateCard accepts field names it does not
+    implement (`minimumFareCents: 8500` validates and is ignored, ride
+    still $19); a configured $150 fixed route bills $159; the $125/hr
+    "hourly" figure is a FLOOR that never binds on the three main
+    routes. Do NOT build stored publication, scoped price lists,
+    precedence, effective dating or approval ceremony — git already
+    provides versioning/authorship/review/rollback, and there is one
+    admin and zero negotiated accounts.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
     machinery extended (same form/row/details_version CAS), edits
     immediately authoritative, NO driver approval queue (release is the
