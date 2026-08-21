@@ -8,6 +8,7 @@
 // Run: node tests/quote-ride.test.js
 
 const path = require('path');
+const fs = require('fs');
 const assert = require('assert');
 
 process.env.SUPABASE_URL = 'https://example.supabase.co';
@@ -38,7 +39,26 @@ const CUSTOMERS = {
 };
 
 const ADDRESS_PLACE_ID = 'ChIJTESTaddressPLACEid1234';
-const MIA_PLACE_ID = 'ChIJQ2DP_4u02YgRPNlKgMr9gBE';
+const EXPECTED_AIRPORTS = Object.freeze({
+  MIA: Object.freeze({
+    placeId: 'ChIJLSeUuFi32YgRgpwdRDtxYkg',
+    formattedAddress: 'Miami International Airport (MIA), 2100 NW 42nd Ave, Miami, FL 33142'
+  }),
+  FLL: Object.freeze({
+    placeId: 'ChIJhTflH4aq2YgR9m9hZLFOmoo',
+    formattedAddress: 'Fort Lauderdale-Hollywood International Airport (FLL), 100 Terminal Dr, Fort Lauderdale, FL 33315'
+  }),
+  PBI: Object.freeze({
+    placeId: 'ChIJCboyqy3W2IgRdLKci4qxznw',
+    formattedAddress: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33406'
+  })
+});
+const PREVIOUS_AIRPORT_PLACE_IDS = Object.freeze([
+  'ChIJQ2DP_4u02YgRPNlKgMr9gBE',
+  'ChIJ9frI5Hq42YgR4bCqA7w1_Ww',
+  'ChIJd_cFKRUu2YgR6Me7ie5YMO0'
+]);
+const MIA_PLACE_ID = EXPECTED_AIRPORTS.MIA.placeId;
 
 // ---------- mock state ----------
 const state = {};
@@ -104,7 +124,7 @@ const quoteRideEndpoint = require(path.join(repoRoot, 'backend/functions/quote-r
 const { quantizeMiles, quantizeMinutes, FIELD_MASK } = require(path.join(repoRoot, 'backend/functions/lib/route-facts.js'));
 const { computeIntentHash, verifyQuoteToken, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
 const { resolveRateCard } = require(path.join(repoRoot, 'backend/functions/lib/rate-card-resolver.js'));
-const { airportByCode } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
+const { AIRPORTS, airportByCode, isValidPlaceId } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
 const { quoteRide: engineQuote } = require(path.join(repoRoot, 'backend/functions/lib/ride-quote.js'));
 
 const FUTURE_PICKUP = () => new Date(Date.now() + 24 * 3600e3).toISOString();
@@ -596,6 +616,56 @@ async function check(name, fn) {
   });
 
   // ---------- canonical place identity ----------
+  await check('all three airport pins match the current rollout identities and Railway cache', async () => {
+    assert.deepStrictEqual(Object.keys(AIRPORTS).sort(), Object.keys(EXPECTED_AIRPORTS).sort());
+    const ids = new Set();
+    for (const [code, expected] of Object.entries(EXPECTED_AIRPORTS)) {
+      const actual = airportByCode(code);
+      assert.ok(actual, `${code} must exist`);
+      assert.strictEqual(actual.placeId, expected.placeId, `${code} place ID drifted`);
+      assert.strictEqual(actual.formattedAddress, expected.formattedAddress, `${code} display address drifted`);
+      assert.ok(isValidPlaceId(actual.placeId), `${code} place ID must satisfy the shared boundary`);
+      ids.add(actual.placeId);
+    }
+    assert.strictEqual(ids.size, 3, 'each airport must have a distinct place identity');
+
+    // Railway's custom autocomplete and route logic are deliberately
+    // untouched. Its data-only popular Place Details cache must still
+    // carry the same current IDs so the two runtimes do not drift.
+    const proxySource = fs.readFileSync(path.join(repoRoot, 'backend/api-proxy/server.js'), 'utf8');
+    for (const [code, expected] of Object.entries(EXPECTED_AIRPORTS)) {
+      assert.ok(proxySource.includes(`['${expected.placeId}', { // ${code}`),
+        `Railway's ${code} cache must match the quote-service registry`);
+      assert.ok(proxySource.includes(`formatted_address: '${expected.formattedAddress}',`),
+        `Railway's ${code} display address must match the quote-service registry`);
+    }
+    for (const previous of PREVIOUS_AIRPORT_PLACE_IDS) {
+      assert.ok(!Object.values(AIRPORTS).some((airport) => airport.placeId === previous),
+        'the quote service must not route with a replaced airport pin');
+      assert.ok(!proxySource.includes(previous),
+        'Railway must not advertise a replaced airport pin as current');
+    }
+  });
+
+  await check('MIA/FLL/PBI use the current airport pin on the correct route side in both modes', async () => {
+    for (const [code, expected] of Object.entries(EXPECTED_AIRPORTS)) {
+      for (const mode of ['dropoff', 'pickup']) {
+        const r = await post(goodIntent({ airportCode: code, mode }));
+        assert.strictEqual(r.statusCode, 200, `${code} ${mode} must quote under mocked providers`);
+        const routeBody = state.routesCalls.at(-1).body;
+        if (mode === 'dropoff') {
+          assert.strictEqual(routeBody.origin.placeId, ADDRESS_PLACE_ID);
+          assert.strictEqual(routeBody.destination.placeId, expected.placeId);
+        } else {
+          assert.strictEqual(routeBody.origin.placeId, expected.placeId);
+          assert.strictEqual(routeBody.destination.placeId, ADDRESS_PLACE_ID);
+        }
+      }
+    }
+    assert.strictEqual(state.placesCalls.length, 6);
+    assert.strictEqual(state.routesCalls.length, 6);
+  });
+
   await check('the RESOLVED place id is canonical: routing, response, and intentHash all use it', async () => {
     // Google documents that Place Details MAY answer with a different
     // id (address-range inference, subpremise components — exactly
