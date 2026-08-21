@@ -440,7 +440,16 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     deliberately whether to key it (HMAC); (c) the three pinned airport
     place ids never pass through resolvePlace — verify they resolve in
     the rollout smoke matrix, since a retired id silently kills every
-    quote for that airport.
+    quote for that airport. ROLLOUT FINDING (2026-08-21): the first live
+    MIA quote reached Routes but returned NOT_FOUND. A one-shot direct
+    diagnostic proved the passenger address resolved and that one of
+    the two redacted route waypoints was unknown; it could not identify
+    which waypoint because provider identities are intentionally absent
+    from diagnostics. The complete MIA/FLL/PBI server registry and the
+    Railway data-only cache were refreshed from the current Google
+    identities. The corrected preview returning 200 for MIA, followed
+    by FLL and PBI, remains the load-bearing root-cause confirmation —
+    do not describe the provider rollout as complete before that matrix.
     PROVIDER FAILURES ARE NARROWLY CLASSIFIED (round 3): Places 400
     (INVALID_REQUEST: an invalid/truncated/modified id) and 404
     (obsolete/unknown id) are permanent passenger-correctable identity

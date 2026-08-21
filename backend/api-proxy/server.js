@@ -23,19 +23,20 @@ const MAX_CACHE_SIZE = 1000; // Prevent memory issues
 
 // Popular places cache (airports, hotels, landmarks)
 const popularPlaces = new Map([
-  // Pre-cache airport data
-  ['ChIJQ2DP_4u02YgRPNlKgMr9gBE', { // MIA
+  // Current airport identities. Keep these data-only Place Details
+  // cache keys aligned with functions/lib/place-identity.js.
+  ['ChIJLSeUuFi32YgRgpwdRDtxYkg', { // MIA
     formatted_address: 'Miami International Airport (MIA), 2100 NW 42nd Ave, Miami, FL 33142',
     geometry: { location: { lat: 25.7931, lng: -80.2906 } },
     name: 'Miami International Airport'
   }],
-  ['ChIJ9frI5Hq42YgR4bCqA7w1_Ww', { // FLL
+  ['ChIJhTflH4aq2YgR9m9hZLFOmoo', { // FLL
     formatted_address: 'Fort Lauderdale-Hollywood International Airport (FLL), 100 Terminal Dr, Fort Lauderdale, FL 33315',
     geometry: { location: { lat: 26.0742, lng: -80.1506 } },
     name: 'Fort Lauderdale-Hollywood International Airport'
   }],
-  ['ChIJd_cFKRUu2YgR6Me7ie5YMO0', { // PBI
-    formatted_address: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33415',
+  ['ChIJCboyqy3W2IgRdLKci4qxznw', { // PBI
+    formatted_address: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33406',
     geometry: { location: { lat: 26.6832, lng: -80.0956 } },
     name: 'Palm Beach International Airport'
   }]

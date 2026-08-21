@@ -19,9 +19,11 @@
 // never the browser-recoverable maps key. One attempt, bounded
 // timeout, no retries; failures are structured, never thrown.
 
-// LinkMia's service airports — server-known identities (place IDs and
-// canonical display data mirror the Railway proxy's pre-cache, the
-// same identities the autocomplete surfaces to passengers today).
+// LinkMia's service airports — server-known identities. Keep these
+// place IDs and canonical display values aligned with the Railway
+// proxy's current-airport pre-cache entries. Last refreshed as one set
+// from live Google identities on 2026-08-21; every refresh still needs
+// the three-airport Routes smoke matrix before it is trusted.
 //
 // OPERATIONAL RISK, RECORDED: these three ids are PINNED and never pass
 // through resolvePlace, even though this module's whole premise is that
@@ -34,21 +36,21 @@
 const AIRPORTS = Object.freeze({
   MIA: Object.freeze({
     code: 'MIA',
-    placeId: 'ChIJQ2DP_4u02YgRPNlKgMr9gBE',
+    placeId: 'ChIJLSeUuFi32YgRgpwdRDtxYkg',
     name: 'Miami International Airport',
     formattedAddress: 'Miami International Airport (MIA), 2100 NW 42nd Ave, Miami, FL 33142'
   }),
   FLL: Object.freeze({
     code: 'FLL',
-    placeId: 'ChIJ9frI5Hq42YgR4bCqA7w1_Ww',
+    placeId: 'ChIJhTflH4aq2YgR9m9hZLFOmoo',
     name: 'Fort Lauderdale-Hollywood International Airport',
     formattedAddress: 'Fort Lauderdale-Hollywood International Airport (FLL), 100 Terminal Dr, Fort Lauderdale, FL 33315'
   }),
   PBI: Object.freeze({
     code: 'PBI',
-    placeId: 'ChIJd_cFKRUu2YgR6Me7ie5YMO0',
+    placeId: 'ChIJCboyqy3W2IgRdLKci4qxznw',
     name: 'Palm Beach International Airport',
-    formattedAddress: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33415'
+    formattedAddress: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33406'
   })
 });
 
