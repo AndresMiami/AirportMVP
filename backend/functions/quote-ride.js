@@ -7,9 +7,12 @@
 // authoritative quote pipeline (trusted intent -> server route facts
 // -> 3C-2A engine -> signed quote) can run and be measured before the
 // browser integrates (2B2) and the write endpoints enforce (2C).
-// Zero passenger-visible behavior. Zero storage — no route facts, no
-// quotes, nothing persists (the Google storage-policy review gates 2C,
-// not this).
+// Zero passenger-visible behavior. Zero PRICING storage — no route
+// facts, no quotes, nothing about the trip persists (the Google
+// storage-policy review gates 2C, not this). The ONE write is the
+// ambassador ensure-row, which mirrors create-booking's approved
+// identity recovery so a quote and a booking can never disagree about
+// who is allowed to proceed.
 //
 // TRUSTED-INTENT BOUNDARY: the client sends intent ONLY. The field
 // set is a strict allowlist; any route-fact-shaped or unknown field is
@@ -131,8 +134,24 @@ exports.handler = async (event) => {
   const routesKey = process.env.GOOGLE_ROUTES_API_KEY;
   const placesKey = process.env.GOOGLE_PLACES_SERVER_API_KEY;
   const allowlistRaw = process.env.QUOTE_SHADOW_ALLOWLIST;
-  if (!supabaseUrl || !serviceKey || !anonKey || !routesKey || !placesKey || !allowlistRaw) {
+  // ACCESS MODE — explicit, never inferred. A MISSING allowlist must never
+  // read as "everyone is allowed": that is the failure where deleting one
+  // variable silently opens a paid Google endpoint to the internet. So the
+  // mode is named, defaults to the restrictive value, and an unknown value
+  // is a refusal rather than a guess.
+  //   'allowlist'     (default) — signed-in AND on QUOTE_SHADOW_ALLOWLIST
+  //   'authenticated'           — every signed-in customer; no allowlist needed
+  const accessMode = String(process.env.QUOTE_ACCESS_MODE || 'allowlist').trim().toLowerCase();
+  if (accessMode !== 'allowlist' && accessMode !== 'authenticated') {
+    console.error('❌ quote-ride QUOTE_ACCESS_MODE invalid');
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
+  }
+  if (!supabaseUrl || !serviceKey || !anonKey || !routesKey || !placesKey) {
     console.error('❌ quote-ride configuration incomplete');
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
+  }
+  if (accessMode === 'allowlist' && !allowlistRaw) {
+    console.error('❌ quote-ride allowlist mode requires QUOTE_SHADOW_ALLOWLIST');
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
   // Signing keys go through the ONE canonical resolver that 2C's
@@ -176,14 +195,57 @@ exports.handler = async (event) => {
       console.error('❌ quote-ride customer lookup failed');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
     }
-    if (!customer) {
-      return { statusCode: 403, headers, body: JSON.stringify({ error: 'Account profile incomplete' }) };
+    // AMBASSADOR RECOVERY — must mirror create-booking exactly. Without it
+    // an active ambassador who has never booked is refused a PRICE and then
+    // allowed to BOOK, so the quote and the booking disagree about who may
+    // proceed. create-booking already treats "no customers row + ACTIVE
+    // ambassador host row" as recoverable and mints the row from the HOST
+    // record (never from passenger details); the same rule applies here, on
+    // the same approved source.
+    let customerId = customer ? customer.id : null;
+    if (!customerId) {
+      const { data: ambassadorHost, error: hostError } = await db
+        .from('hosts')
+        .select('id, name, phone, email')
+        .eq('user_id', authUserId)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (hostError) {
+        console.error('❌ quote-ride host lookup failed during identity recovery');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+      }
+      if (!ambassadorHost) {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({ error: 'Account profile incomplete — please sign in again to finish setting up your account' })
+        };
+      }
+      const { data: createdCustomer, error: createError } = await db
+        .from('customers')
+        .insert([{
+          user_id: authUserId,
+          name: ambassadorHost.name,
+          phone: ambassadorHost.phone || null,
+          email: ambassadorHost.email || userData.user.email || null,
+          type: 'guest',
+          source: 'website'
+        }])
+        .select('id')
+        .single();
+      if (createError || !createdCustomer) {
+        console.error('❌ quote-ride ambassador ensure-row failed');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+      }
+      customerId = createdCustomer.id;
     }
 
-    // ---- dark-phase allowlist (BEFORE any Google call) ----
-    const allowlist = allowlistRaw.split(',').map((s) => s.trim()).filter(Boolean);
-    if (!allowlist.includes(authUserId)) {
-      return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not enabled for this account' }) };
+    // ---- access gate (BEFORE any Google call, so curiosity cannot spend) ----
+    if (accessMode === 'allowlist') {
+      const allowlist = allowlistRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      if (!allowlist.includes(authUserId)) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not enabled for this account' }) };
+      }
     }
 
     // ---- trusted-intent validation ----
@@ -232,7 +294,7 @@ exports.handler = async (event) => {
     if (!Number.isInteger(passengers) || passengers < 1 || passengers > 100) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'passengers must be a positive integer' }) };
     }
-    const card0 = await resolveRateCard({ authUserId, customerId: customer.id, pickupAtMs });
+    const card0 = await resolveRateCard({ authUserId, customerId, pickupAtMs });
     if (!card0 || !card0.ok) {
       console.error('❌ quote-ride rate card resolution failed');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Pricing unavailable' }) };
@@ -335,7 +397,7 @@ exports.handler = async (event) => {
       const quoteToken = signQuoteToken({
         purpose: 'create',
         authUserId,
-        customerId: customer.id,
+        customerId,
         vehicle: key,
         pickupAtMs,
         intentHash,

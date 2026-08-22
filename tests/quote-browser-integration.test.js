@@ -25,6 +25,35 @@ const assert = require('assert');
 
 const repoRoot = path.resolve(__dirname, '..');
 const indexMvp = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+const carouselHtml = fs.readFileSync(path.join(repoRoot, 'vehicle-carousel-standalone.html'), 'utf8');
+
+// The carousel's SHIPPED placeholder figures. These are what a passenger sees
+// before anything tells the carousel otherwise, which is exactly why the
+// loading/error/expired states have to overwrite them.
+const CAROUSEL_DEFAULTS = {};
+for (const m of carouselHtml.matchAll(/id="(tesla|escalade|sprinter)-price"[^>]*>([^<]+)</g)) {
+  CAROUSEL_DEFAULTS[m[1]] = m[2].trim();
+}
+assert.deepStrictEqual(Object.keys(CAROUSEL_DEFAULTS).sort(), ['escalade', 'sprinter', 'tesla'],
+  'could not read the carousel default prices from the real markup');
+
+// A model of the carousel's own rendering, seeded from that markup and driven
+// by the real postMessage contract, so assertions are about VISIBLE text.
+function makeCarousel() {
+  const visible = { ...CAROUSEL_DEFAULTS };
+  return {
+    visible: () => ({ ...visible }),
+    apply(msg) {
+      if (!msg) return;
+      if (msg.type === 'updatePrices' && msg.data) {
+        Object.keys(msg.data).forEach((k) => { visible[k] = `$${msg.data[k]}`; });
+      } else if (msg.type === 'clearPrices') {
+        const label = (msg.data && msg.data.label) || '—';
+        Object.keys(visible).forEach((k) => { visible[k] = label; });
+      }
+    },
+  };
+}
 
 const inlineBlocks = [...indexMvp.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
   .map((m) => m[1]).filter((s) => s.trim());
@@ -87,7 +116,8 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
   const contentSection = makeEl('div');
   const iframe = makeEl('iframe');
   const posted = [];
-  iframe.contentWindow = { postMessage: (msg) => posted.push(msg) };
+  const carousel = makeCarousel();
+  iframe.contentWindow = { postMessage: (msg) => { posted.push(msg); carousel.apply(msg); } };
   byId['vehicle-carousel-frame'] = iframe;
 
   const document = {
@@ -102,14 +132,18 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
   };
 
   const alerts = [];
+  const timers = [];
+  let timerId = 0;
   const ctx = {
     console: { log() {}, warn() {}, error() {}, info() {}, group() {}, groupEnd() {} },
     // indexMVP calls several debug.* channels; tolerate any of them
     debug: new Proxy({}, { get: () => () => {} }),
     document,
     window: { addEventListener() {}, location: { search: '' }, matchMedia: () => ({ matches: false }) },
-    setTimeout: (fn) => { fn(); return 0; },     // debounce runs inline
-    clearTimeout() {},
+    // Controllable timers: the TTL expiry must be testable without waiting,
+    // and the debounce must not fire on its own.
+    setTimeout: (fn, ms) => { timers.push({ id: ++timerId, fn, at: ms || 0 }); return timerId; },
+    clearTimeout: (id) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); },
     setInterval: () => 0,
     fetch: fetchImpl || (async () => ({ ok: true, status: 200, json: async () => ({}) })),
     alert: (m) => alerts.push(String(m)),
@@ -151,13 +185,16 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
     dateTime: { date: new Date(), time: new Date('2026-09-15T18:00:00Z') },
     vehicle: { type: null, selected: null },
     passengers: 1,
+    ui: { currentPanel: 'vehicle' },
     quote: { status: 'idle', key: null, data: null, error: null, seq: 0 },
   };
   app.els = { bookBtn: byId.bookBtn = makeEl('button') };
   app.updateSummary = () => {};
   app.updateBookButton = () => {};
   app.pricingService = null;
-  return { app, ctx, posted, alerts, byId, contentSection };
+  app.pendingEdit = null;
+  const runTimers = () => { const due = timers.splice(0); due.forEach((t) => t.fn()); };
+  return { app, ctx, posted, alerts, byId, contentSection, carousel, runTimers, timers };
 }
 
 const SERVER_QUOTE = {
@@ -430,10 +467,10 @@ check('STATIC: the submitted total comes from the quote, and the legacy chain is
   const m = appBlock.match(/pricing:\s*\(\(\)\s*=>\s*\{[\s\S]*?\}\)\(\),/);
   assert.ok(m, 'the pricing block should be a flag-gated expression');
   const body = m[0];
-  assert.ok(/if \(SERVER_QUOTE_ENABLED\)/.test(body), 'must branch on the flag');
+  assert.ok(/if \(this\.quoteFlowActive\(\)\)/.test(body), 'must branch on the scoped predicate');
   assert.ok(/selectedQuoteVehicle\(\)/.test(body), 'enabled branch must read the server quote');
   assert.ok(/finalCents \/ 100/.test(body), 'enabled branch must use server cents');
-  const enabledBranch = body.slice(body.indexOf('if (SERVER_QUOTE_ENABLED)'), body.indexOf('const legacy'));
+  const enabledBranch = body.slice(body.indexOf('if (this.quoteFlowActive())'), body.indexOf('const legacy'));
   assert.ok(!/pricingService|state\.vehicle\.pricing/.test(enabledBranch),
     'the enabled branch must not consult pricing.js at all');
 });
@@ -459,6 +496,156 @@ check('STATIC: pricing.js survives only as a shadow that is logged, never displa
   assert.ok(/console\.log/.test(body), 'the shadow reports to the console');
   assert.ok(!/postMessage|state\.route\.price\s*=|state\.vehicle\.price\s*=/.test(body),
     'the shadow must never write a displayed or submitted price');
+});
+
+// ==================== correction round ====================
+
+check('RACE: a response parsed after the intent moved on is dropped', async () => {
+  // The header check alone is not enough — res.json() is itself an await.
+  let releaseJson;
+  const jsonGate = new Promise((r) => { releaseJson = r; });
+  const impl = async () => ({
+    ok: true, status: 200,
+    json: async () => { await jsonGate; return quoteWithTtl(15); },
+  });
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: impl });
+  const inflight = app.requestServerQuote();
+  await Promise.resolve();
+  app.invalidateQuote('address changed while the body was parsing');
+  releaseJson();
+  await inflight;
+  assert.strictEqual(app.state.quote.data, null,
+    'a body parsed after the intent changed must not be stored under the new key');
+  assert.strictEqual(app.state.quote.status, 'idle');
+  assert.ok(!Object.values(carousel.visible()).some((v) => v === '$39'),
+    'the dropped quote must not reach the screen');
+});
+
+check('CAROUSEL: the shipped default prices are real and get replaced while loading', async () => {
+  assert.deepStrictEqual(CAROUSEL_DEFAULTS, { tesla: '$132', escalade: '$165', sprinter: '$220' });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const impl = async () => { await gate; return { ok: true, status: 200, json: async () => quoteWithTtl(15) }; };
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: impl });
+  const inflight = app.requestServerQuote();
+  await Promise.resolve();
+  assert.deepStrictEqual(carousel.visible(), { tesla: '…', escalade: '…', sprinter: '…' },
+    'markup placeholders must not sit on screen while a price is being fetched');
+  release();
+  await inflight;
+  assert.deepStrictEqual(carousel.visible(), { tesla: '$39', escalade: '$55', sprinter: '$95' });
+});
+
+check('CAROUSEL: a failed quote replaces the visible prices, it does not leave them', async () => {
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  await app.requestServerQuote();
+  assert.strictEqual(carousel.visible().tesla, '$39');
+  app.state.quote.status = 'error';
+  app.state.quote.error = { message: 'Could not compute the route right now', retryable: true };
+  app.renderQuoteState();
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: 'Unavailable', escalade: 'Unavailable', sprinter: 'Unavailable' },
+    'a stale good price must never survive a failure');
+});
+
+check('CAROUSEL: invalidation clears the visible prices', async () => {
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  await app.requestServerQuote();
+  assert.strictEqual(carousel.visible().escalade, '$55');
+  app.invalidateQuote('pickup time changed');
+  assert.deepStrictEqual(carousel.visible(), { tesla: '—', escalade: '—', sprinter: '—' });
+});
+
+check('TTL: a timer expires the visible price and disables Book without a click', async () => {
+  const { app, carousel, runTimers } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, false);
+  assert.strictEqual(carousel.visible().tesla, '$39');
+
+  // the quote reaches its TTL while the passenger is still on the screen
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+  runTimers();
+
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: 'Expired', escalade: 'Expired', sprinter: 'Expired' },
+    'an expired price must stop looking valid on screen');
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'Book must disable itself at expiry');
+});
+
+check('COST: a permanent refusal is not re-bought when Vehicle is reopened', async () => {
+  const f = okFetch({ error: 'That address could not be resolved — please reselect it' }, 400);
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 1);
+  await app.requestServerQuote();          // same intent, e.g. re-entering the panel
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 1, 'a non-retryable refusal must not buy another Google call');
+  await app.requestServerQuote({ force: true });
+  assert.strictEqual(f.calls.length, 2, 'an explicit retry still tries');
+});
+
+check('COST: a retryable failure IS retried when asked again', async () => {
+  const f = okFetch({ error: 'Could not reach the pricing service' }, 502);
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 2, 'a transient failure is allowed to try again');
+});
+
+check('COST: no quote is bought before the passenger reaches the Vehicle step', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, runTimers } = makeContext({ enabled: true, fetchImpl: f });
+  ['where', 'when'].forEach((panel) => {
+    app.state.ui.currentPanel = panel;
+    app.updateVehiclePrices();   // what a route or time change triggers
+    runTimers();
+  });
+  assert.strictEqual(f.calls.length, 0,
+    'route and time edits on earlier screens must not spend on Google');
+  app.state.ui.currentPanel = 'vehicle';
+  app.updateVehiclePrices();
+  runTimers();
+  await new Promise((r) => setTimeout(r, 0));   // let the queued request reach fetch
+  assert.strictEqual(f.calls.length, 1, 'the Vehicle step is where a price is actually needed');
+});
+
+check('SCOPE: a pending edit does not use create-scoped quotes', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: f });
+  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  assert.strictEqual(app.quoteFlowActive(), false,
+    'every token the endpoint signs is purpose:create — an edit must not carry one');
+  app.updateVehiclePrices();
+  assert.strictEqual(f.calls.length, 0, 'an edit must not request a create-scoped quote');
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, false, 'editing must not be blocked by the quote gate');
+  app.renderQuoteState();
+  assert.deepStrictEqual(carousel.visible(), CAROUSEL_DEFAULTS,
+    'the quote UI must stay out of the edit flow entirely');
+});
+
+check('STATIC: the endpoint names its access mode instead of inferring it', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'backend/functions/quote-ride.js'), 'utf8');
+  assert.ok(/QUOTE_ACCESS_MODE/.test(src), 'access must be an explicit named mode');
+  assert.ok(/\|\| 'allowlist'/.test(src), 'the default must be the restrictive mode');
+  assert.ok(/accessMode === 'allowlist' && !allowlistRaw/.test(src),
+    'the allowlist is required only in allowlist mode, so removing it cannot 500');
+  assert.ok(!/!placesKey \|\| !allowlistRaw/.test(src),
+    'the allowlist must no longer be an unconditional configuration requirement');
+});
+
+check('STATIC: quote-ride recovers an ambassador identity exactly like create-booking', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'backend/functions/quote-ride.js'), 'utf8');
+  assert.ok(/from\('hosts'\)/.test(src) && /eq\('status', 'active'\)/.test(src),
+    'an active ambassador host row is the approved recovery source');
+  assert.ok(/from\('customers'\)[\s\S]{0,400}\.insert/.test(src), 'the row is minted, not refused');
+  assert.ok(/ambassadorHost\.name/.test(src) && !/booking\.customerName/.test(src),
+    'identity comes from the HOST record, never from passenger details');
 });
 
 run().catch((e) => { console.error(e); process.exit(1); });

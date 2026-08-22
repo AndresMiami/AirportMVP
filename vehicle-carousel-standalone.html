@@ -627,6 +627,14 @@
                                 }
                                 break;
                                 
+                            case 'clearPrices':
+                                // The host has no trustworthy price right now
+                                // (loading, expired, or the pricing service
+                                // refused). Showing the last good number — or the
+                                // markup's placeholder figures — would be a lie.
+                                this.clearPrices(data && data.label);
+                                break;
+
                             case 'selectVehicle':
                                 if (data?.vehicleId) {
                                     const index = this.vehicles.findIndex(v => v.id === data.vehicleId);
@@ -663,6 +671,23 @@
                         }
                     });
                 }
+            }
+
+            clearPrices(label) {
+                const text = label || '—';
+                const ids = (this.vehicles && this.vehicles.length)
+                    ? this.vehicles.map(v => v.id)
+                    : ['tesla', 'escalade', 'sprinter'];
+                ids.forEach(vehicleId => {
+                    const priceElement = document.getElementById(`${vehicleId}-price`);
+                    if (priceElement) {
+                        priceElement.classList.add('updating');
+                        priceElement.textContent = text;
+                        setTimeout(() => {
+                            priceElement.classList.remove('updating');
+                        }, 500);
+                    }
+                });
             }
 
             updatePrices(prices) {
