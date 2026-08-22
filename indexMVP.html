@@ -1874,7 +1874,7 @@
             //     server's zone and silently reprice the ride.
             //   * The response's `intent.placeId` is CANONICAL — Google may
             //     supersede the id we sent. That canonical id is what gets
-            //     submitted, or 2C's hash recomputation will reject an honest
+            //     submitted, or 2C's keyed-commitment recomputation will reject an honest
             //     booking.
 
             // SCOPE — new bookings only. Every token the endpoint signs carries
@@ -1953,6 +1953,82 @@
                 const key = this.state.vehicle?.type;
                 const v = key && this.state.quote.data?.vehicles?.[key];
                 return (v && v.ok) ? v : null;
+            }
+
+            captureServerQuoteContract() {
+                if (!this.quoteFlowActive() || !this.quoteIsFresh()) return null;
+                const quote = this.state.quote.data;
+                const selected = this.selectedQuoteVehicle();
+                const vehicleKey = this.state.vehicle?.type;
+                const milesTenths = quote?.route?.milesTenths;
+                const routeMinutes = quote?.route?.minutes;
+                const expiresAt = this.quoteExpiryMs();
+                if (!selected?.token || !quote?.intent?.placeId ||
+                    !quote?.intent?.airportCode || !vehicleKey ||
+                    !Number.isSafeInteger(milesTenths) || milesTenths < 0 ||
+                    !Number.isSafeInteger(routeMinutes) || routeMinutes < 0 ||
+                    !Number.isFinite(expiresAt) || expiresAt <= Date.now() ||
+                    !Number.isSafeInteger(selected.finalCents) || selected.finalCents < 0 ||
+                    !quote?.pricingVersion) {
+                    return null;
+                }
+                return Object.freeze({
+                    seq: this.state.quote.seq,
+                    key: this.state.quote.key,
+                    token: selected.token,
+                    placeId: quote.intent.placeId,
+                    airportCode: quote.intent.airportCode,
+                    vehicleKey,
+                    routeMilesTenths: milesTenths,
+                    routeMinutes,
+                    pricingVersion: quote.pricingVersion,
+                    finalCents: selected.finalCents,
+                    expiresAt
+                });
+            }
+
+            serverQuoteContractIsCurrent(contract) {
+                if (!contract || !this.quoteFlowActive()) return false;
+                const selected = this.selectedQuoteVehicle();
+                return this.state.quote.seq === contract.seq &&
+                    this.state.quote.key === contract.key &&
+                    this.quoteKey(this.quoteIntent()) === contract.key &&
+                    this.state.vehicle?.type === contract.vehicleKey &&
+                    selected?.token === contract.token &&
+                    Date.now() < contract.expiresAt;
+            }
+
+            // Attach only the canonical server-quote contract. Route facts use
+            // integer units echoed by quote-ride, never the browser's legacy
+            // route cache. They are resubmitted so 2C can recompute the keyed
+            // commitment; they do not become raw fields inside the token.
+            attachServerQuoteContract(apiPayload, contract = null) {
+                // Disabled/edit flows intentionally carry no create quote. If
+                // this WAS a quote-backed submission, however, never fall back
+                // silently because state changed during the authentication
+                // await: every request fact and token must remain one snapshot.
+                if (!contract) {
+                    if (this.quoteFlowActive()) {
+                        throw new Error('The authoritative quote is incomplete — please refresh the price.');
+                    }
+                    return apiPayload;
+                }
+                if (!this.serverQuoteContractIsCurrent(contract)) {
+                    throw new Error('Your ride or price changed while booking — please review it and try again.');
+                }
+
+                apiPayload.quoteToken = contract.token;
+                apiPayload.placeId = contract.placeId;
+                apiPayload.airportCode = contract.airportCode;
+                apiPayload.vehicleKey = contract.vehicleKey;
+                apiPayload.routeMilesTenths = contract.routeMilesTenths;
+                apiPayload.routeMinutes = contract.routeMinutes;
+                apiPayload.pricingVersion = contract.pricingVersion;
+                // This legacy duration comes from the browser/Railway cache.
+                // A verified write must use only the route minutes authenticated
+                // by the quote commitment, so do not send both truths.
+                delete apiPayload.durationMinutes;
+                return apiPayload;
             }
 
             async requestServerQuote({ force = false } = {}) {
@@ -2553,8 +2629,10 @@
                 // have sat on the vehicle screen past the 15-minute TTL, or
                 // edited the trip in another tab. A stale quote must never be
                 // submitted, and there is no fallback to the browser price.
+                let serverQuoteContract = null;
                 if (this.quoteFlowActive()) {
-                    if (!this.quoteIsFresh() || !this.selectedQuoteVehicle()) {
+                    serverQuoteContract = this.captureServerQuoteContract();
+                    if (!serverQuoteContract) {
                         this.renderQuoteState();
                         this.requestServerQuote({ force: true });
                         alert('These prices are no longer current. We are getting a fresh price — please review it before booking.');
@@ -2579,6 +2657,23 @@
                 const contactInfo = passengerModal.getContactInfo();
                 const passengerData = passengerModal.getPassengerData();
 
+                // Freeze every mutable UI fact before the first await. A
+                // session refresh may yield to carousel/navigation events; the
+                // later POST must either use this one coherent snapshot or
+                // refuse, never combine booking A with quote B.
+                const submitState = {
+                    mode: this.state.mode,
+                    passengers: this.state.passengers,
+                    pickupNotes: this.state.pickupNotes ? { ...this.state.pickupNotes } : {},
+                    vehicle: this.state.vehicle ? { ...this.state.vehicle } : null,
+                    dateTime: this.state.dateTime ? { ...this.state.dateTime } : {},
+                    paymentMethod: this.state.paymentMethod,
+                    promoCode: this.state.promoCode,
+                    routeDuration: this.state.route?.duration ?? null,
+                    addressLabel: this.state.locations.address?.address || '',
+                    airportLabel: this.state.locations.airport?.name || ''
+                };
+
                 const bookingData = {
                     tripId: tripId,
                     booker: {
@@ -2591,39 +2686,38 @@
                             ? passengerData.data.fullName
                             : contactInfo?.name || 'Self',
                         guestData: passengerData?.type === 'guest' ? passengerData.data : null,
-                        count: this.state.passengers,
+                        count: submitState.passengers,
                         phone: passengerData?.type === 'guest'
                             ? `${passengerData.data.countryCode} ${passengerData.data.phone}`
                             : contactInfo?.phone || 'Not provided',
-                        notes: this.state.pickupNotes
+                        notes: submitState.pickupNotes
                     },
                     driver: {
                         name: "Carlos Martinez",
                         rating: 4.7,
-                        vehicle: this.state.vehicle.name
+                        vehicle: submitState.vehicle.name
                     },
                     route: {
-                        from: this.state.mode === 'dropoff' 
-                            ? this.state.locations.address.address 
-                            : this.state.locations.airport.name,
-                        to: this.state.mode === 'dropoff' 
-                            ? this.state.locations.airport.name 
-                            : this.state.locations.address.address
+                        from: submitState.mode === 'dropoff'
+                            ? submitState.addressLabel
+                            : submitState.airportLabel,
+                        to: submitState.mode === 'dropoff'
+                            ? submitState.airportLabel
+                            : submitState.addressLabel
                     },
-                    vehicle: this.state.vehicle,
-                    dateTime: this.state.dateTime,
+                    vehicle: submitState.vehicle,
+                    dateTime: submitState.dateTime,
                     payment: {
-                        method: this.state.paymentMethod,
-                        promo: this.state.promoCode
+                        method: submitState.paymentMethod,
+                        promo: submitState.promoCode
                     },
                     pricing: (() => {
                         // PR 3C-2B2: when the server quote is authoritative the
                         // submitted total is the server's cents, full stop. The
                         // pricing.js chain below is the legacy path and applies
                         // only while the flag is off.
-                        if (this.quoteFlowActive()) {
-                            const sv = this.selectedQuoteVehicle();
-                            const total = sv.finalCents / 100;
+                        if (serverQuoteContract) {
+                            const total = serverQuoteContract.finalCents / 100;
                             return { base: total, surge: 0, discount: 0, total };
                         }
                         const legacy = this.state.vehicle.pricing?.finalPrice
@@ -2718,7 +2812,7 @@
                             dateTime: bookingData.dateTime?.time || new Date().toISOString(),
                             vehicle: bookingData.vehicle?.name || 'Sedan',
                             price: bookingData.pricing?.total || 0,
-                            mode: this.state.mode,
+                            mode: submitState.mode,
                             passengers: bookingData.passenger?.count || 1,
                             tripId: tripId,
                             bags: bookingData.vehicle?.bags || 0,
@@ -2727,7 +2821,7 @@
                             pickupSign: bookingData.passenger?.notes?.pickupSign || null,
                             promoCode: bookingData.payment?.promo || null,
                             flightNumber: bookingData.passenger?.notes?.referenceCode || null,
-                            durationMinutes: this.state.route?.duration || null,
+                            durationMinutes: submitState.routeDuration,
                             refCode: getStoredRefCode()
                         };
 
@@ -2735,15 +2829,11 @@
                     // validates required fields only and ignores unknown ones,
                     // so sending these today needs no backend change and gives
                     // 2C a browser that already speaks the final contract.
-                    // placeId is the CANONICAL id the server resolved, echoed
-                    // back verbatim: 2C recomputes the intent hash from it, and
-                    // autocomplete's original id would not match.
-                    if (this.quoteFlowActive()) {
-                        const sv = this.selectedQuoteVehicle();
-                        apiPayload.quoteToken = sv.token;
-                        apiPayload.placeId = this.state.quote.data.intent.placeId;
-                        apiPayload.pricingVersion = this.state.quote.data.pricingVersion;
-                    }
+                    // Canonical identity, vehicle key, and integer route facts
+                    // are echoed from the server response. 2C recomputes the
+                    // keyed commitment; autocomplete/browser-route values do
+                    // not get to establish financial truth.
+                    this.attachServerQuoteContract(apiPayload, serverQuoteContract);
 
                     if (isEditing) {
                         apiPayload.bookingId = editContext.bookingId;

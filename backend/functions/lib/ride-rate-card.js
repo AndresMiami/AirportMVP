@@ -23,6 +23,8 @@
 // validation cannot be mutated afterwards — freezing is part of the
 // contract, not a courtesy.
 
+const { isValidVersionLabel } = require('./version-label');
+
 // Module-private registry of validated cards. A WeakSet membership is
 // UNFORGEABLE (unlike a global-registry Symbol brand, which any caller
 // could stamp) and never walks prototype chains (Object.create of a
@@ -187,8 +189,8 @@ function validateRateCard(rawCard) {
     fail('card must serialize to a plain object');
   }
 
-  if (typeof card.pricingVersion !== 'string' || card.pricingVersion.trim() === '') {
-    fail('pricingVersion must be a nonempty string');
+  if (!isValidVersionLabel(card.pricingVersion)) {
+    fail('pricingVersion must be a 1-128 character version slug');
   }
   if (!KNOWN_STRATEGIES.includes(card.strategy)) fail(`unknown strategy '${card.strategy}'`);
   if (!isPositiveInt(card.maxDistanceMiles) || card.maxDistanceMiles > 10000) {

@@ -350,7 +350,7 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     explicit audited admin-assignment capability. It must preserve
     every release record and must not weaken the rule preventing
     drivers from reclaiming their own released commitments.
-  * PR 3C-2A server pricing engine — BUILT (this PR): the canonical,
+  * PR 3C-2A server pricing engine — SHIPPED (merge bda4249): the canonical,
     PURE server-side pricing/capacity engine
     (backend/functions/lib/ride-rate-card.js + ride-quote.js) — a
     validated, versioned, frozen RATE CARD separated from the
@@ -362,7 +362,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     authoritative in production yet. Future Supabase pricing profiles /
     ambassador dashboard / markups and the time-dominant rate card are
     architecturally supported and explicitly deferred.
-  * PR 3C-2B1 server quote service — BUILT (this PR): DARK
+  * PR 3C-2B1 server quote service — SHIPPED (merge 41a2639; real-Google
+    provider rollout and airport-identity correction closed by a2e9e92): DARK
     `/api/quote-ride` (nothing calls it). Trusted-INTENT boundary
     (strict field allowlist; airportCode + Google place_id resolved
     SERVER-side to one identity for routing and the future stored
@@ -378,8 +379,13 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     displaying fallback pricing); all-vehicles response with honest
     passengerCapacityChecked:true / luggageCapacityChecked:false
     (bags DELIBERATELY dormant — the UI collects no bag count);
-    rate-card-resolver seam (code card today; documented future
-    fail-closed override contract); signed tokens (HMAC v1, kid
+    HISTORICAL TOKEN NOTE: the v1 details in this 2B1 record describe
+    the original dark service. PR 3C-2C-A (merge 77fb91a) replaced v1
+    outright with token v2 before any production token existed; there
+    is no v1 compatibility window. The original rate-card-resolver seam
+    (code card today; documented future fail-closed override contract)
+    and signed-token record below remain the historical 2B1 contract;
+    signed tokens used HMAC v1 with kid
     rotation via QUOTE_SIGNING_CURRENT/PREVIOUS_ID+SECRET, purpose
     'create' only, dual auth-user+customer binding, intentHash instead
     of location data, 15-min price-hold TTL — replay within TTL is a
@@ -464,17 +470,38 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     address" or "no drivable route". The 7s shared provider budget is a
     PRODUCT latency/cost guard, NOT a platform limit (Netlify's
     synchronous limit is 60s and not configurable).
-  * PR 3C-2B2/2C — NEXT: browser integration (server quotes displayed,
-    explicit passenger acceptance of price differences, allowlist
-    removal, indexMVP must retain autocomplete's place_id AND then
-    resubmit the quote's CANONICAL placeId; pickupAt must carry a UTC
-    offset — an offset-less instant is reinterpreted in the server's
-    zone and silently reprices), then
-    endpoint enforcement in create-booking/update-pending-booking
-    (verify-or-reject, snapshot migration, strictness fixes,
-    calculate-price.js retirement, eventual pricing.js deletion). One
-    mechanism for both pending and confirmed edits; blockers for
-    confirmed editing.
+  * PR 3C-2B2 browser integration — SHIPPED DARK (merge 3d81073): the
+    new-booking browser can display server quotes and carry their
+    canonical place identity/token, but `SERVER_QUOTE_ENABLED` remains
+    false, `/api/quote-ride` remains kill-switched, and `pricing.js`
+    remains the live production pricing authority. Pending edits remain
+    deliberately on the legacy flow until edit-purpose quoting lands.
+  * PR 3C-2C-A pricing-enforcement foundation — SHIPPED DARK (merge
+    77fb91a): token v2 and migration 017's database/RPC foundation are
+    on main, but migration 017 has NOT been run in production. The
+    correction/preflight pass must be reviewed and its historical
+    ambassador decisions completed before rollout; the SQL file being
+    deployed is not evidence that the schema exists. The corrected v2
+    contract carries canonical `airportCode` + `vehicleKey`; authoritative
+    route distance (integer tenths of a mile) and duration (whole minutes)
+    are bound into the keyed commitment and resubmitted for verification,
+    but are deliberately absent from the token projection and durable
+    acceptance/booking storage until the Google Routes storage-policy review
+    explicitly clears a retention design. Verified CREATE therefore stores
+    `duration_minutes = NULL`; verified EDIT also clears the prior route's
+    duration rather than retaining stale route data or relabeling new Google
+    data as durable truth. Migration 017 takes NOWAIT exclusive locks on
+    bookings/customers/hosts before validating the reviewed historical actor
+    manifest, so run it only in a brief maintenance window; any concurrent
+    access aborts the whole transaction and requires a clean retry.
+  * PR 3C-2C — NEXT, in this order: run the reviewed migration 017 only
+    after its production preflight passes; build 2C-B so create/edit
+    writers verify and consume quotes through the atomic RPCs; enter
+    observe mode; restore the quote-service production configuration
+    and smoke it while the browser flag remains off; flip the browser
+    flag last; observe real traffic before the irreversible move to
+    enforce. One mechanism serves pending and future confirmed edits;
+    confirmed editing remains a later product step.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
     machinery extended (same form/row/details_version CAS), edits
     immediately authoritative, NO driver approval queue (release is the
@@ -482,7 +509,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     the EARLIER of pre/post-edit pickup (>2h normal; ≤2h urgent driver
     push + admin Telegram; at/after pickup Manage ride closed), shadow
     REBOOKING audit from the pre-edit ride inside T-2h (0/50/100, $0
-    pilot), before/after revision history (migration 017). NO WhatsApp
+    pilot), before/after revision history (migration 018 or the next
+    available number; 017 now belongs to pricing enforcement). NO WhatsApp
     change workflow — WhatsApp stays exceptional human coordination only.
   * NO-SHOW principle (record only, never implemented yet): a driver tap
     must NEVER create a compensated no-show — future review requires an

@@ -26,6 +26,9 @@ const assert = require('assert');
 const repoRoot = path.resolve(__dirname, '..');
 const indexMvp = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
 const carouselHtml = fs.readFileSync(path.join(repoRoot, 'vehicle-carousel-standalone.html'), 'utf8');
+const {
+  computeCommitment, newJti, signQuoteToken, verifyQuoteToken,
+} = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
 
 // The carousel's SHIPPED placeholder figures. These are what a passenger sees
 // before anything tells the carousel otherwise, which is exactly why the
@@ -239,6 +242,7 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     navigator: { userAgent: 'test', standalone: false, serviceWorker: { register: async () => ({}) } },
     currentActiveBooking: null,
+    currentSession: null,
     getStoredRefCode: () => null,
     Date, Math, JSON, Object, Array, Number, String, Boolean, Error, Promise, Set, Map,
     isNaN, parseFloat, parseInt, URL, AbortController,
@@ -294,7 +298,7 @@ const SERVER_QUOTE = {
       formattedAddress: '1 Brickell Ave, Miami, FL',
       pickupAt: '2026-09-15T18:00:00.000Z', passengers: 1,
     },
-    route: { miles: 10, minutes: 20, quality: 'traffic_aware' },
+    route: { miles: 10, milesTenths: 100, minutes: 20, quality: 'traffic_aware' },
     vehicles: {
       tesla: { ok: true, vehicleName: 'Tesla Model Y', finalCents: 3900, token: 'tok.tesla', expiresAt: null },
       escalade: { ok: true, vehicleName: 'Cadillac Escalade', finalCents: 5500, token: 'tok.escalade', expiresAt: null },
@@ -556,19 +560,132 @@ check('STATIC: the submitted total comes from the quote, and the legacy chain is
   const m = appBlock.match(/pricing:\s*\(\(\)\s*=>\s*\{[\s\S]*?\}\)\(\),/);
   assert.ok(m, 'the pricing block should be a flag-gated expression');
   const body = m[0];
-  assert.ok(/if \(this\.quoteFlowActive\(\)\)/.test(body), 'must branch on the scoped predicate');
-  assert.ok(/selectedQuoteVehicle\(\)/.test(body), 'enabled branch must read the server quote');
+  assert.ok(/if \(serverQuoteContract\)/.test(body), 'must branch on the frozen submission contract');
   assert.ok(/finalCents \/ 100/.test(body), 'enabled branch must use server cents');
-  const enabledBranch = body.slice(body.indexOf('if (this.quoteFlowActive())'), body.indexOf('const legacy'));
+  const enabledBranch = body.slice(body.indexOf('if (serverQuoteContract)'), body.indexOf('const legacy'));
   assert.ok(!/pricingService|state\.vehicle\.pricing/.test(enabledBranch),
     'the enabled branch must not consult pricing.js at all');
 });
 
-check('STATIC: the payload carries the token, the CANONICAL place id and the pricing version', () => {
-  assert.ok(/apiPayload\.quoteToken = sv\.token;/.test(appBlock), 'quoteToken must be submitted');
-  assert.ok(/apiPayload\.placeId = this\.state\.quote\.data\.intent\.placeId;/.test(appBlock),
-    "2C recomputes the hash from the server's canonical id, not autocomplete's");
-  assert.ok(/apiPayload\.pricingVersion = this\.state\.quote\.data\.pricingVersion;/.test(appBlock));
+check('STATIC: the payload helper carries every canonical commitment input', () => {
+  assert.ok(/attachServerQuoteContract\(apiPayload, serverQuoteContract\)/.test(appBlock));
+  for (const field of ['quoteToken', 'placeId', 'airportCode', 'vehicleKey',
+    'routeMilesTenths', 'routeMinutes', 'pricingVersion']) {
+    assert.ok(new RegExp(`apiPayload\\.${field} =`).test(appBlock), `${field} must be submitted`);
+  }
+  assert.ok(/delete apiPayload\.durationMinutes/.test(appBlock),
+    'a verified request must not carry the browser route cache as a second duration truth');
+});
+
+check('CONTRACT: the real browser payload verifies against a real v2 token', async () => {
+  const secret = 'browser-contract-secret-'.padEnd(40, 'x');
+  const keyId = 'browser-contract-v2';
+  const now = Date.now();
+  const pickupAtMs = Date.parse(SERVER_QUOTE.quote.intent.pickupAt);
+  const intent = {
+    mode: SERVER_QUOTE.quote.intent.mode,
+    airportCode: SERVER_QUOTE.quote.intent.airportCode,
+    placeId: SERVER_QUOTE.quote.intent.placeId,
+    pickupAtMs,
+    passengers: SERVER_QUOTE.quote.intent.passengers,
+    routeMilesTenths: SERVER_QUOTE.quote.route.milesTenths,
+    routeMinutes: SERVER_QUOTE.quote.route.minutes,
+  };
+  const finalCents = SERVER_QUOTE.quote.vehicles.escalade.finalCents;
+  const token = signQuoteToken({
+    purpose: 'create', jti: newJti(), authUserId: '44444444-4444-4444-8444-444444444444', customerId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    vehicle: 'escalade', pickupAtMs,
+    commitment: computeCommitment(intent, 'escalade', finalCents, secret),
+    routeQuality: 'traffic_aware', finalCents,
+    pricingVersion: 'linkmia-parity-2026-08', engineVersion: 'ride-quote-v1',
+    resolvedVersion: 'linkmia-parity-2026-08',
+  }, { keyId, secret, nowMs: now });
+
+  const response = quoteWithTtl(15);
+  response.quote.vehicles.escalade.token = token;
+  const { app } = makeContext({ enabled: true, fetchImpl: okFetch(response) });
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'escalade', name: 'Cadillac Escalade', passengers: 7, bags: 8, price: 55 });
+
+  const contract = app.captureServerQuoteContract();
+  assert.ok(contract, 'a fresh selected quote must produce one immutable submission contract');
+  const payload = app.attachServerQuoteContract({
+    mode: app.state.mode,
+    dateTime: app.state.dateTime.time,
+    passengers: app.state.passengers,
+    vehicle: app.state.vehicle.name,
+    durationMinutes: app.state.route.duration,
+  }, contract);
+  assert.strictEqual(payload.quoteToken, token);
+  assert.strictEqual(payload.placeId, intent.placeId);
+  assert.strictEqual(payload.airportCode, intent.airportCode);
+  assert.strictEqual(payload.vehicleKey, 'escalade');
+  assert.strictEqual(payload.routeMilesTenths, 100);
+  assert.strictEqual(payload.routeMinutes, 20);
+  assert.ok(!Object.hasOwn(payload, 'durationMinutes'),
+    'legacy browser duration must not accompany a verified quote');
+
+  const expectedIntent = {
+    mode: payload.mode,
+    airportCode: payload.airportCode,
+    placeId: payload.placeId,
+    pickupAtMs: Date.parse(payload.dateTime),
+    passengers: payload.passengers,
+    routeMilesTenths: payload.routeMilesTenths,
+    routeMinutes: payload.routeMinutes,
+  };
+  const verified = verifyQuoteToken(payload.quoteToken, {
+    keys: [{ id: keyId, secret }], nowMs: now + 1,
+    expected: {
+      purpose: 'create', authUserId: '44444444-4444-4444-8444-444444444444', customerId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      vehicle: payload.vehicleKey, intent: expectedIntent,
+    },
+  });
+  assert.strictEqual(verified.ok, true,
+    'the final browser payload must contain every value needed to recompute the commitment');
+});
+
+check('SUBMIT RACE: an auth await cannot pair booking A with quote/vehicle B', async () => {
+  const response = quoteWithTtl(15);
+  const f = okFetch(response);
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();
+  app.selectVehicle({
+    id: 'escalade', name: 'Cadillac Escalade', passengers: 7, bags: 8, price: 55
+  });
+
+  let releaseSession;
+  let sessionEntered;
+  const sessionGate = new Promise((resolve) => { releaseSession = resolve; });
+  const sessionStarted = new Promise((resolve) => { sessionEntered = resolve; });
+  ctx.window.supabaseClient.auth.getSession = async () => {
+    sessionEntered();
+    await sessionGate;
+    return { data: { session: { access_token: 'jwt-submit-race' } } };
+  };
+  ctx.PassengerModal = {
+    getInstance: () => ({
+      getContactInfo: () => ({ name: 'Passenger', phone: '3055550100', type: 'booker' }),
+      getPassengerData: () => ({ type: 'self', data: null }),
+    }),
+  };
+  let shownError = '';
+  app.showPaymentError = (message) => { shownError = String(message); };
+
+  const callsBeforeSubmit = f.calls.length;
+  const pending = app.confirmBooking();
+  await sessionStarted;
+  // This is the exact race: while session refresh yields, the passenger (or
+  // another UI event) moves the mutable carousel to a different vehicle.
+  app.selectVehicle({
+    id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39
+  });
+  releaseSession();
+  await pending;
+
+  assert.strictEqual(f.calls.length, callsBeforeSubmit,
+    'a changed submission snapshot must stop before the booking POST');
+  assert.match(shownError, /changed while booking/i);
 });
 
 check('STATIC: place_id is retained from autocomplete instead of discarded', () => {
