@@ -1960,6 +1960,11 @@
                 // before a pending edit began could otherwise fire inside the
                 // edit flow and request a create-scoped quote for it.
                 if (!this.quoteFlowActive()) return;
+                // The Vehicle step is the only place a passenger needs a live
+                // price. A debounce can be queued there and fire after they
+                // navigate back to When, so recheck the stage at execution time
+                // before buying a Places + Compute Routes Pro pair.
+                if (this.state.ui?.currentPanel !== 'vehicle') return;
 
                 const intent = this.quoteIntent();
                 const key = this.quoteKey(intent);
@@ -1992,6 +1997,12 @@
                     // during it, and the next call is the one that spends money
                     // at Google — so check before the fetch, not only after.
                     if (seq !== q.seq) return;
+                    if (!this.quoteFlowActive() || this.state.ui?.currentPanel !== 'vehicle') {
+                        // Do not leave this intent stuck as "loading": returning
+                        // to Vehicle must be able to request it normally.
+                        this.invalidateQuote('left Vehicle before quote request');
+                        return;
+                    }
 
                     const res = await fetch('/api/quote-ride', {
                         method: 'POST',
@@ -2068,7 +2079,15 @@
             // that is not "fresh server price" replaces the visible numbers.
             setCarouselPlaceholder(label) {
                 this.vehiclePrices = null;
-                this.carouselState = { kind: 'placeholder', label };
+                // A placeholder replaces PRICE truth, not availability truth.
+                // Keep the last refusal set until a later successful quote
+                // explicitly replaces it. Clearing it here briefly re-enabled
+                // vehicles the server had refused while a retry/loading/error
+                // state was on screen.
+                const unavailable = Array.isArray(this.carouselState?.unavailable)
+                    ? this.carouselState.unavailable.slice()
+                    : [];
+                this.carouselState = { kind: 'placeholder', label, unavailable };
                 this.pushCarouselState();
             }
 
@@ -2086,6 +2105,10 @@
                 const post = (msg) => iframe.contentWindow.postMessage(msg, '*');
                 if (st.kind === 'placeholder') {
                     post({ type: 'clearPrices', data: { label: st.label } });
+                    // Loading/error/expired states have no newer availability
+                    // truth. Preserve the last authoritative refusal set until
+                    // a successful quote replaces it (possibly with []).
+                    post({ type: 'setUnavailable', data: { ids: st.unavailable || [] } });
                     return;
                 }
                 post({ type: 'updatePrices', data: st.prices });
@@ -2093,8 +2116,11 @@
                     // A vehicle the engine refused (party too large, beyond the
                     // service area) must say so, not sit on a stale '…'.
                     post({ type: 'clearPrices', data: { label: 'Unavailable', ids: st.unavailable } });
-                    post({ type: 'setUnavailable', data: { ids: st.unavailable } });
                 }
+                // Always replace the disabled set, INCLUDING with an empty
+                // array. Otherwise a vehicle refused by quote A remains dead
+                // after quote B makes every vehicle bookable.
+                post({ type: 'setUnavailable', data: { ids: st.unavailable || [] } });
             }
 
             // A price that has passed its TTL must stop looking valid on screen,
@@ -2340,11 +2366,22 @@
                 
                 // Send prices to carousel iframe
                 if (Object.keys(prices).length > 0) {
+                    // Pending edits intentionally remain on legacy pricing. It
+                    // has no server refusal set, so replace both the live iframe
+                    // state and the replayable presentation with an empty set.
+                    this.carouselState = { kind: 'prices', prices, unavailable: [] };
                     const iframe = document.getElementById('vehicle-carousel-frame');
                     if (iframe && iframe.contentWindow) {
                         iframe.contentWindow.postMessage({
                             type: 'updatePrices',
                             data: prices
+                        }, '*');
+                        // Pending edits intentionally remain on legacy pricing.
+                        // Clear any disabled cards left by an earlier server
+                        // quote before handing the carousel back to that flow.
+                        iframe.contentWindow.postMessage({
+                            type: 'setUnavailable',
+                            data: { ids: [] }
                         }, '*');
                         console.log('💸 Sent prices to carousel iframe:', prices);
                     }

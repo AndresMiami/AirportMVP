@@ -53,13 +53,17 @@ function loadRealCarousel() {
     els[`${k}-price`] = { textContent: CAROUSEL_DEFAULTS[k], classList: { add() {}, remove() {} } };
   });
   const mk = () => ({
-    style: {}, children: [], textContent: '',
+    style: {}, children: [], textContent: '', attrs: {},
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-    addEventListener() {}, setAttribute() {}, appendChild(c) { this.children.push(c); return c; },
+    addEventListener() {},
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    getAttribute(k) { return this.attrs[k]; },
+    appendChild(c) { this.children.push(c); return c; },
     querySelector: () => null, querySelectorAll: () => [],
   });
 
   let listener = null;
+  const parentMessages = [];
   const cctx = {
     console: { log() {}, warn() {}, error() {} },
     document: {
@@ -69,7 +73,8 @@ function loadRealCarousel() {
     },
     window: {
       addEventListener: (t, fn) => { if (t === 'message') listener = fn; },
-      parent: { postMessage() {} },
+      parent: { postMessage: (msg) => parentMessages.push(msg) },
+      getComputedStyle: () => ({ paddingLeft: '0' }),
     },
     setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
     Set, Map, Math, Date, JSON, Object, Array, Number, String, Boolean, Error,
@@ -81,18 +86,44 @@ function loadRealCarousel() {
   assert.ok(cctx.__Carousel, 'could not reach the real carousel class');
 
   const inst = Object.create(cctx.__Carousel.prototype);
-  inst.vehicles = [{ id: 'tesla' }, { id: 'escalade' }, { id: 'sprinter' }];
+  inst.vehicles = [
+    { id: 'tesla', name: 'Tesla Model Y', basePrice: 132, passengers: 4, bags: 4 },
+    { id: 'escalade', name: 'Cadillac Escalade', basePrice: 165, passengers: 7, bags: 8 },
+    { id: 'sprinter', name: 'Mercedes Sprinter', basePrice: 220, passengers: 12, bags: 15 },
+  ];
   inst.currentIndex = 0;
-  inst.track = { children: [mk(), mk(), mk()] };
-  inst.centerCard = () => {}; inst.updateActiveStates = () => {};
-  inst.updateNavButtons = () => {}; inst.notifySelection = () => {};
+  let detectedIndex = 0;
+  const scrollCalls = [];
+  const cards = inst.vehicles.map((vehicle, index) => {
+    const card = mk();
+    card.querySelector = (sel) => sel === '.vehicle-price-tag' ? els[`${vehicle.id}-price`] : null;
+    card.getBoundingClientRect = () => ({ left: (index - detectedIndex) * 200, width: 100 });
+    card.offsetWidth = 100;
+    card.offsetLeft = index * 200;
+    return card;
+  });
+  inst.cards = cards;
+  inst.track = { children: cards };
+  inst.scrollWrapper = {
+    getBoundingClientRect: () => ({ left: 0, width: 100 }),
+    scrollTo: (options) => {
+      scrollCalls.push(options);
+      detectedIndex = Math.round(options.left / 200);
+    },
+  };
+  inst.updateActiveStates = () => {};
+  inst.updateNavButtons = () => {};
 
   let ready = false;
   return {
     instance: inst,
+    parentMessages,
     becomeReady() { inst.setupCommunication(); ready = true; },   // installs the REAL listener
     isReady: () => ready,
     deliver(msg) { if (ready && listener) listener({ data: msg }); },
+    detectAt(index) { detectedIndex = index; inst.detectActiveCard(); },
+    viewportIndex: () => detectedIndex,
+    scrollCalls,
     visible() {
       const out = {};
       Object.keys(CAROUSEL_DEFAULTS).forEach((k) => { out[k] = els[`${k}-price`].textContent; });
@@ -774,6 +805,158 @@ check('REFUSED: a refused vehicle cannot be selected in the real carousel', asyn
   assert.strictEqual(carousel.instance.currentIndex, 1, 'available vehicles still select');
 });
 
+check('REFUSED RECOVERY: a later all-valid quote re-enables the real card', async () => {
+  const refused = quoteWithTtl(15);
+  refused.quote.vehicles.sprinter = { ok: false, error: { code: 'passenger_capacity_exceeded' } };
+  refused.quote.vehiclesOk = 2; refused.quote.vehiclesRefused = 1;
+  const allValid = quoteWithTtl(15);
+  const bodies = [refused, allValid];
+  let call = 0;
+  const impl = async () => ({
+    ok: true, status: 200,
+    json: async () => bodies[Math.min(call++, bodies.length - 1)],
+  });
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: impl });
+
+  await app.requestServerQuote();
+  assert.strictEqual(carousel.instance.unavailableIds.has('sprinter'), true);
+  assert.strictEqual(carousel.visible().sprinter, 'Unavailable');
+  assert.strictEqual(carousel.instance.track.children[2].style.pointerEvents, 'none');
+
+  await app.requestServerQuote({ force: true });
+  assert.strictEqual(carousel.instance.unavailableIds.size, 0,
+    'the new quote must replace the old disabled set with []');
+  assert.strictEqual(carousel.visible().sprinter, '$95');
+  assert.strictEqual(carousel.instance.track.children[2].style.pointerEvents, '');
+  assert.strictEqual(carousel.instance.track.children[2].getAttribute('aria-disabled'), 'false');
+  carousel.instance.selectCard(2);
+  assert.strictEqual(carousel.instance.currentIndex, 2,
+    'a vehicle made bookable again must be selectable in the same page session');
+});
+
+check('REFUSED SCROLL: centering a refused card neither selects nor notifies it', async () => {
+  const body = quoteWithTtl(15);
+  body.quote.vehicles.sprinter = { ok: false, error: { code: 'distance_exceeds_service_area' } };
+  body.quote.vehiclesOk = 2; body.quote.vehiclesRefused = 1;
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: okFetch(body) });
+  await app.requestServerQuote();
+
+  carousel.parentMessages.length = 0;
+  carousel.detectAt(2);                                // scroll centers Sprinter
+  assert.strictEqual(carousel.instance.currentIndex, 0,
+    'scroll detection must not activate a vehicle the server refused');
+  const selections = carousel.parentMessages.filter((m) => m && m.type === 'vehicleSelected');
+  assert.strictEqual(selections.length, 0,
+    'scroll detection must not emit vehicleSelected for a refused card');
+});
+
+check('REFUSED SCROLL: the viewport snaps back so a recovered card cannot differ from the booked vehicle', async () => {
+  const refused = quoteWithTtl(15);
+  refused.quote.vehicles.tesla = { ok: false, error: { code: 'passenger_capacity_exceeded' } };
+  refused.quote.vehiclesOk = 2; refused.quote.vehiclesRefused = 1;
+  const allValid = quoteWithTtl(15);
+  const bodies = [refused, allValid];
+  let call = 0;
+  const impl = async () => ({
+    ok: true, status: 200,
+    json: async () => bodies[Math.min(call++, bodies.length - 1)],
+  });
+  const { app, carousel, sendToApp } = makeContext({ enabled: true, fetchImpl: impl });
+
+  await app.requestServerQuote();
+  const moved = carousel.parentMessages.filter((m) => m && m.type === 'vehicleSelected').pop();
+  assert.strictEqual(moved?.vehicle?.id, 'escalade',
+    'refusing the selected Tesla must move selection to the first bookable vehicle');
+  sendToApp(moved);                                  // real parent listener binds its token
+  assert.strictEqual(app.state.vehicle.type, 'escalade');
+
+  carousel.parentMessages.length = 0;
+  carousel.detectAt(0);                              // passenger swipes to refused Tesla
+  assert.strictEqual(carousel.instance.currentIndex, 1);
+  assert.strictEqual(carousel.viewportIndex(), 1,
+    'the real centerCard path must return the viewport to Escalade');
+  assert.strictEqual(carousel.parentMessages.filter((m) => m?.type === 'vehicleSelected').length, 0,
+    'snapping back must not pretend the passenger made another selection');
+
+  await app.requestServerQuote({ force: true });     // a later quote restores Tesla
+  assert.strictEqual(carousel.instance.unavailableIds.size, 0);
+  assert.strictEqual(carousel.viewportIndex(), 1,
+    're-enabling Tesla must not resurrect the rejected viewport position');
+  assert.strictEqual(carousel.instance.currentIndex, 1);
+  assert.strictEqual(app.state.vehicle.type, 'escalade');
+  assert.strictEqual(app.state.vehicle.quoteToken, 'tok.escalade',
+    'the centered card and the token Book would submit must still agree');
+  assert.strictEqual(app.els.bookBtn.disabled, false);
+});
+
+check('PLACEHOLDER AVAILABILITY: refusals survive every non-authoritative price state', async () => {
+  const refused = quoteWithTtl(15);
+  refused.quote.vehicles.tesla = { ok: false, error: { code: 'passenger_capacity_exceeded' } };
+  refused.quote.vehiclesOk = 2; refused.quote.vehiclesRefused = 1;
+  const allValid = quoteWithTtl(15);
+  let call = 0;
+  let releaseFailure;
+  let markFailureStarted;
+  const failureStarted = new Promise((resolve) => { markFailureStarted = resolve; });
+  const impl = async () => {
+    const n = call++;
+    if (n === 0) return { ok: true, status: 200, json: async () => refused };
+    if (n === 1) {
+      markFailureStarted();
+      await new Promise((resolve) => { releaseFailure = resolve; });
+      return {
+        ok: false, status: 502,
+        json: async () => ({ error: 'Could not compute the route right now' }),
+      };
+    }
+    return { ok: true, status: 200, json: async () => allValid };
+  };
+  const { app, carousel, posted, sendToApp } = makeContext({ enabled: true, fetchImpl: impl });
+
+  await app.requestServerQuote();
+  assert.strictEqual(carousel.instance.unavailableIds.has('tesla'), true);
+
+  const assertStillRefused = (label) => {
+    assert.strictEqual(carousel.visible().tesla, label);
+    assert.strictEqual(carousel.instance.unavailableIds.has('tesla'), true,
+      `${label} must not invent newer availability truth`);
+    assert.strictEqual(carousel.instance.track.children[0].style.pointerEvents, 'none');
+    assert.strictEqual(carousel.instance.track.children[0].getAttribute('aria-disabled'), 'true');
+    const before = carousel.instance.currentIndex;
+    carousel.parentMessages.length = 0;
+    carousel.instance.selectCard(0);
+    assert.strictEqual(carousel.instance.currentIndex, before,
+      `${label} must not make the refused card selectable`);
+    assert.strictEqual(carousel.parentMessages.filter((m) => m?.type === 'vehicleSelected').length, 0);
+  };
+
+  app.invalidateQuote('pickup changed');
+  assertStillRefused('—');
+
+  const failing = app.requestServerQuote({ force: true });
+  await failureStarted;
+  assertStillRefused('…');
+  releaseFailure();
+  await failing;
+  assertStillRefused('Unavailable');
+
+  // Expiry uses the same replayable placeholder state. Pin it explicitly so
+  // a future renderer change cannot clear availability on this fourth path.
+  app.setCarouselPlaceholder('Expired');
+  assertStillRefused('Expired');
+
+  const replayStart = posted.length;
+  sendToApp({ type: 'carouselReady' });
+  const replay = posted.slice(replayStart).filter((m) => m?.type === 'setUnavailable').pop();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(replay?.data?.ids)), ['tesla'],
+    'a late carouselReady must replay the remembered refusal, not []');
+
+  await app.requestServerQuote({ force: true });
+  assert.strictEqual(carousel.instance.unavailableIds.size, 0,
+    'only the later authoritative quote may clear the refusal set');
+  assert.strictEqual(carousel.instance.track.children[0].style.pointerEvents, '');
+});
+
 check('EDIT RACE: a quote timer queued before an edit begins does not fire inside it', async () => {
   const f = okFetch(quoteWithTtl(15));
   const { app, runTimers } = makeContext({ enabled: true, fetchImpl: f });
@@ -812,6 +995,39 @@ check('SPEND GUARD: the intent is rechecked after the session round trip, before
   await inflight;
   assert.strictEqual(f.calls.length, 0,
     'a stale intent must not buy a Places + Compute Routes Pro pair');
+});
+
+check('STAGE GUARD: leaving Vehicle cancels queued and pre-provider quote spending', async () => {
+  const queuedFetch = okFetch(quoteWithTtl(15));
+  const queued = makeContext({ enabled: true, fetchImpl: queuedFetch });
+  queued.app.scheduleQuote();
+  queued.app.state.ui.currentPanel = 'when';
+  queued.runTimers();
+  await Promise.resolve();
+  assert.strictEqual(queuedFetch.calls.length, 0,
+    'a debounce queued on Vehicle must not spend after the passenger leaves');
+
+  // The panel can also change while getSession() is awaiting. Recheck at the
+  // last boundary before fetch, reset the loading state, and prove re-entry
+  // can request normally rather than deduplicating forever.
+  let releaseSession;
+  const sessionGate = new Promise((r) => { releaseSession = r; });
+  const gatedFetch = okFetch(quoteWithTtl(15));
+  const gated = makeContext({ enabled: true, fetchImpl: gatedFetch, sessionGate });
+  const inflight = gated.app.requestServerQuote();
+  await Promise.resolve();
+  gated.app.state.ui.currentPanel = 'when';
+  releaseSession();
+  await inflight;
+  assert.strictEqual(gatedFetch.calls.length, 0,
+    'leaving during session acquisition must stop before the paid fetch');
+  assert.strictEqual(gated.app.state.quote.status, 'idle',
+    'an aborted request must not leave the quote stuck loading');
+
+  gated.app.state.ui.currentPanel = 'vehicle';
+  await gated.app.requestServerQuote();
+  assert.strictEqual(gatedFetch.calls.length, 1,
+    'returning to Vehicle must be able to request a fresh quote');
 });
 
 run().catch((e) => { console.error(e); process.exit(1); });

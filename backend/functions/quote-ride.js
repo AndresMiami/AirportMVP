@@ -34,11 +34,12 @@
 // `quote.intent.placeId` verbatim so 2C's intentHash recomputation
 // matches without a second Places call.
 //
-// ACCESS (dark phase): signed-in customer AND the explicit
-// QUOTE_SHADOW_ALLOWLIST of auth user ids — "signed-in" is every
-// passenger, and a dark endpoint must not let curiosity spend Google
-// quota. The allowlist check precedes every Google call; removing the
-// allowlist is a deliberate 2B2 change.
+// ACCESS: QUOTE_ACCESS_MODE is explicit and defaults fail-closed to
+// `allowlist`, where a signed-in auth user must also appear in
+// QUOTE_SHADOW_ALLOWLIST. Production rollout deliberately selects
+// `authenticated`, where a verified account proceeds through the normal
+// customer/approved-ambassador identity contract. Deleting the allowlist
+// while still in allowlist mode is a configuration error, never permission.
 //
 // Kill switch QUOTE_SERVICE_DISABLED=1 answers 503 before anything.
 

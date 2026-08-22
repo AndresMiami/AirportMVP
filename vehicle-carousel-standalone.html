@@ -603,6 +603,19 @@
                 });
 
                 if (closestIndex !== this.currentIndex) {
+                    // Scrolling used to bypass selectCard() and activate a
+                    // vehicle the server refused. Keep the current selection
+                    // when the centered card is unavailable; clicks, keys and
+                    // touch-end already follow the same rule via selectCard().
+                    const closest = this.vehicles[closestIndex];
+                    if (closest && this.unavailableIds && this.unavailableIds.has(closest.id)) {
+                        // Selection and viewport must describe the same vehicle.
+                        // A bare return strands the viewport on the refused card;
+                        // if a later quote re-enables it, the screen shows that
+                        // card while Book still submits the previous selection.
+                        this.centerCard(this.currentIndex);
+                        return;
+                    }
                     this.currentIndex = closestIndex;
                     this.updateActiveStates();
                     this.updateNavButtons();
