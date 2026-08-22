@@ -689,6 +689,26 @@
     <!-- Main Application Scripts -->
     <!-- Autocomplete will be loaded lazily when needed -->
     <script>
+        // ========== PR 3C-2B2 — SERVER QUOTE ROLLOUT FLAG ==========
+        // false  = today's behaviour, byte for byte. No quote request is ever
+        //          made, and pricing.js still sets the displayed and submitted
+        //          price. Merging 2B2 with this false changes nothing.
+        // true   = the server quote becomes the ONLY price that may be shown as
+        //          final or submitted. A missing or expired quote blocks Book.
+        //
+        // Flipping this to true requires BOTH of the following first, or every
+        // booking is blocked:
+        //   1. QUOTE_SERVICE_DISABLED unset (or 0) on the Netlify production
+        //      context — while it is set the endpoint answers 503 to everyone.
+        //   2. QUOTE_SHADOW_ALLOWLIST removed — a signed-in passenger who is
+        //      not on the list gets 403.
+        // Precedent for a client-side rollout constant: REQUIRE_PAYMENT.
+        const SERVER_QUOTE_ENABLED = false;
+
+        // A quote is priced for one exact intent. Anything that changes the
+        // intent must throw the old quote away rather than reprice silently.
+        const QUOTE_DEBOUNCE_MS = 500;
+
         // Main Application Class
         class AirportBookingApp {
             constructor() {
@@ -696,7 +716,8 @@
                     mode: 'dropoff',
                     locations: {
                         address: null,
-                        airport: null
+                        airport: null,
+                        placeId: null   // autocomplete's Google place_id (PR 3C-2B2)
                     },
                     route: {
                         distance: null,
@@ -706,6 +727,17 @@
                     dateTime: {
                         date: new Date(),
                         time: null
+                    },
+                    // PR 3C-2B2 — the server quote is the ONLY price that may be
+                    // displayed as final or submitted. pricing.js runs alongside
+                    // it as a silent shadow and can never reach the passenger or
+                    // the database. See SERVER_QUOTE_ENABLED below.
+                    quote: {
+                        status: 'idle',   // idle | loading | ready | error | blocked
+                        key: null,        // the intent tuple this quote answers
+                        data: null,       // the server's quote object, verbatim
+                        error: null,      // { message, retryable }
+                        seq: 0            // guards against a stale response landing
                     },
                     flight: '',
                     vehicle: {
@@ -1054,8 +1086,9 @@
             }
             
             resetSelections() {
-                this.state.locations = { address: null, airport: null };
+                this.state.locations = { address: null, airport: null, placeId: null };
                 this.state.route = { distance: null, duration: null, price: null };
+                this.invalidateQuote('selection reset');
                 
                 this.els.addressInput.value = '';
                 if (this.autocomplete) {
@@ -1073,23 +1106,38 @@
             }
             
             handleAddressSelected(detail) {
+                // PR 3C-2B2: keep autocomplete's place_id. Before this it was
+                // received here and thrown away, which is why
+                // `state.locations.address.place_id` was read at the pricing
+                // call site and was always undefined. The server quote needs a
+                // real place_id, and 2C will need the CANONICAL one the server
+                // returns (stored separately in state.quote.data.intent).
+                const placeId = detail && detail.placeId;
+                this.state.locations.placeId =
+                    (typeof placeId === 'string' && placeId && placeId !== 'unknown')
+                        ? placeId
+                        : null;
+
                 this.updateAddressStepState();
                 this.updateAirportStepState();
                 this.updateContinueButton();
             }
-            
+
             handleAddressCoordinates(detail) {
                 this.state.locations.address = {
                     address: detail.address,
                     coordinates: { lat: detail.lat, lng: detail.lng }
                 };
-                
+
+                this.invalidateQuote('address changed');
                 this.updateAddressStepState();
                 this.calculateRoute();
             }
-            
+
             handleAddressValidationCleared() {
                 this.state.locations.address = null;
+                this.state.locations.placeId = null;
+                this.invalidateQuote('address cleared');
                 this.updateAddressStepState();
                 this.updateAirportStepState();
                 this.updateContinueButton();
@@ -1118,7 +1166,8 @@
                     code: airportCode,
                     name: this.getAirportName(airportCode)
                 };
-                
+                this.invalidateQuote('airport changed');
+
                 this.els.airportOptions.forEach(opt => {
                     opt.classList.toggle('selected', opt.dataset.airport === airportCode);
                 });
@@ -1315,6 +1364,7 @@
                     this.updateProgressSteps('when');
                     this.updateSummary();
                 } else if (panel === 'vehicle') {
+                    if (SERVER_QUOTE_ENABLED) this.requestServerQuote();
                     this.els.panelsWrapper.classList.add('show-vehicle');
                     this.els.progressLine.classList.add('active');
                     this.els.summaryBar.classList.add('visible');
@@ -1636,7 +1686,10 @@
                     this.hideTimeWarning();
                 }
                 
+                const prevPickup = this.state.dateTime.time
+                    ? new Date(this.state.dateTime.time).getTime() : null;
                 this.state.dateTime.time = date;
+                if (prevPickup !== date.getTime()) this.invalidateQuote('pickup time changed');
                 this.updateTimeNote();
                 // Time-of-day affects surge pricing. Recalculate the
                 // selected vehicle before either a new booking or an edit is
@@ -1750,6 +1803,24 @@
                     price: carouselPrice // Use carousel price as initial value
                 };
 
+                // PR 3C-2B2: each vehicle carries its OWN signed token in the
+                // same quote, so switching vehicles selects a different token
+                // rather than needing a fresh quote. The submitted price and the
+                // token therefore always describe the same vehicle.
+                if (SERVER_QUOTE_ENABLED) {
+                    const q = this.selectedQuoteVehicle();
+                    if (q) {
+                        this.state.vehicle.price = q.finalCents / 100;
+                        this.state.vehicle.quoteToken = q.token;
+                        this.state.route.price = q.finalCents / 100;
+                    } else {
+                        this.state.vehicle.quoteToken = null;
+                    }
+                    this.renderQuoteState();
+                    this.updateSummary();
+                    return;
+                }
+
                 // Calculate pricing if route data is available
                 if (this.state.route.distance && this.state.route.duration) {
                     const pricing = this.calculateVehiclePrice(vehicleType, this.state.route.distance, this.state.route.duration);
@@ -1768,6 +1839,286 @@
                 }
             }
             
+            // ================= PR 3C-2B2 — server quote client =================
+            // The contract, and why each piece is the way it is:
+            //   * The request carries INTENT ONLY — mode, airportCode, placeId,
+            //     pickupAt, passengers. The endpoint rejects any other field by
+            //     name, including route facts and a vehicle preference.
+            //   * There is deliberately no `vehicle` field: one quote prices
+            //     every vehicle and signs a SEPARATE token per vehicle, each
+            //     bound to its own vehicle. Choosing a vehicle therefore picks a
+            //     different token from the same quote — it does not need a new
+            //     quote, and issuing one would buy a second Google round trip
+            //     for an identical answer.
+            //   * pickupAt must carry a UTC offset. `Date.toISOString()` gives
+            //     the Z form; an offset-less string would be re-read in the
+            //     server's zone and silently reprice the ride.
+            //   * The response's `intent.placeId` is CANONICAL — Google may
+            //     supersede the id we sent. That canonical id is what gets
+            //     submitted, or 2C's hash recomputation will reject an honest
+            //     booking.
+
+            quoteIntent() {
+                const { mode, locations, dateTime, passengers } = this.state;
+                if (!locations.airport?.code || !locations.placeId || !dateTime.time) return null;
+                const pickupAt = new Date(dateTime.time);
+                if (isNaN(pickupAt.getTime())) return null;
+                return {
+                    mode,
+                    airportCode: locations.airport.code,
+                    placeId: locations.placeId,
+                    pickupAt: pickupAt.toISOString(),
+                    passengers: this.state.passengers
+                };
+            }
+
+            quoteKey(intent) {
+                return intent
+                    ? [intent.mode, intent.airportCode, intent.placeId,
+                       intent.pickupAt, intent.passengers].join('|')
+                    : null;
+            }
+
+            invalidateQuote(reason) {
+                if (!SERVER_QUOTE_ENABLED) return;
+                const q = this.state.quote;
+                if (q.status === 'idle' && !q.data) return;
+                debug.info?.(`🧾 quote invalidated: ${reason}`);
+                q.seq++;                       // any in-flight response is now stale
+                q.status = 'idle';
+                q.key = null;
+                q.data = null;
+                q.error = null;
+                if (this.state.vehicle) this.state.vehicle.quoteToken = null;
+                this.renderQuoteState();
+            }
+
+            quoteIsFresh() {
+                const q = this.state.quote;
+                if (q.status !== 'ready' || !q.data) return false;
+                if (this.quoteKey(this.quoteIntent()) !== q.key) return false;
+                const expiry = this.quoteExpiryMs();
+                return expiry !== null && Date.now() < expiry;
+            }
+
+            quoteExpiryMs() {
+                const vehicles = this.state.quote.data?.vehicles;
+                if (!vehicles) return null;
+                // Every vehicle in one response shares an issue time; take the
+                // earliest expiry present so nothing is ever used past its TTL.
+                let earliest = null;
+                Object.keys(vehicles).forEach(k => {
+                    const t = Date.parse(vehicles[k]?.expiresAt || '');
+                    if (!isNaN(t) && (earliest === null || t < earliest)) earliest = t;
+                });
+                return earliest;
+            }
+
+            selectedQuoteVehicle() {
+                const key = this.state.vehicle?.type;
+                const v = key && this.state.quote.data?.vehicles?.[key];
+                return (v && v.ok) ? v : null;
+            }
+
+            async requestServerQuote({ force = false } = {}) {
+                if (!SERVER_QUOTE_ENABLED) return;
+
+                const intent = this.quoteIntent();
+                const key = this.quoteKey(intent);
+                if (!intent) { this.invalidateQuote('intent incomplete'); return; }
+
+                const q = this.state.quote;
+                if (!force && q.key === key && this.quoteIsFresh()) return;
+                if (!force && q.key === key && q.status === 'loading') return;
+
+                const seq = ++q.seq;
+                q.status = 'loading';
+                q.key = key;
+                q.data = null;
+                q.error = null;
+                if (this.state.vehicle) this.state.vehicle.quoteToken = null;
+                this.renderQuoteState();
+
+                try {
+                    if (!window.supabaseClient) throw new Error('auth client unavailable');
+                    const { data: { session } } = await window.supabaseClient.auth.getSession();
+                    if (!session?.access_token) throw new Error('not signed in');
+
+                    const res = await fetch('/api/quote-ride', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${session.access_token}`
+                        },
+                        body: JSON.stringify(intent)
+                    });
+
+                    if (seq !== q.seq) return;   // the intent moved on; drop this answer
+
+                    let payload = null;
+                    try { payload = await res.json(); } catch (_) { payload = null; }
+
+                    if (!res.ok) {
+                        // 400 identity refusals are the passenger's to fix. 422 is a
+                        // real "no route". Everything else is ours, and says so.
+                        const retryable = res.status >= 500 || res.status === 429;
+                        q.status = 'error';
+                        q.error = {
+                            message: payload?.error || 'Could not get a price right now',
+                            retryable
+                        };
+                        this.renderQuoteState();
+                        return;
+                    }
+
+                    const quote = payload?.quote;
+                    if (!quote || !quote.vehicles || quote.bookable !== true) {
+                        q.status = 'error';
+                        q.error = { message: 'No vehicle is available for this trip', retryable: false };
+                        this.renderQuoteState();
+                        return;
+                    }
+
+                    q.status = 'ready';
+                    q.data = quote;
+                    q.error = null;
+                    this.applyServerPrices();
+                    this.shadowComparePricing();
+                    this.renderQuoteState();
+                } catch (err) {
+                    if (seq !== q.seq) return;
+                    console.error('Quote request failed:', err?.name || 'error');
+                    q.status = 'error';
+                    q.error = { message: 'Could not reach the pricing service', retryable: true };
+                    this.renderQuoteState();
+                }
+            }
+
+            scheduleQuote() {
+                if (!SERVER_QUOTE_ENABLED) return;
+                clearTimeout(this._quoteTimer);
+                this._quoteTimer = setTimeout(() => this.requestServerQuote(), QUOTE_DEBOUNCE_MS);
+            }
+
+            // Server cents are the displayed price. Nothing else may write here.
+            applyServerPrices() {
+                const vehicles = this.state.quote.data?.vehicles || {};
+                const prices = {};
+                Object.keys(vehicles).forEach(k => {
+                    if (vehicles[k]?.ok) prices[k] = vehicles[k].finalCents / 100;
+                });
+                if (!Object.keys(prices).length) return;
+
+                this.vehiclePrices = prices;
+                const iframe = document.getElementById('vehicle-carousel-frame');
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'updatePrices', data: prices }, '*');
+                }
+
+                const selected = this.state.vehicle?.type;
+                if (selected && vehicles[selected]?.ok) {
+                    this.state.vehicle.price = prices[selected];
+                    this.state.vehicle.quoteToken = vehicles[selected].token;
+                    this.state.route.price = prices[selected];
+                }
+            }
+
+            // pricing.js still runs, but ONLY as a shadow: it is logged and
+            // never displayed, never stored, never submitted. Divergence is
+            // expected and large — the two use different route facts (the
+            // browser asks for "now", the server asks for the scheduled pickup)
+            // — so this is telemetry, not a check that should ever "fail".
+            shadowComparePricing() {
+                try {
+                    const vehicles = this.state.quote.data?.vehicles || {};
+                    const { distance, duration } = this.state.route;
+                    if (!this.pricingService || !distance || !duration) return;
+                    const rows = {};
+                    Object.keys(vehicles).forEach(k => {
+                        if (!vehicles[k]?.ok) return;
+                        const local = this.calculateVehiclePrice(k, distance, duration);
+                        if (!local || local.error) return;
+                        const server = vehicles[k].finalCents / 100;
+                        rows[k] = {
+                            server,
+                            browser: local.finalPrice,
+                            deltaPct: +(((server / local.finalPrice) - 1) * 100).toFixed(1)
+                        };
+                    });
+                    console.log('🔍 quote shadow (browser vs server, not displayed):', rows);
+                } catch (_) { /* a shadow must never affect the booking */ }
+            }
+
+            renderQuoteState() {
+                const panel = document.querySelector('#vehiclePanel .content-section');
+                if (!panel) return;
+                let el = document.getElementById('quoteStatus');
+
+                if (!SERVER_QUOTE_ENABLED) { el?.remove(); return; }
+
+                const q = this.state.quote;
+                const show = q.status === 'loading' || q.status === 'error' ||
+                             (q.status === 'ready' && !this.quoteIsFresh());
+
+                if (!show) { el?.remove(); this.updateBookAvailability(); return; }
+
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'quoteStatus';
+                    el.setAttribute('role', 'status');
+                    panel.prepend(el);
+                }
+
+                let bg = '#2C2C2E', border = 'rgba(255,255,255,0.12)', color = '#EBEBF0', text = '';
+                let action = null;
+
+                if (q.status === 'loading') {
+                    text = 'Getting current prices…';
+                } else if (q.status === 'ready') {
+                    bg = 'rgba(255,179,64,0.10)'; border = 'rgba(255,179,64,0.45)'; color = '#F2DDB8';
+                    text = 'These prices have expired. Refresh to get current prices.';
+                    action = 'Refresh prices';
+                } else {
+                    const retryable = q.error?.retryable !== false;
+                    bg = 'rgba(255,69,58,0.10)'; border = 'rgba(255,69,58,0.45)'; color = '#F3C6C2';
+                    text = q.error?.message || 'Could not get a price right now';
+                    if (retryable) action = 'Try again';
+                }
+
+                el.style.cssText = 'margin:0 0 12px;padding:12px 14px;border-radius:12px;' +
+                    `background:${bg};border:1px solid ${border};color:${color};` +
+                    'font-size:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
+                el.innerHTML = '';
+                const span = document.createElement('span');
+                span.style.flex = '1';
+                span.textContent = text;
+                el.appendChild(span);
+                if (action) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = action;
+                    btn.style.cssText = 'border:1px solid currentColor;background:transparent;' +
+                        'color:inherit;border-radius:8px;padding:6px 12px;font-size:13px;' +
+                        'font-weight:600;cursor:pointer;font-family:inherit;';
+                    btn.addEventListener('click', () => this.requestServerQuote({ force: true }));
+                    el.appendChild(btn);
+                }
+                this.updateBookAvailability();
+            }
+
+            // A quote that is missing, stale or expired blocks Book/Save. There
+            // is deliberately no fallback to the browser calculator: the price
+            // shown and the price submitted must be the same number.
+            updateBookAvailability() {
+                const btn = this.els.bookBtn || document.getElementById('bookBtn');
+                if (!btn) return;
+                if (!SERVER_QUOTE_ENABLED) { btn.disabled = false; return; }
+                const ok = this.quoteIsFresh() && !!this.selectedQuoteVehicle();
+                btn.disabled = !ok;
+                btn.style.opacity = ok ? '' : '0.5';
+                btn.style.cursor = ok ? '' : 'not-allowed';
+            }
+
             calculateVehiclePrice(vehicleType, distance, duration, options = {}) {
                 if (this.pricingService) {
                     // Prepare options with all necessary data for accurate pricing
@@ -1812,6 +2163,17 @@
             }
             
             updateVehiclePrices() {
+                // PR 3C-2B2: when the server quote is authoritative, pricing.js
+                // must not write a displayed price. It still runs, but only via
+                // shadowComparePricing(), whose output is logged and discarded.
+                // Letting this function through would let the browser's number
+                // overwrite the server's between a quote and a submit — exactly
+                // the "shown $95, booked $85" split this PR exists to close.
+                if (SERVER_QUOTE_ENABLED) {
+                    this.scheduleQuote();
+                    return;
+                }
+
                 if (!this.state.route.distance || !this.state.route.duration) {
                     console.log('⏳ No route data available for pricing');
                     return;
@@ -2026,6 +2388,20 @@
             }
 
             async confirmBooking() {
+                // PR 3C-2B2 — the quote is re-checked HERE, immediately before
+                // submitting, not just when it was displayed. The passenger may
+                // have sat on the vehicle screen past the 15-minute TTL, or
+                // edited the trip in another tab. A stale quote must never be
+                // submitted, and there is no fallback to the browser price.
+                if (SERVER_QUOTE_ENABLED) {
+                    if (!this.quoteIsFresh() || !this.selectedQuoteVehicle()) {
+                        this.renderQuoteState();
+                        this.requestServerQuote({ force: true });
+                        alert('These prices are no longer current. We are getting a fresh price — please review it before booking.');
+                        return;
+                    }
+                }
+
                 // ========== PAYMENT CONFIGURATION ==========
                 // Set to false to skip Stripe payment (driver collects cash/Zelle)
                 // Set to true when ready to enable Stripe payments
@@ -2080,13 +2456,20 @@
                         method: this.state.paymentMethod,
                         promo: this.state.promoCode
                     },
-                    pricing: {
-                        // Price priority: calculated pricing > route price > carousel price
-                        base: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price,
-                        surge: 0,
-                        discount: 0,
-                        total: this.state.vehicle.pricing?.finalPrice || this.state.route.price || this.state.vehicle.price
-                    },
+                    pricing: (() => {
+                        // PR 3C-2B2: when the server quote is authoritative the
+                        // submitted total is the server's cents, full stop. The
+                        // pricing.js chain below is the legacy path and applies
+                        // only while the flag is off.
+                        if (SERVER_QUOTE_ENABLED) {
+                            const sv = this.selectedQuoteVehicle();
+                            const total = sv.finalCents / 100;
+                            return { base: total, surge: 0, discount: 0, total };
+                        }
+                        const legacy = this.state.vehicle.pricing?.finalPrice
+                            || this.state.route.price || this.state.vehicle.price;
+                        return { base: legacy, surge: 0, discount: 0, total: legacy };
+                    })(),
                     status: 'pending',
                     createdAt: new Date().toISOString()
                 };
@@ -2187,6 +2570,20 @@
                             durationMinutes: this.state.route?.duration || null,
                             refCode: getStoredRefCode()
                         };
+
+                    // PR 3C-2B2 — carried now, ENFORCED in 2C. create-booking
+                    // validates required fields only and ignores unknown ones,
+                    // so sending these today needs no backend change and gives
+                    // 2C a browser that already speaks the final contract.
+                    // placeId is the CANONICAL id the server resolved, echoed
+                    // back verbatim: 2C recomputes the intent hash from it, and
+                    // autocomplete's original id would not match.
+                    if (SERVER_QUOTE_ENABLED) {
+                        const sv = this.selectedQuoteVehicle();
+                        apiPayload.quoteToken = sv.token;
+                        apiPayload.placeId = this.state.quote.data.intent.placeId;
+                        apiPayload.pricingVersion = this.state.quote.data.pricingVersion;
+                    }
 
                     if (isEditing) {
                         apiPayload.bookingId = editContext.bookingId;
