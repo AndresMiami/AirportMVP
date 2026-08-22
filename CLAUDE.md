@@ -478,9 +478,14 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     mechanism for both pending and confirmed edits; blockers for
     confirmed editing.
   * NORTH-STAR DESIGN, NOT A SCHEDULE (2026-08-21): the operator console
-    mockup lives at `docs/prototypes/operations-console.html` with its
-    rationale in `docs/prototypes/README.md`. It is WIRED TO NOTHING —
-    no import, no link, no function reference. It exists so the
+    rationale is `docs/prototypes/README.md`. The mockup HTML itself is
+    deliberately NOT in `main` — it lives on the unmerged branch
+    `design/operations-console-mockup`, because `publish = "."` means
+    any .html committed anywhere becomes a real public production page
+    (Codex caught this on PR #69; a deploy preview served the console at
+    /docs/prototypes/operations-console.html while main serves the
+    booking page there via the catch-all). "Not linked" is NOT "not
+    deployed". It exists so the
     destination is agreed; it does NOT reorder the work. Andres
     confirmed the sequence stays: (1) 3C-2B2 browser shows server
     prices, (2) 3C-2C endpoints enforce + store the accepted quote,
@@ -524,6 +529,17 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     silently skipped. Pilot-acceptable (admin already received the
     ride_released notice); the clean fix needs era-aware admin event
     identity (its own migration decision, not a patch).
+- DEPLOYMENT HARDENING, OPEN (raised 2026-08-21 by Codex on PR #69):
+  `netlify.toml` sets `publish = "."`, so the deployed site serves the
+  ENTIRE REPOSITORY. Verified 200 on production for `/CLAUDE.md`,
+  `/docs/PRICING_STRUCTURE.md`, `/tests/quote-ride.test.js` and
+  `/database/migrations/016_release_ride.sql` — architecture notes,
+  tests and schema are publicly readable at guessable URLs. FIX =
+  publish an explicit directory of approved site assets (a `dist/` or
+  equivalent), NOT an accumulating list of 404 redirects for /docs,
+  /tests, /database, /backend and every future internal folder. Until
+  this lands, do NOT commit any new .html anywhere in the repo that is
+  not meant to be a public page — see `docs/prototypes/README.md`.
 - Approved, NOT yet built: invitation-only driver onboarding — emailed
   invite / password-set flow replacing admin-set passwords. Record only;
   implement post-RLS.
