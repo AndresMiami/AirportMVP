@@ -89,8 +89,46 @@ export class CustomAutocomplete {
     }
 
     // Session token management
+    // Google bills Places Autocomplete by SESSION: the typed-prediction
+    // requests and the Place Details call that ends them are linked by this
+    // token. Google's documentation says "using a version 4 UUID is
+    // recommended" for `sessiontoken`.
+    //
+    // This used to be 'sess_' + Math.random().toString(36) — not a UUID. The
+    // token is forwarded to Google verbatim by the Railway proxy, so if a
+    // non-UUID is not recognised as a session, every prediction request is
+    // billed on its own instead of being grouped. Whether Google actually
+    // rejects the old shape is undocumented; a real UUID costs nothing and
+    // removes the question. Verify against the GCP billing report, not this
+    // comment.
+    newSessionUuid() {
+        try {
+            // Needs a secure context — true in production (HTTPS) and on
+            // localhost, which is where this app ever runs.
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+            if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+                const bytes = crypto.getRandomValues(new Uint8Array(16));
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;   // version 4
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;   // variant 10xx
+                const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+                return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
+                       `${hex.slice(16, 20)}-${hex.slice(20)}`;
+            }
+        } catch (e) {
+            // fall through to the last resort below
+        }
+        // Last resort: weaker randomness, but still a well-formed v4, which is
+        // the part Google reads. Never worse than what this replaced.
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : ((r & 0x3) | 0x8)).toString(16);
+        });
+    }
+
     generateSessionToken() {
-        this.sessionToken = 'sess_' + Math.random().toString(36).substr(2, 9);
+        this.sessionToken = this.newSessionUuid();
         this.sessionStartTime = Date.now();
         this.sessionRequestCount = 0;
         console.log('Generated new session token:', this.sessionToken);
