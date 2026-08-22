@@ -531,8 +531,31 @@
                 }, { passive: false });
             }
 
+            setUnavailable(ids) {
+                this.unavailableIds = new Set(ids || []);
+                (this.vehicles || []).forEach((v, i) => {
+                    const card = this.track && this.track.children[i];
+                    if (!card) return;
+                    const off = this.unavailableIds.has(v.id);
+                    card.classList.toggle('unavailable', off);
+                    card.style.opacity = off ? '0.45' : '';
+                    card.style.pointerEvents = off ? 'none' : '';
+                    card.setAttribute('aria-disabled', off ? 'true' : 'false');
+                });
+                // If the selected card just became unavailable, move to the
+                // first one that is still bookable rather than leaving a
+                // refused vehicle selected.
+                const current = this.vehicles && this.vehicles[this.currentIndex];
+                if (current && this.unavailableIds.has(current.id)) {
+                    const next = (this.vehicles || []).findIndex(v => !this.unavailableIds.has(v.id));
+                    if (next >= 0) this.selectCard(next);
+                }
+            }
+
             selectCard(index) {
                 if (index < 0 || index >= this.vehicles.length) return;
+                const target = this.vehicles[index];
+                if (this.unavailableIds && target && this.unavailableIds.has(target.id)) return;
                 
                 this.currentIndex = index;
                 this.centerCard(index);
@@ -580,6 +603,19 @@
                 });
 
                 if (closestIndex !== this.currentIndex) {
+                    // Scrolling used to bypass selectCard() and activate a
+                    // vehicle the server refused. Keep the current selection
+                    // when the centered card is unavailable; clicks, keys and
+                    // touch-end already follow the same rule via selectCard().
+                    const closest = this.vehicles[closestIndex];
+                    if (closest && this.unavailableIds && this.unavailableIds.has(closest.id)) {
+                        // Selection and viewport must describe the same vehicle.
+                        // A bare return strands the viewport on the refused card;
+                        // if a later quote re-enables it, the screen shows that
+                        // card while Book still submits the previous selection.
+                        this.centerCard(this.currentIndex);
+                        return;
+                    }
                     this.currentIndex = closestIndex;
                     this.updateActiveStates();
                     this.updateNavButtons();
@@ -627,6 +663,20 @@
                                 }
                                 break;
                                 
+                            case 'clearPrices':
+                                // The host has no trustworthy price right now
+                                // (loading, expired, or the pricing service
+                                // refused). Showing the last good number — or the
+                                // markup's placeholder figures — would be a lie.
+                                this.clearPrices(data && data.label, data && data.ids);
+                                break;
+
+                            case 'setUnavailable':
+                                // A vehicle the engine refused cannot be booked,
+                                // so it must not be selectable either.
+                                this.setUnavailable((data && data.ids) || []);
+                                break;
+
                             case 'selectVehicle':
                                 if (data?.vehicleId) {
                                     const index = this.vehicles.findIndex(v => v.id === data.vehicleId);
@@ -663,6 +713,26 @@
                         }
                     });
                 }
+            }
+
+            clearPrices(label, only) {
+                const text = label || '—';
+                const all = (this.vehicles && this.vehicles.length)
+                    ? this.vehicles.map(v => v.id)
+                    : ['tesla', 'escalade', 'sprinter'];
+                // `only` marks specific vehicles (e.g. ones the pricing engine
+                // refused) rather than blanking the whole row.
+                const ids = (only && only.length) ? all.filter(id => only.indexOf(id) >= 0) : all;
+                ids.forEach(vehicleId => {
+                    const priceElement = document.getElementById(`${vehicleId}-price`);
+                    if (priceElement) {
+                        priceElement.classList.add('updating');
+                        priceElement.textContent = text;
+                        setTimeout(() => {
+                            priceElement.classList.remove('updating');
+                        }, 500);
+                    }
+                });
             }
 
             updatePrices(prices) {
