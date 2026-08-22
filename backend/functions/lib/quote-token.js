@@ -1,66 +1,80 @@
-// Signed quote tokens (PR 3C-2B1) — the tamper-evident seal on a
-// server-issued quote. HMAC-SHA256 over a VERSIONED canonical payload;
-// verification is stateless (recompute the seal), which also means:
+// Signed quote tokens v2 (PR 3C-2C-A) — the tamper-evident seal on a
+// server-issued quote. HMAC-SHA256 over a VERSIONED canonical payload.
 //
-//   REPLAY, STATED HONESTLY: within its TTL a token can be presented
-//   more than once — stateless verification cannot detect reuse. The
-//   blast radius is bounded by what the token binds (same authenticated
-//   customer, same exact intent via intentHash, same vehicle, same
-//   price), NOT by any duplicate-booking rule: create-booking's
-//   one-nonterminal-booking check is a check-then-insert with a known
-//   race, and ambassador accounts are exempt from it entirely. That
-//   check is therefore NOT a replay defense and must never be cited as
-//   one. ATOMIC TOKEN CONSUMPTION (single-use jti, or an equivalent
-//   idempotency key written in the same transaction as the booking) is
-//   a MANDATORY 2C GATE — 2C is where a database write exists to hang
-//   it on, and enforcement must not ship without it.
+// V2 REPLACES V1 OUTRIGHT. No v1 token has ever existed outside tests:
+// the browser flag has been false since 2B2 merged and the issuing
+// endpoint is 503 in production, so there is no compatibility window to
+// honor and none is provided. The write path (2C-B) accepts v2 only.
+// A deliberate reason beyond cleanliness: v1 tokens were DETERMINISTIC
+// (one shared iat per response, no nonce), so two same-millisecond
+// quotes for identical intent produced byte-identical strings — a
+// string- or digest-keyed consumption gate would have collapsed two
+// legitimately distinct quotes (an ambassador's two same-intent guest
+// rides) into one slot. v2's random jti ends that class.
 //
-// Payload v1 (purpose 'create' ONLY — 2B1 is honestly create-scoped;
-// edit-time quotes arrive as a new version/purpose WITH the features
-// that validate booking ownership and details_version):
-//   { v:1, kid, purpose:'create', authUserId, customerId, vehicle,
-//     pickupAtMs, intentHash, routeQuality,
+// Payload v2, purpose 'create':
+//   { v:2, kid, jti, purpose:'create', authUserId, customerId, vehicle,
+//     pickupAtMs, commitment, routeQuality,
 //     finalCents, pricingVersion, engineVersion, resolvedVersion,
 //     iat, exp }
-// intentHash binds the token to the EXACT intent (mode, airport,
-// CANONICAL place_id, pickup, passengers, and THIS token's vehicle)
-// INSTEAD of raw route facts or coordinates.
+// Payload v2, purpose 'edit' adds EXACTLY (schema forbids them on
+// 'create' — the exact-field-set rule is per purpose):
+//   bookingId          — the booking this edit quote may mutate
+//   assignmentEpoch    — the driver-assignment era at issue time; the
+//                        edit RPC compares it against the row inside
+//                        the guarded write, so a token issued before an
+//                        Accept/Release transition can never apply
+//                        afterwards (migration 017 maintains the epoch
+//                        by trigger; release deliberately does NOT bump
+//                        details_version, which is why the epoch exists)
 //
-// WHAT THAT DOES AND DOES NOT BUY, PRECISELY: intentHash is a one-way
-// COMMITMENT, not confidentiality. It keeps coordinates and street
-// text out of the token, but it is an UNKEYED SHA-256 over a small,
-// guessable domain, and pickupAtMs and vehicle sit in the payload in
-// PLAINTEXT. Anyone holding a token can therefore confirm a SUSPECTED
-// place_id in a few dozen hashes (mode x airport x passengers is a
-// tiny space). So: no location data is DISCLOSED by a token, but a
-// leaked token is an address-CONFIRMATION oracle. Do not restate this
-// as "no location data of any kind transits the client". 2C should
-// decide deliberately whether to key this digest with the signing
-// secret (HMAC) — deferred here only because the verifier must then
-// select the key by `kid` BEFORE a caller can compute the expectation,
-// which is an API change this correction round should not smuggle in.
+// ONE JTI PER QUOTE: quote-ride generates a single random jti for the
+// whole response and stamps it into every vehicle's token. Consuming
+// any vehicle's token consumes the QUOTE — sibling vehicle tokens
+// cannot multiply one quote into several bookings. Retries are told
+// apart by the SHA-256 digest of the exact token string (canonical
+// bytes make one token = one string = one digest): same jti + same
+// digest + same authenticated identity is an idempotent retry; same
+// jti + different digest is a consumed-quote conflict.
 //
-// Route facts live in the (server-to-caller) response only; if 2C needs
-// quoted facts bound for storage, that is a deliberate v2 payload
-// decision then. Key rotation is explicit config:
-// QUOTE_SIGNING_CURRENT_ID/SECRET sign;
-// verification also accepts QUOTE_SIGNING_PREVIOUS_ID/SECRET, selected
-// by the token's kid.
+// KEYED COMMITMENT replaces v1's unkeyed intentHash. v1's hash was
+// SHA-256 over a small guessable domain, which made a leaked token an
+// address-CONFIRMATION oracle (a few dozen hashes confirm a suspected
+// place_id). v2's commitment is HMAC-SHA256 under a key DERIVED from
+// the signing secret selected by the token's kid — nothing about the
+// place is confirmable without the secret. Because the key depends on
+// the kid, the caller cannot precompute the expected commitment;
+// instead the VERIFIER computes it from the caller's submitted intent
+// (expected.intent) using the kid-selected key and compares. One key
+// authority, rotation included, no second secret to manage.
 //
-// TTL is a PRICE-HOLD POLICY, not a technical constant: 15 minutes,
-// chosen deliberately (short replay window, fresh facts; 2B2 re-quotes
-// silently so the UX cost is nil). Changing it is a product decision.
+// The commitment binds: mode, airportCode, CANONICAL placeId,
+// pickupAtMs, passengers, vehicle, finalCents. DELIBERATELY NOT BOUND:
+// address text. The place IDENTITY is the operational route identity
+// (plan v5 C6); display text is a passenger-visible label whose
+// retention sits behind the Google storage-policy review.
 //
-// VERIFICATION FAILS CLOSED. Everything the caller relies on is
-// mandatory: a finite clock, the complete set of expectations, the
-// EXACT v1 field set (an unsigned extra property is a rejection, not a
-// passenger), and a canonical encoding. The verifier returns a frozen
-// projection built only from validated fields, so a consumer can never
-// read an attribute the signature did not cover.
+// TIME, AMENDED DELIBERATELY (recorded in plan v3 and carried since):
+// signature, schema, and identity are checked absolutely and in that
+// order. Expiry alone may be DEFERRED by the consumption path — the
+// exact-digest idempotent-retry lookup must run before the time
+// verdict, or a passenger whose booking succeeded would be stranded by
+// a late retry of a token that has since expired. Default behavior
+// still refuses expired tokens; a caller opts into deferral with
+// { deferTime: true } and then MUST act on the returned timeStatus.
+//
+// TTL is a PRICE-HOLD POLICY, not a technical constant: 15 minutes.
+// Changing it is a product decision.
+//
+// VERIFICATION FAILS CLOSED. Mandatory clock and expectations, the
+// EXACT per-purpose field set (an unsigned extra property is a
+// rejection), canonical bytes (one quote = one token string), unknown
+// expectation keys refused. The verifier returns a frozen projection
+// built only from validated fields.
 
 const crypto = require('crypto');
 
-const TOKEN_VERSION = 1;
+const TOKEN_VERSION = 2;
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 
 // A token minted more than this far in the future is refused rather
@@ -77,11 +91,9 @@ const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 
 // ---------------------------------------------------------------
 // Signing key configuration — ONE canonical resolver, consumed by the
-// issuing endpoint today and by 2C's verification tomorrow, so signing
-// and verification can never disagree about which keys are acceptable.
-// Discipline mirrors lib/notify.js vapidConfigValid(): a present but
-// too-weak key is NOT configured. A one-character secret must never be
-// able to mint a quote that a write endpoint will later trust.
+// issuing endpoint and by 2C's verification alike, so signing and
+// verification can never disagree about which keys are acceptable.
+// A present but too-weak key is NOT configured.
 // ---------------------------------------------------------------
 
 const MIN_SECRET_BYTES = 32;
@@ -94,11 +106,8 @@ function validKeyId(id) {
 
 // "At least 32 bytes of secret material", measured as the UTF-8 byte
 // length of the configured value. Deliberately NOT an entropy estimate
-// (unmeasurable) and NOT a decode-then-measure rule (it would reject a
-// legitimate 32+ character passphrase). `openssl rand -base64 48` and
-// `openssl rand -hex 32` both satisfy it; a truncated or placeholder
-// secret does not. Whitespace is refused outright: a secret that was
-// copy-pasted with padding is a configuration error, not a key.
+// and NOT a decode-then-measure rule. Whitespace is refused outright: a
+// secret copy-pasted with padding is a configuration error, not a key.
 function validSecret(secret) {
   if (typeof secret !== 'string' || /\s/.test(secret)) return false;
   const bytes = Buffer.byteLength(secret, 'utf8');
@@ -107,9 +116,8 @@ function validSecret(secret) {
 
 // env -> { ok:true, current:{id,secret}, keys:[current, previous?] }
 //      | { ok:false, reason }
-// The PREVIOUS pair is ALL-OR-NOTHING (half a rotation is a
-// misconfiguration, never a silent single-key fallback) and its id must
-// differ from the current id so kid selection is unambiguous.
+// The PREVIOUS pair is ALL-OR-NOTHING and its id must differ from the
+// current id so kid selection is unambiguous.
 function resolveSigningKeys(env) {
   const source = env || {};
   const currentId = source.QUOTE_SIGNING_CURRENT_ID;
@@ -143,88 +151,142 @@ function resolveSigningKeys(env) {
 }
 
 // ---------------------------------------------------------------
-// Canonical payload
+// Keyed intent commitment
 // ---------------------------------------------------------------
 
-// Fixed field order, no whitespace — the exact bytes both signer and
-// verifier MAC.
-const PAYLOAD_FIELDS = [
-  'v', 'kid', 'purpose', 'authUserId', 'customerId', 'vehicle',
-  'pickupAtMs', 'intentHash', 'routeQuality',
-  'finalCents', 'pricingVersion', 'engineVersion', 'resolvedVersion',
-  'iat', 'exp'
-];
+// Domain-separated derivation: the commitment key is HMAC(secret,
+// constant), never the signing secret itself, so commitment material
+// and signature material are cryptographically distinct even though
+// exactly one configured secret backs both. Rotation rotates both.
+const COMMITMENT_DERIVATION_LABEL = 'linkmia-quote-commitment-v2';
 
-const ROUTE_QUALITIES = ['traffic_aware', 'fallback'];
-const INTENT_HASH_RE = /^[0-9a-f]{64}$/;
-
-function canonicalPayload(payload) {
-  const ordered = {};
-  for (const f of PAYLOAD_FIELDS) ordered[f] = payload[f];
-  return JSON.stringify(ordered);
+function deriveCommitmentKey(secret) {
+  return crypto.createHmac('sha256', secret).update(COMMITMENT_DERIVATION_LABEL).digest();
 }
 
-const nonEmptyString = (x) => typeof x === 'string' && x.length > 0;
-const safeInt = (x) => typeof x === 'number' && Number.isSafeInteger(x);
-
-// The EXACT v1 schema. Returns a validated projection or null. An extra
-// property is a rejection: canonicalPayload only MACs the known fields,
-// so anything beyond them is unsigned and must never reach a consumer.
-function projectV1Payload(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const keys = Object.keys(payload);
-  if (keys.length !== PAYLOAD_FIELDS.length) return null;
-  for (const k of keys) if (!PAYLOAD_FIELDS.includes(k)) return null;
-
-  if (payload.v !== TOKEN_VERSION) return null;
-  if (!validKeyId(payload.kid)) return null;
-  if (payload.purpose !== 'create') return null;
-  if (!nonEmptyString(payload.authUserId)) return null;
-  if (!nonEmptyString(payload.customerId)) return null;
-  if (!nonEmptyString(payload.vehicle)) return null;
-  if (!safeInt(payload.pickupAtMs)) return null;
-  if (typeof payload.intentHash !== 'string' || !INTENT_HASH_RE.test(payload.intentHash)) return null;
-  if (!ROUTE_QUALITIES.includes(payload.routeQuality)) return null;
-  if (!safeInt(payload.finalCents) || payload.finalCents < 0) return null;
-  if (!nonEmptyString(payload.pricingVersion)) return null;
-  if (!nonEmptyString(payload.engineVersion)) return null;
-  if (!nonEmptyString(payload.resolvedVersion)) return null;
-  if (!safeInt(payload.iat) || !safeInt(payload.exp)) return null;
-  // Exact TTL: the price hold is policy, and a token claiming a longer
-  // hold than the policy grants is a forgery signal, not a long quote.
-  if (payload.exp - payload.iat !== QUOTE_TTL_MS) return null;
-
-  const projected = {};
-  for (const f of PAYLOAD_FIELDS) projected[f] = payload[f];
-  return Object.freeze(projected);
-}
-
-// The intent hash: canonical serialization of the FULL intent, INCLUDING
-// the vehicle this particular token prices. 2C recomputes it from the
-// submitted intent plus the chosen vehicle and compares.
-//
-// placeId MUST be the CANONICAL id returned by the quote response (the
-// id Google resolved), never a client's original autocomplete id —
-// otherwise a resolved-id substitution would make an honest booking
-// fail verification. See lib/place-identity.js.
-function computeIntentHash(intent) {
+// intent: { mode, airportCode, placeId, pickupAtMs, passengers }
+// placeId MUST be the CANONICAL id from the quote response (the id
+// Google resolved), never a client's original autocomplete id.
+// vehicle and finalCents come from the token being minted/verified, so
+// each vehicle's token carries its own commitment.
+function computeCommitment(intent, vehicle, finalCents, secret) {
   const canonical = JSON.stringify({
     mode: intent.mode,
     airportCode: intent.airportCode,
     placeId: intent.placeId,
     pickupAtMs: intent.pickupAtMs,
     passengers: intent.passengers,
-    vehicle: intent.vehicle ?? null
+    vehicle,
+    finalCents
   });
-  return crypto.createHash('sha256').update(canonical).digest('hex');
+  return crypto.createHmac('sha256', deriveCommitmentKey(secret)).update(canonical).digest('hex');
+}
+
+// ---------------------------------------------------------------
+// Canonical payload — per-purpose exact field sets
+// ---------------------------------------------------------------
+
+const CREATE_FIELDS = [
+  'v', 'kid', 'jti', 'purpose', 'authUserId', 'customerId', 'vehicle',
+  'pickupAtMs', 'commitment', 'routeQuality',
+  'finalCents', 'pricingVersion', 'engineVersion', 'resolvedVersion',
+  'iat', 'exp'
+];
+// Edit adds bookingId + assignmentEpoch; field ORDER is fixed and
+// distinct per purpose — the canonical bytes are the purpose's list.
+const EDIT_FIELDS = [
+  'v', 'kid', 'jti', 'purpose', 'authUserId', 'customerId',
+  'bookingId', 'assignmentEpoch', 'vehicle',
+  'pickupAtMs', 'commitment', 'routeQuality',
+  'finalCents', 'pricingVersion', 'engineVersion', 'resolvedVersion',
+  'iat', 'exp'
+];
+
+const PURPOSES = ['create', 'edit'];
+const ROUTE_QUALITIES = ['traffic_aware', 'fallback'];
+const COMMITMENT_RE = /^[0-9a-f]{64}$/;
+const JTI_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function fieldsFor(purpose) {
+  return purpose === 'edit' ? EDIT_FIELDS : CREATE_FIELDS;
+}
+
+function canonicalPayload(payload) {
+  const ordered = {};
+  for (const f of fieldsFor(payload.purpose)) ordered[f] = payload[f];
+  return JSON.stringify(ordered);
+}
+
+const nonEmptyString = (x) => typeof x === 'string' && x.length > 0;
+const safeInt = (x) => typeof x === 'number' && Number.isSafeInteger(x);
+
+// The EXACT v2 schema for the payload's declared purpose. Returns a
+// validated frozen projection or null. An extra property is a
+// rejection: canonicalPayload only MACs the purpose's known fields, so
+// anything beyond them is unsigned and must never reach a consumer.
+function projectV2Payload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (!PURPOSES.includes(payload.purpose)) return null;
+  const fields = fieldsFor(payload.purpose);
+
+  const keys = Object.keys(payload);
+  if (keys.length !== fields.length) return null;
+  for (const k of keys) if (!fields.includes(k)) return null;
+
+  if (payload.v !== TOKEN_VERSION) return null;
+  if (!validKeyId(payload.kid)) return null;
+  if (typeof payload.jti !== 'string' || !JTI_RE.test(payload.jti)) return null;
+  if (!nonEmptyString(payload.authUserId)) return null;
+  if (!nonEmptyString(payload.customerId)) return null;
+  if (payload.purpose === 'edit') {
+    if (typeof payload.bookingId !== 'string' || !UUID_RE.test(payload.bookingId)) return null;
+    if (!safeInt(payload.assignmentEpoch) || payload.assignmentEpoch < 0) return null;
+  }
+  if (!nonEmptyString(payload.vehicle)) return null;
+  if (!safeInt(payload.pickupAtMs)) return null;
+  if (typeof payload.commitment !== 'string' || !COMMITMENT_RE.test(payload.commitment)) return null;
+  if (!ROUTE_QUALITIES.includes(payload.routeQuality)) return null;
+  if (!safeInt(payload.finalCents) || payload.finalCents < 0) return null;
+  if (!nonEmptyString(payload.pricingVersion)) return null;
+  if (!nonEmptyString(payload.engineVersion)) return null;
+  if (!nonEmptyString(payload.resolvedVersion)) return null;
+  if (!safeInt(payload.iat) || !safeInt(payload.exp)) return null;
+  // Exact TTL: a token claiming a longer hold than the policy grants is
+  // a forgery signal, not a long quote.
+  if (payload.exp - payload.iat !== QUOTE_TTL_MS) return null;
+
+  const projected = {};
+  for (const f of fields) projected[f] = payload[f];
+  return Object.freeze(projected);
+}
+
+// The SHA-256 digest of the exact token string — the retry identity.
+// Canonical bytes guarantee one quote-vehicle = one string = one
+// digest, so an acceptance row keyed on this digest distinguishes a
+// true retry (same digest) from a sibling vehicle token (same jti,
+// different digest). The raw token is NEVER stored — it remains a live
+// bearer credential until exp; the digest carries the audit identity
+// with zero credential value.
+function tokenDigest(token) {
+  return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
 function hmac(canonical, secret) {
   return crypto.createHmac('sha256', secret).update(canonical).digest();
 }
 
-// Sign a quote payload. Fields beyond the canonical list are ignored;
-// v/kid/iat/exp are stamped here.
+function newJti() {
+  return crypto.randomUUID();
+}
+
+// Sign a quote payload. `fields` must carry purpose, jti, identity,
+// vehicle, pickupAtMs, commitment, routeQuality, money and versions —
+// plus bookingId/assignmentEpoch for purpose 'edit'. v/kid/iat/exp are
+// stamped here. Fields beyond the purpose's canonical list are ignored
+// by serialization and therefore unsigned — projectV2Payload would
+// reject a payload carrying them, so the signer simply never emits
+// them.
 function signQuoteToken(fields, { keyId, secret, nowMs }) {
   const payload = {
     ...fields,
@@ -233,6 +295,18 @@ function signQuoteToken(fields, { keyId, secret, nowMs }) {
     iat: nowMs,
     exp: nowMs + QUOTE_TTL_MS
   };
+  // Issue-time completeness: JSON.stringify silently DROPS undefined
+  // values, so a signer missing a purpose field would mint a token
+  // every verifier refuses as schema_invalid — a misleading failure at
+  // the worst possible distance from the bug. Fail here instead.
+  if (!PURPOSES.includes(payload.purpose)) {
+    throw new Error(`signQuoteToken: unknown purpose ${String(payload.purpose)}`);
+  }
+  for (const f of fieldsFor(payload.purpose)) {
+    if (payload[f] === undefined || payload[f] === null) {
+      throw new Error(`signQuoteToken: missing field ${f} for purpose ${payload.purpose}`);
+    }
+  }
   const canonical = canonicalPayload(payload);
   const sig = hmac(canonical, secret);
   return `${b64url(canonical)}.${b64url(sig)}`;
@@ -253,24 +327,33 @@ function strictDecode(segment) {
 }
 
 // Every expectation is MANDATORY — a caller that forgets one must be
-// refused, never silently granted an unchecked token.
-// Exactly these — no more, no less. Accepting an UNKNOWN expectation
-// key would repeat the very bug this verifier was corrected for: a 2C
-// author writing expected.finalCents or expected.pickupAtMs would
-// believe the price and the instant were pinned while nothing checked
-// them. Unknown keys are refused so the mistake surfaces immediately;
-// anything else a consumer wants to pin, it compares itself against
-// the returned frozen projection.
-const REQUIRED_EXPECTATIONS = ['purpose', 'authUserId', 'customerId', 'vehicle', 'intentHash'];
+// refused, never silently granted an unchecked token. Exactly these —
+// no more, no less; unknown keys are refused so a consumer's mistaken
+// extra pin surfaces immediately. `intent` replaces v1's precomputed
+// intentHash: the commitment key is selected by the token's kid, which
+// the caller cannot know in advance, so the VERIFIER computes the
+// expected commitment from the caller's submitted intent and compares.
+// Anything else a consumer wants to pin (finalCents, pickupAtMs,
+// bookingId, assignmentEpoch), it compares against the returned frozen
+// projection — for edit tokens the RPC MUST compare bookingId and
+// assignmentEpoch against the booking row inside the guarded write.
+const REQUIRED_EXPECTATIONS = ['purpose', 'authUserId', 'customerId', 'vehicle', 'intent'];
+const INTENT_FIELDS = ['mode', 'airportCode', 'placeId', 'pickupAtMs', 'passengers'];
 
 // Verify a token against the configured keys and expectations.
-// keys: [{ id, secret }, ...] (current first, previous second) — supply
-//       resolveSigningKeys(process.env).keys, never a hand-built list.
-// expected: { purpose, authUserId, customerId, vehicle, intentHash } —
-//       ALL required, ALL enforced.
-// Returns { ok:true, payload } (frozen, validated projection)
+// keys: [{ id, secret }, ...] — supply resolveSigningKeys(env).keys,
+//       never a hand-built list.
+// expected: { purpose, authUserId, customerId, vehicle,
+//             intent: { mode, airportCode, placeId, pickupAtMs, passengers } }
+// options.deferTime: when true, an authentic token past its expiry (or
+//       before its validity) is RETURNED with ok:true and a non-'valid'
+//       timeStatus instead of being refused — for the consumption path
+//       ONLY, which orders the exact-digest idempotent lookup before
+//       the time verdict and must act on timeStatus itself. The default
+//       refuses, exactly as before.
+// Returns { ok:true, payload, timeStatus:'valid'|'expired'|'not_yet_valid' }
 //       | { ok:false, reason }.
-function verifyQuoteToken(token, { keys, nowMs, expected } = {}) {
+function verifyQuoteToken(token, { keys, nowMs, expected, deferTime = false } = {}) {
   if (typeof nowMs !== 'number' || !Number.isFinite(nowMs)) {
     return { ok: false, reason: 'invalid_clock' };
   }
@@ -285,6 +368,24 @@ function verifyQuoteToken(token, { keys, nowMs, expected } = {}) {
   for (const f of Object.keys(expected)) {
     if (!REQUIRED_EXPECTATIONS.includes(f)) {
       return { ok: false, reason: 'unknown_expectation' };
+    }
+  }
+  const intent = expected.intent;
+  if (typeof intent !== 'object' || Array.isArray(intent)) {
+    return { ok: false, reason: 'missing_expectations' };
+  }
+  // Unknown intent keys are the SAME mistake as unknown expectation
+  // keys (a caller believing something is pinned that is not) and get
+  // the same loud reason; missing required fields are the caller
+  // forgetting a binding.
+  for (const f of Object.keys(intent)) {
+    if (!INTENT_FIELDS.includes(f)) {
+      return { ok: false, reason: 'unknown_expectation' };
+    }
+  }
+  for (const f of INTENT_FIELDS) {
+    if (intent[f] === undefined || intent[f] === null) {
+      return { ok: false, reason: 'missing_expectations' };
     }
   }
   if (!Array.isArray(keys) || keys.length === 0) {
@@ -316,16 +417,16 @@ function verifyQuoteToken(token, { keys, nowMs, expected } = {}) {
 
   // EXACT schema BEFORE any key work: an unsigned extra property is a
   // rejection, not a passenger.
-  const payload = projectV1Payload(parsed);
+  const payload = projectV2Payload(parsed);
   if (!payload) return { ok: false, reason: 'schema_invalid' };
 
   // CANONICAL BYTES: the payload segment must BE the canonical
   // serialization, not merely re-serialize to something that MACs the
-  // same. Without this, a token holder can mint unlimited DISTINCT
-  // token strings for one quote (reordered keys, added whitespace,
-  // 4.5e3 for 4500, a duplicated key) that all verify identically —
-  // which would give 2C's mandated single-use/jti gate no stable key
-  // to dedupe on. One quote, one token string.
+  // same. Without this, a token holder could mint unlimited DISTINCT
+  // token strings for one quote (reordered keys, whitespace, 4.5e3 for
+  // 4500) that all verify identically — which would give the digest-
+  // keyed retry identity and the jti consumption gate no stable key.
+  // One quote-vehicle, one token string.
   if (payloadBuf.toString('utf8') !== canonicalPayload(payload)) {
     return { ok: false, reason: 'not_canonical' };
   }
@@ -339,29 +440,45 @@ function verifyQuoteToken(token, { keys, nowMs, expected } = {}) {
     return { ok: false, reason: 'bad_signature' };
   }
 
-  // Time: expiry is inclusive (at exp the price hold is over), and a
-  // token minted meaningfully in the future is refused.
-  if (payload.iat > nowMs + MAX_CLOCK_SKEW_MS) {
-    return { ok: false, reason: 'not_yet_valid' };
-  }
-  if (nowMs >= payload.exp) {
-    return { ok: false, reason: 'expired' };
-  }
-
+  // Identity and intent BEFORE time (the recorded amendment): an
+  // authentic token's identity verdict must not depend on the clock.
   if (payload.purpose !== expected.purpose) return { ok: false, reason: 'wrong_purpose' };
   if (payload.authUserId !== expected.authUserId) return { ok: false, reason: 'wrong_identity' };
   if (payload.customerId !== expected.customerId) return { ok: false, reason: 'wrong_identity' };
   if (payload.vehicle !== expected.vehicle) return { ok: false, reason: 'wrong_vehicle' };
-  if (payload.intentHash !== expected.intentHash) return { ok: false, reason: 'wrong_intent' };
 
-  return { ok: true, payload };
+  // The verifier computes the expected commitment itself, under the
+  // key the token's kid selected — the caller supplies raw intent.
+  const expectedCommitment = computeCommitment(
+    intent, payload.vehicle, payload.finalCents, key.secret
+  );
+  const givenCommitment = Buffer.from(payload.commitment, 'hex');
+  const wantCommitment = Buffer.from(expectedCommitment, 'hex');
+  if (givenCommitment.length !== wantCommitment.length ||
+      !crypto.timingSafeEqual(givenCommitment, wantCommitment)) {
+    return { ok: false, reason: 'wrong_intent' };
+  }
+
+  // Time LAST. Expiry is inclusive (at exp the price hold is over); a
+  // token minted meaningfully in the future is refused or flagged.
+  let timeStatus = 'valid';
+  if (payload.iat > nowMs + MAX_CLOCK_SKEW_MS) timeStatus = 'not_yet_valid';
+  else if (nowMs >= payload.exp) timeStatus = 'expired';
+
+  if (timeStatus !== 'valid' && !deferTime) {
+    return { ok: false, reason: timeStatus === 'expired' ? 'expired' : 'not_yet_valid' };
+  }
+
+  return { ok: true, payload, timeStatus };
 }
 
 module.exports = {
   TOKEN_VERSION,
   QUOTE_TTL_MS,
   MIN_SECRET_BYTES,
-  computeIntentHash,
+  computeCommitment,
+  tokenDigest,
+  newJti,
   signQuoteToken,
   verifyQuoteToken,
   resolveSigningKeys

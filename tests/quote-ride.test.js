@@ -122,7 +122,7 @@ global.fetch = async (url, options) => {
 
 const quoteRideEndpoint = require(path.join(repoRoot, 'backend/functions/quote-ride.js'));
 const { quantizeMiles, quantizeMinutes, FIELD_MASK } = require(path.join(repoRoot, 'backend/functions/lib/route-facts.js'));
-const { computeIntentHash, verifyQuoteToken, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
+const { computeCommitment, tokenDigest, newJti, verifyQuoteToken, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
 const { resolveRateCard } = require(path.join(repoRoot, 'backend/functions/lib/rate-card-resolver.js'));
 const { AIRPORTS, airportByCode, isValidPlaceId } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
 const { quoteRide: engineQuote } = require(path.join(repoRoot, 'backend/functions/lib/ride-quote.js'));
@@ -433,60 +433,84 @@ async function check(name, fn) {
   });
 
   // ---------- token contract ----------
-  await check('token payload: v1, kid, purpose create, dual identity, intentHash, no location data', async () => {
+  await check('token payload v2: jti shared per quote, keyed commitment, no location data, no edit fields', async () => {
     const pickupAt = FUTURE_PICKUP();
     const r = await post(goodIntent({ pickupAt }));
     const q = JSON.parse(r.body).quote;
     const p = decodeTokenPayload(q.vehicles.sprinter.token);
-    assert.strictEqual(p.v, 1);
+    assert.strictEqual(p.v, 2);
     assert.strictEqual(p.kid, 'k-2026-08');
-    assert.strictEqual(p.purpose, 'create', '2B1 is honestly create-only — no editContext exists');
-    assert.ok(!('editContext' in p));
+    assert.strictEqual(p.purpose, 'create');
+    assert.ok(!('bookingId' in p) && !('assignmentEpoch' in p),
+      'edit-only fields are FORBIDDEN on a create token — the exact schema is per purpose');
+    assert.match(p.jti, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      'the quote id is a random v4 UUID');
+    // ONE jti per QUOTE: every vehicle token in one response shares it,
+    // so consuming any vehicle consumes the quote — sibling tokens
+    // cannot multiply one quote into several bookings.
+    assert.strictEqual(decodeTokenPayload(q.vehicles.tesla.token).jti, p.jti);
+    assert.strictEqual(decodeTokenPayload(q.vehicles.escalade.token).jti, p.jti);
+    // ...while the exact-token DIGEST distinguishes the vehicles (the
+    // retry identity for the consumption gate).
+    assert.notStrictEqual(tokenDigest(q.vehicles.tesla.token), tokenDigest(q.vehicles.sprinter.token));
     assert.strictEqual(p.authUserId, 'auth-andres');
     assert.strictEqual(p.customerId, 'cust-andres');
     assert.strictEqual(p.vehicle, 'sprinter');
     assert.strictEqual(p.pickupAtMs, Date.parse(pickupAt));
     assert.strictEqual(p.finalCents, q.vehicles.sprinter.finalCents);
-    const expectedHash = computeIntentHash({
-      mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-      pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: 'sprinter'
-    });
-    assert.strictEqual(p.intentHash, expectedHash,
-      'each token binds the EXACT intent INCLUDING its own vehicle');
+    // KEYED commitment: recomputable only with the signing secret —
+    // unlike v1's unkeyed hash, a leaked token is no longer an
+    // address-confirmation oracle.
+    const expectedCommitment = computeCommitment(
+      { mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
+        pickupAtMs: Date.parse(pickupAt), passengers: 2 },
+      'sprinter', q.vehicles.sprinter.finalCents, CURRENT_SECRET
+    );
+    assert.strictEqual(p.commitment, expectedCommitment,
+      'each token binds the EXACT intent INCLUDING its own vehicle and cents, under the signing key');
     const raw = JSON.stringify(p);
     assert.ok(!raw.includes(ADDRESS_PLACE_ID) && !raw.includes('Test St') && !raw.includes('lat'),
       'no place IDs, addresses, or coordinates may transit the client inside a token');
     assert.ok(!('routeMiles' in p) && !('routeMinutes' in p),
-      'intentHash INSTEAD of raw route facts — facts live in the response only (plan v3)');
+      'commitment INSTEAD of raw route facts — facts live in the response only');
     assert.strictEqual(p.routeQuality, 'traffic_aware', 'routeQuality is the one required route field');
     assert.strictEqual(p.exp - p.iat, QUOTE_TTL_MS);
     assert.strictEqual(q.ttlMinutes, 15, 'TTL is the deliberate 15-minute price-hold policy');
   });
 
-  await check('token verification FAILS CLOSED: exact v1 schema, mandatory expectations, strict encoding', async () => {
+  await check('token verification FAILS CLOSED: exact v2 schema, mandatory expectations, strict encoding', async () => {
     const keys = [
       { id: 'k-2026-08', secret: CURRENT_SECRET },
       { id: 'k-2026-07', secret: PREVIOUS_SECRET }
     ];
-    const HASH = 'a1b2c3d4'.repeat(8); // a real 64-char hex digest shape
-    const base = {
-      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', pickupAtMs: Date.now() + 3600e3, intentHash: HASH,
+    const now = Date.now();
+    const INTENT = {
+      mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
+      pickupAtMs: now + 3600e3, passengers: 2
+    };
+    const JTI = newJti();
+    // The commitment is key-dependent, so each signing key mints its own.
+    const mkBase = (secret) => ({
+      purpose: 'create', jti: JTI, authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', pickupAtMs: INTENT.pickupAtMs,
+      commitment: computeCommitment(INTENT, 'tesla', 4500, secret),
       routeQuality: 'traffic_aware',
       finalCents: 4500, pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
-    };
-    const now = Date.now();
+    });
+    const base = mkBase(CURRENT_SECRET);
     const EXPECT = {
       purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', intentHash: HASH
+      vehicle: 'tesla', intent: INTENT
     };
     const current = signQuoteToken(base, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
     const ok = verifyQuoteToken(current, { keys, nowMs: now + 60000, expected: EXPECT });
     assert.strictEqual(ok.ok, true);
     assert.ok(Object.isFrozen(ok.payload), 'the returned projection is frozen');
 
-    // Rotation: a token signed by the PREVIOUS key still verifies.
-    const previous = signQuoteToken(base, { keyId: 'k-2026-07', secret: PREVIOUS_SECRET, nowMs: now });
+    // Rotation: a token signed by the PREVIOUS key still verifies —
+    // including its commitment, which the verifier recomputes under the
+    // kid-selected key, never under a caller-guessed one.
+    const previous = signQuoteToken(mkBase(PREVIOUS_SECRET), { keyId: 'k-2026-07', secret: PREVIOUS_SECRET, nowMs: now });
     assert.strictEqual(verifyQuoteToken(previous, { keys, nowMs: now + 60000, expected: EXPECT }).ok, true);
 
     // Unknown kid refuses.
@@ -504,7 +528,7 @@ async function check(name, fn) {
     // fields, so an appended property keeps the signature valid. It
     // must be REFUSED, never returned to a consumer as if signed.
     const withExtra = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-    withExtra.bookingId = 'attacker-supplied';
+    withExtra.bookingId = '11111111-2222-3333-4444-555555555555';
     const extraTok = Buffer.from(JSON.stringify(withExtra)).toString('base64url') + '.' + sig;
     assert.strictEqual(verifyQuoteToken(extraTok, { keys, nowMs: now, expected: EXPECT }).reason, 'schema_invalid',
       'an unsigned extra property is a rejection, not a passenger');
@@ -530,8 +554,9 @@ async function check(name, fn) {
     // '"exp":null' MAC identically — an immortal token if exp is only
     // typeof-checked. The exact-schema projection kills it.
     const canonNull = JSON.stringify({
-      v: 1, kid: 'k-2026-08', purpose: 'create', authUserId: 'auth-andres',
-      customerId: 'cust-andres', vehicle: 'tesla', pickupAtMs: 1, intentHash: HASH,
+      v: 2, kid: 'k-2026-08', jti: JTI, purpose: 'create', authUserId: 'auth-andres',
+      customerId: 'cust-andres', vehicle: 'tesla', pickupAtMs: 1,
+      commitment: base.commitment,
       routeQuality: 'traffic_aware', finalCents: 4500, pricingVersion: 'v',
       engineVersion: 'e', resolvedVersion: 'v', iat: 0, exp: null
     });
@@ -574,8 +599,62 @@ async function check(name, fn) {
     assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, authUserId: 'auth-other' } }).reason, 'wrong_identity');
     assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, vehicle: 'sprinter' } }).reason, 'wrong_vehicle',
       'a vehicle expectation must be ENFORCED, never silently dropped');
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, intentHash: 'f'.repeat(64) } }).reason, 'wrong_intent',
-      'an intentHash expectation must be ENFORCED, never silently dropped');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
+      expected: { ...EXPECT, intent: { ...INTENT, placeId: 'ChIJ_other_place_id' } } }).reason, 'wrong_intent',
+      'the verifier recomputes the KEYED commitment from the submitted intent — a different place refuses');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
+      expected: { ...EXPECT, intent: { ...INTENT, passengers: 3 } } }).reason, 'wrong_intent');
+
+    // DEFERRED TIME (the recorded amendment): the consumption path may
+    // order the exact-digest idempotent lookup before the time verdict.
+    // Authenticity and identity are still absolute; only expiry defers,
+    // and the caller gets an explicit timeStatus to act on.
+    const late = verifyQuoteToken(current, { keys, nowMs: now + QUOTE_TTL_MS + 1, expected: EXPECT, deferTime: true });
+    assert.strictEqual(late.ok, true);
+    assert.strictEqual(late.timeStatus, 'expired');
+    const fresh = verifyQuoteToken(current, { keys, nowMs: now + 1000, expected: EXPECT, deferTime: true });
+    assert.strictEqual(fresh.timeStatus, 'valid');
+    const forgedLate = verifyQuoteToken(forged, { keys, nowMs: now + QUOTE_TTL_MS + 1, expected: EXPECT, deferTime: true });
+    assert.strictEqual(forgedLate.ok, false, 'deferTime NEVER relaxes authenticity — only the clock');
+
+    // EDIT PURPOSE: bookingId + assignmentEpoch are REQUIRED there and
+    // FORBIDDEN on create — the exact field set is per purpose.
+    const BOOKING = '99999999-8888-4777-a666-555555555555';
+    const editBase = {
+      ...mkBase(CURRENT_SECRET), purpose: 'edit', bookingId: BOOKING, assignmentEpoch: 2
+    };
+    const editTok = signQuoteToken(editBase, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
+    const editOk = verifyQuoteToken(editTok, { keys, nowMs: now, expected: { ...EXPECT, purpose: 'edit' } });
+    assert.strictEqual(editOk.ok, true);
+    assert.strictEqual(editOk.payload.bookingId, BOOKING);
+    assert.strictEqual(editOk.payload.assignmentEpoch, 2,
+      'the edit RPC compares this against the row inside the guarded write');
+    assert.strictEqual(verifyQuoteToken(editTok, { keys, nowMs: now, expected: EXPECT }).reason, 'wrong_purpose',
+      'an edit token can never pass a create expectation');
+    // the SIGNER refuses an incomplete edit payload at issue time —
+    // JSON.stringify would silently drop the undefined field and mint a
+    // token that dies far away as schema_invalid.
+    const noBooking = { ...editBase };
+    delete noBooking.bookingId;
+    assert.throws(() => signQuoteToken(noBooking, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }),
+      /missing field bookingId/);
+    // ...and a hand-FORGED edit token missing the field still refuses at
+    // the verifier's exact schema (defense at both ends).
+    const forgedNoBooking = (() => {
+      const bytes = JSON.stringify({ ...JSON.parse(Buffer.from(editTok.split('.')[0], 'base64url').toString()) });
+      const obj = JSON.parse(bytes);
+      delete obj.bookingId;
+      const text = JSON.stringify(obj);
+      const sig2 = require('crypto').createHmac('sha256', CURRENT_SECRET).update(text).digest();
+      return Buffer.from(text).toString('base64url') + '.' + Buffer.from(sig2).toString('base64url');
+    })();
+    assert.strictEqual(verifyQuoteToken(forgedNoBooking, { keys, nowMs: now, expected: { ...EXPECT, purpose: 'edit' } }).reason, 'schema_invalid');
+
+    // DIGEST: deterministic over the exact string, distinct across
+    // tokens — the consumption gate's retry identity.
+    assert.strictEqual(tokenDigest(current), tokenDigest(current));
+    assert.notStrictEqual(tokenDigest(current), tokenDigest(previous));
+    assert.match(tokenDigest(current), /^[0-9a-f]{64}$/);
 
     // STRICT encoding: exactly two canonical base64url segments.
     for (const bad of ['garbage', current + '.extra', current + '=', current.replace('.', '.='),
@@ -690,12 +769,13 @@ async function check(name, fn) {
     // ...and so does the response the client will resubmit.
     assert.strictEqual(q.intent.placeId, RESOLVED,
       '2B2 resubmits quote.intent.placeId verbatim — it must be canonical');
-    // ...and so does every token's intentHash.
+    // ...and so does every token's keyed commitment.
     const p = decodeTokenPayload(q.vehicles.tesla.token);
-    assert.strictEqual(p.intentHash, computeIntentHash({
-      mode: 'dropoff', airportCode: 'MIA', placeId: RESOLVED,
-      pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: 'tesla'
-    }), 'the hash 2C recomputes must cover the canonical id');
+    assert.strictEqual(p.commitment, computeCommitment(
+      { mode: 'dropoff', airportCode: 'MIA', placeId: RESOLVED,
+        pickupAtMs: Date.parse(pickupAt), passengers: 2 },
+      'tesla', q.vehicles.tesla.finalCents, CURRENT_SECRET
+    ), 'the commitment 2C recomputes must cover the canonical id');
     // Substitution is observable in telemetry as a BOOLEAN, never an id.
     const tel = state.logLines.find((l) => l.includes('quote_telemetry'));
     assert.ok(tel.includes('"placeIdSubstituted":true'));
@@ -771,29 +851,32 @@ async function check(name, fn) {
     assert.ok(/reselect/i.test(r404.body));
   });
 
-  await check('every vehicle token binds its OWN vehicle in both the payload and the intentHash', async () => {
+  await check('every vehicle token binds its OWN vehicle in both the payload and the commitment', async () => {
     const pickupAt = FUTURE_PICKUP();
     const q = JSON.parse((await post(goodIntent({ pickupAt }))).body).quote;
-    const hashes = new Set();
+    const INTENT = {
+      mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
+      pickupAtMs: Date.parse(pickupAt), passengers: 2
+    };
+    const commitments = new Set();
     for (const key of Object.keys(q.vehicles)) {
       if (!q.vehicles[key].ok) continue;
       const p = decodeTokenPayload(q.vehicles[key].token);
       assert.strictEqual(p.vehicle, key);
-      assert.strictEqual(p.intentHash, computeIntentHash({
-        mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-        pickupAtMs: Date.parse(pickupAt), passengers: 2, vehicle: key
-      }), `${key}'s hash must cover ${key}, not a shared preference`);
-      hashes.add(p.intentHash);
+      assert.strictEqual(p.commitment, computeCommitment(
+        INTENT, key, q.vehicles[key].finalCents, CURRENT_SECRET
+      ), `${key}'s commitment must cover ${key} and ITS cents, not a shared preference`);
+      commitments.add(p.commitment);
       // The token verifies ONLY against its own vehicle.
       const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
       const expected = {
         purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-        vehicle: key, intentHash: p.intentHash
+        vehicle: key, intent: INTENT
       };
       assert.strictEqual(verifyQuoteToken(q.vehicles[key].token, { keys, nowMs: Date.now(), expected }).ok, true);
     }
-    assert.strictEqual(hashes.size, Object.keys(q.vehicles).filter((k) => q.vehicles[k].ok).length,
-      'each vehicle gets a DISTINCT hash — never one shared, contradictory hash');
+    assert.strictEqual(commitments.size, Object.keys(q.vehicles).filter((k) => q.vehicles[k].ok).length,
+      'each vehicle gets a DISTINCT commitment — never one shared, contradictory binding');
   });
 
   // ---------- input strictness ----------
@@ -866,17 +949,21 @@ async function check(name, fn) {
     // one quote (reordered keys, whitespace, 4.5e3 for 4500) that all
     // verify — leaving 2C's mandated single-use gate no stable key.
     const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
-    const HASH = 'a1b2c3d4'.repeat(8);
     const now = Date.now();
+    const INTENT = {
+      mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
+      pickupAtMs: now + 3600e3, passengers: 2
+    };
     const tok = signQuoteToken({
-      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', pickupAtMs: now + 3600e3, intentHash: HASH,
+      purpose: 'create', jti: newJti(), authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', pickupAtMs: INTENT.pickupAtMs,
+      commitment: computeCommitment(INTENT, 'tesla', 4500, CURRENT_SECRET),
       routeQuality: 'traffic_aware', finalCents: 4500,
       pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
     }, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
     const EXPECT = {
       purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', intentHash: HASH
+      vehicle: 'tesla', intent: INTENT
     };
     const [pb, sig] = tok.split('.');
     const obj = JSON.parse(Buffer.from(pb, 'base64url').toString());
@@ -897,17 +984,21 @@ async function check(name, fn) {
 
   await check('an expectation key outside the contract is refused, never silently dropped', async () => {
     const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
-    const HASH = 'a1b2c3d4'.repeat(8);
     const now = Date.now();
+    const INTENT = {
+      mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
+      pickupAtMs: now + 3600e3, passengers: 2
+    };
     const tok = signQuoteToken({
-      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', pickupAtMs: now + 3600e3, intentHash: HASH,
+      purpose: 'create', jti: newJti(), authUserId: 'auth-andres', customerId: 'cust-andres',
+      vehicle: 'tesla', pickupAtMs: INTENT.pickupAtMs,
+      commitment: computeCommitment(INTENT, 'tesla', 4500, CURRENT_SECRET),
       routeQuality: 'traffic_aware', finalCents: 4500,
       pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
     }, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
     const EXPECT = {
       purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
-      vehicle: 'tesla', intentHash: HASH
+      vehicle: 'tesla', intent: INTENT
     };
     // A 2C author who "pins" the price or the instant this way would
     // otherwise get ok:true with neither actually enforced.
@@ -917,6 +1008,11 @@ async function check(name, fn) {
         'unknown_expectation',
         `expected.${Object.keys(extra)[0]} must fail loudly rather than be ignored`);
     }
+    // The same discipline applies INSIDE the intent object.
+    assert.strictEqual(
+      verifyQuoteToken(tok, { keys, nowMs: now,
+        expected: { ...EXPECT, intent: { ...INTENT, routeMiles: 10 } } }).reason,
+      'unknown_expectation', 'an unknown intent field must fail loudly too');
     // What a consumer legitimately wants is on the frozen projection.
     assert.strictEqual(verifyQuoteToken(tok, { keys, nowMs: now, expected: EXPECT }).payload.finalCents, 4500);
   });

@@ -22,16 +22,16 @@
 //
 // ALL VEHICLES, NO PREFERENCE: this endpoint prices every vehicle on
 // the card and signs one token per vehicle, each bound to ITS OWN
-// vehicle through both the payload field and the intentHash. There is
+// vehicle through both the payload field and the keyed commitment. There is
 // deliberately no `vehicle` request field — in an all-vehicles contract
-// a "preference" could only perturb the hash, which is exactly the
+// a "preference" could only perturb the commitment, which is exactly the
 // incoherence that would let a token's payload vehicle and its
-// intentHash disagree. The passenger's choice is expressed by which
+// commitment disagree. The passenger's choice is expressed by which
 // token they present at 2C.
 //
 // CANONICAL PLACE ID: the response echoes the id Google RESOLVED, not
 // the id submitted (Google may supersede an id). 2B2 must resubmit
-// `quote.intent.placeId` verbatim so 2C's intentHash recomputation
+// `quote.intent.placeId` verbatim so 2C's commitment recomputation
 // matches without a second Places call.
 //
 // ACCESS: QUOTE_ACCESS_MODE is explicit and defaults fail-closed to
@@ -52,7 +52,7 @@ function authUserIdOf(userData) {
 const { airportByCode, isValidPlaceId, resolvePlace } = require('./lib/place-identity');
 const { computeRouteFacts, isMeaningfullyPast } = require('./lib/route-facts');
 const { resolveRateCard } = require('./lib/rate-card-resolver');
-const { computeIntentHash, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require('./lib/quote-token');
+const { computeCommitment, signQuoteToken, newJti, resolveSigningKeys, QUOTE_TTL_MS } = require('./lib/quote-token');
 const { quoteRide } = require('./lib/ride-quote');
 
 // The strict intent allowlist — the boundary is enforced, not advisory.
@@ -363,7 +363,7 @@ exports.handler = async (event) => {
       };
     }
     // The CANONICAL id — used for routing, for the response, and for
-    // the intentHash alike. Never a mix.
+    // the commitment alike. Never a mix.
     const canonicalPlaceId = place.placeId;
 
     // ---- server route facts (place_id waypoints, both sides) ----
@@ -395,6 +395,11 @@ exports.handler = async (event) => {
     const vehicles = {};
     const centsByVehicle = {};
     let vehiclesOk = 0;
+    // ONE jti for the whole quote, shared by every vehicle's token:
+    // consuming any vehicle's token consumes the QUOTE, so sibling
+    // vehicle tokens can never multiply one quote into several
+    // bookings (retries are told apart by exact-token digest).
+    const quoteJti = newJti();
     for (const key of Object.keys(card.vehicles)) {
       const q = quoteRide({
         vehicle: key,
@@ -414,23 +419,24 @@ exports.handler = async (event) => {
         vehicles[key] = { ok: false, error: q.error };
         continue;
       }
-      // Each token's intentHash covers ITS OWN vehicle, so a payload
-      // vehicle and its hash can never disagree.
-      const intentHash = computeIntentHash({
-        mode,
-        airportCode,
-        placeId: canonicalPlaceId,
-        pickupAtMs,
-        passengers,
-        vehicle: key
-      });
+      // Each token's KEYED commitment covers ITS OWN vehicle and
+      // cents, so a payload vehicle and its commitment can never
+      // disagree — and unlike v1's unkeyed hash, a leaked token is no
+      // longer an address-confirmation oracle.
+      const commitment = computeCommitment(
+        { mode, airportCode, placeId: canonicalPlaceId, pickupAtMs, passengers },
+        key,
+        q.quote.finalCents,
+        signing.current.secret
+      );
       const quoteToken = signQuoteToken({
         purpose: 'create',
+        jti: quoteJti,
         authUserId,
         customerId,
         vehicle: key,
         pickupAtMs,
-        intentHash,
+        commitment,
         routeQuality: route.routeQuality,
         finalCents: q.quote.finalCents,
         pricingVersion: q.quote.pricingVersion,

@@ -10,8 +10,8 @@
 // DIFFERENT place id than the one submitted (ids are refreshed and
 // superseded over time). The resolved id is therefore the canonical
 // one, and the caller must use it for routing, for the response, and
-// for the intentHash alike — never a mix. The response returns it so
-// 2B2 resubmits the canonical id and 2C's intentHash recomputation
+// for the keyed commitment alike — never a mix. The response returns it so
+// 2B2 resubmits the canonical id and 2C's commitment recomputation
 // matches without a second Places call.
 //
 // Server-side ONLY: the Places API (New) call uses the dedicated
