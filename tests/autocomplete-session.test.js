@@ -40,15 +40,20 @@ function makeGenerator({ randomUUID = true, getRandomValues = true } = {}) {
     console: { log() {}, warn() {}, error() {} },
     crypto: (randomUUID || getRandomValues) ? cryptoStub : undefined,
     Uint8Array, Array, Math, Date, String, Number, JSON, Object,
+    setTimeout: (fn) => { fn(); return 0; },   // debounce fires inline
+    clearTimeout: () => {},
   };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   vm.runInContext(
-    source.replace(/^export class /m, 'class ') + '\n;globalThis.__C = CustomAutocomplete;',
+    source.replace(/^export class /m, 'class ').replace(/^export const /m, 'const ')
+      + '\n;globalThis.__C = CustomAutocomplete; globalThis.__MIN = MIN_AUTOCOMPLETE_CHARS;',
     ctx,
     { filename: 'autocomplete.js' }
   );
-  return Object.create(ctx.__C.prototype);
+  const inst = Object.create(ctx.__C.prototype);
+  inst.__minChars = ctx.__MIN;
+  return inst;
 }
 
 let checks = 0;
@@ -146,6 +151,33 @@ check('the proxy forwards the token to Google untouched', () => {
     'both the autocomplete and details proxy routes must forward the session token');
   assert.ok(!/sessiontoken\.(slice|substr|substring)\(/.test(proxySource),
     'the proxy must not reshape the token');
+});
+
+check('short prefixes never reach Google', () => {
+  // Requests that end in a Place Details call ride free inside the session.
+  // Requests from an ABANDONED search do not — the session never terminates,
+  // so each one is billed on its own. Short prefixes are the ones that get
+  // abandoned, so they are the ones worth not sending.
+  const gen = makeGenerator();
+  assert.strictEqual(gen.__minChars, 5, 'the minimum should be 5 characters');
+
+  const fired = [];
+  const inst = {
+    isValidated: false,
+    debounceTimer: null,
+    lastInput: '',
+    hideSuggestions() {},
+    fetchSuggestions(v) { fired.push(v); },
+    input: { dispatchEvent() {} },
+    clearValidation() {},
+    handleInput: gen.handleInput,
+  };
+  // note: handleInput trims first, so '1200 ' is FOUR characters and is held
+  ['1', '12', '120', '1200', '1200 ', '1200 B', 'Setai'].forEach((v) => {
+    inst.handleInput({ target: { value: v } });
+  });
+  assert.deepStrictEqual(fired, ['1200 B', 'Setai'],
+    'only trimmed inputs of 5+ characters should reach Google');
 });
 
 results.forEach((r) => console.log(r));

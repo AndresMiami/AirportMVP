@@ -12,6 +12,10 @@
  * CSS styles are in maps-autocomplete.css
  */
 
+// Shortest input that may trigger a Google prediction request. See the
+// comment at the guard in handleInput() for why this is 5 and not 3.
+const MIN_AUTOCOMPLETE_CHARS = 5;
+
 export class CustomAutocomplete {
     constructor(inputId, suggestionsId, onSelect) {
         this.input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
@@ -256,8 +260,20 @@ export class CustomAutocomplete {
             clearTimeout(this.debounceTimer);
         }
         
-        // Minimum 3 characters
-        if (value.length < 3) {
+        // MINIMUM LENGTH — a cost control, not a UX preference.
+        //
+        // Autocomplete requests that end in a Place Details call are bundled
+        // into that session and cost nothing extra. Requests from a search the
+        // passenger ABANDONS are not: the session never terminates, so they are
+        // billed on their own. Short prefixes are exactly the ones that produce
+        // useless predictions and get abandoned.
+        //
+        // At 3 characters a Miami address is still just a street number
+        // ("120", "185"). Five is the first point where a query is usually
+        // specific enough to be worth asking Google — "1200 " with the space,
+        // or the start of a real name ("Setai", "Loews", "Brick"). This removes
+        // the 3- and 4-character requests, which never resolved anything.
+        if (value.length < MIN_AUTOCOMPLETE_CHARS) {
             this.hideSuggestions();
             this.lastInput = value;
             return;
