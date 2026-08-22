@@ -696,21 +696,27 @@
         // true   = the server quote becomes the ONLY price that may be shown as
         //          final or submitted. A missing or expired quote blocks Book.
         //
-        // Flipping this to true requires ALL of the following first, or every
-        // booking is blocked. Order matters; each is its own authorized step.
-        //   1. Restore the provider + signing credentials on the PRODUCTION
-        //      context only — GOOGLE_ROUTES_API_KEY,
-        //      GOOGLE_PLACES_SERVER_API_KEY, QUOTE_SIGNING_CURRENT_ID and
-        //      QUOTE_SIGNING_CURRENT_SECRET were deliberately removed after
-        //      2B1 testing. Do NOT touch GOOGLE_MAPS_API_KEY: that is the
-        //      browser/Railway autocomplete key and is unrelated.
-        //   2. QUOTE_SERVICE_DISABLED unset (or 0) on that context — while it
-        //      is set the endpoint answers 503 to everyone.
-        //   3. QUOTE_ACCESS_MODE=authenticated. Do NOT simply delete
+        // ROLLOUT ORDER — each step is its own authorized action, and the
+        // browser flag is LAST. Doing these out of order either blocks every
+        // booking or opens a paid Google endpoint before it has been smoked.
+        //   1. Leave QUOTE_SERVICE_DISABLED=1 ON. Nothing below changes that.
+        //   2. Restore the four provider/signing secrets on the PRODUCTION
+        //      context ONLY: GOOGLE_ROUTES_API_KEY,
+        //      GOOGLE_PLACES_SERVER_API_KEY, QUOTE_SIGNING_CURRENT_ID,
+        //      QUOTE_SIGNING_CURRENT_SECRET. They were deliberately removed
+        //      after 2B1 testing. Do NOT touch GOOGLE_MAPS_API_KEY — that is
+        //      the browser/Railway autocomplete key and is unrelated.
+        //   3. Set QUOTE_ACCESS_MODE=authenticated. Do NOT simply delete
         //      QUOTE_SHADOW_ALLOWLIST: in the default 'allowlist' mode a
         //      missing allowlist is a configuration error and answers 500.
-        //      Access is a named mode so that removing one variable can never
+        //      Access is a NAMED mode so removing one variable can never
         //      silently open a paid endpoint to everyone.
+        //   4. Deploy and VERIFY the endpoint still answers 503. Netlify
+        //      captures env at build time, so this proves the new config
+        //      shipped without exposing anything.
+        //   5. Remove QUOTE_SERVICE_DISABLED and smoke-test the endpoint
+        //      directly, while this browser flag is still false.
+        //   6. Only then flip this flag to true.
         // Precedent for a client-side rollout constant: REQUIRE_PAYMENT.
         const SERVER_QUOTE_ENABLED = false;
 
@@ -1905,6 +1911,11 @@
             invalidateQuote(reason) {
                 if (!SERVER_QUOTE_ENABLED) return;
                 const q = this.state.quote;
+                // Cancel a QUEUED request before the early return below. A
+                // debounced quote can be waiting while the state still reads
+                // 'idle' with no data, and that queued request is for the
+                // intent that just died.
+                clearTimeout(this._quoteTimer);
                 if (q.status === 'idle' && !q.data) return;
                 debug.info?.(`🧾 quote invalidated: ${reason}`);
                 q.seq++;                       // any in-flight response is now stale
@@ -1945,7 +1956,10 @@
             }
 
             async requestServerQuote({ force = false } = {}) {
-                if (!SERVER_QUOTE_ENABLED) return;
+                // quoteFlowActive(), not the raw flag: a debounce timer queued
+                // before a pending edit began could otherwise fire inside the
+                // edit flow and request a create-scoped quote for it.
+                if (!this.quoteFlowActive()) return;
 
                 const intent = this.quoteIntent();
                 const key = this.quoteKey(intent);
@@ -1973,6 +1987,11 @@
                     if (!window.supabaseClient) throw new Error('auth client unavailable');
                     const { data: { session } } = await window.supabaseClient.auth.getSession();
                     if (!session?.access_token) throw new Error('not signed in');
+
+                    // Acquiring the session is an await. The intent can change
+                    // during it, and the next call is the one that spends money
+                    // at Google — so check before the fetch, not only after.
+                    if (seq !== q.seq) return;
 
                     const res = await fetch('/api/quote-ride', {
                         method: 'POST',
@@ -2049,9 +2068,32 @@
             // that is not "fresh server price" replaces the visible numbers.
             setCarouselPlaceholder(label) {
                 this.vehiclePrices = null;
+                this.carouselState = { kind: 'placeholder', label };
+                this.pushCarouselState();
+            }
+
+            // The iframe may not have installed its message listener yet, and
+            // it ships hardcoded prices in its markup. Posting once and hoping
+            // meant a placeholder could be dropped on the floor and the markup
+            // figures ($132/$165/$220) would sit there looking like real
+            // prices. So the LAST intended presentation is kept and replayed
+            // whenever the carousel announces it is ready.
+            pushCarouselState() {
+                const st = this.carouselState;
+                if (!st) return;
                 const iframe = document.getElementById('vehicle-carousel-frame');
-                if (iframe && iframe.contentWindow) {
-                    iframe.contentWindow.postMessage({ type: 'clearPrices', data: { label } }, '*');
+                if (!iframe || !iframe.contentWindow) return;
+                const post = (msg) => iframe.contentWindow.postMessage(msg, '*');
+                if (st.kind === 'placeholder') {
+                    post({ type: 'clearPrices', data: { label: st.label } });
+                    return;
+                }
+                post({ type: 'updatePrices', data: st.prices });
+                if (st.unavailable && st.unavailable.length) {
+                    // A vehicle the engine refused (party too large, beyond the
+                    // service area) must say so, not sit on a stale '…'.
+                    post({ type: 'clearPrices', data: { label: 'Unavailable', ids: st.unavailable } });
+                    post({ type: 'setUnavailable', data: { ids: st.unavailable } });
                 }
             }
 
@@ -2070,15 +2112,20 @@
             applyServerPrices() {
                 const vehicles = this.state.quote.data?.vehicles || {};
                 const prices = {};
+                const unavailable = [];
                 Object.keys(vehicles).forEach(k => {
                     if (vehicles[k]?.ok) prices[k] = vehicles[k].finalCents / 100;
+                    else unavailable.push(k);
                 });
                 if (!Object.keys(prices).length) return;
 
                 this.vehiclePrices = prices;
-                const iframe = document.getElementById('vehicle-carousel-frame');
-                if (iframe && iframe.contentWindow) {
-                    iframe.contentWindow.postMessage({ type: 'updatePrices', data: prices }, '*');
+                this.carouselState = { kind: 'prices', prices, unavailable };
+                this.pushCarouselState();
+
+                // A refused vehicle must not stay selected with a stale price.
+                if (this.state.vehicle?.type && unavailable.indexOf(this.state.vehicle.type) >= 0) {
+                    this.state.vehicle.quoteToken = null;
                 }
 
                 const selected = this.state.vehicle?.type;
@@ -3289,13 +3336,20 @@
                     
                 case 'carouselReady':
                     console.log('Carousel iframe is ready');
-                    // Send any pending price updates
-                    const iframe = document.getElementById('vehicle-carousel-frame');
-                    if (iframe && window.airportApp?.vehiclePrices) {
-                        iframe.contentWindow.postMessage({
-                            type: 'updatePrices',
-                            data: window.airportApp.vehiclePrices
-                        }, '*');
+                    // Replay the LAST intended presentation — which may be a
+                    // placeholder, not prices. Replaying only prices left the
+                    // carousel showing its hardcoded markup figures whenever
+                    // the state was "loading", "expired" or "unavailable".
+                    if (window.airportApp?.carouselState) {
+                        window.airportApp.pushCarouselState();
+                    } else {
+                        const iframe = document.getElementById('vehicle-carousel-frame');
+                        if (iframe && window.airportApp?.vehiclePrices) {
+                            iframe.contentWindow.postMessage({
+                                type: 'updatePrices',
+                                data: window.airportApp.vehiclePrices
+                            }, '*');
+                        }
                     }
                     break;
                     

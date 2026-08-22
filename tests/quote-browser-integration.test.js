@@ -37,20 +37,66 @@ for (const m of carouselHtml.matchAll(/id="(tesla|escalade|sprinter)-price"[^>]*
 assert.deepStrictEqual(Object.keys(CAROUSEL_DEFAULTS).sort(), ['escalade', 'sprinter', 'tesla'],
   'could not read the carousel default prices from the real markup');
 
-// A model of the carousel's own rendering, seeded from that markup and driven
-// by the real postMessage contract, so assertions are about VISIBLE text.
-function makeCarousel() {
-  const visible = { ...CAROUSEL_DEFAULTS };
+// The REAL carousel, loaded out of vehicle-carousel-standalone.html and run in
+// its own realm. Its whole script is wrapped in an IIFE, so the auto-construction
+// line is swapped for an export from inside — which also stops it building itself
+// against a DOM this harness has not set up. Messages are only delivered once the
+// carousel has installed its listener, which is the readiness race being tested.
+function loadRealCarousel() {
+  const script = [...carouselHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((m) => m[1]).join('\n;\n')
+    .replace(/new VehicleCarouselStandalone\(\);?/g,
+             'globalThis.__Carousel = VehicleCarouselStandalone;');
+
+  const els = {};
+  Object.keys(CAROUSEL_DEFAULTS).forEach((k) => {
+    els[`${k}-price`] = { textContent: CAROUSEL_DEFAULTS[k], classList: { add() {}, remove() {} } };
+  });
+  const mk = () => ({
+    style: {}, children: [], textContent: '',
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener() {}, setAttribute() {}, appendChild(c) { this.children.push(c); return c; },
+    querySelector: () => null, querySelectorAll: () => [],
+  });
+
+  let listener = null;
+  const cctx = {
+    console: { log() {}, warn() {}, error() {} },
+    document: {
+      readyState: 'complete', getElementById: (id) => els[id] || null,
+      querySelector: () => mk(), querySelectorAll: () => [],
+      addEventListener() {}, createElement: mk, body: mk(),
+    },
+    window: {
+      addEventListener: (t, fn) => { if (t === 'message') listener = fn; },
+      parent: { postMessage() {} },
+    },
+    setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
+    Set, Map, Math, Date, JSON, Object, Array, Number, String, Boolean, Error,
+  };
+  cctx.window.parent.window = cctx.window.parent;   // parent !== window -> iframe mode
+  cctx.globalThis = cctx;
+  vm.createContext(cctx);
+  vm.runInContext(script, cctx, { filename: 'vehicle-carousel.js' });
+  assert.ok(cctx.__Carousel, 'could not reach the real carousel class');
+
+  const inst = Object.create(cctx.__Carousel.prototype);
+  inst.vehicles = [{ id: 'tesla' }, { id: 'escalade' }, { id: 'sprinter' }];
+  inst.currentIndex = 0;
+  inst.track = { children: [mk(), mk(), mk()] };
+  inst.centerCard = () => {}; inst.updateActiveStates = () => {};
+  inst.updateNavButtons = () => {}; inst.notifySelection = () => {};
+
+  let ready = false;
   return {
-    visible: () => ({ ...visible }),
-    apply(msg) {
-      if (!msg) return;
-      if (msg.type === 'updatePrices' && msg.data) {
-        Object.keys(msg.data).forEach((k) => { visible[k] = `$${msg.data[k]}`; });
-      } else if (msg.type === 'clearPrices') {
-        const label = (msg.data && msg.data.label) || '—';
-        Object.keys(visible).forEach((k) => { visible[k] = label; });
-      }
+    instance: inst,
+    becomeReady() { inst.setupCommunication(); ready = true; },   // installs the REAL listener
+    isReady: () => ready,
+    deliver(msg) { if (ready && listener) listener({ data: msg }); },
+    visible() {
+      const out = {};
+      Object.keys(CAROUSEL_DEFAULTS).forEach((k) => { out[k] = els[`${k}-price`].textContent; });
+      return out;
     },
   };
 }
@@ -103,7 +149,7 @@ function makeEl(tag) {
   return el;
 }
 
-function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
+function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselReady = true, sessionGate = null }) {
   const source = enabled
     ? appBlock.replace('const SERVER_QUOTE_ENABLED = false;', 'const SERVER_QUOTE_ENABLED = true;')
     : appBlock;
@@ -116,8 +162,9 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
   const contentSection = makeEl('div');
   const iframe = makeEl('iframe');
   const posted = [];
-  const carousel = makeCarousel();
-  iframe.contentWindow = { postMessage: (msg) => { posted.push(msg); carousel.apply(msg); } };
+  const carousel = loadRealCarousel();
+  if (carouselReady) carousel.becomeReady();
+  iframe.contentWindow = { postMessage: (msg) => { posted.push(msg); carousel.deliver(msg); } };
   byId['vehicle-carousel-frame'] = iframe;
 
   const document = {
@@ -132,6 +179,7 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
   };
 
   const alerts = [];
+  const appMessageListeners = [];
   const timers = [];
   let timerId = 0;
   const ctx = {
@@ -139,7 +187,10 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
     // indexMVP calls several debug.* channels; tolerate any of them
     debug: new Proxy({}, { get: () => () => {} }),
     document,
-    window: { addEventListener() {}, location: { search: '' }, matchMedia: () => ({ matches: false }) },
+    window: {
+      addEventListener: (t, fn) => { if (t === 'message') appMessageListeners.push(fn); },
+      location: { search: '' }, matchMedia: () => ({ matches: false }),
+    },
     // Controllable timers: the TTL expiry must be testable without waiting,
     // and the debounce must not fire on its own.
     setTimeout: (fn, ms) => { timers.push({ id: ++timerId, fn, at: ms || 0 }); return timerId; },
@@ -168,7 +219,12 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
   ctx.window.location = ctx.location;
   ctx.window.document = ctx.document;
   ctx.window.supabaseClient = {
-    auth: { getSession: async () => ({ data: { session: sessionToken ? { access_token: sessionToken } : null } }) },
+    auth: {
+      getSession: async () => {
+        if (sessionGate) await sessionGate;
+        return { data: { session: sessionToken ? { access_token: sessionToken } : null } };
+      },
+    },
   };
   ctx.supabaseClient = ctx.window.supabaseClient;
   vm.createContext(ctx);
@@ -194,7 +250,9 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc' }) {
   app.pricingService = null;
   app.pendingEdit = null;
   const runTimers = () => { const due = timers.splice(0); due.forEach((t) => t.fn()); };
-  return { app, ctx, posted, alerts, byId, contentSection, carousel, runTimers, timers };
+  const sendToApp = (msg) => appMessageListeners.forEach((fn) => fn({ data: msg }));
+  ctx.window.airportApp = app;
+  return { app, ctx, posted, alerts, byId, contentSection, carousel, runTimers, timers, sendToApp };
 }
 
 const SERVER_QUOTE = {
@@ -646,6 +704,114 @@ check('STATIC: quote-ride recovers an ambassador identity exactly like create-bo
   assert.ok(/from\('customers'\)[\s\S]{0,400}\.insert/.test(src), 'the row is minted, not refused');
   assert.ok(/ambassadorHost\.name/.test(src) && !/booking\.customerName/.test(src),
     'identity comes from the HOST record, never from passenger details');
+});
+
+// ============ narrow-review round ============
+
+check('READINESS: a placeholder posted before the iframe listens is replayed, not lost', async () => {
+  // The carousel installs its message listener when it boots. Anything posted
+  // before that is dropped on the floor — and its markup ships real-looking
+  // prices, so a dropped placeholder leaves $132/$165/$220 on screen.
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const impl = async () => { await gate; return { ok: true, status: 200, json: async () => quoteWithTtl(15) }; };
+  const { app, carousel, sendToApp } = makeContext({ enabled: true, fetchImpl: impl, carouselReady: false });
+
+  const inflight = app.requestServerQuote();
+  await Promise.resolve();
+  assert.deepStrictEqual(carousel.visible(), CAROUSEL_DEFAULTS,
+    'sanity: the placeholder was posted before the carousel could hear it');
+
+  carousel.becomeReady();
+  sendToApp({ type: 'carouselReady' });
+  assert.deepStrictEqual(carousel.visible(), { tesla: '…', escalade: '…', sprinter: '…' },
+    'carouselReady must replay the PLACEHOLDER, not only prices');
+
+  release();
+  await inflight;
+  assert.deepStrictEqual(carousel.visible(), { tesla: '$39', escalade: '$55', sprinter: '$95' });
+});
+
+check('READINESS: prices posted before the iframe listens are replayed too', async () => {
+  const { app, carousel, sendToApp } = makeContext({
+    enabled: true, fetchImpl: okFetch(quoteWithTtl(15)), carouselReady: false,
+  });
+  await app.requestServerQuote();
+  assert.deepStrictEqual(carousel.visible(), CAROUSEL_DEFAULTS, 'sanity: all messages dropped');
+  carousel.becomeReady();
+  sendToApp({ type: 'carouselReady' });
+  assert.deepStrictEqual(carousel.visible(), { tesla: '$39', escalade: '$55', sprinter: '$95' });
+});
+
+check('REFUSED: a vehicle the engine refused reads Unavailable, not a stale placeholder', async () => {
+  const body = JSON.parse(JSON.stringify(SERVER_QUOTE));
+  body.quote.vehicles.sprinter = { ok: false, error: { code: 'passenger_capacity_exceeded' } };
+  body.quote.vehiclesOk = 2; body.quote.vehiclesRefused = 1;
+  const exp = new Date(Date.now() + 15 * 60000).toISOString();
+  ['tesla', 'escalade'].forEach((k) => { body.quote.vehicles[k].expiresAt = exp; });
+
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: okFetch(body) });
+  await app.requestServerQuote();
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: '$39', escalade: '$55', sprinter: 'Unavailable' },
+    'a refused vehicle must say so rather than sit on the loading placeholder');
+});
+
+check('REFUSED: a refused vehicle cannot be selected in the real carousel', async () => {
+  const body = JSON.parse(JSON.stringify(SERVER_QUOTE));
+  body.quote.vehicles.sprinter = { ok: false, error: { code: 'distance_exceeds_service_area' } };
+  body.quote.vehiclesOk = 2; body.quote.vehiclesRefused = 1;
+  const exp = new Date(Date.now() + 15 * 60000).toISOString();
+  ['tesla', 'escalade'].forEach((k) => { body.quote.vehicles[k].expiresAt = exp; });
+
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: okFetch(body) });
+  await app.requestServerQuote();
+  const before = carousel.instance.currentIndex;
+  carousel.instance.selectCard(2);                      // sprinter
+  assert.strictEqual(carousel.instance.currentIndex, before,
+    'selecting an unbookable vehicle must be refused');
+  carousel.instance.selectCard(1);                      // escalade
+  assert.strictEqual(carousel.instance.currentIndex, 1, 'available vehicles still select');
+});
+
+check('EDIT RACE: a quote timer queued before an edit begins does not fire inside it', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, runTimers } = makeContext({ enabled: true, fetchImpl: f });
+  app.scheduleQuote();                                   // queued while booking normally
+  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 2 };
+  runTimers();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.calls.length, 0,
+    'requestServerQuote must gate on quoteFlowActive(), not the raw flag');
+});
+
+check('EDIT RACE: invalidating cancels a queued quote timer', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, runTimers, timers } = makeContext({ enabled: true, fetchImpl: f });
+  const before = timers.length;                 // the app queues its own timers at boot
+  app.scheduleQuote();
+  assert.strictEqual(timers.length, before + 1, 'sanity: a debounce timer is queued');
+  app.invalidateQuote('address changed');
+  runTimers();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.calls.length, 0, 'a queued request for a dead intent must not fire');
+});
+
+check('SPEND GUARD: the intent is rechecked after the session round trip, before paying', async () => {
+  // getSession() is an await. If the intent changes during it, the very next
+  // call is the one that spends money at Google.
+  let releaseSession;
+  const sessionGate = new Promise((r) => { releaseSession = r; });
+  const f = okFetch(quoteWithTtl(15));
+  const { app } = makeContext({ enabled: true, fetchImpl: f, sessionGate });
+
+  const inflight = app.requestServerQuote();
+  await Promise.resolve();
+  app.invalidateQuote('address changed while acquiring the session');
+  releaseSession();
+  await inflight;
+  assert.strictEqual(f.calls.length, 0,
+    'a stale intent must not buy a Places + Compute Routes Pro pair');
 });
 
 run().catch((e) => { console.error(e); process.exit(1); });

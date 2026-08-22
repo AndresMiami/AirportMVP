@@ -43,6 +43,11 @@
 // Kill switch QUOTE_SERVICE_DISABLED=1 answers 503 before anything.
 
 const { createClient } = require('@supabase/supabase-js');
+
+// The authenticated subject, in one place.
+function authUserIdOf(userData) {
+  return userData.user.id;
+}
 const { airportByCode, isValidPlaceId, resolvePlace } = require('./lib/place-identity');
 const { computeRouteFacts, isMeaningfullyPast } = require('./lib/route-facts');
 const { resolveRateCard } = require('./lib/rate-card-resolver');
@@ -184,7 +189,18 @@ exports.handler = async (event) => {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
     }
     if (!userData?.user) return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid session' }) };
-    const authUserId = userData.user.id;
+    const authUserId = authUserIdOf(userData);
+
+    // ---- access gate: FIRST, before any database read, write or Google call ----
+    // A denied account must leave no trace. When this sat after the identity
+    // lookup, an unlisted ambassador got a customers row minted for them and
+    // THEN a 403 — a write performed on behalf of someone being refused.
+    if (accessMode === 'allowlist') {
+      const allowlist = allowlistRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      if (!allowlist.includes(authUserId)) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not enabled for this account' }) };
+      }
+    }
 
     const { data: customer, error: customerError } = await db
       .from('customers')
@@ -233,18 +249,31 @@ exports.handler = async (event) => {
         }])
         .select('id')
         .single();
-      if (createError || !createdCustomer) {
-        console.error('❌ quote-ride ambassador ensure-row failed');
+      if (createError) {
+        // customers.user_id carries a UNIQUE index, so two requests racing to
+        // recover the same ambassador will collide by design. The loser must
+        // re-read the winner's row, not fail the quote.
+        const conflict = createError.code === '23505' ||
+          /duplicate key|unique constraint/i.test(createError.message || '');
+        if (!conflict) {
+          console.error('❌ quote-ride ambassador ensure-row failed');
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+        }
+        const { data: existing, error: rereadError } = await db
+          .from('customers')
+          .select('id')
+          .eq('user_id', authUserId)
+          .maybeSingle();
+        if (rereadError || !existing) {
+          console.error('❌ quote-ride ambassador ensure-row reread failed');
+          return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
+        }
+        customerId = existing.id;
+      } else if (!createdCustomer) {
+        console.error('❌ quote-ride ambassador ensure-row returned no row');
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not verify account' }) };
-      }
-      customerId = createdCustomer.id;
-    }
-
-    // ---- access gate (BEFORE any Google call, so curiosity cannot spend) ----
-    if (accessMode === 'allowlist') {
-      const allowlist = allowlistRaw.split(',').map((s) => s.trim()).filter(Boolean);
-      if (!allowlist.includes(authUserId)) {
-        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not enabled for this account' }) };
+      } else {
+        customerId = createdCustomer.id;
       }
     }
 
