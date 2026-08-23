@@ -479,24 +479,43 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   * PR 3C-2C-A pricing-enforcement foundation — SHIPPED DARK (merge
     77fb91a): token v2 and migration 017's database/RPC foundation are
     on main, but migration 017 has NOT been run in production. The
-    correction/preflight pass must be reviewed and its historical
-    ambassador decisions completed before rollout; the SQL file being
-    deployed is not evidence that the schema exists. The corrected v2
-    contract carries canonical `airportCode` + `vehicleKey`; authoritative
-    route distance (integer tenths of a mile) and duration (whole minutes)
-    are bound into the keyed commitment and resubmitted for verification,
-    but are deliberately absent from the token projection and durable
-    acceptance/booking storage until the Google Routes storage-policy review
-    explicitly clears a retention design. Verified CREATE therefore stores
-    `duration_minutes = NULL`; verified EDIT also clears the prior route's
-    duration rather than retaining stale route data or relabeling new Google
-    data as durable truth. Migration 017 takes NOWAIT exclusive locks on
-    bookings/customers/hosts before validating the reviewed historical actor
-    manifest, so run it only in a brief maintenance window; any concurrent
-    access aborts the whole transaction and requires a clean retry.
+    correction/preflight pass must be reviewed and its historical ambassador
+    decisions completed before rollout; the SQL file being deployed is not
+    evidence that the schema exists. The corrected v2 contract carries
+    canonical `airportCode` + `vehicleKey`. Its exact nine-field keyed intent is
+    `mode`, `airportCode`, `placeId`, `pickupAtMs`, `passengers`,
+    `routeMilesTenths`, `routeMinutes`, `vehicleKey`, and `finalCents`. The
+    token library validates those integer fields at issuance; 2C-B
+    must recompute the commitment from authoritative facts before calling SQL.
+    Distance is never persisted; the existing whole-minute
+    `duration_minutes` estimate MUST remain populated on verified creates and
+    edits and is temporarily preserved from the verified
+    commitment so the trip ETA and operator notices do not silently disappear
+    before the Google Routes storage-policy review settles long-term retention.
+    An authentic expired or not-yet-valid token cannot authorize a new write in
+    ANY mode, although an exact-token retry may recover a result that already
+    committed. This is the sole exception to "observe never rejects": 2C-B
+    submits the authentic stale projection as verified, then silently re-quotes
+    on `quote_expired`/`quote_not_yet_valid`. The browser shows **Updating
+    price…** with no up-front TTL label, alert, or passenger-facing "refused"
+    wording—even when Book detects the lapse. A verified token is consumed in
+    off, observe, and enforce (off still stores client money with
+    `client_legacy` authority), so one quote cannot multiply bookings; for an
+    ambassador exempt from the active-slot rule, that receipt is the one-quote /
+    one-booking guarantee. Missing operation IDs remain tolerated and
+    telemetried in off/observe; enforce returns the outdated-client 428
+    contract. Migration
+    017 takes NOWAIT exclusive locks on bookings/customers/hosts before
+    validating the reviewed historical actor manifest, so run it only in a
+    brief maintenance window; a lock held at that instant aborts the whole
+    transaction and requires a clean retry. See
+    `docs/3C-2C-PLAN-V5-ADDENDUM.md` for the four ratified corrections and
+    `docs/MIGRATION-017-RUNBOOK.md` for the preflight, quiet-window, live-smoke,
+    and destructive emergency-rollback procedure.
   * PR 3C-2C — NEXT, in this order: run the reviewed migration 017 only
     after its production preflight passes; build 2C-B so create/edit
-    writers verify and consume quotes through the atomic RPCs; enter
+    writers verify and consume quotes through the atomic RPCs and replace
+    2B2's stale-price alert with the ratified silent refresh; enter
     observe mode; restore the quote-service production configuration
     and smoke it while the browser flag remains off; flip the browser
     flag last; observe real traffic before the irreversible move to

@@ -1955,6 +1955,44 @@
                 return (v && v.ok) ? v : null;
             }
 
+            // A successful HTTP response is not automatically a usable quote.
+            // Missing canonical facts, money, expiry or a vehicle token means
+            // LinkMia's response contract is broken; retrying the same intent
+            // would only buy another Places + Routes call for the same defect.
+            serverQuoteIsComplete(quote) {
+                if (!quote || typeof quote !== 'object' ||
+                    !quote.intent || typeof quote.intent !== 'object' ||
+                    typeof quote.intent.placeId !== 'string' || !quote.intent.placeId ||
+                    typeof quote.intent.airportCode !== 'string' || !quote.intent.airportCode ||
+                    !quote.route || typeof quote.route !== 'object' ||
+                    !Number.isSafeInteger(quote.route.milesTenths) || quote.route.milesTenths < 0 ||
+                    !Number.isSafeInteger(quote.route.minutes) || quote.route.minutes < 0 ||
+                    typeof quote.pricingVersion !== 'string' || !quote.pricingVersion ||
+                    !quote.vehicles || typeof quote.vehicles !== 'object' ||
+                    Array.isArray(quote.vehicles)) return false;
+
+                const expectedVehicleKeys = ['escalade', 'sprinter', 'tesla'];
+                const actualVehicleKeys = Object.keys(quote.vehicles).sort();
+                if (actualVehicleKeys.length !== expectedVehicleKeys.length ||
+                    actualVehicleKeys.some((key, i) => key !== expectedVehicleKeys[i])) {
+                    return false;
+                }
+
+                let vehiclesOk = 0;
+                for (const vehicle of Object.values(quote.vehicles)) {
+                    if (!vehicle || typeof vehicle !== 'object' || typeof vehicle.ok !== 'boolean') {
+                        return false;
+                    }
+                    if (!vehicle.ok) continue;
+                    vehiclesOk++;
+                    if (typeof vehicle.token !== 'string' || !vehicle.token ||
+                        !Number.isSafeInteger(vehicle.finalCents) || vehicle.finalCents < 0 ||
+                        !Number.isFinite(Date.parse(vehicle.expiresAt || ''))) return false;
+                }
+                return quote.vehiclesOk === vehiclesOk &&
+                    quote.bookable === (vehiclesOk > 0);
+            }
+
             captureServerQuoteContract() {
                 if (!this.quoteFlowActive() || !this.quoteIsFresh()) return null;
                 const quote = this.state.quote.data;
@@ -2115,7 +2153,20 @@
                     }
 
                     const quote = payload?.quote;
-                    if (!quote || !quote.vehicles || quote.bookable !== true) {
+                    if (!this.serverQuoteIsComplete(quote)) {
+                        // This is our response/configuration defect, not a
+                        // transient provider outage and not a passenger input
+                        // problem. Fail closed without offering or scheduling
+                        // another paid request for the unchanged intent.
+                        q.status = 'error';
+                        q.error = {
+                            message: 'Pricing is unavailable right now. Please contact LinkMia to book this ride.',
+                            retryable: false
+                        };
+                        this.renderQuoteState();
+                        return;
+                    }
+                    if (quote.bookable === false) {
                         q.status = 'error';
                         q.error = { message: 'No vehicle is available for this trip', retryable: false };
                         this.renderQuoteState();
@@ -2634,8 +2685,19 @@
                     serverQuoteContract = this.captureServerQuoteContract();
                     if (!serverQuoteContract) {
                         this.renderQuoteState();
-                        this.requestServerQuote({ force: true });
-                        alert('These prices are no longer current. We are getting a fresh price — please review it before booking.');
+                        // A non-retryable response/configuration refusal is not
+                        // an expired quote. Re-buying it here would repeat a paid
+                        // request that cannot succeed until LinkMia fixes the
+                        // contract, so keep Book blocked and state that honestly.
+                        const permanentFailure = this.state.quote.status === 'error' &&
+                            this.state.quote.error?.retryable === false;
+                        if (!permanentFailure) {
+                            this.requestServerQuote({ force: true });
+                            alert('These prices are no longer current. We are getting a fresh price — please review it before booking.');
+                        } else {
+                            alert(this.state.quote.error.message ||
+                                'Pricing is unavailable right now. Please contact LinkMia to book this ride.');
+                        }
                         return;
                     }
                 }

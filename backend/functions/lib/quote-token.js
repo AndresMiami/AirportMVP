@@ -483,7 +483,10 @@ function verifyQuoteToken(token, { keys, nowMs, expected, deferTime = false } = 
     return { ok: false, reason: 'not_canonical' };
   }
 
-  const key = keys.find((k) => k && k.id === payload.kid && typeof k.secret === 'string' && k.secret);
+  // Callers are expected to pass resolveSigningKeys(env).keys, but keep the
+  // verifier total and fail-closed even if a hand-built key array slips
+  // through a future integration.
+  const key = keys.find((k) => k && k.id === payload.kid && validSecret(k.secret));
   if (!key) return { ok: false, reason: 'unknown_key' };
 
   const expectedSig = hmac(canonicalPayload(payload), key.secret);
@@ -531,6 +534,7 @@ function verifyQuoteToken(token, { keys, nowMs, expected, deferTime = false } = 
 module.exports = {
   TOKEN_VERSION,
   QUOTE_TTL_MS,
+  MAX_CLOCK_SKEW_MS,
   MIN_SECRET_BYTES,
   computeCommitment,
   tokenDigest,

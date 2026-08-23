@@ -504,10 +504,66 @@ check('a 400 identity refusal is surfaced as non-retryable', async () => {
 check('a 200 that is not bookable is an error, not a price of zero', async () => {
   const body = JSON.parse(JSON.stringify(SERVER_QUOTE));
   body.quote.bookable = false; body.quote.vehiclesOk = 0;
+  Object.keys(body.quote.vehicles).forEach((key) => {
+    body.quote.vehicles[key] = { ok: false, error: 'capacity' };
+  });
   const { app, posted } = makeContext({ enabled: true, fetchImpl: okFetch(body) });
   await app.requestServerQuote();
   assert.strictEqual(app.state.quote.status, 'error');
   assert.strictEqual(posted.filter((m) => m.type === 'updatePrices').length, 0);
+});
+
+check('COST: an incomplete 200 is a non-retryable LinkMia defect, never a paid re-quote loop', async () => {
+  const body = quoteWithTtl(15);
+  delete body.quote.vehicles.tesla.token;
+  const f = okFetch(body);
+  const { app, carousel, alerts } = makeContext({ enabled: true, fetchImpl: f });
+
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 1);
+  assert.strictEqual(app.state.quote.status, 'error');
+  assert.strictEqual(app.state.quote.error.retryable, false,
+    'a broken successful response is our configuration defect, not a provider retry');
+  assert.match(app.state.quote.error.message, /contact LinkMia/i);
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: 'Unavailable', escalade: 'Unavailable', sprinter: 'Unavailable' });
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'Book must remain fail-closed');
+
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 1,
+    're-entering Vehicle must not buy the same malformed response again');
+  await app.confirmBooking();
+  assert.strictEqual(f.calls.length, 1,
+    'the blocked Book path must not force-buy the malformed response again');
+  assert.ok(alerts.some((message) => /contact LinkMia/i.test(message)),
+    'the passenger must see an honest unavailable state, not an expired-price message');
+});
+
+check('COST: a 200 with missing or extra vehicle cards is incomplete and never re-bought', async () => {
+  const variants = [
+    (quote) => { delete quote.quote.vehicles.escalade; quote.quote.vehiclesOk = 2; },
+    (quote) => {
+      quote.quote.vehicles.limousine = { ...quote.quote.vehicles.tesla };
+      quote.quote.vehiclesOk = 4;
+    }
+  ];
+
+  for (const mutate of variants) {
+    const body = quoteWithTtl(15);
+    mutate(body);
+    const f = okFetch(body);
+    const { app, carousel } = makeContext({ enabled: true, fetchImpl: f });
+
+    await app.requestServerQuote();
+    assert.strictEqual(app.state.quote.status, 'error');
+    assert.strictEqual(app.state.quote.error.retryable, false);
+    assert.deepStrictEqual(carousel.visible(),
+      { tesla: 'Unavailable', escalade: 'Unavailable', sprinter: 'Unavailable' });
+    await app.requestServerQuote();
+    assert.strictEqual(f.calls.length, 1,
+      'a malformed vehicle set must not trigger another paid request');
+  }
 });
 
 check('Book is disabled without a fresh quote and enabled with one', async () => {

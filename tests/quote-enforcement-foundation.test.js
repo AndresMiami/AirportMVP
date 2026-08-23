@@ -8,6 +8,7 @@
 // Run: node tests/quote-enforcement-foundation.test.js
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,6 +28,7 @@ const preflightSql = preflight.replace(/--[^\n]*/g, '');
 
 const {
   QUOTE_TTL_MS,
+  MAX_CLOCK_SKEW_MS,
   computeCommitment,
   newJti,
   signQuoteToken,
@@ -119,6 +121,86 @@ function assertBefore(haystack, earlier, later, message) {
   assert.ok(first < second, message);
 }
 
+function normalizeSqlType(value) {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function parameterTypes(value, declarations) {
+  if (value.trim() === '') return [];
+  return value.split(',').map((raw) => {
+    const parameter = raw.trim().replace(/\s+DEFAULT\s+[\s\S]*$/i, '');
+    if (!declarations) return normalizeSqlType(parameter);
+    const match = /^(?:IN\s+|OUT\s+|INOUT\s+|VARIADIC\s+)?[A-Za-z_][A-Za-z0-9_]*\s+([\s\S]+)$/i.exec(parameter);
+    assert.ok(match, `cannot normalize function parameter ${parameter}`);
+    return normalizeSqlType(match[1]);
+  });
+}
+
+function createdFoundationFunctionIdentities(value) {
+  const names = new Set([
+    'pricing_state_guard', 'set_pricing_mode', 'bookings_guard',
+    'accept_quote_create', 'accept_quote_edit', 'accept_optional_edit'
+  ]);
+  const identities = [];
+  const pattern = /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+(?:public\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*?)\)\s*RETURNS\b/gi;
+  for (const match of value.matchAll(pattern)) {
+    if (!names.has(match[1])) continue;
+    identities.push(`${match[1]}(${parameterTypes(match[2], true).join(',')})`);
+  }
+  return identities;
+}
+
+function droppedFoundationFunctionIdentities(value) {
+  const names = new Set([
+    'pricing_state_guard', 'set_pricing_mode', 'bookings_guard',
+    'accept_quote_create', 'accept_quote_edit', 'accept_optional_edit'
+  ]);
+  const identities = [];
+  const pattern = /DROP\s+FUNCTION(?:\s+IF\s+EXISTS)?\s+(?:public\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)/gi;
+  for (const match of value.matchAll(pattern)) {
+    if (!names.has(match[1])) continue;
+    identities.push(`${match[1]}(${parameterTypes(match[2], false).join(',')})`);
+  }
+  return identities;
+}
+
+function makeTokenFixture() {
+  const secret = 'foundation-test-secret-0123456789abcdef0123456789';
+  const keyId = 'foundation-v2';
+  const nowMs = Date.UTC(2026, 7, 22, 12, 0, 0);
+  const intent = {
+    mode: 'dropoff',
+    airportCode: 'MIA',
+    placeId: 'ChIJFoundationAddress123',
+    pickupAtMs: nowMs + 60 * 60 * 1000,
+    passengers: 2,
+    routeMilesTenths: 214,
+    routeMinutes: 37
+  };
+  const createFields = {
+    purpose: 'create',
+    jti: newJti(),
+    authUserId: '55555555-5555-4555-8555-555555555555',
+    customerId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    vehicle: 'escalade',
+    pickupAtMs: intent.pickupAtMs,
+    commitment: computeCommitment(intent, 'escalade', 17500, secret),
+    routeQuality: 'traffic_aware',
+    finalCents: 17500,
+    pricingVersion: 'card-v1',
+    engineVersion: 'engine-v1',
+    resolvedVersion: 'card-v1'
+  };
+  const expected = {
+    purpose: 'create',
+    authUserId: createFields.authUserId,
+    customerId: createFields.customerId,
+    vehicle: createFields.vehicle,
+    intent
+  };
+  return { secret, keyId, nowMs, intent, createFields, expected };
+}
+
 console.log('Quote-enforcement foundation contract');
 
 (async () => {
@@ -171,6 +253,27 @@ console.log('Quote-enforcement foundation contract');
     assert.match(rollback, /NOTIFY pgrst\s*,\s*'reload schema'\s*;/i);
     assert.match(rollback, /ALTER COLUMN price DROP NOT NULL/i,
       'rollback must restore the pre-017 nullable price contract');
+    assert.match(rollback, /to_regclass\(\s*'public\.pricing_state'\s*\)/i,
+      'rollback must prove the state table is gone');
+    assert.match(rollback, /pg_proc[\s\S]{0,300}proname\s+IN/i,
+      'rollback must prove every function overload is gone');
+    assert.match(rollback, /information_schema\.columns[\s\S]{0,300}price_cents/i,
+      'rollback must prove every added bookings column is gone');
+    assert.match(rollback, /pg_constraint[\s\S]{0,420}bookings_price_authority_check/i,
+      'rollback must prove every added constraint is gone');
+    assert.match(rollback, /pg_trigger[\s\S]{0,420}pricing_state_truncate_guard_trg/i,
+      'rollback must prove every added trigger is gone');
+    assert.match(rollback, /attname\s*=\s*'price'[\s\S]{0,80}attnotnull/i,
+      'rollback must prove legacy price is nullable again');
+
+    const created = createdFoundationFunctionIdentities(sql);
+    const dropped = droppedFoundationFunctionIdentities(rollback);
+    assert.strictEqual(created.length, 6,
+      'migration must create exactly six foundation function identities');
+    assert.strictEqual(dropped.length, 6,
+      'rollback must drop exactly six foundation function identities');
+    assert.deepStrictEqual(created.slice().sort(), dropped.slice().sort(),
+      'rollback DROP signatures must exactly cover every created foundation function identity');
     assert.match(rollback, /\bCOMMIT\s*;/i);
   });
 
@@ -187,7 +290,9 @@ console.log('Quote-enforcement foundation contract');
       'accept_quote_create', 'accept_quote_edit', 'accept_optional_edit',
       'set_pricing_mode', 'bookings_guard', 'pricing_state_guard',
       'bookings_guard_trg', 'pricing_state_guard_trg',
+      'pricing_state_truncate_guard_trg',
       'pricing_state_audit_guard_trg',
+      'pricing_state_audit_truncate_guard_trg',
       'bookings_price_authority_check', 'bookings_route_authority_check',
       'bookings_route_identity_check', 'bookings_price_cents_equal_check',
       'bookings_price_nonnegative_check', 'bookings_assignment_epoch_check'
@@ -204,6 +309,21 @@ console.log('Quote-enforcement foundation contract');
     assert.match(preflightSql,
       /to_regprocedure\(\s*'extensions\.digest\(text,text\)'\s*\)/i,
       'preflight must prove pgcrypto digest exists in the trusted extensions schema');
+    assert.match(preflight,
+      /NULL::BOOLEAN\),\s*--\s*REVIEW TRUE\/FALSE/i,
+      'preflight must generate a deliberately incomplete human-decision manifest');
+    assert.match(preflight,
+      /execute each labeled check A1 through G6 separately/i,
+      'SQL-editor execution guidance must preserve every preflight result grid');
+    const beginCount = (preflightSql.match(/\bBEGIN\s*;/gi) || []).length;
+    const readOnlyCount = (preflightSql.match(/SET\s+TRANSACTION\s+READ\s+ONLY\s*;/gi) || []).length;
+    const rollbackCount = (preflightSql.match(/\bROLLBACK\s*;/gi) || []).length;
+    assert.strictEqual(beginCount, 16,
+      'preflight must expose exactly 16 independently runnable result grids');
+    assert.strictEqual(readOnlyCount, beginCount,
+      'every preflight result grid must run inside a read-only transaction');
+    assert.strictEqual(rollbackCount, beginCount,
+      'every preflight result grid must close its own transaction');
   });
 
   await check('pgcrypto is a pre-existing qualified dependency, not rollback residue', () => {
@@ -288,40 +408,9 @@ console.log('Quote-enforcement foundation contract');
   });
 
   await check('token v2 refuses purpose confusion and separates authenticity from time', () => {
-    const secret = 'foundation-test-secret-0123456789abcdef0123456789';
-    const keyId = 'foundation-v2';
-    const nowMs = Date.UTC(2026, 7, 22, 12, 0, 0);
-    const intent = {
-      mode: 'dropoff',
-      airportCode: 'MIA',
-      placeId: 'ChIJFoundationAddress123',
-      pickupAtMs: nowMs + 60 * 60 * 1000,
-      passengers: 2,
-      routeMilesTenths: 214,
-      routeMinutes: 37
-    };
-    const token = signQuoteToken({
-      purpose: 'create',
-      jti: newJti(),
-      authUserId: '55555555-5555-4555-8555-555555555555',
-      customerId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      vehicle: 'escalade',
-      pickupAtMs: intent.pickupAtMs,
-      commitment: computeCommitment(intent, 'escalade', 17500, secret),
-      routeQuality: 'traffic_aware',
-      finalCents: 17500,
-      pricingVersion: 'card-v1',
-      engineVersion: 'engine-v1',
-      resolvedVersion: 'card-v1'
-    }, { keyId, secret, nowMs });
+    const { secret, keyId, nowMs, intent, createFields, expected } = makeTokenFixture();
+    const token = signQuoteToken(createFields, { keyId, secret, nowMs });
     const keys = [{ id: keyId, secret }];
-    const expected = {
-      purpose: 'create',
-      authUserId: '55555555-5555-4555-8555-555555555555',
-      customerId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      vehicle: 'escalade',
-      intent
-    };
     assert.strictEqual(
       verifyQuoteToken(token, {
         keys,
@@ -345,7 +434,220 @@ console.log('Quote-enforcement foundation contract');
     assert.strictEqual(deferred.canConsume, false, 'an expired token cannot create a new consumption');
   });
 
+  await check('token signer and verifier reject clocks, nil identities, and SQL overflows', () => {
+    const { secret, keyId, nowMs, intent, createFields, expected } = makeTokenFixture();
+    const token = signQuoteToken(createFields, { keyId, secret, nowMs });
+    const keys = [{ id: keyId, secret }];
+    const rawCreate = {
+      v: 2,
+      kid: keyId,
+      jti: createFields.jti,
+      purpose: 'create',
+      authUserId: createFields.authUserId,
+      customerId: createFields.customerId,
+      vehicle: createFields.vehicle,
+      pickupAtMs: createFields.pickupAtMs,
+      commitment: createFields.commitment,
+      routeQuality: createFields.routeQuality,
+      finalCents: createFields.finalCents,
+      pricingVersion: createFields.pricingVersion,
+      engineVersion: createFields.engineVersion,
+      resolvedVersion: createFields.resolvedVersion,
+      iat: nowMs,
+      exp: nowMs + QUOTE_TTL_MS
+    };
+    const forge = (payload) => {
+      const canonical = JSON.stringify(payload);
+      return `${Buffer.from(canonical).toString('base64url')}.${crypto
+        .createHmac('sha256', secret).update(canonical).digest('base64url')}`;
+    };
+
+    assert.throws(
+      () => signQuoteToken(createFields, { keyId, secret, nowMs: nowMs + 0.5 }),
+      /invalid clock/i
+    );
+    assert.deepStrictEqual(
+      verifyQuoteToken(token, { keys, nowMs: nowMs + 0.5, expected }),
+      { ok: false, reason: 'invalid_clock' }
+    );
+
+    for (const [field, value] of [
+      ['jti', '00000000-0000-0000-0000-000000000000'],
+      ['authUserId', '00000000-0000-0000-0000-000000000000'],
+      ['customerId', '00000000-0000-0000-0000-000000000000']
+    ]) {
+      assert.throws(
+        () => signQuoteToken({ ...createFields, [field]: value }, { keyId, secret, nowMs }),
+        /invalid create payload/i,
+        `${field} must refuse the nil UUID`
+      );
+      assert.strictEqual(
+        verifyQuoteToken(forge({ ...rawCreate, [field]: value }), { keys, nowMs, expected }).reason,
+        'schema_invalid',
+        `verifier must refuse ${field}'s nil UUID before key/time work`
+      );
+    }
+
+    const editFields = {
+      ...createFields,
+      purpose: 'edit',
+      bookingId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      assignmentEpoch: 0
+    };
+    assert.throws(
+      () => signQuoteToken({
+        ...editFields,
+        bookingId: '00000000-0000-0000-0000-000000000000'
+      }, { keyId, secret, nowMs }),
+      /invalid edit payload/i
+    );
+    const rawEdit = {
+      v: 2,
+      kid: keyId,
+      jti: editFields.jti,
+      purpose: 'edit',
+      authUserId: editFields.authUserId,
+      customerId: editFields.customerId,
+      bookingId: editFields.bookingId,
+      assignmentEpoch: editFields.assignmentEpoch,
+      vehicle: editFields.vehicle,
+      pickupAtMs: editFields.pickupAtMs,
+      commitment: editFields.commitment,
+      routeQuality: editFields.routeQuality,
+      finalCents: editFields.finalCents,
+      pricingVersion: editFields.pricingVersion,
+      engineVersion: editFields.engineVersion,
+      resolvedVersion: editFields.resolvedVersion,
+      iat: nowMs,
+      exp: nowMs + QUOTE_TTL_MS
+    };
+    const editExpected = { ...expected, purpose: 'edit' };
+    assert.strictEqual(
+      verifyQuoteToken(forge({
+        ...rawEdit,
+        bookingId: '00000000-0000-0000-0000-000000000000'
+      }), { keys, nowMs, expected: editExpected }).reason,
+      'schema_invalid'
+    );
+    assert.throws(
+      () => signQuoteToken({ ...editFields, assignmentEpoch: 2147483648 }, { keyId, secret, nowMs }),
+      /invalid edit payload/i
+    );
+    assert.strictEqual(
+      verifyQuoteToken(forge({ ...rawEdit, assignmentEpoch: 2147483648 }), {
+        keys, nowMs, expected: editExpected
+      }).reason,
+      'schema_invalid'
+    );
+    assert.throws(
+      () => signQuoteToken({
+        ...createFields,
+        finalCents: 2147483648,
+        commitment: computeCommitment(intent, createFields.vehicle, 2147483648, secret)
+      }, { keyId, secret, nowMs }),
+      /invalid create payload/i
+    );
+    assert.strictEqual(
+      verifyQuoteToken(forge({ ...rawCreate, finalCents: 2147483648 }), {
+        keys, nowMs, expected
+      }).reason,
+      'schema_invalid'
+    );
+    assert.throws(
+      () => signQuoteToken({ ...createFields, pickupAtMs: 8640000000000001 }, { keyId, secret, nowMs }),
+      /invalid create payload/i
+    );
+    assert.strictEqual(
+      verifyQuoteToken(forge({ ...rawCreate, pickupAtMs: 8640000000000001 }), {
+        keys, nowMs, expected
+      }).reason,
+      'schema_invalid'
+    );
+  });
+
+  await check('commitment intent is integer-exact and invalid input never gets signed', () => {
+    const { secret, keyId, nowMs, intent, createFields, expected } = makeTokenFixture();
+    assert.throws(
+      () => computeCommitment({ ...intent, routeMilesTenths: 10.5 }, 'escalade', 17500, secret),
+      /invalid input/i
+    );
+    assert.throws(
+      () => computeCommitment(null, 'escalade', 17500, secret),
+      /invalid input/i
+    );
+    assert.throws(
+      () => computeCommitment(intent, '', 17500, secret),
+      /invalid input/i
+    );
+    const token = signQuoteToken(createFields, { keyId, secret, nowMs });
+    assert.strictEqual(
+      verifyQuoteToken(token, {
+        keys: [{ id: keyId, secret }],
+        nowMs,
+        expected: { ...expected, intent: { ...intent, routeMilesTenths: 10.5 } }
+      }).reason,
+      'invalid_expectation'
+    );
+  });
+
+  await check('a hand-built weak verifier key refuses as unknown_key without throwing', () => {
+    const { nowMs, intent, createFields, expected } = makeTokenFixture();
+    const weakSecret = 'weak';
+    const weakKeyId = 'weak-key';
+    const payload = {
+      v: 2,
+      kid: weakKeyId,
+      jti: createFields.jti,
+      purpose: 'create',
+      authUserId: createFields.authUserId,
+      customerId: createFields.customerId,
+      vehicle: createFields.vehicle,
+      pickupAtMs: createFields.pickupAtMs,
+      commitment: 'a'.repeat(64),
+      routeQuality: createFields.routeQuality,
+      finalCents: createFields.finalCents,
+      pricingVersion: createFields.pricingVersion,
+      engineVersion: createFields.engineVersion,
+      resolvedVersion: createFields.resolvedVersion,
+      iat: nowMs,
+      exp: nowMs + QUOTE_TTL_MS
+    };
+    const canonical = JSON.stringify(payload);
+    const token = `${Buffer.from(canonical).toString('base64url')}.${crypto
+      .createHmac('sha256', weakSecret).update(canonical).digest('base64url')}`;
+    assert.doesNotThrow(() => verifyQuoteToken(token, {
+      keys: [{ id: weakKeyId, secret: weakSecret }],
+      nowMs,
+      expected: { ...expected, intent }
+    }));
+    assert.strictEqual(
+      verifyQuoteToken(token, {
+        keys: [{ id: weakKeyId, secret: weakSecret }],
+        nowMs,
+        expected: { ...expected, intent }
+      }).reason,
+      'unknown_key'
+    );
+  });
+
+  await check('SQL token time policy is pinned to the shared JavaScript constants', () => {
+    const bodies = [functionSql('accept_quote_create'), functionSql('accept_quote_edit')];
+    for (const [index, body] of bodies.entries()) {
+      const ttl = [...body.matchAll(/\(p_payload->>'exp'\)::NUMERIC\s*-\s*\(p_payload->>'iat'\)::NUMERIC\s*<>\s*(\d+)/gi)]
+        .map((match) => Number(match[1]));
+      const skew = [...body.matchAll(/\(p_payload->>'iat'\)::BIGINT\s*>\s*v_now_ms\s*\+\s*(\d+)/gi)]
+        .map((match) => Number(match[1]));
+      assert.ok(ttl.length >= 1, `RPC ${index + 1} must enforce exact TTL`);
+      assert.ok(skew.length >= 1, `RPC ${index + 1} must enforce maximum clock skew`);
+      sameSet(ttl, [QUOTE_TTL_MS], `RPC ${index + 1} TTL drifted from quote-token.js`);
+      sameSet(skew, [MAX_CLOCK_SKEW_MS], `RPC ${index + 1} skew drifted from quote-token.js`);
+    }
+  });
+
   await check('both RPCs enforce verdict shape and purpose-bound exact retries', () => {
+    assert.match(migration,
+      /authentic token as verdict `verified`[\s\S]{0,180}never relabel it `verify_failed`/i,
+      'the endpoint/RPC handoff must preserve authentic stale-token provenance');
     const create = normalize(functionSql('accept_quote_create'));
     const edit = normalize(functionSql('accept_quote_edit'));
     for (const body of [create, edit]) {
@@ -429,17 +731,22 @@ console.log('Quote-enforcement foundation contract');
     }
   });
 
-  await check('unverified full edits cannot retain stale canonical route identity', () => {
+  await check('full edits downgrade unverified identity and retain the validated ETA snapshot', () => {
     const edit = normalize(functionSql('accept_quote_edit'));
     assert.match(edit,
-      /canonical_place_id\s*=\s*CASE\s+WHEN\s+v_effective_verdict\s*=\s*'verified'[\s\S]{0,180}THEN\s+p_canonical_place_id\s+ELSE\s+NULL\s+END/i);
+      /canonical_place_id\s*=\s*CASE\s+WHEN\s+v_effective_verdict\s*=\s*'verified'\s+AND\s+v_mode\s*<>\s*'off'[\s\S]{0,180}THEN\s+p_canonical_place_id\s+ELSE\s+NULL\s+END/i);
     assert.match(edit,
-      /airport_code\s*=\s*CASE\s+WHEN\s+v_effective_verdict\s*=\s*'verified'[\s\S]{0,180}THEN\s+p_airport_code\s+ELSE\s+NULL\s+END/i);
+      /airport_code\s*=\s*CASE\s+WHEN\s+v_effective_verdict\s*=\s*'verified'\s+AND\s+v_mode\s*<>\s*'off'[\s\S]{0,180}THEN\s+p_airport_code\s+ELSE\s+NULL\s+END/i);
     assert.match(edit,
-      /route_authority\s*=\s*CASE\s+WHEN\s+v_effective_verdict\s*=\s*'verified'[\s\S]{0,180}THEN\s+'canonical'\s+ELSE\s+'legacy_text'\s+END/i);
+      /route_authority\s*=\s*CASE\s+WHEN\s+v_effective_verdict\s*=\s*'verified'\s+AND\s+v_mode\s*<>\s*'off'[\s\S]{0,180}THEN\s+'canonical'\s+ELSE\s+'legacy_text'\s+END/i);
     assert.match(edit,
-      /duration_minutes\s*=\s*CASE\s+WHEN\s+p_verdict\s*=\s*'verified'\s+THEN\s+NULL/i,
-      'a verified replacement route must clear rather than retain the old duration');
+      /duration_minutes\s*=\s*v_duration_minutes/i,
+      'the whole-minute passenger/ops ETA snapshot must use the validated edit value');
+    assert.match(edit,
+      /v_duration_minutes\s*<\s*1\s+OR\s+v_duration_minutes\s*>\s*1440/i,
+      'the temporarily retained duration must be bounded before storage');
+    assert.doesNotMatch(edit, /route_(?:miles|distance)[A-Za-z_]*\s*=/i,
+      'authoritative route distance stays commitment-only and unstored');
 
     const guard = normalize(functionSql('bookings_guard'));
     assert.match(guard,
@@ -543,13 +850,34 @@ console.log('Quote-enforcement foundation contract');
       assert.match(sql,
         new RegExp(`GRANT\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+${fn}\\s*\\([\\s\\S]{0,300}?TO\\s+service_role`, 'i'));
     }
+    const bookingsGuard = normalize(functionSql('bookings_guard'));
+    assert.match(bookingsGuard,
+      /LANGUAGE\s+plpgsql\s+SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*public\s*,\s*pg_temp/i,
+      'bookings guard must read pricing_state under owner rights with a pinned path');
   });
 
-  await check('trigger and index presence are verified, not merely created', () => {
-    assert.match(sql, /CREATE\s+TRIGGER\s+bookings_guard_trg/i);
+  await check('exactly five guard triggers and the active-slot index are verified', () => {
+    const expectedTriggers = [
+      'bookings_guard_trg',
+      'pricing_state_guard_trg',
+      'pricing_state_truncate_guard_trg',
+      'pricing_state_audit_guard_trg',
+      'pricing_state_audit_truncate_guard_trg'
+    ];
+    const createdTriggers = [...sql.matchAll(/CREATE\s+TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+      .map((match) => match[1]);
+    assert.strictEqual(createdTriggers.length, 5,
+      'migration must create exactly five triggers, with no duplicate hiding behind set comparison');
+    sameSet(createdTriggers, expectedTriggers,
+      'migration must create exactly the five reviewed guard triggers');
     assert.match(sql, /CREATE\s+UNIQUE\s+INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+bookings_one_active_per_customer/i);
-    assert.match(sql, /pg_trigger[\s\S]{0,300}bookings_guard_trg/i);
+    for (const trigger of expectedTriggers) {
+      assert.match(sql, new RegExp(`pg_trigger[\\s\\S]{0,900}${trigger}`, 'i'),
+        `self-check must name ${trigger}`);
+    }
     assert.match(sql, /tgenabled/i, 'self-check must refuse a disabled trigger');
+    assert.match(sql, /v_count\s*<>\s*5/i,
+      'self-check must require exactly five enabled foundation triggers');
     assert.match(sql, /pg_indexes[\s\S]{0,300}bookings_one_active_per_customer/i);
   });
 
@@ -575,6 +903,12 @@ console.log('Quote-enforcement foundation contract');
     assert.match(smoke, /blocked/i);
     assert.match(smoke, /quote_not_yet_valid/i,
       'observe smoke must refuse a future token before business writes');
+    assert.match(smoke, /off verified acceptance\/duration contract failed/i,
+      'off smoke must consume a valid quote under client_legacy authority');
+    assert.match(smoke, /off sibling token multiplied one quote/i,
+      'off smoke must prove acceptance—not active_slot—prevents quote multiplication');
+    assert.match(smoke, /off accepted an authentic stale edit quote/i,
+      'off smoke must refuse authentic stale edits without relabelling them');
     assert.match(smoke, /active_exists/i,
       'smoke must classify the RPC active-slot conflict');
     assert.match(smoke, /SET\s+LOCAL\s+ROLE\s+service_role/i,
@@ -585,6 +919,57 @@ console.log('Quote-enforcement foundation contract');
       'contact-only edits must remain usable during a pricing emergency');
     assert.match(smoke, /legacy route edit retained stale canonical identity/i,
       'smoke must exercise direct-writer canonical-identity downgrade');
+  });
+
+  await check('service-role smoke performs real booking insert, accept, and cancellation writes', () => {
+    const smokeRaw = sectionAfter('BEHAVIORAL SMOKE');
+    const roleBlock = /EXECUTE\s+'SET LOCAL ROLE service_role'\s*;([\s\S]*?)EXECUTE\s+'RESET ROLE'\s*;/i.exec(smokeRaw);
+    assert.ok(roleBlock, 'smoke must have a bounded service_role block');
+    assert.match(roleBlock[1], /INSERT\s+INTO\s+bookings\b/i,
+      'service_role must exercise the real legacy create lane');
+    assert.match(roleBlock[1],
+      /UPDATE\s+bookings\s+SET\s+status\s*=\s*'confirmed'\s*,\s*assigned_driver\s*=\s*v_driver/i,
+      'service_role must exercise driver acceptance');
+    assert.match(roleBlock[1],
+      /UPDATE\s+bookings\s+SET\s+status\s*=\s*'cancelled'/i,
+      'service_role must exercise passenger cancellation');
+    assert.match(smokeRaw,
+      /legacy assigned writer escaped authority\/actor\/slot guards/i,
+      'the role-scoped writes must be asserted after RESET ROLE');
+  });
+
+  await check('enforce smoke proves server money wins and direct pricing writes are fenced', () => {
+    const smokeRaw = sectionAfter('BEHAVIORAL SMOKE');
+    const rollbackAt = smokeRaw.indexOf('EMERGENCY ROLLBACK');
+    const smoke = normalize((rollbackAt === -1 ? smokeRaw : smokeRaw.slice(0, rollbackAt))
+      .replace(/--[^\n]*/g, ''));
+    assert.match(smoke,
+      /accept_quote_create[\s\S]{0,700}1\.00[\s\S]{0,600}price\s*=\s*132\.00[\s\S]{0,160}price_cents\s*=\s*13200/i,
+      'enforce create must prove browser money loses to token money');
+    assert.match(smoke,
+      /accept_quote_edit[\s\S]{0,700}2\.00[\s\S]{0,600}price\s*=\s*145\.00[\s\S]{0,160}price_cents\s*=\s*14500/i,
+      'enforce edit must prove browser money loses to token money');
+    assert.match(smoke, /enforce create did not use server money/i);
+    assert.match(smoke, /enforce edit did not use server money/i);
+    assert.match(smoke, /RPC authority mismatch was accepted/i,
+      'smoke must reject an RPC-marked write whose authority disagrees with the mode');
+    assert.match(smoke, /customer_id accepted a direct write/i,
+      'smoke must exercise the customer immutability guard without relying on slot uniqueness');
+    assert.match(smoke, /direct INSERT survived enforcement/i);
+    assert.match(smoke, /direct ride-intent UPDATE survived enforcement/i);
+    assert.match(smoke, /enforce edit accepted no token/i);
+    assert.match(smoke, /enforce accepted an invalid token/i);
+  });
+
+  await check('smoke outcome assertions cannot pass vacuously on SQL NULL', () => {
+    const smokeRaw = sectionAfter('BEHAVIORAL SMOKE');
+    const rollbackAt = smokeRaw.indexOf('EMERGENCY ROLLBACK');
+    const smoke = (rollbackAt === -1 ? smokeRaw : smokeRaw.slice(0, rollbackAt))
+      .replace(/--[^\n]*/g, '');
+    assert.doesNotMatch(smoke, /v_result\s*(?:->>\s*'[^']+'\s*)?<>/i,
+      'v_result comparisons must use IS DISTINCT FROM so NULL fails closed');
+    assert.match(smoke, /v_result->>'outcome'\s+IS\s+DISTINCT\s+FROM/i,
+      'smoke must carry explicit NULL-safe outcome assertions');
   });
 
   await check('smoke teardown proves no bookings, actors, receipts, or quote rows survive', () => {
