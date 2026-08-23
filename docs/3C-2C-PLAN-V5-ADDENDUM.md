@@ -23,18 +23,22 @@ only; it is never permission for a new write.
 The 2C-B endpoint must submit an authentic token whose `timeStatus` is not
 valid as `p_verdict='verified'` with its verified projection; it must never
 relabel it `verify_failed`. On `quote_expired` or `quote_not_yet_valid` in any
-mode, the browser silently re-quotes. There is no up-front "price live for 15
-min" label, no alert, and no passenger-facing word "refused": the vehicle
-screen simply shows **Updating price…** and continues with the refreshed quote.
-If Book detects the lapse, it follows the same silent refresh. Replacing 2B2's
-currently shipped stale-price alert is explicitly 2C-B work, not part of this
-dark SQL correction.
+mode, future 2C-B makes the browser silently re-quote. It replaces all three
+currently shipped 2B2 surfaces—the **Expired** card placeholder, the manual
+**Refresh prices** banner, and the Book-time alert—with **Updating price…** and
+the refreshed quote. There is no up-front "price live for 15 min" label and no
+passenger-facing word "refused." That browser replacement is explicitly 2C-B
+work, not part of this dark SQL correction.
 
 ## 2. Keep one temporary, nonfinancial duration snapshot
 
 Verified creates and edits MUST NOT null the accepted duration. The
-commitment-verified whole-minute route duration continues to populate the
-existing `bookings.duration_minutes` field. This preserves the trip-page ride
+whole-minute route duration continues to populate the existing
+`bookings.duration_minutes` field. SQL can prove only that this value is a
+non-null integer from 1 through 1440; 2C-B MUST map the commitment-verified
+`routeMinutes` into `p_booking.duration_minutes` or `p_edit.duration_minutes`
+(the browser does not send a separate legacy `durationMinutes`) and must refuse
+a zero-minute route rather than inventing one. This preserves the trip-page ride
 estimate and operator notification while Google Routes storage-policy review is
 still open. It is an accepted-quote estimate, not live tracking and not a money
 authority. ETA remains a top-priority passenger metric and should be kept as
@@ -49,7 +53,7 @@ roadmap work: driver-to-pickup at **On my way**, then pickup-to-dropoff at
 
 ## 3. Exact keyed-commitment facts
 
-The v2 commitment binds this exact nine-field intent:
+The v2 keyed commitment binds these exact nine inputs:
 
 - `mode`;
 - `airportCode`;
@@ -58,18 +62,18 @@ The v2 commitment binds this exact nine-field intent:
 - `passengers`;
 - `routeMilesTenths`;
 - `routeMinutes`;
-- `vehicleKey`; and
+- token field `vehicle` (called `vehicleKey` at the browser/RPC boundary); and
 - `finalCents`.
 
-In 2C-B, the Node verifier must recompute the commitment from canonical
-server/provider facts before calling SQL. Binding both route integers prevents
-a short-route price from being presented with a longer route. The SQL boundary
-also checks the signed projection, pickup instant, canonical airport and
-vehicle, and typed booking fields. 2C-B validates both echoed integers but does
-not create a durable route-facts snapshot: distance is never persisted, while
-whole-minute duration continues only through today's existing
-`duration_minutes` field under decision 2 until the storage-policy review
-concludes.
+In 2C-B, the Node verifier recomputes the commitment from the client-echoed
+intent under the `kid`-selected signing key; consuming a quote does not make a
+second provider call. Binding both route integers prevents a short-route price
+from being presented with a longer route. The SQL boundary also checks the
+signed projection, pickup instant, canonical airport and vehicle, and typed
+booking fields. 2C-B validates both echoed integers but does not create a
+durable route-facts snapshot: distance is never persisted, while whole-minute
+duration continues only through today's existing `duration_minutes` field
+under decision 2 until the storage-policy review concludes.
 
 ## 4. Verified quotes are consumed in off mode too
 
@@ -102,3 +106,7 @@ historical ambassador mapping is filled explicitly, and the exact
 manifest-filled rollout artifact is reviewed, checksum-recorded, and passes
 the executed PostgreSQL smoke and rollback. Andres must separately authorize
 those exact SQL bytes. The quote service and browser flag remain disabled.
+
+Stripe containment is a separate, explicitly postponed security track. Andres
+has not made it a migration-017 or 2C-B rollout gate; postponement does not mean
+the existing unauthenticated Stripe surface has been remediated.

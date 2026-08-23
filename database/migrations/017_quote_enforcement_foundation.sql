@@ -336,6 +336,9 @@ BEGIN
   END IF;
 
   SELECT * INTO v_state FROM pricing_state WHERE singleton FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'pricing_state singleton missing';
+  END IF;
 
   -- Exact transition matrix. In particular, `off -> enforce` is impossible:
   -- the observe evidence gate cannot be skipped by a typo or an eager rollout.
@@ -650,11 +653,12 @@ CREATE INDEX quote_verifications_created_idx ON quote_verifications (created_at)
 --     silently re-quote either stale outcome in every mode;
 --   * the keyed commitment covers mode, airport, canonical place identity,
 --     pickup instant, passengers, route miles in integer tenths, whole route
---     minutes, vehicle and cents. Node verifies those facts before this RPC;
---   * route distance is never persisted. `duration_minutes` temporarily keeps
---     the commitment-verified whole-minute ETA snapshot so existing passenger
---     and operator displays do not silently disappear before the Google
---     storage-policy review settles the long-term retention rule;
+--     minutes, token field `vehicle` and cents. Node recomputes it from the
+--     client-echoed intent under the kid-selected key before this RPC;
+--   * route distance is never persisted. SQL only bounds `duration_minutes`
+--     from 1 through 1440; 2C-B must map the commitment-verified routeMinutes
+--     into it so existing passenger and operator displays do not silently
+--     disappear before the Google storage-policy review settles retention;
 --   * off mode still stores client money, but a verified token is consumed and
 --     recorded with authority client_legacy. Operation IDs remain optional in
 --     off/observe and are mandatory (428/outdated_client) in enforce.
@@ -2516,10 +2520,14 @@ DECLARE
   v_op_create UUID := gen_random_uuid();
   v_op_off_create UUID := gen_random_uuid();
   v_op_off_sibling UUID := gen_random_uuid();
+  v_op_off_edit UUID := gen_random_uuid();
+  v_op_off_edit_sibling UUID := gen_random_uuid();
   v_op_off_expired_edit UUID := gen_random_uuid();
   v_op_optional UUID := gen_random_uuid();
   v_op_edit UUID := gen_random_uuid();
   v_op_future UUID := gen_random_uuid();
+  v_op_pickup_create_mismatch UUID := gen_random_uuid();
+  v_op_pickup_edit_mismatch UUID := gen_random_uuid();
   v_op_active_conflict UUID := gen_random_uuid();
   v_op_blocked_optional UUID := gen_random_uuid();
   v_op_enforce_create UUID := gen_random_uuid();
@@ -2528,6 +2536,7 @@ DECLARE
   v_op_enforce_invalid UUID := gen_random_uuid();
   v_jti_create UUID := gen_random_uuid();
   v_jti_off UUID := gen_random_uuid();
+  v_jti_off_edit UUID := gen_random_uuid();
   v_jti_off_expired_edit UUID := gen_random_uuid();
   v_jti_edit UUID := gen_random_uuid();
   v_jti_expired UUID := gen_random_uuid();
@@ -2540,6 +2549,8 @@ DECLARE
   v_verify_seq_called BOOLEAN;
   v_now_ms BIGINT;
   v_pickup_at TIMESTAMPTZ;
+  v_pickup_before TIMESTAMPTZ;
+  v_off_create_payload JSONB;
   v_payload JSONB;
   v_booking_json JSONB;
   v_result JSONB;
@@ -2749,7 +2760,7 @@ BEGIN
     -- pricing.
     v_now_ms := floor(extract(epoch FROM clock_timestamp()) * 1000)::BIGINT;
     v_pickup_at := to_timestamp((v_now_ms + 86400000) / 1000.0);
-    v_payload := jsonb_build_object(
+    v_off_create_payload := jsonb_build_object(
       'v',2,'kid','migration-017-smoke','jti',v_jti_off::text,
       'purpose','create','authUserId',v_auth_quote::text,
       'customerId',v_customer_quote::text,'vehicle','tesla',
@@ -2768,7 +2779,7 @@ BEGIN
     );
     v_result := accept_quote_create(
       v_auth_quote, v_customer_quote, v_op_off_create, repeat('0',64), 'verified',
-      v_jti_off, repeat('0',64), v_payload, 43.21,
+      v_jti_off, repeat('0',64), v_off_create_payload, 43.21,
       'off-place-id', 'MIA', 'tesla', v_booking_json
     );
     v_booking_off := (v_result->>'booking_id')::UUID;
@@ -2784,10 +2795,60 @@ BEGIN
     ) THEN
       RAISE EXCEPTION '017 smoke: off verified acceptance/duration contract failed';
     END IF;
+
+    v_payload := jsonb_build_object(
+      'v',2,'kid','migration-017-smoke','jti',v_jti_off_edit::text,
+      'purpose','edit','authUserId',v_auth_quote::text,
+      'customerId',v_customer_quote::text,'bookingId',v_booking_off::text,
+      'assignmentEpoch',0,'vehicle','tesla',
+      'pickupAtMs',v_now_ms + 86400000,'commitment',repeat('9',64),
+      'routeQuality','traffic_aware','finalCents',6789,
+      'pricingVersion','smoke','engineVersion','smoke','resolvedVersion','smoke',
+      'iat',v_now_ms - 1000,'exp',v_now_ms + 899000
+    );
+    v_result := accept_quote_edit(
+      v_auth_quote, v_customer_quote, v_op_off_edit, repeat('7',64),
+      v_booking_off, 1, 'verified', v_jti_off_edit, repeat('7',64),
+      v_payload, 44.32, 'off-edit-place-id', 'MIA', 'tesla',
+      jsonb_build_object(
+        'pickup_datetime',v_pickup_at::TEXT,'duration_minutes',89,
+        'notes','off-edit-smoke'
+      )
+    );
+    IF v_result->>'outcome' IS DISTINCT FROM 'updated'
+       OR (v_result->>'details_version')::INTEGER IS DISTINCT FROM 2
+       OR NOT EXISTS (
+         SELECT 1 FROM bookings WHERE id = v_booking_off
+           AND price = 44.32 AND price_authority = 'client_legacy'
+           AND duration_minutes = 89 AND notes = 'off-edit-smoke'
+       ) OR NOT EXISTS (
+         SELECT 1 FROM quote_acceptances WHERE booking_id = v_booking_off
+           AND purpose = 'edit' AND jti = v_jti_off_edit
+           AND authority = 'client_legacy' AND final_cents = 6789
+           AND client_cents = 4432
+       ) THEN
+      RAISE EXCEPTION '017 smoke: off verified edit acceptance contract failed';
+    END IF;
+    v_result := accept_quote_edit(
+      v_auth_quote, v_customer_quote, v_op_off_edit_sibling, repeat('8',64),
+      v_booking_off, 2, 'verified', v_jti_off_edit, repeat('8',64),
+      v_payload, 44.32, 'off-edit-place-id', 'MIA', 'tesla',
+      jsonb_build_object(
+        'pickup_datetime',v_pickup_at::TEXT,'duration_minutes',90
+      )
+    );
+    IF v_result->>'outcome' IS DISTINCT FROM 'quote_consumed'
+       OR NOT EXISTS (SELECT 1 FROM bookings WHERE id = v_booking_off
+                        AND details_version = 2 AND duration_minutes = 89)
+       OR (SELECT count(*) FROM quote_acceptances
+             WHERE jti = v_jti_off_edit) IS DISTINCT FROM 1::BIGINT THEN
+      RAISE EXCEPTION '017 smoke: off edit sibling reused a consumed quote';
+    END IF;
+
     UPDATE bookings SET status = 'completed' WHERE id = v_booking_off;
     v_result := accept_quote_create(
       v_auth_quote, v_customer_quote, v_op_off_sibling, repeat('1',64), 'verified',
-      v_jti_off, repeat('1',64), v_payload, 43.21,
+      v_jti_off, repeat('1',64), v_off_create_payload, 43.21,
       'off-place-id', 'MIA', 'tesla',
       v_booking_json || jsonb_build_object('trip_id','MIG017-OFF-SIBLING')
     );
@@ -2807,6 +2868,8 @@ BEGIN
       'pricingVersion','smoke','engineVersion','smoke','resolvedVersion','smoke',
       'iat',v_now_ms - 900001,'exp',v_now_ms - 1
     );
+    SELECT pickup_datetime INTO v_pickup_before
+      FROM bookings WHERE id = v_booking_legacy;
     v_result := accept_quote_edit(
       v_auth_legacy, v_customer_legacy, v_op_off_expired_edit, repeat('2',64),
       v_booking_legacy, 1, 'verified', v_jti_off_expired_edit, repeat('2',64),
@@ -2905,6 +2968,44 @@ BEGIN
       'pricingVersion','smoke','engineVersion','smoke','resolvedVersion','smoke',
       'iat',v_now_ms - 1000,'exp',v_now_ms + 899000
     );
+    -- A valid signed pickup instant cannot authorize a booking at a different
+    -- instant. Keep the same jti available for the valid create below: this
+    -- refusal must leave no acceptance, receipt, or booking residue.
+    BEGIN
+      PERFORM accept_quote_create(
+        v_auth_quote, v_customer_quote, v_op_pickup_create_mismatch,
+        repeat('3',64), 'verified', v_jti_create, repeat('3',64),
+        v_payload, 43.21, 'smoke-place-id', 'MIA', 'tesla',
+        v_booking_json || jsonb_build_object(
+          'trip_id','MIG017-PICKUP-MISMATCH',
+          'pickup_datetime',(v_pickup_at + interval '1 day')::TEXT
+        )
+      );
+      RAISE EXCEPTION '017 smoke: verified create accepted a mismatched pickup instant';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%verified pickup time does not match booking%' THEN RAISE; END IF;
+    END;
+    IF EXISTS (SELECT 1 FROM bookings WHERE trip_id = 'MIG017-PICKUP-MISMATCH')
+       OR EXISTS (SELECT 1 FROM quote_acceptances WHERE jti = v_jti_create)
+       OR EXISTS (SELECT 1 FROM operation_receipts
+                    WHERE operation_request_id = v_op_pickup_create_mismatch) THEN
+      RAISE EXCEPTION '017 smoke: pickup-mismatched create left durable residue';
+    END IF;
+    BEGIN
+      PERFORM accept_quote_create(
+        v_auth_quote, v_customer_quote, gen_random_uuid(), repeat('4',64),
+        'no_token', NULL, NULL, NULL, 43.21, NULL, NULL, NULL,
+        v_booking_json || jsonb_build_object(
+          'trip_id','MIG017-TOO-MANY-PASSENGERS','passengers',13
+        )
+      );
+      RAISE EXCEPTION '017 smoke: create accepted passengers above the supported bound';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%booking ride details are invalid%' THEN RAISE; END IF;
+    END;
+    IF EXISTS (SELECT 1 FROM bookings WHERE trip_id = 'MIG017-TOO-MANY-PASSENGERS') THEN
+      RAISE EXCEPTION '017 smoke: invalid passenger count left booking residue';
+    END IF;
     BEGIN
       PERFORM accept_quote_create(
         v_auth_quote, v_customer_quote, gen_random_uuid(), repeat('5',64),
@@ -3037,6 +3138,29 @@ BEGIN
       'pricingVersion','smoke','engineVersion','smoke','resolvedVersion','smoke',
       'iat',v_now_ms - 1000,'exp',v_now_ms + 899000
     );
+
+    -- The edit row and the signed projection must name the same pickup
+    -- instant. This refusal records telemetry only: no receipt, acceptance,
+    -- version bump, or ride-detail write may survive.
+    v_result := accept_quote_edit(
+      v_auth_legacy, v_customer_legacy, v_op_pickup_edit_mismatch,
+      repeat('e',64), v_booking_legacy, 2, 'verified', v_jti_edit,
+      repeat('e',64), v_payload, 20.00,
+      'smoke-edit-place', 'MIA', 'tesla',
+      jsonb_build_object(
+        'pickup_datetime',(v_pickup_at + interval '1 day')::TEXT,
+        'duration_minutes',777
+      )
+    );
+    IF v_result->>'outcome' IS DISTINCT FROM 'quote_mismatch'
+       OR EXISTS (SELECT 1 FROM quote_acceptances WHERE jti = v_jti_edit)
+       OR EXISTS (SELECT 1 FROM operation_receipts
+                    WHERE operation_request_id = v_op_pickup_edit_mismatch)
+       OR NOT EXISTS (SELECT 1 FROM bookings WHERE id = v_booking_legacy
+                        AND details_version = 2
+                        AND pickup_datetime = v_pickup_before) THEN
+      RAISE EXCEPTION '017 smoke: pickup-mismatched edit changed durable state';
+    END IF;
 
     v_result := accept_quote_edit(
       v_auth_quote, v_customer_quote, gen_random_uuid(), repeat('0',64),

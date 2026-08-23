@@ -21,10 +21,12 @@ const preflightPath = path.join(
   repoRoot,
   'database/migrations/017_quote_enforcement_preflight.sql'
 );
+const runbookPath = path.join(repoRoot, 'docs/MIGRATION-017-RUNBOOK.md');
 const migration = fs.readFileSync(migrationPath, 'utf8');
 const sql = migration.replace(/--[^\n]*/g, '');
 const preflight = fs.readFileSync(preflightPath, 'utf8');
 const preflightSql = preflight.replace(/--[^\n]*/g, '');
+const runbook = fs.readFileSync(runbookPath, 'utf8');
 
 const {
   QUOTE_TTL_MS,
@@ -310,8 +312,14 @@ console.log('Quote-enforcement foundation contract');
       /to_regprocedure\(\s*'extensions\.digest\(text,text\)'\s*\)/i,
       'preflight must prove pgcrypto digest exists in the trusted extensions schema');
     assert.match(preflight,
-      /NULL::BOOLEAN\),\s*--\s*REVIEW TRUE\/FALSE/i,
+      /\(%L::UUID,\s*NULL::BOOLEAN\)%s\s*--\s*REVIEW TRUE\/FALSE/i,
       'preflight must generate a deliberately incomplete human-decision manifest');
+    assert.match(preflightSql,
+      /row_number\(\)\s+OVER\s*\(\s*ORDER\s+BY\s+customer_id\s*\)\s*<\s*count\(\*\)\s+OVER\s*\(\s*\)/i,
+      'the paste-ready manifest must omit the comma from its final row');
+    assert.match(preflightSql,
+      /THEN\s+','\s+ELSE\s+';'\s+END/i,
+      'the final paste-ready manifest row must carry the statement terminator');
     assert.match(preflight,
       /execute each labeled check A1 through G6 separately/i,
       'SQL-editor execution guidance must preserve every preflight result grid');
@@ -324,6 +332,44 @@ console.log('Quote-enforcement foundation contract');
       'every preflight result grid must run inside a read-only transaction');
     assert.strictEqual(rollbackCount, beginCount,
       'every preflight result grid must close its own transaction');
+  });
+
+  await check('post-install production smoke is structurally rollback-contained and residue-checked', () => {
+    const marker = runbook.indexOf('DO $migration_017_postinstall_smoke$');
+    assert.ok(marker !== -1, 'runbook must carry the reviewed post-install smoke');
+    const fenceStart = runbook.lastIndexOf('```sql', marker);
+    const fenceEnd = runbook.indexOf('```', marker);
+    assert.ok(fenceStart !== -1 && fenceEnd !== -1,
+      'post-install smoke must be one copyable SQL block');
+    const smoke = normalize(runbook.slice(fenceStart + 6, fenceEnd));
+    assert.match(smoke, /^BEGIN\s*;/i);
+    assert.match(smoke, /DO\s+\$migration_017_postinstall_smoke\$/i);
+    assert.match(smoke, /SET\s+LOCAL\s+ROLE\s+service_role/i);
+    assert.match(smoke, /RESET\s+ROLE/i);
+    for (const fn of [
+      'set_pricing_mode', 'accept_quote_create',
+      'accept_quote_edit', 'accept_optional_edit'
+    ]) {
+      assert.match(smoke, new RegExp(`${fn}\\s*\\(`, 'i'),
+        `post-install smoke must execute ${fn}`);
+    }
+    assert.match(smoke,
+      /'verified'\s*,\s*v_jti_create\s*,\s*repeat\(\s*'4'\s*,\s*64\s*\)/i,
+      'create RPC must exercise a synthetic verified jti/digest');
+    assert.match(smoke,
+      /'verified'\s*,\s*v_jti_edit\s*,\s*repeat\(\s*'5'\s*,\s*64\s*\)/i,
+      'edit RPC must exercise a synthetic verified jti/digest');
+    assert.match(smoke,
+      /event_type\s+IN\s*\(\s*'ride_cancelled_admin'\s*,\s*'ride_cancelled'\s*\)/i,
+      'the smoke must prove cancellation outbox rows existed before rollback');
+    assert.match(smoke, /setval\(\s*'public\.pricing_state_audit_id_seq'/i,
+      'nontransactional audit sequence state must be restored');
+    assert.match(smoke, /setval\(\s*'public\.quote_verifications_id_seq'/i,
+      'nontransactional telemetry sequence state must be restored');
+    assert.match(smoke, /ROLLBACK\s*;[\s\S]*booking_residue/i,
+      'the smoke must roll back before its zero-residue query');
+    assert.match(runbook, /Never\s+replace\s+the\s+rollback\s+with\s+a\s+commit/i);
+    assert.match(runbook, /WATCHDOG_DISABLED=1/i);
   });
 
   await check('pgcrypto is a pre-existing qualified dependency, not rollback residue', () => {
@@ -731,6 +777,46 @@ console.log('Quote-enforcement foundation contract');
     }
   });
 
+  await check('verified pickup instants and passenger bounds are mutation-pinned', () => {
+    const create = normalize(functionSql('accept_quote_create'));
+    const edit = normalize(functionSql('accept_quote_edit'));
+    const pickupConversion = String.raw`v_pickup_at\s+IS\s+DISTINCT\s+FROM\s+to_timestamp\s*\(\s*\(\s*\(p_payload->>'pickupAtMs'\)::BIGINT\s*\)\s*\/\s*1000\.0\s*\)`;
+    const createPickupGuard = new RegExp(
+      String.raw`IF\s+p_verdict\s*=\s*'verified'\s+AND\s+${pickupConversion}\s+THEN\s+RAISE\s+EXCEPTION\s+'verified pickup time does not match booking'\s*;`,
+      'i'
+    );
+    const editPickupGuard = new RegExp(
+      String.raw`IF\s+v_effective_verdict\s*=\s*'verified'\s+AND\s+${pickupConversion}\s+THEN([\s\S]{0,500}?)END\s+IF\s*;`,
+      'i'
+    );
+    for (const [name, body] of [['create', create], ['edit', edit]]) {
+      assert.match(body,
+        /v_passengers\s+IS\s+NULL\s+OR\s+v_passengers\s*<\s*1\s+OR\s+v_passengers\s*>\s*12/i,
+        `${name} must retain the passenger-capacity boundary`);
+    }
+    assert.match(create, createPickupGuard,
+      'create must bind pickup_datetime to signed pickupAtMs');
+    const editPickupBranch = editPickupGuard.exec(edit);
+    assert.ok(editPickupBranch,
+      'edit must bind pickup_datetime to signed pickupAtMs');
+    assert.match(editPickupBranch[1],
+      /INSERT\s+INTO\s+quote_verifications\s*\([\s\S]{0,180}?verdict[\s\S]{0,180}?VALUES\s*\(\s*'edit_conflict'/i,
+      'the mismatch branch must record sanitized conflict telemetry');
+    assert.match(editPickupBranch[1],
+      /RETURN\s+jsonb_build_object\s*\(\s*'outcome'\s*,\s*'quote_mismatch'\s*\)\s*;/i,
+      'the mismatch branch must return quote_mismatch');
+    assertBefore(create, createPickupGuard, /INSERT\s+INTO\s+bookings/i,
+      'create pickup binding must precede the booking write');
+    assertBefore(edit, editPickupGuard, /UPDATE\s+bookings\s+SET/i,
+      'edit pickup binding must precede the booking write');
+
+    const smoke = normalize(sectionAfter('BEHAVIORAL SMOKE'));
+    assert.match(smoke, /verified create accepted a mismatched pickup instant/i);
+    assert.match(smoke, /pickup-mismatched create left durable residue/i);
+    assert.match(smoke, /create accepted passengers above the supported bound/i);
+    assert.match(smoke, /pickup-mismatched edit changed durable state/i);
+  });
+
   await check('full edits downgrade unverified identity and retain the validated ETA snapshot', () => {
     const edit = normalize(functionSql('accept_quote_edit'));
     assert.match(edit,
@@ -756,6 +842,9 @@ console.log('Quote-enforcement foundation contract');
 
   await check('pricing mode transition graph is explicit and exhaustive', () => {
     const body = normalize(functionSql('set_pricing_mode'));
+    assert.match(body,
+      /SELECT\s+\*\s+INTO\s+v_state\s+FROM\s+pricing_state\s+WHERE\s+singleton\s+FOR\s+UPDATE\s*;\s*IF\s+NOT\s+FOUND\s+THEN\s+RAISE\s+EXCEPTION\s+'pricing_state singleton missing'/i,
+      'a missing mode singleton must fail with an actionable recovery signal');
     const expected = {
       off: ['off', 'observe'],
       observe: ['off', 'observe', 'enforce'],
@@ -907,6 +996,10 @@ console.log('Quote-enforcement foundation contract');
       'off smoke must consume a valid quote under client_legacy authority');
     assert.match(smoke, /off sibling token multiplied one quote/i,
       'off smoke must prove acceptance—not active_slot—prevents quote multiplication');
+    assert.match(smoke, /off verified edit acceptance contract failed/i,
+      'off smoke must consume a valid edit quote under client_legacy authority');
+    assert.match(smoke, /off edit sibling reused a consumed quote/i,
+      'off edit smoke must prove a sibling digest cannot reuse its jti');
     assert.match(smoke, /off accepted an authentic stale edit quote/i,
       'off smoke must refuse authentic stale edits without relabelling them');
     assert.match(smoke, /active_exists/i,

@@ -215,7 +215,12 @@ WITH candidates AS (
   JOIN public.bookings b ON b.customer_id = c.id
   JOIN public.hosts h ON h.user_id = c.user_id
 )
-SELECT format('(%L::UUID, NULL::BOOLEAN), -- REVIEW TRUE/FALSE', customer_id)
+SELECT format(
+  '(%L::UUID, NULL::BOOLEAN)%s -- REVIEW TRUE/FALSE',
+  customer_id,
+  CASE WHEN row_number() OVER (ORDER BY customer_id) < count(*) OVER ()
+    THEN ',' ELSE ';' END
+)
   AS reviewed_manifest_row
 FROM candidates
 ORDER BY customer_id;

@@ -482,23 +482,29 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     correction/preflight pass must be reviewed and its historical ambassador
     decisions completed before rollout; the SQL file being deployed is not
     evidence that the schema exists. The corrected v2 contract carries
-    canonical `airportCode` + `vehicleKey`. Its exact nine-field keyed intent is
-    `mode`, `airportCode`, `placeId`, `pickupAtMs`, `passengers`,
-    `routeMilesTenths`, `routeMinutes`, `vehicleKey`, and `finalCents`. The
-    token library validates those integer fields at issuance; 2C-B
-    must recompute the commitment from authoritative facts before calling SQL.
+    canonical `airportCode` + `vehicleKey`. Its exact keyed-commitment inputs
+    are the seven intent facts `mode`, `airportCode`, `placeId`, `pickupAtMs`,
+    `passengers`, `routeMilesTenths`, and `routeMinutes`, plus token field
+    `vehicle` (called `vehicleKey` at the browser/RPC boundary) and
+    `finalCents`. The token library validates those integer fields at issuance;
+    2C-B must recompute the commitment from the client-echoed intent under the
+    `kid`-selected signing key before calling SQL; that verification does not
+    make another provider call.
     Distance is never persisted; the existing whole-minute
     `duration_minutes` estimate MUST remain populated on verified creates and
-    edits and is temporarily preserved from the verified
-    commitment so the trip ETA and operator notices do not silently disappear
+    edits. SQL validates only that it is a whole minute from 1 through 1440;
+    2C-B MUST map the commitment-verified `routeMinutes` into that field and
+    refuse a zero-minute route rather than inventing one. This temporary
+    mapping keeps the trip ETA and operator notices from silently disappearing
     before the Google Routes storage-policy review settles long-term retention.
     An authentic expired or not-yet-valid token cannot authorize a new write in
     ANY mode, although an exact-token retry may recover a result that already
     committed. This is the sole exception to "observe never rejects": 2C-B
     submits the authentic stale projection as verified, then silently re-quotes
-    on `quote_expired`/`quote_not_yet_valid`. The browser shows **Updating
-    price…** with no up-front TTL label, alert, or passenger-facing "refused"
-    wording—even when Book detects the lapse. A verified token is consumed in
+    on `quote_expired`/`quote_not_yet_valid`. Future 2C-B replaces 2B2's current
+    **Expired** card placeholder, manual **Refresh prices** banner, and Book-time
+    alert with silent **Updating price…** behavior and no passenger-facing
+    "refused" wording. A verified token is consumed in
     off, observe, and enforce (off still stores client money with
     `client_legacy` authority), so one quote cannot multiply bookings; for an
     ambassador exempt from the active-slot rule, that receipt is the one-quote /
