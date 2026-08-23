@@ -28,6 +28,9 @@ const {
   isValidatedRateCard
 } = require(path.join(repoRoot, 'backend/functions/lib/ride-rate-card.js'));
 const { quoteRide } = require(path.join(repoRoot, 'backend/functions/lib/ride-quote.js'));
+const { isValidVersionLabel } = require(path.join(
+  repoRoot, 'backend/functions/lib/version-label.js'
+));
 
 const CARD = validateRateCard(LINKMIA_RATE_CARD);
 
@@ -708,6 +711,21 @@ async function check(name, fn) {
     assert.ok(Object.isFrozen(LINKMIA_RATE_CARD.vehicles.tesla.tiers[0]));
     assert.ok(Object.isFrozen(CANONICAL_VEHICLES));
     assert.throws(() => { 'use strict'; CANONICAL_VEHICLES.push('limo'); }, TypeError);
+  });
+
+  await check('published rate-card versions use the signed-token version grammar', async () => {
+    for (const version of ['linkmia-parity-2026-08', 'card.v2', 'fleet_A']) {
+      assert.strictEqual(isValidVersionLabel(version), true);
+      const card = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+      card.pricingVersion = version;
+      assert.strictEqual(validateRateCard(card).pricingVersion, version);
+    }
+    for (const version of ['Miami Summer 2027', 'v'.repeat(129), '-leading-dash', 'emoji-🚗']) {
+      assert.strictEqual(isValidVersionLabel(version), false);
+      const card = JSON.parse(JSON.stringify(LINKMIA_RATE_CARD));
+      card.pricingVersion = version;
+      assert.throws(() => validateRateCard(card), /pricingVersion.*version slug/);
+    }
   });
 
   await check('validateRateCard rejects every malformed configuration class', async () => {

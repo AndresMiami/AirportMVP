@@ -389,6 +389,17 @@ exports.handler = async (event) => {
       };
     }
 
+    // The token/acceptance contract uses integer route units, never a
+    // floating-point mileage spelling. These are the EXACT quantized values
+    // the engine prices: tenths of a mile and whole minutes.
+    const routeMilesTenths = Math.round(route.routeMiles * 10);
+    const routeMinutes = route.routeMinutes;
+    if (!Number.isSafeInteger(routeMilesTenths) || routeMilesTenths < 0 ||
+        !Number.isSafeInteger(routeMinutes) || routeMinutes < 0) {
+      console.error('❌ quote-ride canonical route projection invalid');
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Pricing unavailable' }) };
+    }
+
     // ---- price every vehicle on the card ----
     const { card, resolvedVersion } = card0;
 
@@ -424,7 +435,15 @@ exports.handler = async (event) => {
       // disagree — and unlike v1's unkeyed hash, a leaked token is no
       // longer an address-confirmation oracle.
       const commitment = computeCommitment(
-        { mode, airportCode, placeId: canonicalPlaceId, pickupAtMs, passengers },
+        {
+          mode,
+          airportCode,
+          placeId: canonicalPlaceId,
+          pickupAtMs,
+          passengers,
+          routeMilesTenths,
+          routeMinutes
+        },
         key,
         q.quote.finalCents,
         signing.current.secret
@@ -489,7 +508,10 @@ exports.handler = async (event) => {
           },
           route: {
             miles: route.routeMiles,
-            minutes: route.routeMinutes,
+            // Canonical integer units consumed by 2C. `miles` remains a
+            // display convenience; financial/audit code uses milesTenths.
+            milesTenths: routeMilesTenths,
+            minutes: routeMinutes,
             quality: route.routeQuality
           },
           vehicles,

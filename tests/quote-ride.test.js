@@ -24,17 +24,17 @@ process.env.QUOTE_SIGNING_CURRENT_ID = 'k-2026-08';
 process.env.QUOTE_SIGNING_CURRENT_SECRET = CURRENT_SECRET;
 process.env.QUOTE_SIGNING_PREVIOUS_ID = 'k-2026-07';
 process.env.QUOTE_SIGNING_PREVIOUS_SECRET = PREVIOUS_SECRET;
-process.env.QUOTE_SHADOW_ALLOWLIST = 'auth-andres, auth-second';
+process.env.QUOTE_SHADOW_ALLOWLIST = '11111111-1111-4111-8111-111111111111, 22222222-2222-4222-8222-222222222222';
 delete process.env.QUOTE_SERVICE_DISABLED;
 
 const repoRoot = path.resolve(__dirname, '..');
 
 const TOKENS = {
-  'tok-andres': { id: 'auth-andres' },
+  'tok-andres': { id: '11111111-1111-4111-8111-111111111111' },
   'tok-passenger': { id: 'auth-passenger' } // signed in, NOT allowlisted
 };
 const CUSTOMERS = {
-  'auth-andres': { id: 'cust-andres' },
+  '11111111-1111-4111-8111-111111111111': { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
   'auth-passenger': { id: 'cust-passenger' }
 };
 
@@ -226,7 +226,7 @@ async function check(name, fn) {
       ['lng', -80.2], ['coordinates', { lat: 1, lng: 2 }], ['address', '123 Main St'],
       ['origin', 'MIA'], ['destination', 'x'], ['token', 'abc'],
       // vehicle preference is REMOVED from the contract: in an
-      // all-vehicles response it could only perturb the intentHash.
+      // all-vehicles response it could only perturb the keyed commitment.
       ['vehicle', 'tesla']
     ]) {
       const r = await post(goodIntent({ [field]: value }));
@@ -403,6 +403,7 @@ async function check(name, fn) {
     const r = await post(goodIntent());
     const q = JSON.parse(r.body).quote;
     assert.strictEqual(q.route.miles, browserMiles(40233));
+    assert.strictEqual(q.route.milesTenths, Math.round(browserMiles(40233) * 10));
     assert.strictEqual(q.route.minutes, browserMinutes(2429.5));
   });
 
@@ -453,8 +454,8 @@ async function check(name, fn) {
     // ...while the exact-token DIGEST distinguishes the vehicles (the
     // retry identity for the consumption gate).
     assert.notStrictEqual(tokenDigest(q.vehicles.tesla.token), tokenDigest(q.vehicles.sprinter.token));
-    assert.strictEqual(p.authUserId, 'auth-andres');
-    assert.strictEqual(p.customerId, 'cust-andres');
+    assert.strictEqual(p.authUserId, '11111111-1111-4111-8111-111111111111');
+    assert.strictEqual(p.customerId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     assert.strictEqual(p.vehicle, 'sprinter');
     assert.strictEqual(p.pickupAtMs, Date.parse(pickupAt));
     assert.strictEqual(p.finalCents, q.vehicles.sprinter.finalCents);
@@ -463,7 +464,8 @@ async function check(name, fn) {
     // address-confirmation oracle.
     const expectedCommitment = computeCommitment(
       { mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-        pickupAtMs: Date.parse(pickupAt), passengers: 2 },
+        pickupAtMs: Date.parse(pickupAt), passengers: 2,
+        routeMilesTenths: q.route.milesTenths, routeMinutes: q.route.minutes },
       'sprinter', q.vehicles.sprinter.finalCents, CURRENT_SECRET
     );
     assert.strictEqual(p.commitment, expectedCommitment,
@@ -471,8 +473,8 @@ async function check(name, fn) {
     const raw = JSON.stringify(p);
     assert.ok(!raw.includes(ADDRESS_PLACE_ID) && !raw.includes('Test St') && !raw.includes('lat'),
       'no place IDs, addresses, or coordinates may transit the client inside a token');
-    assert.ok(!('routeMiles' in p) && !('routeMinutes' in p),
-      'commitment INSTEAD of raw route facts — facts live in the response only');
+    assert.ok(!('routeMiles' in p) && !('routeMilesTenths' in p) && !('routeMinutes' in p),
+      'route facts are commitment-only — they stay out of the token payload/projection');
     assert.strictEqual(p.routeQuality, 'traffic_aware', 'routeQuality is the one required route field');
     assert.strictEqual(p.exp - p.iat, QUOTE_TTL_MS);
     assert.strictEqual(q.ttlMinutes, 15, 'TTL is the deliberate 15-minute price-hold policy');
@@ -486,12 +488,13 @@ async function check(name, fn) {
     const now = Date.now();
     const INTENT = {
       mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-      pickupAtMs: now + 3600e3, passengers: 2
+      pickupAtMs: now + 3600e3, passengers: 2,
+      routeMilesTenths: 100, routeMinutes: 28
     };
     const JTI = newJti();
     // The commitment is key-dependent, so each signing key mints its own.
     const mkBase = (secret) => ({
-      purpose: 'create', jti: JTI, authUserId: 'auth-andres', customerId: 'cust-andres',
+      purpose: 'create', jti: JTI, authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       vehicle: 'tesla', pickupAtMs: INTENT.pickupAtMs,
       commitment: computeCommitment(INTENT, 'tesla', 4500, secret),
       routeQuality: 'traffic_aware',
@@ -499,13 +502,39 @@ async function check(name, fn) {
     });
     const base = mkBase(CURRENT_SECRET);
     const EXPECT = {
-      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       vehicle: 'tesla', intent: INTENT
     };
     const current = signQuoteToken(base, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
     const ok = verifyQuoteToken(current, { keys, nowMs: now + 60000, expected: EXPECT });
     assert.strictEqual(ok.ok, true);
     assert.ok(Object.isFrozen(ok.payload), 'the returned projection is frozen');
+
+    // The issuer must fail at issuance, not mint a token that dies later.
+    assert.throws(() => signQuoteToken({ ...base, jti: 'not-a-v4-uuid' },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, authUserId: ' ' },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, customerId: '\0' },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, vehicle: ' premier suv ' },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, pickupAtMs: -1 },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, pricingVersion: '   ' },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, pricingVersion: 'v'.repeat(129) },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, finalCents: Number.MAX_SAFE_INTEGER + 1 },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken({ ...base, unsignedExtra: true },
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now }), /invalid create payload/);
+    assert.throws(() => signQuoteToken(base,
+      { keyId: 'bad key', secret: CURRENT_SECRET, nowMs: now }), /invalid key id/);
+    assert.throws(() => signQuoteToken(base,
+      { keyId: 'k-2026-08', secret: 'weak', nowMs: now }), /invalid signing secret/);
+    assert.throws(() => signQuoteToken(base,
+      { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: NaN }), /invalid clock/);
 
     // Rotation: a token signed by the PREVIOUS key still verifies —
     // including its commitment, which the verifier recomputes under the
@@ -554,8 +583,8 @@ async function check(name, fn) {
     // '"exp":null' MAC identically — an immortal token if exp is only
     // typeof-checked. The exact-schema projection kills it.
     const canonNull = JSON.stringify({
-      v: 2, kid: 'k-2026-08', jti: JTI, purpose: 'create', authUserId: 'auth-andres',
-      customerId: 'cust-andres', vehicle: 'tesla', pickupAtMs: 1,
+      v: 2, kid: 'k-2026-08', jti: JTI, purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111',
+      customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', vehicle: 'tesla', pickupAtMs: 1,
       commitment: base.commitment,
       routeQuality: 'traffic_aware', finalCents: 4500, pricingVersion: 'v',
       engineVersion: 'e', resolvedVersion: 'v', iat: 0, exp: null
@@ -585,8 +614,8 @@ async function check(name, fn) {
     // EXPECTATIONS are mandatory — the old contract silently skipped
     // every binding check when they were omitted.
     for (const bad of [undefined, null, {}, { purpose: 'create' },
-      { purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres' },
-      { purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres', vehicle: 'tesla' }]) {
+      { purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', vehicle: 'tesla' }]) {
       const r = verifyQuoteToken(current, { keys, nowMs: now, expected: bad });
       assert.strictEqual(r.reason, 'missing_expectations',
         `incomplete expectations must refuse, not pass: ${JSON.stringify(bad)}`);
@@ -595,8 +624,8 @@ async function check(name, fn) {
 
     // Every binding is enforced, including the two that were silently dropped.
     assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, purpose: 'edit' } }).reason, 'wrong_purpose');
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, customerId: 'cust-other' } }).reason, 'wrong_identity');
-    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, authUserId: 'auth-other' } }).reason, 'wrong_identity');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, customerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } }).reason, 'wrong_identity');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, authUserId: '33333333-3333-4333-8333-333333333333' } }).reason, 'wrong_identity');
     assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now, expected: { ...EXPECT, vehicle: 'sprinter' } }).reason, 'wrong_vehicle',
       'a vehicle expectation must be ENFORCED, never silently dropped');
     assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
@@ -604,6 +633,14 @@ async function check(name, fn) {
       'the verifier recomputes the KEYED commitment from the submitted intent — a different place refuses');
     assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
       expected: { ...EXPECT, intent: { ...INTENT, passengers: 3 } } }).reason, 'wrong_intent');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
+      expected: { ...EXPECT, intent: { ...INTENT, routeMilesTenths: 101 } } }).reason, 'wrong_intent',
+      'changing the authoritative distance must break the keyed commitment');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
+      expected: { ...EXPECT, intent: { ...INTENT, routeMinutes: 29 } } }).reason, 'wrong_intent',
+      'changing the authoritative duration must break the keyed commitment');
+    assert.strictEqual(verifyQuoteToken(current, { keys, nowMs: now,
+      expected: { ...EXPECT, intent: { ...INTENT, routeMinutes: 28.5 } } }).reason, 'invalid_expectation');
 
     // DEFERRED TIME (the recorded amendment): the consumption path may
     // order the exact-digest idempotent lookup before the time verdict.
@@ -612,8 +649,20 @@ async function check(name, fn) {
     const late = verifyQuoteToken(current, { keys, nowMs: now + QUOTE_TTL_MS + 1, expected: EXPECT, deferTime: true });
     assert.strictEqual(late.ok, true);
     assert.strictEqual(late.timeStatus, 'expired');
+    assert.strictEqual(late.canConsume, false,
+      'deferred expiry is authentic for retry lookup but cannot authorize a new write');
     const fresh = verifyQuoteToken(current, { keys, nowMs: now + 1000, expected: EXPECT, deferTime: true });
     assert.strictEqual(fresh.timeStatus, 'valid');
+    assert.strictEqual(fresh.canConsume, true);
+    const deferredFuture = verifyQuoteToken(future, {
+      keys, nowMs: now, expected: EXPECT, deferTime: true
+    });
+    assert.strictEqual(deferredFuture.ok, true);
+    assert.strictEqual(deferredFuture.timeStatus, 'not_yet_valid');
+    assert.strictEqual(deferredFuture.canConsume, false);
+    assert.strictEqual(verifyQuoteToken(current, {
+      keys, nowMs: now, expected: EXPECT, deferTime: 'true'
+    }).reason, 'invalid_options');
     const forgedLate = verifyQuoteToken(forged, { keys, nowMs: now + QUOTE_TTL_MS + 1, expected: EXPECT, deferTime: true });
     assert.strictEqual(forgedLate.ok, false, 'deferTime NEVER relaxes authenticity — only the clock');
 
@@ -745,7 +794,7 @@ async function check(name, fn) {
     assert.strictEqual(state.routesCalls.length, 6);
   });
 
-  await check('the RESOLVED place id is canonical: routing, response, and intentHash all use it', async () => {
+  await check('the RESOLVED place id is canonical: routing, response, and commitment all use it', async () => {
     // Google documents that Place Details MAY answer with a different
     // id (address-range inference, subpremise components — exactly
     // LinkMia's condo/hotel input class). The submitted id must not
@@ -773,7 +822,8 @@ async function check(name, fn) {
     const p = decodeTokenPayload(q.vehicles.tesla.token);
     assert.strictEqual(p.commitment, computeCommitment(
       { mode: 'dropoff', airportCode: 'MIA', placeId: RESOLVED,
-        pickupAtMs: Date.parse(pickupAt), passengers: 2 },
+        pickupAtMs: Date.parse(pickupAt), passengers: 2,
+        routeMilesTenths: q.route.milesTenths, routeMinutes: q.route.minutes },
       'tesla', q.vehicles.tesla.finalCents, CURRENT_SECRET
     ), 'the commitment 2C recomputes must cover the canonical id');
     // Substitution is observable in telemetry as a BOOLEAN, never an id.
@@ -856,7 +906,8 @@ async function check(name, fn) {
     const q = JSON.parse((await post(goodIntent({ pickupAt }))).body).quote;
     const INTENT = {
       mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-      pickupAtMs: Date.parse(pickupAt), passengers: 2
+      pickupAtMs: Date.parse(pickupAt), passengers: 2,
+      routeMilesTenths: q.route.milesTenths, routeMinutes: q.route.minutes
     };
     const commitments = new Set();
     for (const key of Object.keys(q.vehicles)) {
@@ -870,7 +921,7 @@ async function check(name, fn) {
       // The token verifies ONLY against its own vehicle.
       const keys = [{ id: 'k-2026-08', secret: CURRENT_SECRET }];
       const expected = {
-        purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+        purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         vehicle: key, intent: INTENT
       };
       assert.strictEqual(verifyQuoteToken(q.vehicles[key].token, { keys, nowMs: Date.now(), expected }).ok, true);
@@ -952,17 +1003,18 @@ async function check(name, fn) {
     const now = Date.now();
     const INTENT = {
       mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-      pickupAtMs: now + 3600e3, passengers: 2
+      pickupAtMs: now + 3600e3, passengers: 2,
+      routeMilesTenths: 100, routeMinutes: 28
     };
     const tok = signQuoteToken({
-      purpose: 'create', jti: newJti(), authUserId: 'auth-andres', customerId: 'cust-andres',
+      purpose: 'create', jti: newJti(), authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       vehicle: 'tesla', pickupAtMs: INTENT.pickupAtMs,
       commitment: computeCommitment(INTENT, 'tesla', 4500, CURRENT_SECRET),
       routeQuality: 'traffic_aware', finalCents: 4500,
       pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
     }, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
     const EXPECT = {
-      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       vehicle: 'tesla', intent: INTENT
     };
     const [pb, sig] = tok.split('.');
@@ -987,17 +1039,18 @@ async function check(name, fn) {
     const now = Date.now();
     const INTENT = {
       mode: 'dropoff', airportCode: 'MIA', placeId: ADDRESS_PLACE_ID,
-      pickupAtMs: now + 3600e3, passengers: 2
+      pickupAtMs: now + 3600e3, passengers: 2,
+      routeMilesTenths: 100, routeMinutes: 28
     };
     const tok = signQuoteToken({
-      purpose: 'create', jti: newJti(), authUserId: 'auth-andres', customerId: 'cust-andres',
+      purpose: 'create', jti: newJti(), authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       vehicle: 'tesla', pickupAtMs: INTENT.pickupAtMs,
       commitment: computeCommitment(INTENT, 'tesla', 4500, CURRENT_SECRET),
       routeQuality: 'traffic_aware', finalCents: 4500,
       pricingVersion: 'v', engineVersion: 'e', resolvedVersion: 'v'
     }, { keyId: 'k-2026-08', secret: CURRENT_SECRET, nowMs: now });
     const EXPECT = {
-      purpose: 'create', authUserId: 'auth-andres', customerId: 'cust-andres',
+      purpose: 'create', authUserId: '11111111-1111-4111-8111-111111111111', customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       vehicle: 'tesla', intent: INTENT
     };
     // A 2C author who "pins" the price or the instant this way would
@@ -1061,7 +1114,7 @@ async function check(name, fn) {
     for (const line of state.logLines) {
       assert.ok(!line.includes(ADDRESS_PLACE_ID), 'no place IDs in logs');
       assert.ok(!line.includes('Test St'), 'no addresses in logs');
-      assert.ok(!line.includes('auth-andres') && !line.includes('cust-andres'), 'no identities in logs');
+      assert.ok(!line.includes('11111111-1111-4111-8111-111111111111') && !line.includes('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 'no identities in logs');
       assert.ok(!line.includes('raw provider secret text'), 'no raw provider errors in logs');
     }
     assert.ok(telemetry[0].includes('totalMs'));

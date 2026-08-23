@@ -15,15 +15,18 @@ const assert = require('assert');
 
 const repoRoot = path.resolve(__dirname, '..');
 
-const ANDRES = { id: 'user-andres', email: 'andres@example.test' };
-const AMBASSADOR = { id: 'user-amb', email: 'amb@example.test' };
-const STRANGER = { id: 'user-stranger', email: 'stranger@example.test' };
+const ANDRES_ID = '11111111-1111-4111-8111-111111111111';
+const AMBASSADOR_ID = '22222222-2222-4222-8222-222222222222';
+const STRANGER_ID = '33333333-3333-4333-8333-333333333333';
+const ANDRES = { id: ANDRES_ID, email: 'andres@example.test' };
+const AMBASSADOR = { id: AMBASSADOR_ID, email: 'amb@example.test' };
+const STRANGER = { id: STRANGER_ID, email: 'stranger@example.test' };
 const TOKENS = { 'tok-andres': ANDRES, 'tok-amb': AMBASSADOR, 'tok-stranger': STRANGER };
 
 const state = {};
 function reset() {
-  state.customers = { 'user-andres': { id: 'cust-andres' } };   // ambassador has NO row
-  state.hosts = { 'user-amb': { id: 'host-1', name: 'Isabela M.', phone: '305', email: 'h@x.test', status: 'active' } };
+  state.customers = { [ANDRES_ID]: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } };   // ambassador has NO row
+  state.hosts = { [AMBASSADOR_ID]: { id: 'host-1', name: 'Isabela M.', phone: '305', email: 'h@x.test', status: 'active' } };
   state.customerLookupError = null;
   state.hostLookupError = null;
   state.insertResult = null;      // null -> succeed
@@ -66,7 +69,7 @@ const supabaseMock = {
                     state.rereadPending = true;
                     return state.insertResult;
                   }
-                  const created = { id: 'cust-new' };
+                  const created = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' };
                   state.customers[rows[0].user_id] = created;
                   return { data: created, error: null };
                 },
@@ -172,14 +175,14 @@ console.log('\n/api/quote-ride — access modes and identity recovery\n');
 
 // ---------------- access modes ----------------
 check('allowlist mode: a listed account is served', async () => {
-  const res = await post('tok-andres', { QUOTE_ACCESS_MODE: 'allowlist', QUOTE_SHADOW_ALLOWLIST: 'user-andres' });
+  const res = await post('tok-andres', { QUOTE_ACCESS_MODE: 'allowlist', QUOTE_SHADOW_ALLOWLIST: ANDRES_ID });
   assert.strictEqual(res.statusCode, 200, res.body);
   assert.strictEqual(state.placesCalls.length, 1);
   assert.strictEqual(state.routesCalls.length, 1);
 });
 
 check('allowlist mode: an unlisted account is refused and spends NOTHING', async () => {
-  const res = await post('tok-stranger', { QUOTE_ACCESS_MODE: 'allowlist', QUOTE_SHADOW_ALLOWLIST: 'user-andres' });
+  const res = await post('tok-stranger', { QUOTE_ACCESS_MODE: 'allowlist', QUOTE_SHADOW_ALLOWLIST: ANDRES_ID });
   assert.strictEqual(res.statusCode, 403);
   assert.strictEqual(state.placesCalls.length, 0, 'a denied account must not buy a Places call');
   assert.strictEqual(state.routesCalls.length, 0, 'a denied account must not buy a Routes call');
@@ -188,7 +191,7 @@ check('allowlist mode: an unlisted account is refused and spends NOTHING', async
 check('allowlist mode: a denied ambassador leaves NO customers row behind', async () => {
   // The gate used to sit after identity recovery, so an unlisted ambassador
   // got a row minted for them and then a 403 — a write for someone refused.
-  const res = await post('tok-amb', { QUOTE_ACCESS_MODE: 'allowlist', QUOTE_SHADOW_ALLOWLIST: 'user-andres' });
+  const res = await post('tok-amb', { QUOTE_ACCESS_MODE: 'allowlist', QUOTE_SHADOW_ALLOWLIST: ANDRES_ID });
   assert.strictEqual(res.statusCode, 403);
   assert.deepStrictEqual(state.writes, [], 'a denied account must perform zero writes');
 });
@@ -241,7 +244,7 @@ check('an ALLOWED ambassador with no customers row is recovered from the host re
   const res = await post('tok-amb', { QUOTE_ACCESS_MODE: 'authenticated' });
   assert.strictEqual(res.statusCode, 200, res.body);
   assert.strictEqual(state.writes.length, 1);
-  assert.strictEqual(state.writes[0].user_id, 'user-amb');
+  assert.strictEqual(state.writes[0].user_id, AMBASSADOR_ID);
   assert.strictEqual(state.writes[0].name, 'Isabela M.',
     'identity must come from the HOST record, never from passenger details');
 });
@@ -253,9 +256,9 @@ check('a non-ambassador with no customers row is refused, not minted', async () 
 });
 
 check('an INACTIVE ambassador is refused', async () => {
-  state.hosts['user-amb'].status = 'inactive';
+  state.hosts[AMBASSADOR_ID].status = 'inactive';
   // the handler filters on status='active'; emulate by removing the row
-  delete state.hosts['user-amb'];
+  delete state.hosts[AMBASSADOR_ID];
   const res = await post('tok-amb', { QUOTE_ACCESS_MODE: 'authenticated' });
   assert.strictEqual(res.statusCode, 403);
   assert.deepStrictEqual(state.writes, []);
@@ -279,7 +282,7 @@ check('CONCURRENCY: losing the insert race re-reads instead of failing', async (
   // customers.user_id is UNIQUE, so two requests recovering the same
   // ambassador at once collide by design. The loser must recover.
   state.insertResult = { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
-  state.conflictWinnerRow = { id: 'cust-winner' };   // appears only once we lose
+  state.conflictWinnerRow = { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' };   // appears only once we lose
   const res = await post('tok-amb', { QUOTE_ACCESS_MODE: 'authenticated' });
   assert.strictEqual(res.statusCode, 200, res.body);
   assert.strictEqual(state.rereads, 1, 'the loser must re-read the winner\'s row');
