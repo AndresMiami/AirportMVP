@@ -10,7 +10,7 @@
 |---|---|---|
 | **Passenger-visible authority while mode is `off`** | `pricing.js` (browser, loaded by `indexMVP.html`) | Computes the fare passengers see and submit. The writer RPC records that amount explicitly as `client_legacy`; nothing is charged automatically — payment is cash/Zelle collected at ride time (Stripe disabled). |
 | **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A and wired to quote issuance plus dark writer verification. It is cent-exact with `pricing.js` in the canonical America/New_York case, but is not yet passenger-visible or enforceable while the quote service/browser flag remain off and pricing mode is `off`. |
-| Legacy server endpoint | *(retired in PR 3C-2C-B PR-1)* | The drifted `calculate-price.js` oracle was deleted; both its URLs return explicit 404s. |
+| Legacy server endpoint | *(retired in PR 3C-2C-B PR-1)* | The drifted calculator was removed. An inert 404-only stub remains solely because Netlify reserves the direct function namespace; both former URLs return 404 and no pricing code is reachable. |
 | **Server quote service + token consumer** | `backend/functions/quote-ride.js`; `create-booking.js`; `update-pending-booking.js` | The service issues signed server quotes from trusted route facts. The writer endpoints consume and classify a signed token when one is presented, but the production quote service remains kill-switched and the browser flag is false, so current passengers do not use this path yet. |
 
 The dark writer swap does not change current passenger pricing. The server

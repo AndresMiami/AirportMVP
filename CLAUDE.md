@@ -547,8 +547,9 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     vehicle -> sanitized 400 (sedan default removed), booking_mode
     normalized, unparseable dateTime -> 400, text bounds on create, the
     fabricated B<epoch> tripId fallback removed, 'assigned' added to the
-    legacy pre-check. calculate-price is fully retired (handler deleted,
-    both URLs explicit 404s, doc references removed).
+    legacy pre-check. calculate-price is fully retired (pricing implementation
+    removed; inert direct-path 404 stub, public alias explicit 404,
+    doc references corrected).
     update-booking-status now selects an explicit field list (migration
     017's internal pricing columns no longer leak into driver responses;
     host_commission feeds only the admin receipt). quote-ride's issuance

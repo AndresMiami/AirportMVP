@@ -16,16 +16,12 @@
   publish = "."
 
 # calculate-price retired (PR 3C-2C-B PR-1): it was a routed but uncalled
-# client-distance-to-price oracle — the last spare pricing door. Explicit
-# 404s on BOTH paths (the /admin pattern); the handler file is deleted, so
-# the direct function path cannot serve even if routing regressed.
+# client-distance-to-price oracle — the last spare pricing door. The public
+# API alias is an explicit 404. Netlify reserves /.netlify/functions/* and
+# rejects redirect rules for that namespace, so a fail-closed function stub
+# supplies the direct-path 404 without containing any pricing implementation.
 [[redirects]]
   from = "/api/calculate-price"
-  to = "/admin-retired.html"
-  status = 404
-
-[[redirects]]
-  from = "/.netlify/functions/calculate-price"
   to = "/admin-retired.html"
   status = 404
 

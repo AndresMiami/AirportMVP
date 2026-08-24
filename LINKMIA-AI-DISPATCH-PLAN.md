@@ -51,7 +51,7 @@
 | Function | Endpoint | Status | What It Does |
 |----------|----------|--------|-------------|
 | `create-booking.js` | POST `/api/create-booking` | **Working** | Writes through the atomic `accept_quote_create` RPC, then sends the Telegram doorbell only for a new booking |
-| `calculate-price.js` | Both former URLs | **Retired** | Handler deleted; explicit 404s close the old client-distance pricing oracle |
+| `calculate-price.js` | Both former URLs | **Retired** | Inert 404-only stub protects Netlify's reserved direct path; the public alias is an explicit 404 and no pricing implementation remains |
 | `create-payment-intent.js` | POST `/api/create-payment-intent` | **Working** | Stripe PaymentIntent creation |
 | `create-payment.js` | POST `/api/create-payment` | **Working** | Duplicate of above |
 | `create-checkout-session.js` | POST `/api/create-checkout-session` | **Working** | Stripe Checkout hosted page |

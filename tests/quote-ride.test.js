@@ -1157,20 +1157,28 @@ async function check(name, fn) {
 
   await check('calculate-price retirement is complete and pinned behind the cache refresh', async () => {
     const fs = require('fs');
-    assert.strictEqual(
-      fs.existsSync(path.join(repoRoot, 'backend/functions/calculate-price.js')),
-      false,
-      'the retired handler must not exist'
-    );
+    const retiredHandlerPath = path.join(repoRoot, 'backend/functions/calculate-price.js');
+    assert.strictEqual(fs.existsSync(retiredHandlerPath), true,
+      'reserved direct function path requires a fail-closed stub');
+    const retiredSource = fs.readFileSync(retiredHandlerPath, 'utf8');
+    assert.ok(!/ride-quote|ride-rate-card|pricing\.js|calculatePrice|fetch\s*\(/.test(retiredSource),
+      'retired stub contains no calculator or provider path');
+    const directResponse = await require(retiredHandlerPath).handler({
+      httpMethod: 'POST', body: JSON.stringify({ distance: 1, duration: 1 })
+    });
+    assert.strictEqual(directResponse.statusCode, 404);
+    assert.deepStrictEqual(JSON.parse(directResponse.body), { error: 'calculate-price retired' });
+    assert.strictEqual(directResponse.headers['Cache-Control'], 'private, no-store');
     const toml = fs.readFileSync(path.join(repoRoot, 'netlify.toml'), 'utf8');
     const catchAllAt = toml.indexOf('from = "/*"');
-    for (const retiredPath of ['/api/calculate-price', '/.netlify/functions/calculate-price']) {
-      const at = toml.indexOf(`from = "${retiredPath}"`);
-      assert.ok(at >= 0 && (catchAllAt < 0 || at < catchAllAt), `${retiredPath} 404 must precede catch-all`);
-      const block = toml.slice(at, toml.indexOf('[[redirects]]', at + 1));
-      assert.ok(/to\s*=\s*"\/admin-retired\.html"/.test(block), `${retiredPath} targets retired page`);
-      assert.ok(/status\s*=\s*404/.test(block), `${retiredPath} is an explicit 404`);
-    }
+    const aliasAt = toml.indexOf('from = "/api/calculate-price"');
+    assert.ok(aliasAt >= 0 && (catchAllAt < 0 || aliasAt < catchAllAt),
+      'public calculate-price 404 must precede catch-all');
+    const aliasBlock = toml.slice(aliasAt, toml.indexOf('[[redirects]]', aliasAt + 1));
+    assert.ok(/to\s*=\s*"\/admin-retired\.html"/.test(aliasBlock));
+    assert.ok(/status\s*=\s*404/.test(aliasBlock));
+    assert.strictEqual(toml.includes('from = "/.netlify/functions/calculate-price"'), false,
+      'Netlify rejects redirect rules in its reserved function namespace');
     const apiConfig = fs.readFileSync(path.join(repoRoot, 'api-config.js'), 'utf8');
     assert.ok(!apiConfig.includes('/api/calculate-price'));
     assert.ok(!apiConfig.includes('calculatePrice'));
