@@ -1,9 +1,23 @@
-// Authenticated, in-place editing for an account-owned pending ride.
-// The booking identity never changes: id, trip_id, customer_id and created_at
-// are deliberately absent from the update payload. A guarded status + version
-// UPDATE arbitrates the passenger Edit-vs-driver Accept race.
+// Authenticated, in-place editing for an account-owned pending ride —
+// PR 3C-2C-B PR-1 (plan v3.1): the WRITER SWAP. The guarded direct UPDATE is
+// replaced by migration 017's accept_quote_edit RPC — ONE lane for every
+// full-form edit (accept_optional_edit is reserved for Manage Ride's future
+// explicit patch interface; no diff-based lane selection exists anywhere).
+// The RPC owns ownership, the pending+unassigned gate, the details_version
+// CAS, optional-field preservation, booker coherence, and the frozen
+// commission ratio; the booking identity never changes.
+//
+// payment_method is IGNORED UNCONDITIONALLY and never included in p_edit:
+// the current browser force-sends a default ('cash'), so field presence can
+// never mean "the passenger changed payment". The stored value survives
+// every edit until a real payment-control contract exists.
 
 const { createClient } = require('@supabase/supabase-js');
+const {
+  sha256Hex, isUuid, readPresentedToken, classifyToken, recoveryLookup,
+  sharedOutcomeResponse, unknownOutcomeResponse
+} = require('./lib/booking-writer');
+const { isValidPlaceId } = require('./lib/place-identity');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VEHICLE_TYPE = {
@@ -12,6 +26,8 @@ const VEHICLE_TYPE = {
   'Black Escalade': 'suv', 'Cadillac Escalade': 'suv',
   Sprinter: 'sprinter', sprinter: 'sprinter', 'Mercedes Sprinter': 'sprinter'
 };
+const VEHICLE_KEYS = ['tesla', 'escalade', 'sprinter'];
+const AIRPORT_CODES = ['MIA', 'FLL', 'PBI'];
 
 const RESPONSE_FIELDS = 'id, trip_id, status, pickup_location, dropoff_location, pickup_datetime, vehicle_type, vehicle_name, passengers, bags, price, payment_status, customer_name, flight_number, duration_minutes, details_version';
 
@@ -49,7 +65,7 @@ async function requirePassenger(event, supabaseUrl, anonKey, db) {
       return { status: 500, error: 'Could not verify account' };
     }
     if (!customer) return { status: 403, error: 'Account profile incomplete' };
-    return { customerId: customer.id };
+    return { customerId: customer.id, authUserId: userData.user.id };
   } catch (error) {
     console.error('pending-edit auth failed:', error.code || error.name || 'auth_error');
     return { status: 500, error: 'Could not verify sign-in' };
@@ -86,11 +102,19 @@ function parseEdit(body) {
   const vehicleType = VEHICLE_TYPE[vehicleName];
   if (!vehicleType) return { error: 'Invalid vehicle' };
 
+  const operationId = body.operationId ?? null;
+  if (operationId !== null && !isUuid(operationId)) {
+    return { error: 'Invalid ride details' };
+  }
+
   return {
     bookingId,
     expectedVersion,
-    // Required ride details: always full-replace (the form re-validates
-    // them on every edit).
+    operationId,
+    price,
+    pickupMs,
+    // Full-replace ride details (the form re-validates them every edit).
+    // payment_method is deliberately ABSENT — ignored unconditionally.
     values: {
       customer_name: customerName,
       customer_phone: phone,
@@ -101,15 +125,13 @@ function parseEdit(body) {
       bags,
       vehicle_type: vehicleType,
       vehicle_name: vehicleName,
-      price: Math.round(price * 100) / 100,
-      payment_method: text(body.paymentMethod, 30) || 'cash',
       booking_mode: body.mode === 'pickup' ? 'pickup' : 'dropoff',
       duration_minutes: duration
     },
-    // Optional personal details: null here means "not submitted/blank" —
-    // the handler PRESERVES the stored value in that case (a restored
-    // session or fresh device starts from an empty form and must never
-    // silently erase data the passenger didn't retype).
+    // Optional personal details: omitted keys mean "not submitted/blank" —
+    // the RPC preserves the stored value in that case (a restored session
+    // or fresh device starts from an empty form and must never silently
+    // erase data the passenger didn't retype).
     optional: {
       customer_email: text(body.email, 254),
       flight_number: text(body.flightNumber, 80),
@@ -117,8 +139,9 @@ function parseEdit(body) {
       pickup_sign: text(body.pickupSign, 160),
       promo_code: text(body.promoCode, 80)
     },
-    // Booker pair, resolved coherently against the stored row in the
-    // handler (a phone may only ever be stored alongside a name).
+    // Booker pair: the RPC resolves coherence against the stored row (a
+    // phone may only ever be stored alongside a name; submitting the
+    // passenger's own name clears the pair; a blank name preserves it).
     booker: {
       name: text(body.bookerName, 120),
       phone: text(body.bookerPhone, 40)
@@ -185,102 +208,236 @@ exports.handler = async (event) => {
     return { statusCode: auth.status, headers, body: JSON.stringify({ error: auth.error }) };
   }
 
+  // The RAW body string is the envelope identity (request_digest hashes
+  // exactly these bytes). Never log it.
+  const rawBody = event.body || '';
   let body;
-  try { body = JSON.parse(event.body || '{}'); } catch (_) {
+  try { body = JSON.parse(rawBody); } catch (_) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) };
   }
   const edit = parseEdit(body);
   if (edit.error) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: edit.error }) };
   }
+  const requestDigest = edit.operationId ? sha256Hex(rawBody) : null;
+  const presentedToken = readPresentedToken(body);
+  if (presentedToken.invalid) {
+    return { statusCode: 409, headers, body: JSON.stringify({ error: 'quote_invalid', requote: true }) };
+  }
+  const quoteToken = presentedToken.token;
 
   try {
-    const { data: current, error: readError } = await db
-      .from('bookings')
-      .select('id, trip_id, status, assigned_driver, customer_id, details_version, price, host_commission, customer_email, booker_name, booker_phone, flight_number, notes, pickup_sign, promo_code')
-      .eq('id', edit.bookingId)
-      .maybeSingle();
-    if (readError) {
-      console.error('pending-edit booking lookup failed:', readError.code || 'db_error');
-      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not load booking' }) };
-    }
-    if (!current) return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
-    if (current.customer_id !== auth.customerId) {
-      return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not your booking' }) };
-    }
-    if (current.status !== 'pending' || current.assigned_driver) {
-      return {
-        statusCode: 409,
-        headers,
-        body: JSON.stringify({ error: 'Ride is no longer editable', currentStatus: current.status })
-      };
-    }
+    // ============================================
+    // TOKEN CLASSIFICATION (edit purpose). PR-1 ships this dark — no
+    // browser sends edit tokens until PR-2 — but the contract is complete
+    // and behaviorally tested. Signing config resolves LAZILY.
+    // ============================================
+    let verdict = 'no_token';
+    let verifiedPayload = null;
+    let verifiedJti = null;
+    let presentedDigest = null;
+    let canonicalPlaceId = null;
+    let airportCode = null;
+    let vehicleKey = null;
+    let routeMinutes = null;
 
-    // Preserve the commission percentage agreed at creation instead of
-    // silently applying a host's possibly-changed current rate.
-    const oldPrice = Number(current.price);
-    const oldHostCommission = Number(current.host_commission);
-    const commissionRate = oldPrice > 0 && oldHostCommission > 0
-      ? oldHostCommission / oldPrice : 0;
-
-    // Optional-field preservation: a non-empty submitted value replaces;
-    // a missing/blank one preserves the stored value. Explicitly CLEARING
-    // an optional field is DEFERRED until the editor receives protected
-    // server-side prefill data — until then a blank input cannot be
-    // distinguished from an untouched one.
-    const preserved = {};
-    for (const [col, submitted] of Object.entries(edit.optional)) {
-      preserved[col] = submitted !== null ? submitted : (current[col] ?? null);
-    }
-
-    // Booker pair coherence (create-booking parity): booker_phone may only
-    // be stored alongside a meaningful booker_name. Submitting the
-    // passenger's own name is an explicit "for myself" and clears the
-    // pair; a blank name preserves the stored pair; an orphaned phone is
-    // never written.
-    let bookerName = null;
-    let bookerPhone = null;
-    if (edit.booker.name) {
-      if (edit.booker.name !== edit.values.customer_name) {
-        bookerName = edit.booker.name;
-        bookerPhone = edit.booker.phone;
+    if (quoteToken) {
+      vehicleKey = body.vehicleKey;
+      airportCode = body.airportCode;
+      canonicalPlaceId = body.placeId;
+      const routeMilesTenths = body.routeMilesTenths;
+      routeMinutes = body.routeMinutes;
+      const contractValid =
+        VEHICLE_KEYS.includes(vehicleKey) &&
+        AIRPORT_CODES.includes(airportCode) &&
+        isValidPlaceId(canonicalPlaceId) &&
+        Number.isInteger(routeMilesTenths) && routeMilesTenths >= 0 &&
+        Number.isInteger(routeMinutes) && routeMinutes >= 1 && routeMinutes <= 1440 &&
+        Number.isSafeInteger(edit.pickupMs);
+      if (!contractValid) {
+        return { statusCode: 409, headers, body: JSON.stringify({ error: 'quote_invalid', requote: true }) };
       }
-    } else if (current.booker_name) {
-      bookerName = current.booker_name;
-      bookerPhone = current.booker_phone || null;
+
+      const classification = classifyToken(quoteToken, {
+        env: process.env,
+        nowMs: Date.now(),
+        expected: {
+          purpose: 'edit',
+          authUserId: auth.authUserId,
+          customerId: auth.customerId,
+          vehicle: vehicleKey,
+          intent: {
+            mode: edit.values.booking_mode,
+            airportCode,
+            placeId: canonicalPlaceId,
+            pickupAtMs: edit.pickupMs,
+            passengers: edit.values.passengers,
+            routeMilesTenths,
+            routeMinutes
+          }
+        }
+      });
+
+      if (classification.kind === 'oversize') {
+        return { statusCode: 409, headers, body: JSON.stringify({ error: 'quote_invalid', requote: true }) };
+      }
+      if (classification.kind === 'keys_unavailable') {
+        // READ-ONLY recovery only (plan v3.1 §3.2(c)); unmatched requests
+        // are a sanitized 500 with no RPC call and no write, every mode.
+        const recovered = await recoveryLookup(db, {
+          operationId: edit.operationId,
+          requestDigest,
+          tokenDigest: classification.digest,
+          authUserId: auth.authUserId,
+          customerId: auth.customerId,
+          kind: 'edit',
+          bookingId: edit.bookingId
+        });
+        if (recovered && recovered.bookingId) {
+          const { data: row, error: rereadError } = await db
+            .from('bookings')
+            .select(RESPONSE_FIELDS)
+            .eq('id', recovered.bookingId)
+            .maybeSingle();
+          if (rereadError || !row) {
+            console.error('pending-edit recovery re-read failed');
+            return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not process this request' }) };
+          }
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              success: true,
+              bookingId: row.id,
+              tripId: row.trip_id,
+              detailsVersion: row.details_version,
+              booking: row,
+              idempotent: true
+            })
+          };
+        }
+        console.error('pending-edit signing configuration unavailable — unmatched request refused');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not process this request' }) };
+      }
+      if (classification.kind === 'verified') {
+        verdict = 'verified';
+        verifiedPayload = classification.payload;
+        verifiedJti = classification.payload.jti;
+        presentedDigest = classification.digest;
+      } else {
+        verdict = 'verify_failed';
+        presentedDigest = classification.digest;
+      }
     }
 
-    const updates = {
-      ...edit.values,
-      ...preserved,
-      booker_name: bookerName,
-      booker_phone: bookerPhone,
-      host_commission: Math.round(edit.values.price * commissionRate * 100) / 100,
-      details_version: edit.expectedVersion + 1,
-      updated_at: new Date().toISOString()
-    };
+    // ============================================
+    // FAST PRE-CHECKS — bare legacy requests only (today's 403/404/409
+    // shapes). A request carrying an operationId or token goes straight
+    // to the RPC so a lost response + exact retry lands on its receipt
+    // instead of being intercepted by a state that already moved.
+    // ============================================
+    if (!edit.operationId && !quoteToken) {
+      const { data: current, error: readError } = await db
+        .from('bookings')
+        .select('id, status, assigned_driver, customer_id')
+        .eq('id', edit.bookingId)
+        .maybeSingle();
+      if (readError) {
+        console.error('pending-edit booking lookup failed:', readError.code || 'db_error');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not load booking' }) };
+      }
+      if (!current) return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
+      if (current.customer_id !== auth.customerId) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not your booking' }) };
+      }
+      if (current.status !== 'pending' || current.assigned_driver) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'Ride is no longer editable', currentStatus: current.status })
+        };
+      }
+    }
 
-    const { data: updated, error: updateError } = await db
-      .from('bookings')
-      .update(updates)
-      .eq('id', edit.bookingId)
-      .eq('customer_id', auth.customerId)
-      .eq('status', 'pending')
-      .eq('details_version', edit.expectedVersion)
-      .is('assigned_driver', null)
-      .select(RESPONSE_FIELDS)
-      .maybeSingle();
+    // ============================================
+    // THE ATOMIC WRITER — accept_quote_edit (migration 017). One lane for
+    // every full-form edit. The RPC enforces ownership, pending+unassigned,
+    // the details_version CAS, epoch binding for edit tokens, optional
+    // preservation, booker coherence, and derives host_commission from the
+    // stored ratio and the authoritative fare.
+    // ============================================
+    const pEdit = { ...edit.values };
+    if (verdict === 'verified' || verdict === 'verify_failed') {
+      // Every validated modern quote contract carries routeMinutes. Even
+      // when the signature fails in off/observe, preserve that internally
+      // coherent route snapshot; only a genuinely token-less legacy edit
+      // may reuse/preserve legacy duration.
+      pEdit.duration_minutes = routeMinutes;
+    } else if (pEdit.duration_minutes === null) {
+      // Omitted key preserves the stored value (RPC COALESCE rule).
+      delete pEdit.duration_minutes;
+    }
+    for (const [col, submitted] of Object.entries(edit.optional)) {
+      if (submitted !== null) pEdit[col] = submitted;
+    }
+    if (edit.booker.name !== null) {
+      pEdit.booker_name = edit.booker.name;
+      if (edit.booker.phone !== null) pEdit.booker_phone = edit.booker.phone;
+    }
 
-    if (updateError) {
-      console.error('pending-edit update failed:', updateError.code || 'db_error');
+    const { data: result, error: rpcError } = await db.rpc('accept_quote_edit', {
+      p_auth_user_id: auth.authUserId,
+      p_customer_id: auth.customerId,
+      p_operation_request_id: edit.operationId,
+      p_request_digest: requestDigest,
+      p_booking_id: edit.bookingId,
+      p_expected_details_version: edit.expectedVersion,
+      p_verdict: verdict,
+      p_jti: verdict === 'verified' ? verifiedJti : null,
+      p_token_digest: verdict === 'no_token' ? null : presentedDigest,
+      p_payload: verdict === 'verified' ? verifiedPayload : null,
+      p_client_price: edit.price,
+      p_canonical_place_id: verdict === 'verified' ? canonicalPlaceId : null,
+      p_airport_code: verdict === 'verified' ? airportCode : null,
+      p_vehicle_key: verdict === 'verified' ? vehicleKey : null,
+      p_edit: pEdit
+    });
+
+    if (rpcError) {
+      console.error('❌ accept_quote_edit failed:', rpcError.code || 'rpc_error');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Changes were not saved' }) };
     }
-    if (!updated) {
-      // Lost the guarded race — report live truth HONESTLY (the same
-      // discipline as cancellation): a present booking answers 409 with
-      // its real status + version, a genuinely missing booking is 404,
-      // and a failed re-read is a real 500 — never a guessed 409
-      // 'unknown' that could disguise a database outage as a race.
+
+    const outcome = result && typeof result === 'object' ? result.outcome : null;
+
+    if (outcome === 'updated' || outcome === 'idempotent') {
+      const { data: row, error: rereadError } = await db
+        .from('bookings')
+        .select(RESPONSE_FIELDS)
+        .eq('id', edit.bookingId)
+        .maybeSingle();
+      if (rereadError || !row) {
+        console.error('pending-edit post-commit re-read failed');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not confirm the changes' }) };
+      }
+      if (outcome === 'updated') {
+        await sendUpdatedDoorbell(row);
+      }
+      const responseBody = {
+        success: true,
+        bookingId: row.id,
+        tripId: row.trip_id,
+        detailsVersion: row.details_version,
+        booking: row
+      };
+      if (outcome === 'idempotent') responseBody.idempotent = true;
+      return { statusCode: 200, headers, body: JSON.stringify(responseBody) };
+    }
+
+    if (outcome === 'version_conflict' || outcome === 'not_editable') {
+      // Honest live truth, as before: a present booking answers with its
+      // real status + version; a missing one is 404; a failed re-read is
+      // a real 500 — never a guessed conflict.
       const { data: latest, error: rereadError } = await db
         .from('bookings')
         .select('status, details_version')
@@ -293,6 +450,13 @@ exports.handler = async (event) => {
       if (!latest) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
       }
+      if (outcome === 'not_editable') {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'Ride is no longer editable', currentStatus: latest.status })
+        };
+      }
       return {
         statusCode: 409,
         headers,
@@ -304,18 +468,35 @@ exports.handler = async (event) => {
       };
     }
 
-    await sendUpdatedDoorbell(updated);
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        bookingId: updated.id,
-        tripId: updated.trip_id,
-        detailsVersion: updated.details_version,
-        booking: updated
-      })
-    };
+    if (outcome === 'not_found') {
+      return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
+    }
+
+    if (outcome === 'quote_consumed') {
+      // Identity-gated by the RPC: this caller's quote already bought an
+      // edit of THIS booking (a sibling vehicle token replay). The edit
+      // registry answers with requote guidance plus the live version so
+      // the browser reloads state and quotes fresh — the create-side
+      // reopen shape does not fit an edit.
+      const { data: latest } = await db
+        .from('bookings')
+        .select('details_version')
+        .eq('id', edit.bookingId)
+        .maybeSingle();
+      return {
+        statusCode: 409,
+        headers,
+        body: JSON.stringify({
+          error: 'quote_stale',
+          requote: true,
+          currentDetailsVersion: latest ? latest.details_version : null
+        })
+      };
+    }
+
+    const shared = sharedOutcomeResponse(outcome);
+    const mapped = shared || unknownOutcomeResponse(outcome);
+    return { statusCode: mapped.statusCode, headers, body: JSON.stringify(mapped.body) };
   } catch (error) {
     console.error('pending-edit unexpected failure:', error.code || error.name || 'unexpected');
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Changes were not saved' }) };

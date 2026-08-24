@@ -67,7 +67,6 @@ AirportMVP/
 │       ├── create-booking.js  # Booking + WhatsApp notification
 │       ├── create-payment-intent.js  # Stripe PaymentIntent
 │       ├── create-checkout-session.js
-│       ├── calculate-price.js # Server-side pricing
 │       └── stripe-config.js
 │
 ├── database/
@@ -120,7 +119,7 @@ AirportMVP/
 │  (Express)       │  │                       │  │   (PostgreSQL)   │
 │                  │  │  /api/create-booking  │  │                  │
 │  /api/places/*   │  │  /api/create-payment  │  │  Tables:         │
-│  /api/directions │  │  /api/calculate-price │  │  - customers     │
+│  /api/directions │  │  (retired)           │  │  - customers     │
 │                  │  │                       │  │  - drivers       │
 │  Features:       │  │  Integrates:          │  │  - bookings      │
 │  - Rate limiting │  │  - Twilio (WhatsApp)  │  │  - hosts         │

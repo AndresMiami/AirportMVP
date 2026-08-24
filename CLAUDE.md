@@ -518,15 +518,61 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     `docs/3C-2C-PLAN-V5-ADDENDUM.md` for the four ratified corrections and
     `docs/MIGRATION-017-RUNBOOK.md` for the preflight, quiet-window, live-smoke,
     and destructive emergency-rollback procedure.
-  * PR 3C-2C — NEXT, in this order: run the reviewed migration 017 only
-    after its production preflight passes; build 2C-B so create/edit
-    writers verify and consume quotes through the atomic RPCs and replace
-    2B2's stale-price alert with the ratified silent refresh; enter
-    observe mode; restore the quote-service production configuration
-    and smoke it while the browser flag remains off; flip the browser
-    flag last; observe real traffic before the irreversible move to
-    enforce. One mechanism serves pending and future confirmed edits;
-    confirmed editing remains a later product step.
+  * Migration 017 — RUN IN PRODUCTION (2026-08-23, checksum-matched
+    rollout artifact, Andres-authorized; preflight all-pass, post-install
+    grid + rollback-contained smoke verified, watchdog resumed).
+    pricing_state mode is `off`; the quote ledgers are empty.
+  * PR 3C-2C-B — plan v3.1 ratified (Codex GO, sign-off on file): TWO dark
+    PRs. **PR-1 (this branch) — the WRITER SWAP, dark:** create-booking and
+    update-pending-booking write through accept_quote_create /
+    accept_quote_edit (ride-quote.js calculates; signed tokens carry its
+    result; the RPCs verify, consume, and store — they are not a second
+    calculator). ONE lane for every full-form edit; accept_optional_edit
+    ships unused, reserved for Manage Ride. Envelope contract: operationId
+    travels INSIDE the serialized body, request_digest = sha256(raw body),
+    exact-byte retries land on operation receipts (requests with an
+    operationId or token BYPASS the endpoint pre-checks so the RPC
+    arbitrates recovery). Three-way token classification with LAZY signing
+    config: authentic (incl. stale, deferTime — the RPC refuses new writes
+    in every mode), verify_failed (working resolver + digest), and
+    keys-unavailable (READ-ONLY identity/kind/digest-gated recovery; an
+    unmatched request is a sanitized 500 with NO RPC call in every mode).
+    Exhaustive fail-closed outcome registry (428 outdated_client /
+    quote_required with reload:true; requote:true on quote_expired /
+    quote_invalid / quote_stale; unknown outcomes and raw 23505 never
+    leak). Edit paymentMethod is IGNORED UNCONDITIONALLY (the browser
+    force-sends 'cash'; stored values survive). Post-RPC re-reads feed
+    responses and doorbells; doorbells only on genuinely new
+    created/updated, bounded 2s timeout. Deliberate tightenings: unknown
+    vehicle -> sanitized 400 (sedan default removed), booking_mode
+    normalized, unparseable dateTime -> 400, text bounds on create, the
+    fabricated B<epoch> tripId fallback removed, 'assigned' added to the
+    legacy pre-check. calculate-price is fully retired (pricing implementation
+    removed; inert direct-path 404 stub, public alias explicit 404,
+    doc references corrected).
+    update-booking-status now selects an explicit field list (migration
+    017's internal pricing columns no longer leak into driver responses;
+    host_commission feeds only the admin receipt). quote-ride's issuance
+    floor refuses routes outside 1..1440 whole minutes (the SQL-consumable
+    band); the pricing ENGINE's wider bound is untouched (golden parity).
+    **PR-2 — NEXT, dark:** edit-purpose quoting (owner + status +
+    expectedDetailsVersion checked BEFORE any Google call), the browser
+    envelope (bounded timeout, one exact retry, durable same-tab pending
+    envelope bound to the account, "Check again" recovery), passive expiry
+    (idle = zero provider calls; the stale primary action stays CLICKABLE
+    as "Refresh and Book/Save"; tap snapshot {intent, vehicle, cents,
+    acceptedQuoteSeq} with a separate refreshSeq; at most 1 quiet re-quote
+    + 1 auto-resubmit per tap, changed price = new tap), restored-edit
+    interaction markers (route/pickupAt/vehicle/traveler — prefilled never
+    counts), 1..1440 alignment in quote-token/browser validators, SW bump.
+    Then the plan-v3.1 activation ladder (secrets -> prove-503 rebuild ->
+    kill switch off -> airport smoke -> observe -> browser flag + SW bump
+    -> graduation evidence -> enforce, each rung Andres-authorized;
+    post-enforce emergency = mode `blocked` ONLY). Graduation blocks on
+    zero non-test no_request_id/no_token/verify_failed traffic; the Google
+    storage/policy review gate remains OPEN and is carried to activation.
+    One mechanism serves pending and future confirmed edits; confirmed
+    editing remains a later product step.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
     machinery extended (same form/row/details_version CAS), edits
     immediately authoritative, NO driver approval queue (release is the

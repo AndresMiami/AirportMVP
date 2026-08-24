@@ -28,7 +28,7 @@ export const API_CONFIG = {
     
     // Netlify Functions (serverless)
     booking: {
-      calculatePrice: '/api/calculate-price',
+      // calculate-price retired (PR 3C-2C-B PR-1) — both URLs are 404s.
       createBooking: '/api/create-booking',
       createPaymentIntent: '/api/create-payment-intent',
       confirmPayment: '/api/confirm-payment',
@@ -60,13 +60,6 @@ export const API_CONFIG = {
   },
 
   // Specific API methods
-  async calculatePrice(tripData) {
-    return this.apiCall(this.endpoints.booking.calculatePrice, {
-      method: 'POST',
-      body: JSON.stringify(tripData)
-    });
-  },
-
   async createBooking(bookingData) {
     return this.apiCall(this.endpoints.booking.createBooking, {
       method: 'POST',

@@ -392,10 +392,16 @@ exports.handler = async (event) => {
     // The token/acceptance contract uses integer route units, never a
     // floating-point mileage spelling. These are the EXACT quantized values
     // the engine prices: tenths of a mile and whole minutes.
+    // ISSUANCE FLOOR (plan v3.1 §F / PR-1): the database consumes verified
+    // durations only from 1 through 1440 whole minutes, so a route outside
+    // that band must never be signed — a validly signed but SQL-impossible
+    // quote would otherwise trigger a paid re-quote loop. (The pricing
+    // engine's wider 0..10080 money-safety bound is a separate belt and
+    // deliberately untouched — golden parity preserves its quirks.)
     const routeMilesTenths = Math.round(route.routeMiles * 10);
     const routeMinutes = route.routeMinutes;
     if (!Number.isSafeInteger(routeMilesTenths) || routeMilesTenths < 0 ||
-        !Number.isSafeInteger(routeMinutes) || routeMinutes < 0) {
+        !Number.isSafeInteger(routeMinutes) || routeMinutes < 1 || routeMinutes > 1440) {
       console.error('❌ quote-ride canonical route projection invalid');
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Pricing unavailable' }) };
     }

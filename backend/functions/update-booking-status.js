@@ -274,7 +274,14 @@ exports.handler = async (event) => {
       // recognized below as a verified idempotent duplicate.
       query = query.is('driver_ready_at', null);
     }
-    const { data, error } = await query.select();
+    // Explicit allowlist (PR 3C-2C-B PR-1): migration 017 added internal
+    // pricing columns (price_authority, active_slot, assignment_epoch,
+    // canonical_place_id, multi_booking_exempt) that a bare select() would
+    // leak into driver client responses. Selection = the driver-bookings
+    // DRIVER_FIELDS contract plus host_commission, which only the Telegram
+    // receipt reads and which is stripped from the client response below.
+    const UPDATE_SELECT_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, dropoff_location, vehicle_type, vehicle_name, passengers, bags, price, driver_payout, payment_status, flight_number, duration_minutes, customer_name, customer_phone, booker_name, booker_phone, pickup_sign, notes, accepted_at, driver_ready_at, driver_ready_source, details_version, host_commission';
+    const { data, error } = await query.select(UPDATE_SELECT_FIELDS);
 
     if (error) {
       // Release reaccept guard (migration 016): the database refuses to
@@ -354,7 +361,10 @@ exports.handler = async (event) => {
     // on completion. Informational only — all control stays in the web app.
     await sendReceipt(action, data[0]);
 
-    return { statusCode: 200, headers, body: JSON.stringify({ success: true, booking: data[0] }) };
+    // host_commission is deliberately excluded from driver payloads
+    // (driver-bookings parity) — it feeds only the admin receipt above.
+    const { host_commission, ...driverSafeBooking } = data[0];
+    return { statusCode: 200, headers, body: JSON.stringify({ success: true, booking: driverSafeBooking }) };
   } catch (error) {
     console.error('❌ update-booking-status error:', error);
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Internal error' }) };
