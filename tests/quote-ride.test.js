@@ -1264,6 +1264,12 @@ async function check(name, fn) {
     assert.strictEqual(state.bookingLookups.length, 1);
     assert.strictEqual(state.bookingLookups[0].googleCallsAtLookup, 0,
       'the lookup happens BEFORE the first provider call');
+    assert.strictEqual(state.bookingLookups[0].col, 'id',
+      'the lookup filters on the booking id column');
+    for (const col of ['customer_id', 'status', 'assigned_driver', 'details_version', 'assignment_epoch']) {
+      assert.ok(state.bookingLookups[0].cols.includes(col),
+        `the lookup selects ${col} — every gate fact comes from the row`);
+    }
     assert.strictEqual(googleCalls(), 2, 'a passing edit gate buys the normal one Places + one Routes');
 
     const quote = JSON.parse(res.body).quote;

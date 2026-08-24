@@ -162,6 +162,7 @@ async function run() {
   }
   results.forEach((r) => console.log(r));
   console.log(`\n  ALL ${checks} CHECKS PASS\n`);
+  process.exitCode = 0;   // the only success exit — a hung check drains to 1
 }
 
 // ---------------- fake DOM ----------------
@@ -1225,9 +1226,9 @@ check('EDIT RACE: a quote timer queued before an edit begins does not fire insid
   // queued create-scoped timer through invalidateQuote (which clears the
   // debounce BEFORE its idle early-return). Assert the real code wires that,
   // then replay the same sequence against the queued timer.
-  assert.ok(appBlock.includes(
-    "invalidateQuote('pending edit started — create-scoped quotes do not apply')"),
-    'beginPendingEdit must invalidate create-scoped quote state at edit start');
+  assert.match(appBlock,
+    /this\.invalidateQuote\('pending edit started — create-scoped quotes do not apply'\)/,
+    'beginPendingEdit must CALL invalidateQuote at edit start (a comment cannot satisfy this)');
   app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 2 };
   app.invalidateQuote('pending edit started — create-scoped quotes do not apply');
   runTimers();
@@ -1309,7 +1310,7 @@ function routedFetch(routes) {
     calls.push(call);
     const route = routes[url];
     if (!route) throw new Error(`unrouted fetch: ${url}`);
-    const r = typeof route === 'function' ? route(call, calls) : route;
+    const r = await (typeof route === 'function' ? route(call, calls) : route);
     const status = r.status ?? 200;
     return { ok: status >= 200 && status < 300, status, json: async () => r.body };
   };
@@ -1427,6 +1428,9 @@ check('TAP on a stale quote: a CHANGED price never auto-submits — it asks for 
   assert.strictEqual(alerts.length, 0, 'the note is quiet — no alert, no "refused"');
   assert.strictEqual(app.selectedQuoteVehicle().finalCents, 4900,
     'the refreshed price is on screen for the passenger to review');
+  const note = app.els.bookBtn.children.find((c) => c.className === 'btn-sub-text');
+  assert.ok(note && /review the new price/i.test(note.textContent),
+    'the quiet one-liner actually RENDERS (the note target is created if missing)');
 });
 
 check('REQUOTE: a server requote spends the tap budget — refresh, ONE resubmit, then stop', async () => {
@@ -1540,6 +1544,113 @@ check('RECOVERY OFFER: bound to the account — another subject\'s envelope is d
   assert.ok(card, 'the same account gets the offer');
   assert.match(card.children[0].textContent, /couldn't confirm your last ride change/,
     'an edit envelope says change, not booking');
+
+  // "Check again" on the edit envelope: a recovered edit is a COMMITTED
+  // edit — the edit session closes and the server's version is adopted,
+  // exactly like the direct save path.
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  ctx.fetch = routedFetch({
+    '/api/update-pending-booking': { status: 200, body: { bookingId: 'b-1', tripId: 'LM-1', detailsVersion: 9 } },
+  });
+  await card.children[1].listeners.click[0]();
+  assert.deepStrictEqual(sheets, ['b-1']);
+  assert.strictEqual(app.pendingEdit, null, 'the recovered edit closes the edit session');
+  assert.strictEqual(ctx.currentActiveBooking?.details_version, 9,
+    'the committed version is adopted for the next edit');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null);
+  assert.strictEqual(card.removed, true);
+});
+
+check('IN-FLIGHT: nothing re-enables the button mid-POST, and a second tap is inert', async () => {
+  let releaseCreate;
+  const createGate = new Promise((r) => { releaseCreate = r; });
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': async () => { await createGate; return CREATED; },
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  const storedEnvelopes = [];
+  const origSet = ctx.sessionStorage.setItem;
+  ctx.sessionStorage.setItem = (k, v) => { if (k === 'lm_pending_envelope') storedEnvelopes.push(v); return origSet(k, v); };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const pending = tap(app);
+  assert.ok(pending);
+  await new Promise((r) => setTimeout(r, 0));   // let the chain reach the gated POST
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'sanity: the POST is in flight');
+
+  // Mid-flight, the quote expires and the expiry path recomputes the button…
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+  app.renderQuoteState();
+  assert.strictEqual(app.els.bookBtn.disabled, true,
+    'expiry recompute must NOT resurrect the button while a submission is in flight');
+
+  // …and the passenger taps again anyway (keyboard, ghost click):
+  app.handleBookingClick();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'no second concurrent POST');
+  assert.strictEqual(storedEnvelopes.length, 1, 'no second envelope — the slot is never clobbered');
+
+  releaseCreate();
+  await pending;
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(alerts.length, 0);
+  assert.strictEqual(app._submitInFlight, false, 'the flag is released when the chain settles');
+});
+
+check('MARKERS: carousel auto-select (userInitiated:false) never grants the vehicle marker', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  app.editMarkers = {
+    routeDirection: true, routeAddress: true, pickupAt: true,
+    vehicle: false, traveler: false
+  };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39, userInitiated: false });
+  assert.strictEqual(app.editMarkers.vehicle, false,
+    'the boot-time auto-select is not a passenger choice');
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'Save stays blocked');
+  // the passenger's own tap counts
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39, userInitiated: true });
+  assert.strictEqual(app.editMarkers.vehicle, true);
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, false);
+});
+
+check('STATIC: the carousel stamps userInitiated=false on every non-user selection', () => {
+  const carousel = fs.readFileSync(path.join(repoRoot, 'vehicle-carousel-standalone.html'), 'utf8');
+  assert.match(carousel, /selectCard\(index, userInitiated = true\)/);
+  assert.match(carousel, /this\.selectCard\(0, false\), 100\)/, 'boot auto-select');
+  assert.match(carousel, /case 'reset':\s*\n\s*this\.selectCard\(0, false\)/, 'host reset');
+  assert.match(carousel, /case 'selectVehicle':[\s\S]{0,400}?this\.selectCard\(index, false\)/, 'host restore');
+  assert.match(carousel, /this\.selectCard\(next, false\)/, 'unavailable auto-advance');
+  assert.match(carousel, /userInitiated: userInitiated === true/, 'the flag rides in vehicleData');
+});
+
+check('STATIC: envelope lifecycle wiring — boot offer on every path, sign-outs clear it', () => {
+  const full = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+  const resumeIdx = full.indexOf('function resumeAccountBookingWhenReady()');
+  const offerIdx = full.indexOf('offerPendingEnvelope(subject)', resumeIdx);
+  const bookingBranchIdx = full.indexOf('const bookingId = currentActiveBooking?.id', resumeIdx);
+  assert.ok(resumeIdx >= 0 && offerIdx > resumeIdx && offerIdx < bookingBranchIdx,
+    'the recovery offer must run BEFORE the active-booking early returns — a normal passenger\'s edit recovery always coexists with a live booking');
+  const logoutIdx = full.indexOf('async function logout()');
+  const logoutBlock = full.slice(logoutIdx, full.indexOf('}', full.indexOf('window.location.href', logoutIdx)));
+  assert.ok(logoutBlock.includes("removeItem('lm_pending_envelope')"),
+    'explicit sign-out clears the pending envelope');
+  const revokedIdx = full.indexOf('revoked server-side');
+  assert.ok(full.slice(revokedIdx, revokedIdx + 600).includes("removeItem('lm_pending_envelope')"),
+    'the revoked-session bounce clears it too');
 });
 
 check('428 reload:true — the outdated bundle reloads instead of arguing', async () => {
@@ -1611,6 +1722,11 @@ check('EDIT_STALE: a stale edit quote fails closed with honest reopen copy', asy
     'the captured CAS is sacred — never silently refreshed into a retry');
   assert.strictEqual(app.state.quote.error.editStale, true);
   assert.match(app.state.quote.error.message, /reopen/i);
+  assert.strictEqual(app.pendingEdit.detailsVersion, 3,
+    'the server-echoed currentDetailsVersion must NEVER be adopted silently');
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 1,
+    'a stale edit is a dead intent — re-entry must not buy another provider call');
   assert.deepStrictEqual(carousel.visible(),
     { tesla: 'Unavailable', escalade: 'Unavailable', sprinter: 'Unavailable' });
   app.updateBookAvailability();
@@ -1622,18 +1738,26 @@ check('STATIC: every interaction marker is wired to its real explicit action', (
   assert.match(appBlock,
     /beginPendingEdit[\s\S]{0,2000}?routeDirection:\s*false,\s*routeAddress:\s*false,[\s\S]{0,40}?pickupAt:\s*false,\s*vehicle:\s*false,\s*traveler:\s*false/,
     'beginPendingEdit must reset every marker');
-  // each setter is guarded so create flows never touch markers
-  assert.match(appBlock, /this\.pendingEdit && this\.editMarkers && this\.state\.locations\.placeId[\s\S]{0,80}?routeAddress = true/,
-    'routeAddress: only a LIVE autocomplete selection');
-  assert.match(appBlock, /invalidateQuote\('airport changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers\) \{\s*\n\s*this\.editMarkers\.routeDirection = true/,
-    'routeDirection: an explicit airport choice');
-  assert.match(appBlock, /invalidateQuote\('pickup time changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers\) \{\s*\n\s*this\.editMarkers\.pickupAt = true/,
-    'pickupAt: an explicit time set');
-  assert.match(appBlock, /this\.editMarkers\.vehicle = true/,
-    'vehicle: an explicit selection');
+  // each setter is guarded so create flows AND flag-off legacy flows never
+  // touch markers or call updateBookAvailability (dark invariance)
+  assert.match(appBlock, /this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\) &&\s*\n\s*this\.state\.locations\.placeId[\s\S]{0,120}?routeAddress = true/,
+    'routeAddress: only a LIVE autocomplete selection, quote flow only');
+  assert.match(appBlock, /invalidateQuote\('airport changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\)\) \{\s*\n\s*this\.editMarkers\.routeDirection = true/,
+    'routeDirection: an explicit airport choice, quote flow only');
+  assert.match(appBlock, /invalidateQuote\('pickup time changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\)\) \{\s*\n\s*this\.editMarkers\.pickupAt = true/,
+    'pickupAt: an explicit time set, quote flow only');
+  assert.match(appBlock, /this\.quoteFlowActive\(\) &&\s*\n\s*!\(isObject && vehicleData\.userInitiated === false\)[\s\S]{0,80}?this\.editMarkers\.vehicle = true/,
+    'vehicle: an explicit USER selection — carousel auto-select never counts');
   // traveler is set ONLY inside the modal completion callback
   assert.match(appBlock, /openRequired\(\(\) => \{[\s\S]{0,200}?editMarkers\.traveler = true/,
     'traveler: only the modal review sets it');
+  // an edit session under the quote flow starts with Save honestly DISABLED
+  assert.ok(appBlock.includes('if (this.quoteFlowActive()) this.updateBookAvailability();'),
+    'beginPendingEdit recomputes availability so zero-marker Save is not a silent no-op');
 });
 
+// A check that awaits a promise that never settles drains node's event loop
+// and would otherwise exit 0 with zero output — pre-arm failure so silence
+// is loud. run() flips this to 0 only after the summary prints.
+process.exitCode = 1;
 run().catch((e) => { console.error(e); process.exit(1); });

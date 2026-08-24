@@ -393,6 +393,8 @@
                         // getSession() can still return a locally unexpired
                         // token that was revoked server-side. Clear it before
                         // returning to the front door so Retry cannot loop.
+                        // The session's pending envelope goes with it.
+                        try { sessionStorage.removeItem('lm_pending_envelope'); } catch (_) {}
                         try { await window.supabaseClient.auth.signOut(); } catch (_) {}
                         window.location.replace('/login.html');
                         return false;
@@ -475,6 +477,20 @@
                 try { sessionStorage.removeItem('lm_pending_edit_intent'); } catch (_) {}
             };
 
+            // Same-tab recovery FIRST, on every boot path: an unresolved
+            // submission envelope is offered back to the SAME account even
+            // when a live booking resumes into the trip sheet or an edit
+            // reopens — the fixed card overlays either. (A normal
+            // passenger's unresolved EDIT always coexists with an active
+            // booking, so gating this on "no booking resumed" made edit
+            // recovery unreachable.)
+            try {
+                window.supabaseClient?.auth?.getSession().then(({ data }) => {
+                    const subject = data?.session?.user?.id || null;
+                    if (subject) window.airportApp.offerPendingEnvelope(subject);
+                });
+            } catch (_) { /* recovery must never break boot */ }
+
             const bookingId = currentActiveBooking?.id;
             if (bookingId) {
                 activeBookingResumed = true;
@@ -519,15 +535,6 @@
 
             // No live booking and no consumable intent: drop anything stale.
             if (intent) clearIntent();
-
-            // Same-tab recovery: an unresolved submission envelope from this
-            // tab is offered back to the SAME account (Check again / Discard).
-            try {
-                window.supabaseClient?.auth?.getSession().then(({ data }) => {
-                    const subject = data?.session?.user?.id || null;
-                    if (subject) window.airportApp.offerPendingEnvelope(subject);
-                });
-            } catch (_) { /* recovery must never break boot */ }
         }
 
         function applyAuthenticatedAccountState() {
@@ -663,6 +670,9 @@
         }
 
         async function logout() {
+            // A pending submission envelope is bound to this account; it
+            // must not survive an explicit sign-out on a shared device.
+            try { sessionStorage.removeItem('lm_pending_envelope'); } catch (_) {}
             await window.supabaseClient.auth.signOut();
             window.location.href = '/login.html';
         }
@@ -1143,7 +1153,9 @@
                         : null;
                 // Edit-session interaction marker: only a LIVE autocomplete
                 // selection in this session counts — retained text never does.
-                if (this.pendingEdit && this.editMarkers && this.state.locations.placeId) {
+                // quoteFlowActive() keeps every flag-off legacy path untouched.
+                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive() &&
+                    this.state.locations.placeId) {
                     this.editMarkers.routeAddress = true;
                     this.updateBookAvailability();
                 }
@@ -1197,7 +1209,7 @@
                     name: this.getAirportName(airportCode)
                 };
                 this.invalidateQuote('airport changed');
-                if (this.pendingEdit && this.editMarkers) {
+                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive()) {
                     this.editMarkers.routeDirection = true;
                     this.updateBookAvailability();
                 }
@@ -1728,7 +1740,7 @@
                     ? new Date(this.state.dateTime.time).getTime() : null;
                 this.state.dateTime.time = date;
                 if (prevPickup !== date.getTime()) this.invalidateQuote('pickup time changed');
-                if (this.pendingEdit && this.editMarkers) {
+                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive()) {
                     this.editMarkers.pickupAt = true;
                     this.updateBookAvailability();
                 }
@@ -1844,7 +1856,15 @@
                     bags: bags,
                     price: carouselPrice // Use carousel price as initial value
                 };
-                if (this.pendingEdit && this.editMarkers) {
+                // Marker only under the quote flow (flag-off legacy behavior
+                // stays byte-identical), and only for the passenger's OWN
+                // action: the carousel stamps userInitiated=false on its
+                // boot-time auto-select, host-driven restore, and
+                // unavailable-advance selections. Absence of the flag (a
+                // stale cached carousel) counts as user — fail-open here is
+                // dark-phase-only and self-heals with the SW bump.
+                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive() &&
+                    !(isObject && vehicleData.userInitiated === false)) {
                     this.editMarkers.vehicle = true;
                     this.updateBookAvailability();
                 }
@@ -2472,6 +2492,16 @@
                     return;
                 }
 
+                if (this._submitInFlight) {
+                    // confirmBooking owns the button ('Processing...') until
+                    // the submission settles; expiry timers and carousel
+                    // events must never re-enable it mid-flight.
+                    btn.disabled = true;
+                    btn.style.opacity = '0.5';
+                    btn.style.cursor = 'wait';
+                    return;
+                }
+
                 const q = this.state.quote;
                 const fresh = this.quoteIsFresh();
                 const selected = !!this.selectedQuoteVehicle();
@@ -2726,6 +2756,13 @@
             
             // Handle booking button click - open passenger modal first
             handleBookingClick() {
+                // One submission at a time. While an envelope (or legacy
+                // POST) is in flight, quote-expiry timers and carousel events
+                // may recompute the button, but a tap must never start a
+                // second concurrent chain — that would overwrite the tap
+                // snapshot, spend another chain's budget, and clobber the
+                // single-slot recovery envelope.
+                if (this._submitInFlight) return;
                 const passengerModal = PassengerModal.getInstance();
 
                 // PR-2: the TAP is the acceptance boundary. Freeze what the
@@ -2806,6 +2843,11 @@
                     bookBtn.innerHTML = '<span class="btn-main-text">Save changes</span>';
                     bookBtn.disabled = false;
                 }
+                // Under the quote flow, Save starts DISABLED — the markers
+                // are all unset, and an enabled button whose taps are silent
+                // no-ops would be dishonest. (Flag off keeps the legacy
+                // enabled button above.)
+                if (this.quoteFlowActive()) this.updateBookAvailability();
             }
 
             finishPendingEdit() {
@@ -2845,11 +2887,19 @@
                 return true;
             }
 
-            // A one-line, alert-free note under the primary action.
+            // A one-line, alert-free note under the primary action. Error and
+            // edit paths rewrite the button with only the main-text span, so
+            // the note target is (re)created here — the quiet path's one
+            // honest line must never be silently dropped.
             notePriceChanged(text) {
                 const btn = this.els.bookBtn || document.getElementById('bookBtn');
-                const sub = btn?.querySelector('.btn-sub-text');
-                if (sub) {
+                if (btn) {
+                    let sub = btn.querySelector('.btn-sub-text');
+                    if (!sub) {
+                        sub = document.createElement('span');
+                        sub.className = 'btn-sub-text';
+                        btn.appendChild(sub);
+                    }
                     sub.textContent = text;
                     clearTimeout(this._bookNoteTimer);
                     this._bookNoteTimer = setTimeout(() => { sub.textContent = ''; }, 8000);
@@ -2866,8 +2916,18 @@
             storePendingEnvelope(envelope) {
                 try { sessionStorage.setItem('lm_pending_envelope', JSON.stringify(envelope)); } catch (_) {}
             }
-            clearPendingEnvelope() {
-                try { sessionStorage.removeItem('lm_pending_envelope'); } catch (_) {}
+            clearPendingEnvelope(operationId = null) {
+                // With an operationId, clear ONLY that operation's envelope —
+                // a settling chain must never delete a different operation's
+                // stored recovery. Without one (Discard, logout), clear
+                // whatever the slot holds.
+                try {
+                    if (operationId) {
+                        const raw = sessionStorage.getItem('lm_pending_envelope');
+                        if (raw && JSON.parse(raw)?.operationId !== operationId) return;
+                    }
+                    sessionStorage.removeItem('lm_pending_envelope');
+                } catch (_) {}
             }
             readPendingEnvelope(authSubject) {
                 try {
@@ -2950,6 +3010,20 @@
                         const { response, result } = out;
                         if (response.ok && result?.bookingId) {
                             try { localStorage.setItem('lm_last_trip_id', result.bookingId); } catch (_) {}
+                            if (env.kind === 'edit') {
+                                // A recovered edit is a committed edit: close
+                                // the edit session and adopt the server's
+                                // version, exactly like the direct save path.
+                                currentActiveBooking = {
+                                    ...(currentActiveBooking || {}),
+                                    id: result.bookingId,
+                                    trip_id: result.tripId || currentActiveBooking?.trip_id,
+                                    status: 'pending',
+                                    details_version: result.detailsVersion ??
+                                        currentActiveBooking?.details_version
+                                };
+                                this.finishPendingEdit();
+                            }
                             this.showTripSheet(result.bookingId);
                         } else if (response.status === 409 && result?.existingBookingId) {
                             this.showTripSheet(result.existingBookingId);
@@ -3003,6 +3077,14 @@
             }
 
             async confirmBooking() {
+                // Single-submission discipline: the flag spans this ENTIRE
+                // chain (quote gate, quiet refresh, session, envelope POST)
+                // and is released in the finally below. handleBookingClick
+                // refuses taps while it is set; the sanctioned requote
+                // auto-resubmit releases it just before recursing.
+                if (this._submitInFlight) return;
+                this._submitInFlight = true;
+                try {
                 // PR 3C-2B2 — the quote is re-checked HERE, immediately before
                 // submitting, not just when it was displayed. The passenger may
                 // have sat on the vehicle screen past the 15-minute TTL, or
@@ -3284,8 +3366,8 @@
                         }
                         response = out.response;
                         result = out.result;
-                        // Any definitive mapped response settles the envelope.
-                        this.clearPendingEnvelope();
+                        // Any definitive mapped response settles THIS envelope.
+                        this.clearPendingEnvelope(envelope.operationId);
                     } else {
                         response = await fetch(submitUrl, {
                             method: 'POST',
@@ -3320,7 +3402,13 @@
                         if (snap && !snap.refreshUsed && !snap.resubmitUsed) {
                             snap.resubmitUsed = true;
                             const ok = await this.quietRefreshForTap(snap);
-                            if (ok) { return this.confirmBooking(); }
+                            if (ok) {
+                                // Sanctioned auto-resubmit: hand the flag to
+                                // the recursive chain (its entry re-takes it
+                                // synchronously — no tap can interleave).
+                                this._submitInFlight = false;
+                                return this.confirmBooking();
+                            }
                             return;
                         }
                         this.invalidateQuote('server requested a fresh quote');
@@ -3422,6 +3510,9 @@
                         ? (error.message || 'Changes not saved. Your original ride is unchanged.')
                         : (error.message || 'Booking failed. Please try again.');
                     this.showPaymentError(errorMessage, isEditing ? 'Changes not saved' : 'Booking not submitted');
+                }
+                } finally {
+                    this._submitInFlight = false;
                 }
             }
 

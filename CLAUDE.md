@@ -585,9 +585,35 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     explicit action in THIS edit session, traveler only by the reopened
     modal at Save — prefilled never counts, Save blocked until all five);
     1..1440 route-minute alignment in quote-token's validCommitmentIntent
-    and the browser contract capture; SW bump v1.3.21. Known cosmetic
-    leftover: a recovery resolved via the card does not remove the
-    original attempt's provisional trip_ localStorage record.
+    and the browser contract capture; SW bump v1.3.21 (indexMVP + the
+    carousel are precached). PRE-PUSH REVIEW ROUND (adversarially
+    verified, all fixed in-branch): submission in-flight guard —
+    _submitInFlight spans the whole confirm chain, handleBookingClick
+    refuses taps and updateBookAvailability never resurrects the button
+    mid-POST (expiry timers/carousel events used to re-enable it,
+    permitting concurrent chains and duplicate ambassador rides; the
+    sanctioned requote auto-resubmit hands the flag to its recursion);
+    envelope clears are OPERATION-SCOPED and both sign-out paths clear
+    the slot; the boot recovery offer runs on EVERY path (it was
+    unreachable exactly when a live booking resumed — i.e. for every
+    normal-passenger edit); a recovered edit closes the edit session
+    and adopts the server version; the carousel stamps
+    userInitiated=false on auto-select/host-restore/reset/unavailable-
+    advance so only a passenger's own selection grants the vehicle
+    marker (absence of the flag fails open — dark-phase-only, self-
+    heals with the SW bump); all four marker setters are quote-flow-
+    gated (flag-off legacy behavior byte-identical — they used to
+    re-enable a disabled Save mid-legacy-save); notePriceChanged
+    (re)creates its render target (the quiet one-liner was silently
+    dropped in every edit session); beginPendingEdit starts Save
+    honestly disabled under the quote flow. Deliberate leftovers
+    (recorded for Codex): single-slot envelope means a new tap after an
+    ignored recovery card overwrites the unresolved envelope; the
+    exhausted-requote return-to-visible performs ONE visible refresh
+    (dead-end idle state was the alternative); edit_stale inside an
+    edit session ends with honest reopen copy, no in-app shortcut; a
+    card-recovered create leaves the original provisional trip_
+    localStorage record.
     Then the plan-v3.1 activation ladder (secrets -> prove-503 rebuild ->
     kill switch off -> airport smoke -> observe -> browser flag + SW bump
     -> graduation evidence -> enforce, each rung Andres-authorized;
