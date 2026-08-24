@@ -61,7 +61,6 @@ AirportMVP/
 │   │   ├── server.js          # Google Maps proxy (17KB)
 │   │   └── package.json
 │   └── functions/             # Netlify serverless functions
-│       ├── calculate-price.js
 │       ├── create-booking.js
 │       ├── create-checkout-session.js
 │       ├── create-payment-intent.js

@@ -35,7 +35,6 @@ AirportMVP/
 │   └── functions/              # Netlify serverless functions
 │       ├── create-payment-intent.js
 │       ├── create-booking.js
-│       ├── calculate-price.js
 │       ├── create-payment.js
 │       └── stripe-config.js
 │

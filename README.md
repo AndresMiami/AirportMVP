@@ -56,7 +56,6 @@ AirportMVP/
 │   ├── api-proxy/        # Google Maps proxy (Railway)
 │   │   └── server.js     # Express server for API key protection
 │   └── functions/        # Netlify serverless functions
-│       ├── calculate-price.js
 │       ├── create-booking.js
 │       └── create-payment.js
 │
@@ -179,7 +178,6 @@ Before pushing changes, verify:
 - `GET /api/places/details` - Place details
 
 ### Netlify Functions
-- `POST /api/calculate-price` - Calculate trip price
 - `POST /api/create-booking` - Create new booking
 - `POST /api/create-payment` - Process payment
 

@@ -10,7 +10,7 @@
 |---|---|---|
 | **Live booking authority** | `pricing.js` (browser, loaded by `indexMVP.html`) | **This computes the fare passengers see and the amount stored on the booking.** Nothing is charged automatically — payment is cash/Zelle collected at ride time (Stripe disabled). Unchanged by 3C-2A. |
 | **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A. Cent-exact parity with `pricing.js` **as run in an America/New_York (Miami-local) browser** — the canonical case; a passenger booking from another timezone can see different surcharges from the live calculator (a recorded quirk below). **NOT wired to any live path yet** — invisible infrastructure. |
-| Legacy server endpoint | `backend/functions/calculate-price.js` | Pre-dates the tiered system; **drifted** (flat per-mile rates, older base prices) and is not the booking authority. Untouched. |
+| Legacy server endpoint | *(retired in PR 3C-2C-B PR-1)* | The drifted `calculate-price.js` oracle was deleted; both its URLs return explicit 404s. |
 | **Server quote service (3C-2B1)** | `backend/functions/quote-ride.js` (+ `lib/route-facts.js`, `lib/place-identity.js`, `lib/rate-card-resolver.js`, `lib/quote-token.js`) | **Issues signed server quotes; consumed by NOTHING yet** (dark, allowlisted, kill-switched). Prices with the canonical engine from server-derived route facts. Becomes passenger-visible in 2B2 and enforceable in 2C. |
 
 During 3C-2A nothing about production behavior changes. The server engine
