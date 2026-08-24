@@ -76,6 +76,9 @@ function resetState() {
     json: async () => ({ routes: [{ distanceMeters: 16093, duration: '1680s' }] })
   });
   state.logLines = [];
+  state.bookings = {};
+  state.bookingError = null;
+  state.bookingLookups = [];
 }
 resetState();
 
@@ -90,6 +93,19 @@ const supabaseMock = {
       }
     },
     from: (table) => {
+      if (table === 'bookings') {
+        return {
+          select: (cols) => ({
+            eq: (col, val) => ({
+              maybeSingle: async () => {
+                state.bookingLookups.push({ cols, col, val, googleCallsAtLookup: googleCalls() });
+                if (state.bookingError) return { data: null, error: state.bookingError };
+                return { data: state.bookings[val] || null, error: null };
+              }
+            })
+          })
+        };
+      }
       if (table !== 'customers') throw new Error('unexpected table: ' + table);
       return {
         select: () => ({
@@ -1155,6 +1171,127 @@ async function check(name, fn) {
     assert.ok(!endpoint.includes('pricing.js'), 'the browser calculator is never touched');
   });
 
+  // ============ PR-2: edit-purpose quote issuance ============
+  const EDIT_BOOKING_ID = '99999999-9999-4999-8999-999999999999';
+  const OWNER_CUSTOMER = CUSTOMERS['11111111-1111-4111-8111-111111111111'].id;
+  function editableBookingRow(overrides = {}) {
+    return {
+      id: EDIT_BOOKING_ID, customer_id: OWNER_CUSTOMER, status: 'pending',
+      assigned_driver: null, details_version: 3, assignment_epoch: 7,
+      ...overrides
+    };
+  }
+
+  await check('EDIT shape: bookingId and expectedDetailsVersion travel together or not at all', async () => {
+    resetState();
+    for (const body of [
+      goodIntent({ bookingId: EDIT_BOOKING_ID }),                    // id without version
+      goodIntent({ expectedDetailsVersion: 3 }),                     // version without id
+    ]) {
+      const res = await post(body);
+      assert.strictEqual(res.statusCode, 400);
+      assert.match(JSON.parse(res.body).error, /supplied together/);
+    }
+    for (const body of [
+      goodIntent({ bookingId: 'not-a-uuid', expectedDetailsVersion: 3 }),
+      goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 0 }),
+      goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3.5 }),
+      goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: '3' }),
+    ]) {
+      const res = await post(body);
+      assert.strictEqual(res.statusCode, 400);
+    }
+    assert.strictEqual(googleCalls(), 0, 'shape refusals must never buy a provider call');
+    assert.strictEqual(state.bookingLookups.length, 0, 'shape refusals precede the lookup');
+  });
+
+  await check('EDIT gates run BEFORE any paid provider call; missing and foreign are one 404', async () => {
+    resetState();
+    const missing = await post(goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3 }));
+    assert.strictEqual(missing.statusCode, 404);
+
+    resetState();
+    state.bookings[EDIT_BOOKING_ID] = editableBookingRow({ customer_id: 'someone-elses-customer' });
+    const foreign = await post(goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3 }));
+    assert.strictEqual(foreign.statusCode, 404);
+    assert.strictEqual(foreign.body, missing.body,
+      'a foreign booking must be indistinguishable from a missing one');
+    assert.strictEqual(googleCalls(), 0, 'refused edits never reach Places or Routes');
+
+    resetState();
+    state.bookingError = { message: 'db down' };
+    const outage = await post(goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3 }));
+    assert.strictEqual(outage.statusCode, 500, 'a lookup outage is an outage, never a 404');
+    assert.strictEqual(googleCalls(), 0);
+  });
+
+  await check('EDIT gates: accepted or assigned rows answer edit_stale/not_editable with the live status', async () => {
+    for (const row of [
+      editableBookingRow({ status: 'confirmed', assigned_driver: 'driver-1' }),
+      editableBookingRow({ assigned_driver: 'driver-1' }),           // pending but claimed
+      editableBookingRow({ status: 'cancelled' }),
+    ]) {
+      resetState();
+      state.bookings[EDIT_BOOKING_ID] = row;
+      const res = await post(goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3 }));
+      assert.strictEqual(res.statusCode, 409);
+      const payload = JSON.parse(res.body);
+      assert.strictEqual(payload.error, 'edit_stale');
+      assert.strictEqual(payload.reason, 'not_editable');
+      assert.strictEqual(payload.currentStatus, row.status);
+      assert.strictEqual(googleCalls(), 0);
+    }
+  });
+
+  await check('EDIT gates: a stale captured version answers edit_stale/version with ZERO provider spend', async () => {
+    resetState();
+    state.bookings[EDIT_BOOKING_ID] = editableBookingRow({ details_version: 5 });
+    const res = await post(goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3 }));
+    assert.strictEqual(res.statusCode, 409);
+    const payload = JSON.parse(res.body);
+    assert.strictEqual(payload.error, 'edit_stale');
+    assert.strictEqual(payload.reason, 'version');
+    assert.strictEqual(payload.currentDetailsVersion, 5);
+    assert.strictEqual(googleCalls(), 0,
+      'the whole point of the pre-provider gate: a stale form buys nothing');
+  });
+
+  await check('EDIT issuance: purpose:edit tokens bind booking + assignment epoch; response echoes edit', async () => {
+    resetState();
+    state.bookings[EDIT_BOOKING_ID] = editableBookingRow();
+    const res = await post(goodIntent({ bookingId: EDIT_BOOKING_ID, expectedDetailsVersion: 3 }));
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(state.bookingLookups.length, 1);
+    assert.strictEqual(state.bookingLookups[0].googleCallsAtLookup, 0,
+      'the lookup happens BEFORE the first provider call');
+    assert.strictEqual(googleCalls(), 2, 'a passing edit gate buys the normal one Places + one Routes');
+
+    const quote = JSON.parse(res.body).quote;
+    assert.deepStrictEqual(quote.edit, { bookingId: EDIT_BOOKING_ID, detailsVersion: 3 },
+      'the edit echo is display-only truth from the live row');
+    for (const key of ['tesla', 'escalade', 'sprinter']) {
+      const payload = decodeTokenPayload(quote.vehicles[key].token);
+      assert.strictEqual(payload.purpose, 'edit');
+      assert.strictEqual(payload.bookingId, EDIT_BOOKING_ID);
+      assert.strictEqual(payload.assignmentEpoch, 7);
+    }
+  });
+
+  await check('CREATE issuance is untouched: purpose:create, no edit fields, edit echo null', async () => {
+    resetState();
+    const res = await post(goodIntent());
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(state.bookingLookups.length, 0, 'creates never look up a booking');
+    const quote = JSON.parse(res.body).quote;
+    assert.strictEqual(quote.edit, null);
+    for (const key of ['tesla', 'escalade', 'sprinter']) {
+      const payload = decodeTokenPayload(quote.vehicles[key].token);
+      assert.strictEqual(payload.purpose, 'create');
+      assert.ok(!('bookingId' in payload) && !('assignmentEpoch' in payload),
+        'create tokens carry no edit binding');
+    }
+  });
+
   await check('calculate-price retirement is complete and pinned behind the cache refresh', async () => {
     const fs = require('fs');
     const retiredHandlerPath = path.join(repoRoot, 'backend/functions/calculate-price.js');
@@ -1185,7 +1322,7 @@ async function check(name, fn) {
     const worker = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
     const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(cacheName, 'linkmia-v1.3.20', 'retirement ships with the reviewed cache bump');
+    assert.strictEqual(cacheName, 'linkmia-v1.3.21', 'PR-2 ships with the reviewed cache bump');
   });
 
   if (failures.length) {

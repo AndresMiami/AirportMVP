@@ -555,16 +555,39 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     host_commission feeds only the admin receipt). quote-ride's issuance
     floor refuses routes outside 1..1440 whole minutes (the SQL-consumable
     band); the pricing ENGINE's wider bound is untouched (golden parity).
-    **PR-2 — NEXT, dark:** edit-purpose quoting (owner + status +
-    expectedDetailsVersion checked BEFORE any Google call), the browser
-    envelope (bounded timeout, one exact retry, durable same-tab pending
-    envelope bound to the account, "Check again" recovery), passive expiry
-    (idle = zero provider calls; the stale primary action stays CLICKABLE
-    as "Refresh and Book/Save"; tap snapshot {intent, vehicle, cents,
-    acceptedQuoteSeq} with a separate refreshSeq; at most 1 quiet re-quote
-    + 1 auto-resubmit per tap, changed price = new tap), restored-edit
-    interaction markers (route/pickupAt/vehicle/traveler — prefilled never
-    counts), 1..1440 alignment in quote-token/browser validators, SW bump.
+    **PR-2 (this branch) — EDIT QUOTING + THE ENVELOPE, dark:**
+    quote-ride gains edit-purpose issuance: bookingId +
+    expectedDetailsVersion travel together or 400; owner/editability/CAS
+    gates run BEFORE any paid Google call (missing and foreign bookings
+    are ONE 404; non-pending/assigned -> 409 edit_stale/not_editable with
+    the live status; version drift -> 409 edit_stale/version — the
+    browser's captured CAS is sacred, never silently refreshed); passing
+    edits mint purpose:'edit' tokens binding bookingId + assignment_epoch
+    and the response echoes `edit:{bookingId, detailsVersion}`
+    (display-only). Browser: edits quote through the same flow under an
+    edit-scoped quote key (mode|airport|place|pickup|pax|edit|id|version);
+    THE TAP is the acceptance boundary — handleBookingClick freezes
+    {intentKey, vehicleKey, finalCents, acceptedQuoteSeq} plus per-tap
+    refreshUsed/resubmitUsed budget flags (same invariant as the plan's
+    refreshSeq split: at most 1 quiet re-quote + 1 auto-resubmit per tap,
+    any change = a new visible tap); passive expiry (idle = zero provider
+    calls, Expired cards, primary action stays CLICKABLE as "Refresh and
+    Book/Save", quiet "Updating price…", never "refused", changed price =
+    note + new tap); THE ENVELOPE (operationId inside the body, serialized
+    ONCE, 15s bound, one exact-byte retry; definitive = parsed JSON with
+    ok/400/401/403/404/409/428/503; unknown result -> durable
+    sessionStorage envelope bound to authSubject+kind+bookingId with a
+    "Check again"/Discard recovery card that re-sends the exact bytes;
+    definitive responses settle it); 428 reload:true -> reload; requote:true
+    -> quiet refresh + ONE auto-resubmit as a NEW envelope, then a visible
+    tap; restored-edit interaction markers
+    (routeDirection/routeAddress/pickupAt/vehicle each set only by an
+    explicit action in THIS edit session, traveler only by the reopened
+    modal at Save — prefilled never counts, Save blocked until all five);
+    1..1440 route-minute alignment in quote-token's validCommitmentIntent
+    and the browser contract capture; SW bump v1.3.21. Known cosmetic
+    leftover: a recovery resolved via the card does not remove the
+    original attempt's provisional trip_ localStorage record.
     Then the plan-v3.1 activation ladder (secrets -> prove-503 rebuild ->
     kill switch off -> airport smoke -> observe -> browser flag + SW bump
     -> graduation evidence -> enforce, each rung Andres-authorized;

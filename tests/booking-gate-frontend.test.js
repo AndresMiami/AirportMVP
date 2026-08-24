@@ -237,7 +237,12 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
       'the startup race must be retried after the app instance exists');
   });
   check('server duplicate response reopens the existing sheet, never creates local success', () => {
-    const conflictIdx = appBlock.indexOf('response.status === 409 && result?.existingBookingId');
+    // PR-2 added a SECOND 409/existingBookingId consumer (the pending-envelope
+    // recovery card, which has no provisional record to remove) — anchor this
+    // check to the submit path inside confirmBooking.
+    const submitIdx = appBlock.indexOf('const submitUrl = isEditing');
+    assert.ok(submitIdx >= 0);
+    const conflictIdx = appBlock.indexOf('response.status === 409 && result?.existingBookingId', submitIdx);
     const removeIdx = appBlock.indexOf('localStorage.removeItem(\`trip_\${tripId}\`)', conflictIdx);
     const sheetIdx = appBlock.indexOf('this.showTripSheet(result.existingBookingId)', conflictIdx);
     assert.ok(conflictIdx >= 0 && removeIdx > conflictIdx && sheetIdx > removeIdx);

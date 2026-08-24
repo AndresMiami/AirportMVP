@@ -248,7 +248,8 @@ function validCommitmentIntent(intent) {
     safeInt(intent.pickupAtMs) &&
     safeInt(intent.passengers) && intent.passengers > 0 &&
     safeInt(intent.routeMilesTenths) && intent.routeMilesTenths >= 0 &&
-    safeInt(intent.routeMinutes) && intent.routeMinutes >= 0;
+    safeInt(intent.routeMinutes) && intent.routeMinutes >= 1 &&
+    intent.routeMinutes <= 1440;
 }
 
 // The EXACT v2 schema for the payload's declared purpose. Returns a
