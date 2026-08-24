@@ -26,7 +26,8 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const {
-  sha256Hex, isUuid, classifyToken, recoveryLookup,
+  sha256Hex, isUuid, readPresentedToken, signingKeysAvailable,
+  classifyToken, recoveryLookup,
   sharedOutcomeResponse, unknownOutcomeResponse
 } = require('./lib/booking-writer');
 const { isValidPlaceId } = require('./lib/place-identity');
@@ -266,6 +267,15 @@ exports.handler = async (event, context) => {
     }
     const requestDigest = operationId ? sha256Hex(rawBody) : null;
 
+    // An omitted token is legitimate legacy traffic while pricing mode is
+    // off/observe. A PRESENT malformed token is a broken modern contract and
+    // must never be silently relabelled as legacy traffic.
+    const presentedToken = readPresentedToken(booking);
+    if (presentedToken.invalid) {
+      return { statusCode: 409, headers, body: JSON.stringify({ error: 'quote_invalid', requote: true }) };
+    }
+    const quoteToken = presentedToken.token;
+
     // ============================================
     // RESOLVE THE CUSTOMER IDENTITY — every new booking is stamped.
     // The trip payload carries the TRAVELING PASSENGER's details (the
@@ -320,6 +330,14 @@ exports.handler = async (event, context) => {
           body: JSON.stringify({ error: 'Account profile incomplete — please sign in again to finish setting up your account' })
         };
       }
+      // A valid quote can only be minted after quote-ride has ensured this
+      // customer row. If the row is missing and signing configuration is
+      // unavailable, refuse before creating identity state: an outage may
+      // recover completed work, but it may never authorize a new write.
+      if (quoteToken && !signingKeysAvailable(process.env)) {
+        console.error('❌ Quote signing configuration unavailable before ambassador recovery');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not process this request' }) };
+      }
       // Ambassador recovery: the account's row comes from the HOST
       // record — never from the traveling passenger's details.
       // Concurrency-safe (quote-ride pattern): a simultaneous ensure-row
@@ -365,7 +383,6 @@ exports.handler = async (event, context) => {
     // Signing configuration is resolved LAZILY: the no-token path never
     // touches it (PR-1 runs with every quote secret absent).
     // ============================================
-    const quoteToken = typeof booking.quoteToken === 'string' && booking.quoteToken ? booking.quoteToken : null;
     let verdict = 'no_token';
     let verifiedPayload = null;
     let verifiedJti = null;

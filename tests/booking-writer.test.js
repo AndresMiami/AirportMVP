@@ -11,7 +11,8 @@ const assert = require('assert');
 
 const repoRoot = path.resolve(__dirname, '..');
 const {
-  TOKEN_MAX_BYTES, sha256Hex, isUuid, classifyToken, recoveryLookup,
+  TOKEN_MAX_BYTES, sha256Hex, isUuid, readPresentedToken,
+  signingKeysAvailable, classifyToken, recoveryLookup,
   sharedOutcomeResponse, unknownOutcomeResponse
 } = require(path.join(repoRoot, 'backend/functions/lib/booking-writer.js'));
 const {
@@ -87,6 +88,27 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.ok(isUuid(OP));
     assert.ok(!isUuid('not-a-uuid'));
     assert.ok(!isUuid(null));
+  });
+  check('presented-token reader distinguishes omission from malformed modern values', () => {
+    assert.deepStrictEqual(readPresentedToken({}), { present: false, invalid: false, token: null });
+    assert.deepStrictEqual(readPresentedToken({ quoteToken: {} }), { present: true, invalid: true, token: null });
+    assert.deepStrictEqual(readPresentedToken({ quoteToken: null }), { present: true, invalid: true, token: null });
+    assert.deepStrictEqual(readPresentedToken({ quoteToken: '' }), { present: true, invalid: true, token: null });
+    assert.deepStrictEqual(
+      readPresentedToken({ quoteToken: 'x'.repeat(TOKEN_MAX_BYTES + 1) }),
+      { present: true, invalid: true, token: null }
+    );
+    assert.deepStrictEqual(
+      readPresentedToken({ quoteToken: ' exact.token.bytes ' }),
+      { present: true, invalid: false, token: ' exact.token.bytes ' }
+    );
+  });
+  check('signing-key preflight is lazy, side-effect-free, and validates the resolver result', () => {
+    assert.strictEqual(signingKeysAvailable(ENV_NO_KEYS), false);
+    assert.strictEqual(signingKeysAvailable({
+      QUOTE_SIGNING_CURRENT_ID: 'x', QUOTE_SIGNING_CURRENT_SECRET: 'short'
+    }), false);
+    assert.strictEqual(signingKeysAvailable(ENV_WITH_KEYS), true);
   });
 
   // ---- classification: three distinct paths ----

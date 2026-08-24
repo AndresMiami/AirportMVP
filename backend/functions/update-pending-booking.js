@@ -14,7 +14,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const {
-  sha256Hex, isUuid, classifyToken, recoveryLookup,
+  sha256Hex, isUuid, readPresentedToken, classifyToken, recoveryLookup,
   sharedOutcomeResponse, unknownOutcomeResponse
 } = require('./lib/booking-writer');
 const { isValidPlaceId } = require('./lib/place-identity');
@@ -220,6 +220,11 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: edit.error }) };
   }
   const requestDigest = edit.operationId ? sha256Hex(rawBody) : null;
+  const presentedToken = readPresentedToken(body);
+  if (presentedToken.invalid) {
+    return { statusCode: 409, headers, body: JSON.stringify({ error: 'quote_invalid', requote: true }) };
+  }
+  const quoteToken = presentedToken.token;
 
   try {
     // ============================================
@@ -227,7 +232,6 @@ exports.handler = async (event) => {
     // browser sends edit tokens until PR-2 — but the contract is complete
     // and behaviorally tested. Signing config resolves LAZILY.
     // ============================================
-    const quoteToken = typeof body.quoteToken === 'string' && body.quoteToken ? body.quoteToken : null;
     let verdict = 'no_token';
     let verifiedPayload = null;
     let verifiedJti = null;
@@ -363,9 +367,11 @@ exports.handler = async (event) => {
     // stored ratio and the authoritative fare.
     // ============================================
     const pEdit = { ...edit.values };
-    if (verdict === 'verified') {
-      // Verified duration comes from the commitment-verified routeMinutes;
-      // the RPC requires it (1..1440) on verified writes.
+    if (verdict === 'verified' || verdict === 'verify_failed') {
+      // Every validated modern quote contract carries routeMinutes. Even
+      // when the signature fails in off/observe, preserve that internally
+      // coherent route snapshot; only a genuinely token-less legacy edit
+      // may reuse/preserve legacy duration.
       pEdit.duration_minutes = routeMinutes;
     } else if (pEdit.duration_minutes === null) {
       // Omitted key preserves the stored value (RPC COALESCE rule).

@@ -230,13 +230,14 @@ function mkPayload(overrides) {
 }
 // What the REAL ambassador browser flow sends: the passenger modal clears
 // the account holder's info — the payload carries only the TRAVELER.
-function mkAmbassadorPayload() {
+function mkAmbassadorPayload(overrides = {}) {
   return mkPayload({
     customerName: 'Maria Traveler',
     phone: '+1 954 555 0400',
     email: 'maria@example.com',
     bookerName: null,
-    bookerPhone: null
+    bookerPhone: null,
+    ...overrides
   });
 }
 const post = (payload, token) => fn.handler({
@@ -504,6 +505,28 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     quoteToken: FAKE_TOKEN, vehicleKey: 'tesla', airportCode: 'MIA',
     placeId: 'ChIJvalidplace1234567', routeMilesTenths: 123, routeMinutes: 25
   };
+
+  resetCaptures();
+  r = await post(mkPayload({ ...quoteFields, quoteToken: {} }), 'tok-pat');
+  check('present malformed create token -> requote, never legacy/RPC traffic', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(JSON.parse(r.body).error, 'quote_invalid');
+    assert.strictEqual(JSON.parse(r.body).requote, true);
+    assert.strictEqual(capturedCustomerInsert, null);
+    assert.strictEqual(capturedRpc, null);
+  });
+
+  resetCaptures();
+  r = await post(mkAmbassadorPayload({ ...quoteFields }), 'tok-amb');
+  check('keys unavailable + first-time ambassador quote -> zero identity/booking writes', () => {
+    assert.strictEqual(r.statusCode, 500);
+    assert.strictEqual(JSON.parse(r.body).error, 'Could not process this request');
+    assert.strictEqual(capturedCustomerInsert, null);
+    assert.strictEqual(capturedRpc, null);
+    assert.strictEqual(storedRow, null);
+    assert.ok(!r.body.includes('auth-a'));
+    assert.ok(!r.body.includes('host-amb'));
+  });
 
   resetCaptures();
   receiptRow = {

@@ -1,6 +1,6 @@
 # LinkMia Pricing Structure
 
-**Status:** Current production rates · updated for PR 3C-2A (August 2026)
+**Status:** Current production rates and dark authority path · updated for PR 3C-2C-B PR-1 (August 2026)
 
 ---
 
@@ -8,23 +8,27 @@
 
 | Layer | Where | Status |
 |---|---|---|
-| **Live booking authority** | `pricing.js` (browser, loaded by `indexMVP.html`) | **This computes the fare passengers see and the amount stored on the booking.** Nothing is charged automatically — payment is cash/Zelle collected at ride time (Stripe disabled). Unchanged by 3C-2A. |
-| **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A. Cent-exact parity with `pricing.js` **as run in an America/New_York (Miami-local) browser** — the canonical case; a passenger booking from another timezone can see different surcharges from the live calculator (a recorded quirk below). **NOT wired to any live path yet** — invisible infrastructure. |
+| **Passenger-visible authority while mode is `off`** | `pricing.js` (browser, loaded by `indexMVP.html`) | Computes the fare passengers see and submit. The writer RPC records that amount explicitly as `client_legacy`; nothing is charged automatically — payment is cash/Zelle collected at ride time (Stripe disabled). |
+| **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A and wired to quote issuance plus dark writer verification. It is cent-exact with `pricing.js` in the canonical America/New_York case, but is not yet passenger-visible or enforceable while the quote service/browser flag remain off and pricing mode is `off`. |
 | Legacy server endpoint | *(retired in PR 3C-2C-B PR-1)* | The drifted `calculate-price.js` oracle was deleted; both its URLs return explicit 404s. |
-| **Server quote service (3C-2B1)** | `backend/functions/quote-ride.js` (+ `lib/route-facts.js`, `lib/place-identity.js`, `lib/rate-card-resolver.js`, `lib/quote-token.js`) | **Issues signed server quotes; consumed by NOTHING yet** (dark, allowlisted, kill-switched). Prices with the canonical engine from server-derived route facts. Becomes passenger-visible in 2B2 and enforceable in 2C. |
+| **Server quote service + token consumer** | `backend/functions/quote-ride.js`; `create-booking.js`; `update-pending-booking.js` | The service issues signed server quotes from trusted route facts. The writer endpoints consume and classify a signed token when one is presented, but the production quote service remains kill-switched and the browser flag is false, so current passengers do not use this path yet. |
 
-During 3C-2A nothing about production behavior changes. The server engine
-becomes authoritative only through the future, coordinated steps below.
+The dark writer swap does not change current passenger pricing. The server
+engine becomes enforceable only through the coordinated activation steps below.
 
 **Roadmap (deferred, in order):**
-1. **3C-2B** — authoritative route/quote service (server-side route facts
-   via the Routes API work; signed quotes).
-2. **3C-2C** — endpoint enforcement: `create-booking` /
-   `update-pending-booking` verify prices against the server engine.
-3. Versioned **Supabase pricing profiles** + ambassador pricing
+1. **3C-2B** — server quote service and browser integration shipped dark;
+   production service/flag remain off.
+2. **3C-2C-A** — token v2 and migration 017 installed with pricing mode
+   `off`; **3C-2C-B PR-1** swaps both writers onto the atomic RPCs while
+   preserving today's client-priced behavior.
+3. **3C-2C-B PR-2** — edit quoting and the passenger refresh UX, followed
+   by controlled quote-service activation, observe evidence, then a
+   separately authorized one-way transition to enforce.
+4. Versioned **Supabase pricing profiles** + ambassador pricing
    dashboard + configurable markups (the rate-card architecture already
    supports supplying any validated card).
-4. Evaluation of a **time-dominant with distance-floor** rate card
+5. Evaluation of a **time-dominant with distance-floor** rate card
    against real ride data (deliberately not adopted yet).
 
 ---

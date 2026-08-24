@@ -438,11 +438,51 @@ function check(name, fn2) { fn2(); passed++; console.log('✓ ' + name); }
   });
 
   resetBooking();
+  r = await post(mkEdit({ quoteToken: {} }), 'tok-a');
+  check('present malformed edit token -> requote, never legacy/RPC traffic', () => {
+    assert.strictEqual(r.statusCode, 409);
+    assert.strictEqual(JSON.parse(r.body).error, 'quote_invalid');
+    assert.strictEqual(JSON.parse(r.body).requote, true);
+    assert.strictEqual(capturedRpc, null);
+    assert.strictEqual(booking.pickup_location, 'Old pickup');
+  });
+
+  resetBooking();
   r = await post(mkEdit({ quoteToken: 'tok.abc', vehicleKey: 'escalade', airportCode: 'MIA', placeId: 'ChIJvalidplace1234567', routeMilesTenths: 120, routeMinutes: 25 }), 'tok-a');
   check('presented token with signing config unavailable + no receipt match -> sanitized 500, RPC never called', () => {
     assert.strictEqual(r.statusCode, 500);
     assert.strictEqual(capturedRpc, null);
     assert.strictEqual(booking.pickup_location, 'Old pickup');
+  });
+
+  resetBooking({ duration_minutes: 30 });
+  process.env.QUOTE_SIGNING_CURRENT_ID = 'k1';
+  process.env.QUOTE_SIGNING_CURRENT_SECRET = 'edit-test-secret-0123456789abcdef0123456789abcd';
+  try {
+    r = await post(mkEdit({
+      durationMinutes: undefined,
+      pickup: 'Quoted new pickup',
+      dropoff: 'Quoted new dropoff',
+      quoteToken: 'garbage.token',
+      vehicleKey: 'escalade',
+      airportCode: 'MIA',
+      placeId: 'ChIJvalidplace1234567',
+      routeMilesTenths: 120,
+      routeMinutes: 25
+    }), 'tok-a');
+  } finally {
+    delete process.env.QUOTE_SIGNING_CURRENT_ID;
+    delete process.env.QUOTE_SIGNING_CURRENT_SECRET;
+  }
+  check('bad-signature modern edit stores echoed routeMinutes, never stale legacy duration', () => {
+    assert.strictEqual(r.statusCode, 200);
+    assert.strictEqual(capturedRpc.p_verdict, 'verify_failed');
+    assert.ok(/^[0-9a-f]{64}$/.test(capturedRpc.p_token_digest));
+    assert.strictEqual(capturedRpc.p_payload, null);
+    assert.strictEqual(capturedRpc.p_edit.duration_minutes, 25);
+    assert.strictEqual(booking.duration_minutes, 25);
+    assert.strictEqual(booking.pickup_location, 'Quoted new pickup');
+    assert.notStrictEqual(booking.duration_minutes, 30);
   });
 
   resetBooking();

@@ -41,6 +41,33 @@ function isUuid(value) {
   return typeof value === 'string' && UUID_RE.test(value);
 }
 
+// Preserve the distinction between an old client that omitted quoteToken
+// entirely and a modern request that presented a malformed value. Never
+// coerce or trim a token: its exact bytes are the signed/digested identity.
+function readPresentedToken(body) {
+  const present = !!body && typeof body === 'object' &&
+    Object.prototype.hasOwnProperty.call(body, 'quoteToken');
+  if (!present) return { present: false, invalid: false, token: null };
+  const token = body.quoteToken;
+  if (typeof token !== 'string' || token.length === 0 ||
+      Buffer.byteLength(token, 'utf8') > TOKEN_MAX_BYTES) {
+    return { present: true, invalid: true, token: null };
+  }
+  return { present: true, invalid: false, token };
+}
+
+// A cheap, side-effect-free preflight for the one path that could otherwise
+// create an ambassador customer row before token classification. Keep this
+// lazy: legacy/no-token requests must not depend on quote signing config.
+function signingKeysAvailable(env) {
+  try {
+    const signing = resolveSigningKeys(env);
+    return !!signing?.ok && Array.isArray(signing.keys) && signing.keys.length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 // Classify a PRESENTED token (callers must not invoke this on the no-token
 // path — signing configuration stays untouched there). Returns exactly one of:
 //   { kind: 'oversize' }                                — refuse pre-digest
@@ -174,6 +201,8 @@ module.exports = {
   TOKEN_MAX_BYTES,
   sha256Hex,
   isUuid,
+  readPresentedToken,
+  signingKeysAvailable,
   classifyToken,
   recoveryLookup,
   sharedOutcomeResponse,

@@ -407,6 +407,30 @@ async function check(name, fn) {
     assert.strictEqual(q.route.minutes, browserMinutes(2429.5));
   });
 
+  await check('quote issuance signs only the database-consumable 1..1440 minute boundary', async () => {
+    for (const [minutes, expectedStatus] of [[0, 500], [1, 200], [1440, 200], [1441, 500]]) {
+      resetState();
+      // 29 positive provider seconds legitimately quantizes to 0 minutes;
+      // unlike literal 0s it reaches the issuance boundary under test.
+      const providerSeconds = minutes === 0 ? 29 : minutes * 60;
+      state.routesResponse = () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ routes: [{ distanceMeters: 16093, duration: `${providerSeconds}s` }] })
+      });
+      const response = await post(goodIntent());
+      assert.strictEqual(response.statusCode, expectedStatus, `${minutes} minute route`);
+      const parsed = JSON.parse(response.body);
+      if (expectedStatus === 200) {
+        assert.strictEqual(parsed.quote.route.minutes, minutes);
+        assert.ok(parsed.quote.vehicles.tesla.token, `${minutes} minute quote must be signed`);
+      } else {
+        assert.deepStrictEqual(parsed, { error: 'Pricing unavailable' });
+        assert.ok(!('quote' in parsed), `${minutes} minute refusal must carry no quote/token`);
+      }
+    }
+  });
+
   // ---------- engine consumption + capacity honesty ----------
   await check('all-vehicles response matches the engine directly; capacity flags are honest; bags dormant', async () => {
     const pickupAt = FUTURE_PICKUP();
@@ -1129,6 +1153,31 @@ async function check(name, fn) {
     const endpoint = fs.readFileSync(path.join(repoRoot, 'backend/functions/quote-ride.js'), 'utf8');
     assert.ok(endpoint.includes("require('./lib/ride-quote')"), 'the 3C-2A engine is the only calculator');
     assert.ok(!endpoint.includes('pricing.js'), 'the browser calculator is never touched');
+  });
+
+  await check('calculate-price retirement is complete and pinned behind the cache refresh', async () => {
+    const fs = require('fs');
+    assert.strictEqual(
+      fs.existsSync(path.join(repoRoot, 'backend/functions/calculate-price.js')),
+      false,
+      'the retired handler must not exist'
+    );
+    const toml = fs.readFileSync(path.join(repoRoot, 'netlify.toml'), 'utf8');
+    const catchAllAt = toml.indexOf('from = "/*"');
+    for (const retiredPath of ['/api/calculate-price', '/.netlify/functions/calculate-price']) {
+      const at = toml.indexOf(`from = "${retiredPath}"`);
+      assert.ok(at >= 0 && (catchAllAt < 0 || at < catchAllAt), `${retiredPath} 404 must precede catch-all`);
+      const block = toml.slice(at, toml.indexOf('[[redirects]]', at + 1));
+      assert.ok(/to\s*=\s*"\/admin-retired\.html"/.test(block), `${retiredPath} targets retired page`);
+      assert.ok(/status\s*=\s*404/.test(block), `${retiredPath} is an explicit 404`);
+    }
+    const apiConfig = fs.readFileSync(path.join(repoRoot, 'api-config.js'), 'utf8');
+    assert.ok(!apiConfig.includes('/api/calculate-price'));
+    assert.ok(!apiConfig.includes('calculatePrice'));
+    const worker = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
+    assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
+    const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
+    assert.strictEqual(cacheName, 'linkmia-v1.3.20', 'retirement ships with the reviewed cache bump');
   });
 
   if (failures.length) {

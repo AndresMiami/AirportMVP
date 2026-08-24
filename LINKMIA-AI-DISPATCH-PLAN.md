@@ -1,5 +1,10 @@
 # LinkMia AI-Powered Ride Dispatch System — Build Plan
 
+> **Historical concept document.** This captures an early dispatch-system
+> exploration, not the current production inventory. Current pricing and
+> booking authority are documented in `docs/PRICING_STRUCTURE.md` and
+> `CLAUDE.md`; later phases below must be revalidated before implementation.
+
 ## Table of Contents
 - [Step 1: Codebase Exploration Findings](#step-1--codebase-exploration-findings)
 - [Step 2: Gap Analysis](#step-2--gap-analysis)
@@ -45,8 +50,8 @@
 
 | Function | Endpoint | Status | What It Does |
 |----------|----------|--------|-------------|
-| `create-booking.js` | POST `/api/create-booking` | **Working** | Creates booking + Telegram admin notification |
-| `calculate-price.js` | POST `/api/calculate-price` | **Working** | Server-side pricing (prevents tampering) |
+| `create-booking.js` | POST `/api/create-booking` | **Working** | Writes through the atomic `accept_quote_create` RPC, then sends the Telegram doorbell only for a new booking |
+| `calculate-price.js` | Both former URLs | **Retired** | Handler deleted; explicit 404s close the old client-distance pricing oracle |
 | `create-payment-intent.js` | POST `/api/create-payment-intent` | **Working** | Stripe PaymentIntent creation |
 | `create-payment.js` | POST `/api/create-payment` | **Working** | Duplicate of above |
 | `create-checkout-session.js` | POST `/api/create-checkout-session` | **Working** | Stripe Checkout hosted page |
@@ -146,7 +151,7 @@ ADMIN_TELEGRAM_CHAT_ID=[get via getUpdates API]
 
 | Asset | File | Why |
 |-------|------|-----|
-| Pricing engine | `pricing.js` | Already has vehicle configs, tiered rates, surcharges. Can wrap in MCP server directly. |
+| Pricing engine | `backend/functions/lib/ride-quote.js` + rate-card resolver | Canonical server calculator and validated rate-card seam; future tooling must wrap this authority rather than browser `pricing.js`. |
 | Database schema | `database/linkmia-schema.sql` | Booking status flow, driver/customer tables, payment tracking — all designed for dispatch. |
 | Google Maps proxy | `backend/api-proxy/server.js` | Caching, rate limiting, all needed endpoints. MCP server wraps existing proxy. |
 | Stripe payment functions | `backend/functions/create-payment-intent.js` | PaymentIntent creation logic reusable for payment links. |
@@ -157,7 +162,7 @@ ADMIN_TELEGRAM_CHAT_ID=[get via getUpdates API]
 
 | Asset | File | Change Needed |
 |-------|------|---------------|
-| `create-booking.js` | `backend/functions/` | Currently does NOT write to Supabase — only sends notifications. Add Supabase insert. |
+| `create-booking.js` | `backend/functions/` | Writer swap complete: all booking creation flows through `accept_quote_create`; future changes must preserve that single authority path. |
 | `server.js` (Railway) | `backend/api-proxy/` | Add webhook route for Telegram. Currently only handles Maps. |
 | Database schema | `database/linkmia-schema.sql` | Add `customer_memory` table for personalization. Add `language` column to customers. |
 
@@ -247,10 +252,11 @@ Normalize messages from Telegram into a common format.
 **Files to create:**
 - `agent/router/message-router.js` — Accepts messages from Telegram, normalizes to `{ source, chatId, text, timestamp, metadata, isDriver }`, routes to appropriate handler (agent bridge for passengers, command handler for drivers).
 
-#### 1.4 Fix create-booking.js
+#### 1.4 Create-booking persistence (completed by 3C-2C-B PR-1)
 
-**Files to modify:**
-- `backend/functions/create-booking.js` — Add Supabase insert after generating booking ID. Currently only sends Telegram notification but doesn't persist to database.
+`backend/functions/create-booking.js` now persists exclusively through the
+database's `accept_quote_create` RPC. It does not perform a direct insert;
+the RPC owns atomic pricing authority, idempotency, and active-ride conflicts.
 
 #### Testing Phase 1
 1. Firebase: Write and read a test ride document via Node.js script
@@ -350,10 +356,10 @@ Normalize messages from Telegram into a common format.
 | `geocode_address(address)` | Lat/lng via existing `/api/geocoding` |
 | `autocomplete_place(input)` | Suggestions via existing `/api/places/autocomplete` |
 
-**`agent/mcp-servers/pricing-mcp/index.js`** — 3 tools (wraps existing `pricing.js`):
+**`agent/mcp-servers/pricing-mcp/index.js`** — 3 tools (future tools wrap the canonical server engine and rate-card resolver):
 | Tool | Purpose |
 |------|---------|
-| `calculate_price(vehicleType, distance, duration, dateTime)` | Uses existing PricingService class |
+| `calculate_price(vehicleType, distance, duration, dateTime)` | Calls the canonical server quote engine with a validated resolved rate card |
 | `get_all_vehicle_prices(distance, duration, dateTime)` | All 3 vehicles compared |
 | `check_surge_pricing(dateTime)` | Active surcharges for time |
 
@@ -627,7 +633,7 @@ export async function handleIncomingMessage(normalizedMessage) {
 agent/mcp-servers/
 ├── supabase-mcp/    8 tools  (database operations)
 ├── maps-mcp/        3 tools  (wraps existing Railway proxy)
-├── pricing-mcp/     3 tools  (wraps existing PricingService)
+├── pricing-mcp/     3 tools  (wraps canonical server pricing authority)
 ├── messaging-mcp/   4 tools  (Telegram outbound for passengers, drivers, admin)
 └── stripe-mcp/      4 tools  (payments)
 
