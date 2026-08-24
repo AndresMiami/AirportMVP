@@ -79,6 +79,7 @@ function loadRealCarousel() {
       parent: { postMessage: (msg) => parentMessages.push(msg) },
       getComputedStyle: () => ({ paddingLeft: '0' }),
     },
+    location: { origin: 'https://example.test' },
     setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
     Set, Map, Math, Date, JSON, Object, Array, Number, String, Boolean, Error,
   };
@@ -123,7 +124,13 @@ function loadRealCarousel() {
     parentMessages,
     becomeReady() { inst.setupCommunication(); ready = true; },   // installs the REAL listener
     isReady: () => ready,
-    deliver(msg) { if (ready && listener) listener({ data: msg }); },
+    deliver(msg, opts = {}) {
+      if (ready && listener) listener({
+        data: msg,
+        origin: 'origin' in opts ? opts.origin : cctx.location.origin,
+        source: 'source' in opts ? opts.source : cctx.window.parent,
+      });
+    },
     detectAt(index) { detectedIndex = index; inst.detectActiveCard(); },
     viewportIndex: () => detectedIndex,
     scrollCalls,
@@ -242,7 +249,8 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     // setup() expects the full page DOM. Tests build the instance themselves
     // via Object.create, so the boot path must stay parked.
     bootAuthReady: new Promise(() => {}),
-    location: { search: '', href: 'https://example.test/indexMVP.html', replace() {},
+    location: { search: '', href: 'https://example.test/indexMVP.html',
+      origin: 'https://example.test', replace() {},
       reload() { ctx.__reloads = (ctx.__reloads || 0) + 1; } },
     localStorage: (() => {
       const m = new Map();
@@ -318,7 +326,13 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
   app.pricingService = null;
   app.pendingEdit = null;
   const runTimers = () => { const due = timers.splice(0); due.forEach((t) => t.fn()); };
-  const sendToApp = (msg) => appMessageListeners.forEach((fn) => fn({ data: msg }));
+  // Default = the genuine same-origin carousel channel; hostile checks
+  // override origin/source to prove the listener refuses them.
+  const sendToApp = (msg, opts = {}) => appMessageListeners.forEach((fn) => fn({
+    data: msg,
+    origin: 'origin' in opts ? opts.origin : ctx.location.origin,
+    source: 'source' in opts ? opts.source : iframe.contentWindow,
+  }));
   ctx.window.airportApp = app;
   return { app, ctx, posted, alerts, byId, contentSection, carousel, runTimers, timers, sendToApp };
 }
@@ -368,10 +382,17 @@ check('STATIC: the committed default is OFF, so merging changes nothing', () => 
 
 check('DISABLED: no quote request is made and pricing.js still drives the carousel', async () => {
   const f = okFetch(SERVER_QUOTE);
-  const { app } = makeContext({ enabled: false, fetchImpl: f });
-  app.requestServerQuote();
+  const { app, runTimers } = makeContext({ enabled: false, fetchImpl: f });
+  // AWAITED, so removing the method's dark guard cannot slip past a
+  // not-yet-settled fetch: the call must complete having spent nothing
+  // and touched nothing.
+  await app.requestServerQuote();
   app.scheduleQuote();
+  runTimers();
+  await new Promise((r) => setTimeout(r, 0));
   assert.strictEqual(f.calls.length, 0, 'the disabled build must never call /api/quote-ride');
+  assert.strictEqual(app.state.quote.status, 'idle', 'the quote state stays untouched');
+  assert.strictEqual(app.state.quote.data, null);
 });
 
 check('DISABLED: updateVehiclePrices keeps its legacy early-return, not the new one', () => {
@@ -1330,7 +1351,9 @@ function tap(app) {
   return pending;
 }
 
-const CREATED = { status: 200, body: { bookingId: 'db-1', tripId: 'LM-OK', detailsVersion: 1 } };
+// Real endpoint success shape (booking-writer contract): success:true +
+// bookingId (+ detailsVersion, which edits REQUIRE to be definitive).
+const CREATED = { status: 200, body: { success: true, bookingId: 'db-1', tripId: 'LM-OK', detailsVersion: 1 } };
 
 check('ENVELOPE: one tap serializes once — operationId inside the exact stored bytes', async () => {
   const f = routedFetch({
@@ -1459,26 +1482,34 @@ check('REQUOTE: a server requote spends the tap budget — refresh, ONE resubmit
   assert.strictEqual(alerts.length, 0);
 });
 
-check('REQUOTE: an exhausted tap budget returns to a visible tap — never a third submit', async () => {
+check('REQUOTE: an exhausted tap budget returns to a visible tap — no third submit, NO background quote', async () => {
   const f = routedFetch({
     '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
     '/api/create-booking': { status: 409, body: { error: 'quote_expired', requote: true } },
   });
-  const { app, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const { app, carousel, alerts } = makeContext({ enabled: true, fetchImpl: f });
   app.showTripSheet = () => { throw new Error('must not reach the trip sheet'); };
 
   await app.requestServerQuote();
   app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
   await tap(app);
-  // the exhausted branch fires an unawaited background re-quote; let it land
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
 
   assert.strictEqual(f.to('/api/create-booking').length, 2,
     'the per-tap ceiling is one refresh + one resubmit, full stop');
+  assert.strictEqual(f.to('/api/quote-ride').length, 2,
+    'provider ceiling: the initial quote + ONE quiet refresh — exhaustion buys nothing');
   assert.strictEqual(alerts.length, 0, 'the return to a visible tap is quiet');
+  // The refused quote is marked expired locally: Expired cards, and the
+  // primary action stays clickable — the NEXT tap owns the refresh.
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: 'Expired', escalade: 'Expired', sprinter: 'Expired' });
   assert.strictEqual(app.els.bookBtn.disabled, false,
     'the passenger can tap again once they have reviewed');
+  assert.match(app.els.bookBtn.innerHTML, /Refresh and Book/);
+  const note = app.els.bookBtn.children.find((c) => c.className === 'btn-sub-text');
+  assert.ok(note && /needs a refresh/i.test(note.textContent));
 });
 
 check('UNKNOWN result: exact-byte retry once, then the recovery card — and Check again recovers', async () => {
@@ -1552,7 +1583,7 @@ check('RECOVERY OFFER: bound to the account — another subject\'s envelope is d
   app.showTripSheet = (id) => sheets.push(id);
   app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
   ctx.fetch = routedFetch({
-    '/api/update-pending-booking': { status: 200, body: { bookingId: 'b-1', tripId: 'LM-1', detailsVersion: 9 } },
+    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: 'b-1', tripId: 'LM-1', detailsVersion: 9 } },
   });
   await card.children[1].listeners.click[0]();
   assert.deepStrictEqual(sheets, ['b-1']);
@@ -1637,6 +1668,234 @@ check('STATIC: the carousel stamps userInitiated=false on every non-user selecti
   assert.match(carousel, /userInitiated: userInitiated === true/, 'the flag rides in vehicleData');
 });
 
+// ============ PR-2 round 1 (Codex findings 1–5) ============
+
+check('GATE: an unresolved operation blocks new Book/Save chains until resolved or discarded', async () => {
+  let outage = true;
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': () => (outage
+      ? { status: 502, body: { error: 'gateway hiccup' } }
+      : CREATED),
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  ctx.currentSession = { user: { id: 'auth-user-1' } };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.strictEqual(f.to('/api/create-booking').length, 2, 'sanity: unknown after one retry');
+  const storedBytes = ctx.sessionStorage.getItem('lm_pending_envelope');
+  assert.ok(storedBytes, 'sanity: the envelope is unresolved');
+  assert.strictEqual(alerts.length, 1);
+
+  // A later tap must not mint a new operation while this one is unresolved —
+  // ambassadors are multi-ride, so a committed-but-unacknowledged create
+  // plus a fresh chain would be a second REAL guest ride and a lost handle.
+  const callsBefore = f.calls.length;
+  assert.strictEqual(tap(app), null, 'the tap is refused before any chain starts');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.calls.length, callsBefore, 'zero new POSTs of any kind');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), storedBytes,
+    'the unresolved envelope is retained byte-identically');
+  assert.ok(ctx.document.body.children.some((c) => c.id === 'pendingEnvelopeCard' && !c.removed),
+    'the recovery card is re-offered instead');
+  assert.strictEqual(alerts.length, 1, 'the refusal is quiet — the card speaks');
+
+  // Positive control: explicit Discard releases the gate and a new tap books.
+  const cards = ctx.document.body.children.filter((c) => c.id === 'pendingEnvelopeCard' && !c.removed);
+  await cards[cards.length - 1].children[2].listeners.click[0]();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null);
+  outage = false;
+  const createsBefore = f.to('/api/create-booking').length;
+  const pending2 = tap(app);
+  assert.ok(pending2, 'after Discard the tap proceeds');
+  await pending2;
+  assert.strictEqual(f.to('/api/create-booking').length, createsBefore + 1);
+  assert.deepStrictEqual(sheets, ['db-1']);
+});
+
+check('DEFINITIVE means REGISTRY-SHAPED: 200 {} and a generic JSON 503 stay unknown', async () => {
+  for (const bad of [
+    { status: 200, body: {} },                                  // parsed 2xx, no success shape
+    { status: 200, body: { success: true } },                   // still no bookingId
+    { status: 503, body: { error: 'Service Unavailable' } },    // a gateway, not the writer
+    { status: 428, body: { error: 'outdated_client' } },        // no reload:true
+  ]) {
+    const f = routedFetch({
+      '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+      '/api/create-booking': bad,
+    });
+    const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+    app.showTripSheet = () => { throw new Error('must not open a sheet'); };
+    await app.requestServerQuote();
+    app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+    await tap(app);
+    const posts = f.to('/api/create-booking');
+    assert.strictEqual(posts.length, 2, `${bad.status}: one exact-byte retry, then unknown`);
+    assert.strictEqual(posts[0].opts.body, posts[1].opts.body);
+    assert.ok(ctx.sessionStorage.getItem('lm_pending_envelope'),
+      `${bad.status}: a contract-invalid response must NOT settle the envelope`);
+    assert.strictEqual(alerts.length, 1);
+    assert.match(alerts[0], /Check again/);
+  }
+});
+
+check('DEFINITIVE: an edit success without its version is unknown; with it, definitive', async () => {
+  for (const [body, wantPosts, wantEnvelope] of [
+    [{ success: true, bookingId: 'b-9', tripId: 'LM-9' }, 2, true],                    // missing detailsVersion
+    [{ success: true, bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 }, 1, false],
+  ]) {
+    const f = routedFetch({
+      '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+      '/api/update-pending-booking': { status: 200, body },
+    });
+    const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+    app.showTripSheet = () => {};
+    app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 7 };
+    app.editMarkers = {
+      routeDirection: true, routeAddress: true, pickupAt: true,
+      vehicle: false, traveler: false
+    };
+    await app.requestServerQuote();
+    app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+    await tap(app);
+    assert.strictEqual(f.to('/api/update-pending-booking').length, wantPosts);
+    assert.strictEqual(!!ctx.sessionStorage.getItem('lm_pending_envelope'), wantEnvelope,
+      'the edit success shape REQUIRES its committed version');
+  }
+});
+
+check('DEFINITIVE: the writer\'s exact blocked copy IS definitive — one attempt, envelope settled', async () => {
+  const BLOCKED = 'Bookings are temporarily unavailable. Message us on WhatsApp and a human will arrange your ride.';
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': { status: 503, body: { error: BLOCKED } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  let shownError = '';
+  app.showPaymentError = (m) => { shownError = String(m); };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'a recognized outcome is not retried');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null, 'settled');
+  assert.match(shownError, /nothing was booked/i, 'the failure is spoken honestly');
+});
+
+check('STATIC: the blocked registry copy is pinned identically in writer and browser', () => {
+  const copy = 'Bookings are temporarily unavailable. Message us on WhatsApp and a human will arrange your ride.';
+  const writer = fs.readFileSync(path.join(repoRoot, 'backend/functions/lib/booking-writer.js'), 'utf8');
+  assert.ok(writer.includes(copy), 'the writer serves this exact copy for blocked');
+  assert.ok(appBlock.includes(copy), 'the browser recognizes this exact copy as definitive');
+});
+
+check('RECOVERY OVERLAP: an older completion cannot clear or act on a newer operation', async () => {
+  let releaseCheck;
+  const checkGate = new Promise((r) => { releaseCheck = r; });
+  const f = routedFetch({
+    '/api/create-booking': async () => { await checkGate; return CREATED; },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'op-OLD', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  const [, checkBtn, discardBtn] = card.children;
+  const oldCheck = checkBtn.listeners.click[0]();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(discardBtn.disabled, true, 'BOTH controls freeze during a check');
+
+  // While the old check awaits, the slot is repointed to a newer operation.
+  const newer = JSON.stringify({
+    operationId: 'op-NEW', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 2,
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', newer);
+  releaseCheck();
+  await oldCheck;
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+    'the newer operation survives the older completion');
+  assert.notStrictEqual(card.removed, true, 'the shared card is not torn down');
+  assert.deepStrictEqual(sheets, [], 'the older result is not displayed as current');
+  assert.strictEqual(discardBtn.disabled, false, 'controls unfreeze for the live card');
+});
+
+check('CHANNEL: vehicle selection is accepted only from the same-origin carousel frame', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, sendToApp } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();
+  const vehicle = { id: 'escalade', name: 'Cadillac Escalade', passengers: 7, bags: 8, price: 55 };
+  sendToApp({ type: 'vehicleSelected', vehicle }, { origin: 'https://evil.example' });
+  assert.strictEqual(app.state.vehicle?.type ?? null, null,
+    'a cross-origin sender must not drive the priced vehicle/token');
+  sendToApp({ type: 'vehicleSelected', vehicle }, { source: {} });
+  assert.strictEqual(app.state.vehicle?.type ?? null, null,
+    'right origin but wrong window must not either');
+  sendToApp({ type: 'vehicleSelected', vehicle });
+  assert.strictEqual(app.state.vehicle?.type, 'escalade',
+    'the genuine carousel frame still drives selection');
+});
+
+check('CHANNEL: the carousel obeys only its same-origin parent', () => {
+  const { carousel } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  const before = carousel.parentMessages.length;
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } },
+    { origin: 'https://evil.example' });
+  assert.strictEqual(carousel.parentMessages.length, before, 'hostile origin: ignored');
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } },
+    { source: {} });
+  assert.strictEqual(carousel.parentMessages.length, before, 'hostile source: ignored');
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } });
+  const last = carousel.parentMessages[carousel.parentMessages.length - 1];
+  assert.strictEqual(last?.type, 'vehicleSelected', 'the genuine parent still commands');
+  assert.strictEqual(last?.vehicle?.id, 'escalade');
+  assert.strictEqual(last?.vehicle?.userInitiated, false, 'host restore stays non-user');
+});
+
+check('REFRESH BINDING: an answer the tap did not launch is refused, even at the same price', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': CREATED,
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  app.showTripSheet = () => { throw new Error('must not submit'); };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+
+  // Park ONLY the tap's own quiet refresh at the auth step.
+  let gateFirst = true;
+  let releaseFirst; const firstGate = new Promise((r) => { releaseFirst = r; });
+  let firstEntered; const firstIn = new Promise((r) => { firstEntered = r; });
+  ctx.window.supabaseClient.auth.getSession = async () => {
+    if (gateFirst) { gateFirst = false; firstEntered(); await firstGate; }
+    return { data: { session: { access_token: 'jwt-abc', user: { id: 'auth-user-1' } } } };
+  };
+  const pending = tap(app);
+  await firstIn;
+  // An interleaved re-quote completes fully while the tap's refresh is parked.
+  await app.requestServerQuote({ force: true });
+  assert.strictEqual(app.quoteIsFresh(), true,
+    'sanity: the interloper produced a fresh quote at the identical price');
+  releaseFirst();
+  await pending;
+  assert.strictEqual(f.to('/api/create-booking').length, 0,
+    'same intent, same cents — but not the request THIS tap launched: refused');
+  assert.strictEqual(alerts.length, 0);
+  assert.strictEqual(app.els.bookBtn.disabled, false,
+    'the fresh price is reviewable and a new tap can accept it');
+});
+
 check('STATIC: envelope lifecycle wiring — boot offer on every path, sign-outs clear it', () => {
   const full = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
   const resumeIdx = full.indexOf('function resumeAccountBookingWhenReady()');
@@ -1670,7 +1929,7 @@ check('428 reload:true — the outdated bundle reloads instead of arguing', asyn
 check('EDIT: a full edit submission — edit envelope, forced traveler review, CAS carried', async () => {
   const f = routedFetch({
     '/api/quote-ride': { body: quoteWithTtl(15) },
-    '/api/update-pending-booking': { status: 200, body: { bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 } },
+    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 } },
   });
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
   const sheets = [];
@@ -1700,7 +1959,8 @@ check('EDIT: a full edit submission — edit envelope, forced traveler review, C
     'the CAPTURED version is the CAS — a server echo never replaces it');
   assert.match(sent.operationId, /^[0-9a-f-]{36}$/i);
   assert.strictEqual(sent.quoteToken, 'tok.tesla');
-  assert.strictEqual(sent.paymentMethod, 'cash', 'the browser force-sends cash on edits');
+  assert.ok(!('paymentMethod' in sent),
+    'plan v3.1: the edit contract carries NO payment method — stored values survive');
   assert.deepStrictEqual(sheets, ['b-9']);
   assert.strictEqual(app.pendingEdit, null, 'a saved edit closes the edit session');
 });

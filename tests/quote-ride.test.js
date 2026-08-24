@@ -1329,6 +1329,11 @@ async function check(name, fn) {
     assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
     const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
     assert.strictEqual(cacheName, 'linkmia-v1.3.21', 'PR-2 ships with the reviewed cache bump');
+    // The bump is only meaningful if BOTH changed assets are actually in the
+    // precache list — a dropped entry would serve a stale page under a new
+    // cache name.
+    assert.ok(worker.includes("'/indexMVP.html'"), 'changed booking page remains precached');
+    assert.ok(worker.includes("'/vehicle-carousel-standalone.html'"), 'changed carousel remains precached');
   });
 
   if (failures.length) {

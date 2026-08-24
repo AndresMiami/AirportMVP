@@ -582,8 +582,9 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     -> quiet refresh + ONE auto-resubmit as a NEW envelope, then a visible
     tap; restored-edit interaction markers
     (routeDirection/routeAddress/pickupAt/vehicle each set only by an
-    explicit action in THIS edit session, traveler only by the reopened
-    modal at Save — prefilled never counts, Save blocked until all five);
+    explicit action in THIS edit session and jointly gating the primary
+    button; traveler is the fifth, confirmed AFTER the tap in the
+    required modal before submission — prefilled never counts);
     1..1440 route-minute alignment in quote-token's validCommitmentIntent
     and the browser contract capture; SW bump v1.3.21 (indexMVP + the
     carousel are precached). PRE-PUSH REVIEW ROUND (adversarially
@@ -606,14 +607,30 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     re-enable a disabled Save mid-legacy-save); notePriceChanged
     (re)creates its render target (the quiet one-liner was silently
     dropped in every edit session); beginPendingEdit starts Save
-    honestly disabled under the quote flow. Deliberate leftovers
-    (recorded for Codex): single-slot envelope means a new tap after an
-    ignored recovery card overwrites the unresolved envelope; the
-    exhausted-requote return-to-visible performs ONE visible refresh
-    (dead-end idle state was the alternative); edit_stale inside an
-    edit session ends with honest reopen copy, no in-app shortcut; a
-    card-recovered create leaves the original provisional trip_
-    localStorage record.
+    honestly disabled under the quote flow.
+    CODEX ROUND 1 (pr77-codex-review-round1.md, all five findings +
+    cleanups landed): an UNRESOLVED envelope now gates every new
+    Book/Save chain (re-offering the recovery card; released only by
+    definitive recovery, Discard, logout, or account mismatch — and
+    the gate survives same-tab reload); definitive results are
+    REGISTRY-SHAPED (success needs bookingId, edit success needs its
+    detailsVersion, 428 needs reload:true, 409 needs
+    requote/existingBookingId/error, 503 only the writer's exact
+    blocked copy — a parsed 200 {} or gateway JSON 503 stays unknown
+    and keeps the envelope); Check-again completions are
+    operation-scoped (both controls freeze during a check; an older
+    completion can never clear, remove, or speak for a newer
+    operation); the carousel channel is same-origin both ways
+    (event.origin + event.source checked in both windows,
+    location.origin targets); the quiet refresh binds to the exact
+    sequence its tap launched (snap.refreshSeq — an interleaved
+    same-price answer is refused) and an exhausted requote budget buys
+    NOTHING automatically: the local quote is marked expired
+    (expireQuoteLocally) and the next explicit tap owns the refresh.
+    Edit payloads no longer send paymentMethod. Deliberate leftovers:
+    edit_stale inside an edit session ends with honest reopen copy, no
+    in-app shortcut; a card-recovered create leaves the original
+    provisional trip_ localStorage record.
     Then the plan-v3.1 activation ladder (secrets -> prove-503 rebuild ->
     kill switch off -> airport smoke -> observe -> browser flag + SW bump
     -> graduation evidence -> enforce, each rung Andres-authorized;

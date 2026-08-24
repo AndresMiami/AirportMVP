@@ -649,8 +649,13 @@
                 const isInIframe = window.parent !== window;
                 
                 if (isInIframe) {
-                    // Listen for messages from parent (iframe mode)
+                    // Listen for messages from parent (iframe mode). Only the
+                    // SAME-ORIGIN embedding parent may command this carousel —
+                    // any other sender could repaint prices or move the
+                    // selection out from under the booking page.
                     window.addEventListener('message', (event) => {
+                        if (event.origin !== location.origin) return;
+                        if (event.source !== window.parent) return;
                         const { type, data } = event.data || {};
                         
                         switch(type) {
@@ -661,7 +666,7 @@
                                     window.parent.postMessage({
                                         type: 'pricesUpdated',
                                         prices: data
-                                    }, '*');
+                                    }, location.origin);
                                 }
                                 break;
                                 
@@ -696,7 +701,7 @@
                     });
                     
                     // Notify parent that carousel is ready
-                    window.parent.postMessage({ type: 'carouselReady' }, '*');
+                    window.parent.postMessage({ type: 'carouselReady' }, location.origin);
                     
                 } else {
                     // Standard event listeners for non-iframe mode
@@ -779,11 +784,11 @@
                 const isInIframe = window.parent !== window;
                 
                 if (isInIframe) {
-                    // Send postMessage to parent
+                    // Send postMessage to parent (same-origin channel only)
                     window.parent.postMessage({
                         type: 'vehicleSelected',
                         vehicle: vehicleData
-                    }, '*');
+                    }, location.origin);
                 } else {
                     // Dispatch event for non-iframe mode
                     window.dispatchEvent(new CustomEvent('vehicleSelected', {

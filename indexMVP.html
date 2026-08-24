@@ -2304,7 +2304,7 @@
                 if (!st) return;
                 const iframe = document.getElementById('vehicle-carousel-frame');
                 if (!iframe || !iframe.contentWindow) return;
-                const post = (msg) => iframe.contentWindow.postMessage(msg, '*');
+                const post = (msg) => iframe.contentWindow.postMessage(msg, location.origin);
                 if (st.kind === 'placeholder') {
                     post({ type: 'clearPrices', data: { label: st.label } });
                     // Loading/error/expired states have no newer availability
@@ -2633,14 +2633,14 @@
                         iframe.contentWindow.postMessage({
                             type: 'updatePrices',
                             data: prices
-                        }, '*');
+                        }, location.origin);
                         // Pending edits intentionally remain on legacy pricing.
                         // Clear any disabled cards left by an earlier server
                         // quote before handing the carousel back to that flow.
                         iframe.contentWindow.postMessage({
                             type: 'setUnavailable',
                             data: { ids: [] }
-                        }, '*');
+                        }, location.origin);
                         console.log('💸 Sent prices to carousel iframe:', prices);
                     }
                     
@@ -2763,6 +2763,28 @@
                 // snapshot, spend another chain's budget, and clobber the
                 // single-slot recovery envelope.
                 if (this._submitInFlight) return;
+                // An UNRESOLVED operation owns the primary action (plan v3.1
+                // §1): while a same-account envelope awaits recovery, a new
+                // Book/Save chain could create a second real ride while
+                // erasing the only recovery handle for the first (ambassadors
+                // are multi-ride, so the active-slot rule would not catch
+                // it). Only a definitive recovery, explicit Discard, logout,
+                // or an account mismatch releases this gate — and it holds
+                // across a same-tab reload because the envelope does.
+                if (this.quoteFlowActive()) {
+                    let rawEnvelope = null;
+                    try { rawEnvelope = sessionStorage.getItem('lm_pending_envelope'); } catch (_) {}
+                    if (rawEnvelope) {
+                        const subject = (typeof currentSession !== 'undefined' &&
+                            currentSession?.user?.id) || null;
+                        if (!subject) return; // account unknown: block, never delete
+                        const env = this.readPendingEnvelope(subject); // drops foreign/corrupt
+                        if (env) {
+                            this.offerPendingEnvelope(subject);
+                            return;
+                        }
+                    }
+                }
                 const passengerModal = PassengerModal.getInstance();
 
                 // PR-2: the TAP is the acceptance boundary. Freeze what the
@@ -2868,6 +2890,14 @@
                 snap.refreshUsed = true;
                 this._quoteRefreshing = true;
                 this.updateBookAvailability();
+                // Bind the continuation to the EXACT request this tap
+                // launches (the plan's refreshSeq): the forced request below
+                // takes seq seqBefore+1, so any interleaved re-quote —
+                // debounce, another surface — moves the sequence past it and
+                // the tap refuses, even at the identical price. An answer the
+                // tap did not launch is not an answer the tap accepted.
+                const seqBefore = this.state.quote.seq;
+                snap.refreshSeq = seqBefore + 1;
                 try {
                     await this.requestServerQuote({ force: true });
                 } finally {
@@ -2875,6 +2905,7 @@
                 }
                 this.updateBookAvailability();
                 const q = this.state.quote;
+                if (q.seq !== snap.refreshSeq) return false;
                 if (q.status !== 'ready' || !this.quoteIsFresh()) return false;
                 if (this.quoteKey(this.quoteIntent()) !== snap.intentKey) return false;
                 if (this.state.vehicle?.type !== snap.vehicleKey) return false;
@@ -2885,6 +2916,21 @@
                     return false;
                 }
                 return true;
+            }
+
+            // The server refused this quote's token: honestly mark the local
+            // quote expired (Expired cards, clickable "Refresh and
+            // Book/Save") WITHOUT buying a replacement quote. The next
+            // explicit tap performs the refresh under its own budget.
+            expireQuoteLocally() {
+                const vehicles = this.state.quote.data?.vehicles;
+                if (!vehicles) return;
+                const past = new Date(0).toISOString();
+                Object.keys(vehicles).forEach((k) => {
+                    if (vehicles[k]) vehicles[k].expiresAt = past;
+                });
+                clearTimeout(this._quoteExpiryTimer);
+                this.renderQuoteState();
             }
 
             // A one-line, alert-free note under the primary action. Error and
@@ -2989,10 +3035,24 @@
                     card.remove();
                 });
                 checkBtn.addEventListener('click', async () => {
+                    // Both controls freeze while a check is in flight — a
+                    // Discard during the await would repoint the slot under
+                    // this very completion.
                     checkBtn.disabled = true;
+                    discardBtn.disabled = true;
                     checkBtn.textContent = 'Checking…';
+                    // An OLDER completion must never clear, remove, or speak
+                    // for a NEWER operation: everything after an await first
+                    // verifies the slot still holds THIS operation.
+                    const slotIsOurs = () => {
+                        try {
+                            const raw = sessionStorage.getItem('lm_pending_envelope');
+                            return !!raw && JSON.parse(raw)?.operationId === env.operationId;
+                        } catch (_) { return false; }
+                    };
                     try {
                         const { data: { session } } = await window.supabaseClient.auth.getSession();
+                        if (!slotIsOurs()) return;
                         if (!session?.access_token || session.user?.id !== env.authSubject) {
                             span.textContent = 'Please sign in with the same account to check this.';
                             return;
@@ -3000,12 +3060,13 @@
                         const url = env.kind === 'edit'
                             ? '/api/update-pending-booking'
                             : '/api/create-booking';
-                        const out = await this.submitEnvelope(url, env.bodyString, session.access_token);
+                        const out = await this.submitEnvelope(url, env.bodyString, session.access_token, env.kind);
+                        if (!slotIsOurs()) return;
                         if (!out.definitive) {
                             span.textContent = "Still couldn't confirm — check your connection and try again.";
                             return;
                         }
-                        this.clearPendingEnvelope();
+                        this.clearPendingEnvelope(env.operationId);
                         card.remove();
                         const { response, result } = out;
                         if (response.ok && result?.bookingId) {
@@ -3036,16 +3097,51 @@
                         }
                     } finally {
                         checkBtn.disabled = false;
+                        discardBtn.disabled = false;
                         checkBtn.textContent = 'Check again';
                     }
                 });
             }
 
+            // Registry-shape recognition (plan v3.1 §5): a response is
+            // definitive ONLY when it matches a shape this client knows how
+            // to settle. A parsed 200 without its success shape, or a
+            // proxy's generic JSON 503, can accompany a COMMITTED write
+            // whose acknowledgment was mangled — calling those definitive
+            // would destroy the operation's only recovery handle.
+            definitiveEnvelopeResult(kind, response, result) {
+                if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+                if (response.ok) {
+                    return result.success === true &&
+                        typeof result.bookingId === 'string' && result.bookingId.length > 0 &&
+                        (kind !== 'edit' || Number.isInteger(result.detailsVersion));
+                }
+                const s = response.status;
+                const hasError = typeof result.error === 'string' && result.error.length > 0;
+                if (s === 400 || s === 401 || s === 403 || s === 404) return hasError;
+                if (s === 409) {
+                    return result.requote === true ||
+                        (typeof result.existingBookingId === 'string' &&
+                            result.existingBookingId.length > 0) ||
+                        hasError;
+                }
+                if (s === 428) return result.reload === true;
+                if (s === 503) {
+                    // Only the writer's own blocked outcome — its exact
+                    // registry copy — is a known result. A gateway's generic
+                    // JSON 503 says nothing about whether the write landed.
+                    return result.error ===
+                        'Bookings are temporarily unavailable. Message us on WhatsApp and a human will arrange your ride.';
+                }
+                return false;
+            }
+
             // Bounded submission with exact-byte retry. UNKNOWN results —
-            // timeout, connection loss/abort, unexpected 5xx/429, invalid or
-            // non-JSON responses — retain the envelope and retry ONCE with the
-            // identical bytes; only a recognized mapped response is definitive.
-            async submitEnvelope(url, bodyString, accessToken) {
+            // timeout, connection loss/abort, unexpected 5xx/429, invalid,
+            // non-JSON, or contract-invalid responses — retain the envelope
+            // and retry ONCE with the identical bytes; only a recognized
+            // registry-shaped response is definitive.
+            async submitEnvelope(url, bodyString, accessToken, kind) {
                 const attempt = async () => {
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 15000);
@@ -3060,11 +3156,10 @@
                             signal: controller.signal
                         });
                         let result = null;
-                        let parsed = false;
-                        try { result = await response.json(); parsed = true; } catch (_) {}
-                        const definitive = parsed && (response.ok ||
-                            [400, 401, 403, 404, 409, 428, 503].includes(response.status));
-                        return definitive ? { definitive: true, response, result } : { definitive: false };
+                        try { result = await response.json(); } catch (_) {}
+                        return this.definitiveEnvelopeResult(kind, response, result)
+                            ? { definitive: true, response, result }
+                            : { definitive: false };
                     } catch (_) {
                         return { definitive: false };
                     } finally {
@@ -3326,6 +3421,12 @@
                     if (isEditing) {
                         apiPayload.bookingId = editContext.bookingId;
                         apiPayload.expectedDetailsVersion = editContext.detailsVersion;
+                        // Plan v3.1: the edit contract does not carry a
+                        // payment method — the server ignores it
+                        // unconditionally and the stored value survives, so
+                        // sending one would only imply a choice that is not
+                        // being made here.
+                        delete apiPayload.paymentMethod;
                     }
 
                     const submitUrl = isEditing
@@ -3351,7 +3452,8 @@
                         };
                         this.storePendingEnvelope(envelope);
                         const out = await this.submitEnvelope(
-                            submitUrl, envelope.bodyString, submitSession.access_token);
+                            submitUrl, envelope.bodyString, submitSession.access_token,
+                            envelope.kind);
                         if (!out.definitive) {
                             // UNKNOWN result after one exact retry: the envelope
                             // stays stored so "Check again" (and a same-tab
@@ -3411,9 +3513,17 @@
                             }
                             return;
                         }
-                        this.invalidateQuote('server requested a fresh quote');
-                        this.requestServerQuote({ force: true });
-                        this.notePriceChanged('Please review the refreshed price and tap again.');
+                        // Budget exhausted: return to an EXPLICIT
+                        // user-controlled state, buying NOTHING automatically
+                        // (the per-tap ceiling is one quiet refresh + one
+                        // resubmit — a background re-quote here would be a
+                        // second unasked-for Places + Routes pair). The
+                        // server just refused this quote's token, so the
+                        // local price is marked expired: the primary action
+                        // stays clickable as "Refresh and Book/Save" and the
+                        // NEXT tap, with its fresh budget, buys the refresh.
+                        this.expireQuoteLocally();
+                        this.notePriceChanged('This price needs a refresh — review it and tap again.');
                         return;
                     }
 
@@ -3513,6 +3623,11 @@
                 }
                 } finally {
                     this._submitInFlight = false;
+                    // Repaint from state: any recompute that ran DURING the
+                    // chain saw the in-flight freeze, so a refused
+                    // continuation would otherwise leave a dead disabled
+                    // button. (Flag off: the legacy paths own the button.)
+                    if (this.quoteFlowActive()) this.updateBookAvailability();
                 }
             }
 
@@ -4001,7 +4116,7 @@
                     iframe.contentWindow.postMessage({
                         type: 'updatePrices',
                         data: window.airportApp.vehiclePrices
-                    }, '*');
+                    }, location.origin);
                 }
             };
             
@@ -4013,11 +4128,16 @@
             mountPoint.appendChild(iframe);
         }
         
-        // Listen for messages from carousel iframe
+        // Listen for messages from carousel iframe. This is a SAME-ORIGIN
+        // channel: only OUR carousel frame may drive vehicle selection — a
+        // hostile opener/embedder could otherwise switch the priced
+        // vehicle/token and forge the explicit edit marker while the real
+        // viewport shows another vehicle.
         window.addEventListener('message', (event) => {
-            // In production, validate event.origin
-            // if (event.origin !== 'https://yourdomain.com') return;
-            
+            if (event.origin !== location.origin) return;
+            const carouselFrame = document.getElementById('vehicle-carousel-frame');
+            if (!carouselFrame || event.source !== carouselFrame.contentWindow) return;
+
             const { type, vehicle, prices } = event.data || {};
             
             switch(type) {
@@ -4042,7 +4162,7 @@
                             iframe.contentWindow.postMessage({
                                 type: 'updatePrices',
                                 data: window.airportApp.vehiclePrices
-                            }, '*');
+                            }, location.origin);
                         }
                     }
                     break;
