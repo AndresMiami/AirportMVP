@@ -574,13 +574,18 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     calls, Expired cards, primary action stays CLICKABLE as "Refresh and
     Book/Save", quiet "Updating price…", never "refused", changed price =
     note + new tap); THE ENVELOPE (operationId inside the body, serialized
-    ONCE, 15s bound, one exact-byte retry; definitive = parsed JSON with
-    ok/400/401/403/404/409/428/503; unknown result -> durable
-    sessionStorage envelope bound to authSubject+kind+bookingId with a
-    "Check again"/Discard recovery card that re-sends the exact bytes;
-    definitive responses settle it); 428 reload:true -> reload; requote:true
-    -> quiet refresh + ONE auto-resubmit as a NEW envelope, then a visible
-    tap; restored-edit interaction markers
+    ONCE, 15s bound, one exact-byte retry; definitive = a REGISTRY-SHAPED
+    response only — success needs success:true + bookingId (edit success
+    additionally its detailsVersion), 400/401/403/404 need an error
+    string, 409 needs requote/existingBookingId/error, 428 needs
+    reload:true, 503 only the writer's exact blocked copy; anything else,
+    a parsed 200 {} or gateway JSON 503 included, stays unknown ->
+    durable sessionStorage envelope bound to authSubject+kind+bookingId
+    with a "Check again"/Discard recovery card that re-sends the exact
+    bytes; only definitive responses settle it); 428 reload:true ->
+    reload; requote:true -> quiet refresh + ONE auto-resubmit as a NEW
+    envelope (the single-flight lock is held ACROSS the awaited
+    recursion), then a visible tap; restored-edit interaction markers
     (routeDirection/routeAddress/pickupAt/vehicle each set only by an
     explicit action in THIS edit session and jointly gating the primary
     button; traveler is the fifth, confirmed AFTER the tap in the
@@ -627,7 +632,19 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     same-price answer is refused) and an exhausted requote budget buys
     NOTHING automatically: the local quote is marked expired
     (expireQuoteLocally) and the next explicit tap owns the refresh.
-    Edit payloads no longer send paymentMethod. Deliberate leftovers:
+    Edit payloads no longer send paymentMethod.
+    CODEX ROUND 2 (pr77-codex-review-round2.md, both races + cleanups
+    landed): the recursive auto-resubmit is AWAITED, so the
+    single-flight lock and blocked button span the whole recursion (an
+    unawaited return let the outer finally drop the lock at the
+    recursion's first await — second-tap race, execution-reproduced);
+    recovery cards act only for the operation that created them —
+    Discard is operation-scoped and a stale card (slot moved on)
+    removes itself and immediately offers the CURRENT operation
+    instead of re-enabling stale controls; the browser harness
+    captures outbound postMessage targetOrigins in both directions
+    (mutating any target back to '*' now fails) and the scoped
+    envelope clear is pinned at both call sites. Deliberate leftovers:
     edit_stale inside an edit session ends with honest reopen copy, no
     in-app shortcut; a card-recovered create leaves the original
     provisional trip_ localStorage record.

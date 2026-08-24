@@ -3030,8 +3030,27 @@
                 const discardBtn = mkBtn('Discard', false);
                 card.append(span, checkBtn, discardBtn);
 
+                // A card acts ONLY for the operation it was rendered for.
+                // If the slot has moved on to a newer operation, this card
+                // is stale: it may remove itself, then the CURRENT operation
+                // gets a fresh offer — it must never clear or speak for it.
+                const currentSlot = () => {
+                    try {
+                        const raw = sessionStorage.getItem('lm_pending_envelope');
+                        return raw ? JSON.parse(raw) : null;
+                    } catch (_) { return null; }
+                };
+                const yieldToCurrent = () => {
+                    card.remove();
+                    const cur = currentSlot();
+                    if (cur?.authSubject) this.offerPendingEnvelope(cur.authSubject);
+                };
                 discardBtn.addEventListener('click', () => {
-                    this.clearPendingEnvelope();
+                    if (currentSlot()?.operationId !== env.operationId) {
+                        yieldToCurrent();
+                        return;
+                    }
+                    this.clearPendingEnvelope(env.operationId);
                     card.remove();
                 });
                 checkBtn.addEventListener('click', async () => {
@@ -3052,7 +3071,7 @@
                     };
                     try {
                         const { data: { session } } = await window.supabaseClient.auth.getSession();
-                        if (!slotIsOurs()) return;
+                        if (!slotIsOurs()) { yieldToCurrent(); return; }
                         if (!session?.access_token || session.user?.id !== env.authSubject) {
                             span.textContent = 'Please sign in with the same account to check this.';
                             return;
@@ -3061,7 +3080,10 @@
                             ? '/api/update-pending-booking'
                             : '/api/create-booking';
                         const out = await this.submitEnvelope(url, env.bodyString, session.access_token, env.kind);
-                        if (!slotIsOurs()) return;
+                        // The slot moved on while this check awaited: this
+                        // card is stale — never re-enable its controls; hand
+                        // the stage to the current operation's fresh card.
+                        if (!slotIsOurs()) { yieldToCurrent(); return; }
                         if (!out.definitive) {
                             span.textContent = "Still couldn't confirm — check your connection and try again.";
                             return;
@@ -3507,9 +3529,12 @@
                             if (ok) {
                                 // Sanctioned auto-resubmit: hand the flag to
                                 // the recursive chain (its entry re-takes it
-                                // synchronously — no tap can interleave).
+                                // synchronously) and AWAIT it — an unawaited
+                                // return would let the outer finally release
+                                // the lock at the recursion's first await,
+                                // reopening the second-tap race mid-write.
                                 this._submitInFlight = false;
-                                return this.confirmBooking();
+                                return await this.confirmBooking();
                             }
                             return;
                         }

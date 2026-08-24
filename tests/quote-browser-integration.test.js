@@ -67,6 +67,7 @@ function loadRealCarousel() {
 
   let listener = null;
   const parentMessages = [];
+  const parentTargets = [];   // every iframe->parent targetOrigin, in order
   const cctx = {
     console: { log() {}, warn() {}, error() {} },
     document: {
@@ -76,7 +77,7 @@ function loadRealCarousel() {
     },
     window: {
       addEventListener: (t, fn) => { if (t === 'message') listener = fn; },
-      parent: { postMessage: (msg) => parentMessages.push(msg) },
+      parent: { postMessage: (msg, target) => { parentMessages.push(msg); parentTargets.push(target); } },
       getComputedStyle: () => ({ paddingLeft: '0' }),
     },
     location: { origin: 'https://example.test' },
@@ -122,6 +123,7 @@ function loadRealCarousel() {
   return {
     instance: inst,
     parentMessages,
+    parentTargets,
     becomeReady() { inst.setupCommunication(); ready = true; },   // installs the REAL listener
     isReady: () => ready,
     deliver(msg, opts = {}) {
@@ -209,7 +211,10 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
   const posted = [];
   const carousel = loadRealCarousel();
   if (carouselReady) carousel.becomeReady();
-  iframe.contentWindow = { postMessage: (msg) => { posted.push(msg); carousel.deliver(msg); } };
+  const postedTargets = [];   // every parent->iframe targetOrigin, in order
+  iframe.contentWindow = { postMessage: (msg, target) => {
+    posted.push(msg); postedTargets.push(target); carousel.deliver(msg);
+  } };
   byId['vehicle-carousel-frame'] = iframe;
 
   const document = {
@@ -334,7 +339,7 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     source: 'source' in opts ? opts.source : iframe.contentWindow,
   }));
   ctx.window.airportApp = app;
-  return { app, ctx, posted, alerts, byId, contentSection, carousel, runTimers, timers, sendToApp };
+  return { app, ctx, posted, postedTargets, alerts, byId, contentSection, carousel, runTimers, timers, sendToApp };
 }
 
 const SERVER_QUOTE = {
@@ -1822,9 +1827,125 @@ check('RECOVERY OVERLAP: an older completion cannot clear or act on a newer oper
   await oldCheck;
   assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
     'the newer operation survives the older completion');
-  assert.notStrictEqual(card.removed, true, 'the shared card is not torn down');
   assert.deepStrictEqual(sheets, [], 'the older result is not displayed as current');
-  assert.strictEqual(discardBtn.disabled, false, 'controls unfreeze for the live card');
+  // Round 2: the stale card must NOT be re-enabled — it yields: removes
+  // itself and the CURRENT operation gets a fresh offer.
+  assert.strictEqual(card.removed, true, 'the stale card yields the stage');
+  const fresh = ctx.document.body.children.find(
+    (c) => c.id === 'pendingEnvelopeCard' && !c.removed && c !== card);
+  assert.ok(fresh, 'the current operation is offered immediately');
+  // …and even a ghost click on the detached stale Discard cannot delete
+  // the newer operation (Discard is scoped to its own card's operation).
+  await card.children[2].listeners.click[0]();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+    'a stale Discard can never delete the newer envelope');
+});
+
+check('DISCARD SCOPE: a stale card\'s Discard removes only itself — the newer operation survives', async () => {
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'op-OLD', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const oldCard = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard' && !c.removed);
+  // The slot moves on to a newer operation while the old card is on screen.
+  const newer = JSON.stringify({
+    operationId: 'op-NEW', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 2,
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', newer);
+  await oldCard.children[2].listeners.click[0]();   // stale Discard
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+    'op-NEW survives byte-exact');
+  assert.strictEqual(oldCard.removed, true, 'the stale card removes only itself');
+  const cards = ctx.document.body.children.filter(
+    (c) => c.id === 'pendingEnvelopeCard' && !c.removed);
+  assert.ok(cards.length >= 1, 'the current operation is offered in its place');
+  // The OWNING card's Discard still discards.
+  await cards[cards.length - 1].children[2].listeners.click[0]();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the operation that owns the slot can still be discarded');
+});
+
+check('SINGLE-FLIGHT: the lock survives the recursive auto-resubmit end to end', async () => {
+  let created = 0;
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': () => (++created === 1
+      ? { status: 409, body: { error: 'quote_expired', requote: true } }
+      : CREATED),
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  // Session acquisitions in order: (1) the outer submit, (2) the quiet
+  // refresh inside the requote branch, (3) the RECURSIVE resubmit. Park
+  // call 3 — the exact instant round 2 proved the lock used to drop.
+  let sessionCalls = 0;
+  let releaseThird; const thirdGate = new Promise((r) => { releaseThird = r; });
+  let thirdEntered; const thirdIn = new Promise((r) => { thirdEntered = r; });
+  ctx.window.supabaseClient.auth.getSession = async () => {
+    sessionCalls++;
+    if (sessionCalls === 3) { thirdEntered(); await thirdGate; }
+    return { data: { session: { access_token: 'jwt-abc', user: { id: 'auth-user-1' } } } };
+  };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const pending = tap(app);
+  await thirdIn;   // the recursive chain is pending at session acquisition
+  assert.strictEqual(app._submitInFlight, true,
+    'the lock holds through the recursive handoff — the outer finally has not run');
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'the primary button stays blocked');
+  const callsBefore = f.calls.length;
+  assert.strictEqual(tap(app), null, 'a second tap cannot start another chain');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.calls.length, callsBefore, 'the refused tap makes zero calls');
+  releaseThird();
+  await pending;
+  assert.strictEqual(f.to('/api/create-booking').length, 2, 'original + exactly one resubmit');
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(app._submitInFlight, false, 'the lock releases once everything settles');
+});
+
+check('CHANNEL: outbound messages pin the same-origin target — never *', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, carousel, postedTargets } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();           // posts placeholders/prices to the iframe
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  assert.ok(postedTargets.length > 0, 'sanity: the parent posted to the iframe');
+  postedTargets.forEach((t) => assert.strictEqual(t, 'https://example.test',
+    'every parent->iframe message names the same-origin target'));
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } });   // makes the iframe answer
+  assert.ok(carousel.parentTargets.length > 0, 'sanity: the iframe posted to the parent');
+  carousel.parentTargets.forEach((t) => assert.strictEqual(t, 'https://example.test',
+    'every iframe->parent message names the same-origin target'));
+});
+
+check('SCOPED CLEAR: clearPendingEnvelope touches only its own operation — and callers are pinned', () => {
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  const env = JSON.stringify({
+    operationId: 'op-A', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', env);
+  app.clearPendingEnvelope('op-B');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), env,
+    'another operation cannot clear the slot');
+  app.clearPendingEnvelope('op-A');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the owning operation clears it');
+  ctx.sessionStorage.setItem('lm_pending_envelope', env);
+  app.clearPendingEnvelope();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the unscoped form (logout semantics) clears whatever holds the slot');
+  // The settle and recovery call sites use the SCOPED form — a bare clear
+  // there passed every check until this pin.
+  assert.ok(appBlock.includes('this.clearPendingEnvelope(envelope.operationId)'),
+    'the submission settle clears by its own operationId');
+  assert.ok(appBlock.includes('this.clearPendingEnvelope(env.operationId)'),
+    'recovery completion and Discard clear by their own operationId');
 });
 
 check('CHANNEL: vehicle selection is accepted only from the same-origin carousel frame', async () => {
