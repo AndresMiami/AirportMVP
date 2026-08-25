@@ -1879,9 +1879,16 @@ check('SINGLE-FLIGHT: the lock survives the recursive auto-resubmit end to end',
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
   const sheets = [];
   app.showTripSheet = (id) => sheets.push(id);
-  // Session acquisitions in order: (1) the outer submit, (2) the quiet
-  // refresh inside the requote branch, (3) the RECURSIVE resubmit. Park
-  // call 3 — the exact instant round 2 proved the lock used to drop.
+  // The initial quote happens BEFORE the counter is installed — it makes
+  // its own getSession call, and counting it would shift the gate onto
+  // the quiet refresh instead of the boundary under test (the exact
+  // miscount Codex's final review caught: the no-await mutant passed).
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  // Session acquisitions from the tap onward: (1) the outer submit,
+  // (2) the quiet refresh inside the requote branch, (3) the RECURSIVE
+  // resubmit. Park call 3 — the exact instant round 2 proved the lock
+  // used to drop.
   let sessionCalls = 0;
   let releaseThird; const thirdGate = new Promise((r) => { releaseThird = r; });
   let thirdEntered; const thirdIn = new Promise((r) => { thirdEntered = r; });
@@ -1890,8 +1897,6 @@ check('SINGLE-FLIGHT: the lock survives the recursive auto-resubmit end to end',
     if (sessionCalls === 3) { thirdEntered(); await thirdGate; }
     return { data: { session: { access_token: 'jwt-abc', user: { id: 'auth-user-1' } } } };
   };
-  await app.requestServerQuote();
-  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
   const pending = tap(app);
   await thirdIn;   // the recursive chain is pending at session acquisition
   assert.strictEqual(app._submitInFlight, true,
