@@ -67,6 +67,7 @@ function loadRealCarousel() {
 
   let listener = null;
   const parentMessages = [];
+  const parentTargets = [];   // every iframe->parent targetOrigin, in order
   const cctx = {
     console: { log() {}, warn() {}, error() {} },
     document: {
@@ -76,9 +77,10 @@ function loadRealCarousel() {
     },
     window: {
       addEventListener: (t, fn) => { if (t === 'message') listener = fn; },
-      parent: { postMessage: (msg) => parentMessages.push(msg) },
+      parent: { postMessage: (msg, target) => { parentMessages.push(msg); parentTargets.push(target); } },
       getComputedStyle: () => ({ paddingLeft: '0' }),
     },
+    location: { origin: 'https://example.test' },
     setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
     Set, Map, Math, Date, JSON, Object, Array, Number, String, Boolean, Error,
   };
@@ -121,9 +123,16 @@ function loadRealCarousel() {
   return {
     instance: inst,
     parentMessages,
+    parentTargets,
     becomeReady() { inst.setupCommunication(); ready = true; },   // installs the REAL listener
     isReady: () => ready,
-    deliver(msg) { if (ready && listener) listener({ data: msg }); },
+    deliver(msg, opts = {}) {
+      if (ready && listener) listener({
+        data: msg,
+        origin: 'origin' in opts ? opts.origin : cctx.location.origin,
+        source: 'source' in opts ? opts.source : cctx.window.parent,
+      });
+    },
     detectAt(index) { detectedIndex = index; inst.detectActiveCard(); },
     viewportIndex: () => detectedIndex,
     scrollCalls,
@@ -149,6 +158,7 @@ function check(name, fn) { queue.push({ name, fn }); }
 async function run() {
   for (const { name, fn } of queue) {
     try {
+      if (process.env.TRACE) console.log("->", name);
       await fn();
       checks++;
       results.push(`  ✓ ${name}`);
@@ -161,6 +171,7 @@ async function run() {
   }
   results.forEach((r) => console.log(r));
   console.log(`\n  ALL ${checks} CHECKS PASS\n`);
+  process.exitCode = 0;   // the only success exit — a hung check drains to 1
 }
 
 // ---------------- fake DOM ----------------
@@ -170,6 +181,7 @@ function makeEl(tag) {
     style: {}, children: [], listeners: {}, attrs: {},
     id: null, innerHTML: '', textContent: '', disabled: false, type: '',
     appendChild(c) { el.children.push(c); c.parent = el; return c; },
+    append(...cs) { cs.forEach((c) => el.appendChild(c)); },
     prepend(c) { el.children.unshift(c); c.parent = el; return c; },
     remove() { el.removed = true; if (el.parent) el.parent.children = el.parent.children.filter((x) => x !== el); },
     setAttribute(k, v) { el.attrs[k] = String(v); },
@@ -183,6 +195,7 @@ function makeEl(tag) {
   return el;
 }
 
+let uuidCounter = 0;
 function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselReady = true, sessionGate = null }) {
   const source = enabled
     ? appBlock.replace('const SERVER_QUOTE_ENABLED = false;', 'const SERVER_QUOTE_ENABLED = true;')
@@ -198,7 +211,10 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
   const posted = [];
   const carousel = loadRealCarousel();
   if (carouselReady) carousel.becomeReady();
-  iframe.contentWindow = { postMessage: (msg) => { posted.push(msg); carousel.deliver(msg); } };
+  const postedTargets = [];   // every parent->iframe targetOrigin, in order
+  iframe.contentWindow = { postMessage: (msg, target) => {
+    posted.push(msg); postedTargets.push(target); carousel.deliver(msg);
+  } };
   byId['vehicle-carousel-frame'] = iframe;
 
   const document = {
@@ -238,8 +254,38 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     // setup() expects the full page DOM. Tests build the instance themselves
     // via Object.create, so the boot path must stay parked.
     bootAuthReady: new Promise(() => {}),
-    location: { search: '', href: 'https://example.test/indexMVP.html', replace() {} },
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { search: '', href: 'https://example.test/indexMVP.html',
+      origin: 'https://example.test', replace() {},
+      reload() { ctx.__reloads = (ctx.__reloads || 0) + 1; } },
+    localStorage: (() => {
+      const m = new Map();
+      return {
+        getItem: (k) => (m.has(k) ? m.get(k) : null),
+        setItem: (k, v) => m.set(k, String(v)),
+        removeItem: (k) => m.delete(k)
+      };
+    })(),
+    sessionStorage: (() => {
+      const m = new Map();
+      return {
+        getItem: (k) => (m.has(k) ? m.get(k) : null),
+        setItem: (k, v) => m.set(k, String(v)),
+        removeItem: (k) => m.delete(k)
+      };
+    })(),
+    crypto: {
+      randomUUID: () => 'aaaaaaaa-bbbb-4ccc-8ddd-' +
+        String(++uuidCounter).padStart(12, '0'),
+      getRandomValues: (arr) => { for (let i = 0; i < arr.length; i++) arr[i] = 7; return arr; }
+    },
+    PassengerModal: {
+      getInstance: () => ({
+        hasUserData: () => true,
+        openRequired: (cb) => { ctx.__modalOpens = (ctx.__modalOpens || 0) + 1; cb(); },
+        getContactInfo: () => ({ name: 'Pat Passenger', phone: '+1 305 555 0100' }),
+        getPassengerData: () => null
+      })
+    },
     navigator: { userAgent: 'test', standalone: false, serviceWorker: { register: async () => ({}) } },
     currentActiveBooking: null,
     currentSession: null,
@@ -257,7 +303,7 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     auth: {
       getSession: async () => {
         if (sessionGate) await sessionGate;
-        return { data: { session: sessionToken ? { access_token: sessionToken } : null } };
+        return { data: { session: sessionToken ? { access_token: sessionToken, user: { id: 'auth-user-1' } } : null } };
       },
     },
   };
@@ -285,9 +331,15 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
   app.pricingService = null;
   app.pendingEdit = null;
   const runTimers = () => { const due = timers.splice(0); due.forEach((t) => t.fn()); };
-  const sendToApp = (msg) => appMessageListeners.forEach((fn) => fn({ data: msg }));
+  // Default = the genuine same-origin carousel channel; hostile checks
+  // override origin/source to prove the listener refuses them.
+  const sendToApp = (msg, opts = {}) => appMessageListeners.forEach((fn) => fn({
+    data: msg,
+    origin: 'origin' in opts ? opts.origin : ctx.location.origin,
+    source: 'source' in opts ? opts.source : iframe.contentWindow,
+  }));
   ctx.window.airportApp = app;
-  return { app, ctx, posted, alerts, byId, contentSection, carousel, runTimers, timers, sendToApp };
+  return { app, ctx, posted, postedTargets, alerts, byId, contentSection, carousel, runTimers, timers, sendToApp };
 }
 
 const SERVER_QUOTE = {
@@ -335,10 +387,17 @@ check('STATIC: the committed default is OFF, so merging changes nothing', () => 
 
 check('DISABLED: no quote request is made and pricing.js still drives the carousel', async () => {
   const f = okFetch(SERVER_QUOTE);
-  const { app } = makeContext({ enabled: false, fetchImpl: f });
-  app.requestServerQuote();
+  const { app, runTimers } = makeContext({ enabled: false, fetchImpl: f });
+  // AWAITED, so removing the method's dark guard cannot slip past a
+  // not-yet-settled fetch: the call must complete having spent nothing
+  // and touched nothing.
+  await app.requestServerQuote();
   app.scheduleQuote();
+  runTimers();
+  await new Promise((r) => setTimeout(r, 0));
   assert.strictEqual(f.calls.length, 0, 'the disabled build must never call /api/quote-ride');
+  assert.strictEqual(app.state.quote.status, 'idle', 'the quote state stays untouched');
+  assert.strictEqual(app.state.quote.data, null);
 });
 
 check('DISABLED: updateVehiclePrices keeps its legacy early-return, not the new one', () => {
@@ -536,8 +595,11 @@ check('COST: an incomplete 200 is a non-retryable LinkMia defect, never a paid r
   await app.confirmBooking();
   assert.strictEqual(f.calls.length, 1,
     'the blocked Book path must not force-buy the malformed response again');
-  assert.ok(alerts.some((message) => /contact LinkMia/i.test(message)),
-    'the passenger must see an honest unavailable state, not an expired-price message');
+  // PR-2 quiet UX: permanent failures speak through the PERSISTENT banner
+  // (state carries the honest message, Book stays disabled) — never an alert.
+  assert.strictEqual(alerts.length, 0,
+    'permanent failures are banner-spoken; alerts were removed in PR-2');
+  assert.match(app.state.quote.error.message, /contact LinkMia/i);
 });
 
 check('COST: a 200 with missing or extra vehicle cards is incomplete and never re-bought', async () => {
@@ -589,17 +651,15 @@ check('Book stays blocked when a quote exists but no vehicle is chosen', async (
 });
 
 // ============ submit ============
-check('confirmBooking refuses to submit on an expired quote', async () => {
+check('PR-2: a submission exists only downstream of a real tap — direct confirmBooking is inert', async () => {
   const f = okFetch(quoteWithTtl(-1));
   const { app, alerts } = makeContext({ enabled: true, fetchImpl: f });
   await app.requestServerQuote();
   app.state.vehicle = { type: 'tesla', selected: 'tesla' };
   const before = f.calls.length;
-  await app.confirmBooking();
-  assert.ok(alerts.some((a) => /no longer current/i.test(a)),
-    'the passenger must be told, not silently repriced');
-  const bookingCalls = f.calls.slice(before).filter((c) => /create-booking|update-pending-booking/.test(c.url));
-  assert.strictEqual(bookingCalls.length, 0, 'no booking may be written from a stale quote');
+  await app.confirmBooking();   // no tap snapshot exists
+  assert.strictEqual(f.calls.length, before, 'no fetch of any kind without a tap');
+  assert.strictEqual(alerts.length, 0, 'and no alert — the button state is the message');
 });
 
 check('the price source is the selected vehicle\'s server cents', async () => {
@@ -721,6 +781,8 @@ check('SUBMIT RACE: an auth await cannot pair booking A with quote/vehicle B', a
   };
   ctx.PassengerModal = {
     getInstance: () => ({
+      hasUserData: () => true,
+      openRequired: (cb) => cb(),
       getContactInfo: () => ({ name: 'Passenger', phone: '3055550100', type: 'booker' }),
       getPassengerData: () => ({ type: 'self', data: null }),
     }),
@@ -729,7 +791,13 @@ check('SUBMIT RACE: an auth await cannot pair booking A with quote/vehicle B', a
   app.showPaymentError = (message) => { shownError = String(message); };
 
   const callsBeforeSubmit = f.calls.length;
-  const pending = app.confirmBooking();
+  // PR-2: submissions exist only downstream of the tap boundary. Enter
+  // through the real tap and capture the confirm promise it fires.
+  let pending;
+  const realConfirm = app.confirmBooking.bind(app);
+  app.confirmBooking = () => { pending = realConfirm(); return pending; };
+  app.handleBookingClick();
+  assert.ok(pending, 'the tap must freeze a snapshot and reach confirmBooking');
   await sessionStarted;
   // This is the exact race: while session refresh yields, the passenger (or
   // another UI event) moves the mutable carousel to a different vehicle.
@@ -818,8 +886,9 @@ check('CAROUSEL: invalidation clears the visible prices', async () => {
   assert.deepStrictEqual(carousel.visible(), { tesla: '—', escalade: '—', sprinter: '—' });
 });
 
-check('TTL: a timer expires the visible price and disables Book without a click', async () => {
-  const { app, carousel, runTimers } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+check('TTL: a timer expires the visible price; Book stays CLICKABLE as "Refresh and Book"', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, carousel, runTimers } = makeContext({ enabled: true, fetchImpl: f });
   await app.requestServerQuote();
   app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
   app.updateBookAvailability();
@@ -828,6 +897,7 @@ check('TTL: a timer expires the visible price and disables Book without a click'
 
   // the quote reaches its TTL while the passenger is still on the screen
   const past = new Date(Date.now() - 1000).toISOString();
+  const callsAtExpiry = f.calls.length;
   Object.keys(app.state.quote.data.vehicles).forEach((k) => {
     app.state.quote.data.vehicles[k].expiresAt = past;
   });
@@ -836,7 +906,15 @@ check('TTL: a timer expires the visible price and disables Book without a click'
   assert.deepStrictEqual(carousel.visible(),
     { tesla: 'Expired', escalade: 'Expired', sprinter: 'Expired' },
     'an expired price must stop looking valid on screen');
-  assert.strictEqual(app.els.bookBtn.disabled, true, 'Book must disable itself at expiry');
+  // PR-2 passive expiry (ratified DQ-1): the primary action stays
+  // PHYSICALLY clickable and honestly labeled — the tap performs the
+  // quiet refresh. Idle expiry itself buys zero provider calls.
+  assert.strictEqual(app.els.bookBtn.disabled, false,
+    'the stale primary action must remain clickable');
+  assert.match(app.els.bookBtn.innerHTML, /Refresh and Book/,
+    'the label must say the tap refreshes first');
+  assert.strictEqual(f.calls.length, callsAtExpiry,
+    'expiring while idle must not trigger any provider call');
 });
 
 check('COST: a permanent refusal is not re-bought when Vehicle is reopened', async () => {
@@ -876,19 +954,55 @@ check('COST: no quote is bought before the passenger reaches the Vehicle step', 
   assert.strictEqual(f.calls.length, 1, 'the Vehicle step is where a price is actually needed');
 });
 
-check('SCOPE: a pending edit does not use create-scoped quotes', async () => {
+check('SCOPE: an edit quote is edit-scoped — key, request body, and Save gating', async () => {
   const f = okFetch(quoteWithTtl(15));
-  const { app, carousel } = makeContext({ enabled: true, fetchImpl: f });
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  // A create-scoped quote exists first…
+  await app.requestServerQuote();
+  const createKey = app.state.quote.key;
+  assert.strictEqual(f.calls.length, 1);
+
+  // …then a pending edit begins. PR-2: edits DO quote, in their own scope,
+  // so a create-scoped quote can never impersonate an edit quote.
   app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
-  assert.strictEqual(app.quoteFlowActive(), false,
-    'every token the endpoint signs is purpose:create — an edit must not carry one');
-  app.updateVehiclePrices();
-  assert.strictEqual(f.calls.length, 0, 'an edit must not request a create-scoped quote');
+  app.editMarkers = {
+    routeDirection: false, routeAddress: false,
+    pickupAt: false, vehicle: false, traveler: false
+  };
+  assert.strictEqual(app.quoteFlowActive(), true,
+    'PR-2: pending edits use the quote flow too');
+  const editKey = app.quoteKey(app.quoteIntent());
+  assert.notStrictEqual(editKey, createKey,
+    'the same trip facts must key differently under an edit');
+  assert.match(editKey, /\|edit\|b-1\|3$/,
+    'the edit scope names the booking and its captured version');
+
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 2,
+    'the cached create-scoped quote must not answer an edit');
+  const sentBody = JSON.parse(f.calls[1].opts.body);
+  assert.strictEqual(sentBody.bookingId, 'b-1',
+    'edit quotes carry the booking identity');
+  assert.strictEqual(sentBody.expectedDetailsVersion, 3,
+    'edit quotes carry the captured CAS version');
+
+  // Interaction markers: a fresh edit quote + selected vehicle is still not
+  // enough — Save stays blocked until route, pickup time, and vehicle were
+  // each EXPLICITLY chosen in this edit session (prefilled never counts).
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
   app.updateBookAvailability();
-  assert.strictEqual(app.els.bookBtn.disabled, false, 'editing must not be blocked by the quote gate');
-  app.renderQuoteState();
-  assert.deepStrictEqual(carousel.visible(), CAROUSEL_DEFAULTS,
-    'the quote UI must stay out of the edit flow entirely');
+  assert.strictEqual(app.editMarkers.vehicle, true,
+    'an explicit vehicle choice sets its marker');
+  assert.strictEqual(app.els.bookBtn.disabled, true,
+    'Save stays blocked while route/pickup markers are unset');
+  app.editMarkers.routeDirection = true;
+  app.editMarkers.routeAddress = true;
+  app.editMarkers.pickupAt = true;
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, false,
+    'all explicit markers + a fresh quote unlock Save');
+  assert.match(app.els.bookBtn.innerHTML, /Save changes/,
+    'the edit flow labels the primary action Save, not Book');
 });
 
 check('STATIC: the endpoint names its access mode instead of inferring it', () => {
@@ -1134,11 +1248,19 @@ check('EDIT RACE: a quote timer queued before an edit begins does not fire insid
   const f = okFetch(quoteWithTtl(15));
   const { app, runTimers } = makeContext({ enabled: true, fetchImpl: f });
   app.scheduleQuote();                                   // queued while booking normally
+  // PR-2: edits quote too, so the guard moved. beginPendingEdit cancels the
+  // queued create-scoped timer through invalidateQuote (which clears the
+  // debounce BEFORE its idle early-return). Assert the real code wires that,
+  // then replay the same sequence against the queued timer.
+  assert.match(appBlock,
+    /this\.invalidateQuote\('pending edit started — create-scoped quotes do not apply'\)/,
+    'beginPendingEdit must CALL invalidateQuote at edit start (a comment cannot satisfy this)');
   app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 2 };
+  app.invalidateQuote('pending edit started — create-scoped quotes do not apply');
   runTimers();
   await new Promise((r) => setTimeout(r, 0));
   assert.strictEqual(f.calls.length, 0,
-    'requestServerQuote must gate on quoteFlowActive(), not the raw flag');
+    'the queued create-scoped request must never fire inside the edit');
 });
 
 check('EDIT RACE: invalidating cancels a queued quote timer', async () => {
@@ -1203,4 +1325,825 @@ check('STAGE GUARD: leaving Vehicle cancels queued and pre-provider quote spendi
     'returning to Vehicle must be able to request a fresh quote');
 });
 
+// ============ PR-2: tap boundary, envelope, and edit quoting ============
+
+// Fetch router: PR-2 flows talk to /api/quote-ride AND a writer endpoint in
+// one scenario. Routes map url -> {status, body} or a function of the call.
+function routedFetch(routes) {
+  const calls = [];
+  const impl = async (url, opts = {}) => {
+    const call = { url, opts };
+    calls.push(call);
+    const route = routes[url];
+    if (!route) throw new Error(`unrouted fetch: ${url}`);
+    const r = await (typeof route === 'function' ? route(call, calls) : route);
+    const status = r.status ?? 200;
+    return { ok: status >= 200 && status < 300, status, json: async () => r.body };
+  };
+  impl.calls = calls;
+  impl.to = (url) => calls.filter((c) => c.url === url);
+  return impl;
+}
+
+// Enter through the REAL tap boundary and hand back the confirm promise the
+// tap fires, so a check can await the full submission chain.
+function tap(app) {
+  let pending = null;
+  const real = app.confirmBooking.bind(app);
+  app.confirmBooking = () => { pending = real(); return pending; };
+  app.handleBookingClick();
+  app.confirmBooking = real;
+  return pending;
+}
+
+// Real endpoint success shape (booking-writer contract): success:true +
+// bookingId (+ detailsVersion, which edits REQUIRE to be definitive).
+const CREATED = { status: 200, body: { success: true, bookingId: 'db-1', tripId: 'LM-OK', detailsVersion: 1 } };
+
+check('ENVELOPE: one tap serializes once — operationId inside the exact stored bytes', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': { body: quoteWithTtl(15) },
+    '/api/create-booking': CREATED,
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  const storedEnvelopes = [];
+  const origSet = ctx.sessionStorage.setItem;
+  ctx.sessionStorage.setItem = (k, v) => { if (k === 'lm_pending_envelope') storedEnvelopes.push(v); return origSet(k, v); };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+
+  const posts = f.to('/api/create-booking');
+  assert.strictEqual(posts.length, 1);
+  assert.strictEqual(posts[0].opts.headers.Authorization, 'Bearer jwt-abc');
+  assert.strictEqual(storedEnvelopes.length, 1, 'the envelope is stored before the POST');
+  const env = JSON.parse(storedEnvelopes[0]);
+  assert.strictEqual(posts[0].opts.body, env.bodyString,
+    'the POST sends the exact stored envelope bytes');
+  assert.strictEqual(env.kind, 'create');
+  assert.strictEqual(env.authSubject, 'auth-user-1');
+
+  const sent = JSON.parse(posts[0].opts.body);
+  assert.match(sent.operationId, /^[0-9a-f-]{36}$/i, 'operationId travels INSIDE the body');
+  assert.strictEqual(sent.operationId, env.operationId);
+  assert.strictEqual(sent.quoteToken, 'tok.tesla');
+  assert.strictEqual(sent.placeId, 'ChIJ_CANONICAL_xyz', 'the CANONICAL id is resubmitted');
+  assert.strictEqual(sent.vehicleKey, 'tesla');
+  assert.strictEqual(sent.routeMilesTenths, 100);
+  assert.strictEqual(sent.routeMinutes, 20);
+  assert.ok(!('durationMinutes' in sent), 'the legacy browser duration must not ride along');
+  assert.strictEqual(sent.price, 39, 'the submitted total is the server cents');
+
+  assert.deepStrictEqual(sheets, ['db-1'], 'a definitive success opens the trip sheet');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'a definitive mapped response settles the envelope');
+});
+
+check('TAP on a stale quote: one quiet refresh, then automatic submit at the SAME cents', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),   // refresh answers the same price
+    '/api/create-booking': CREATED,
+  });
+  const { app, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  // …the passenger sits on the screen past the TTL, then taps anyway
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+
+  await tap(app);
+
+  assert.strictEqual(f.to('/api/quote-ride').length, 2, 'exactly ONE quiet refresh for the tap');
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'then the submit happens automatically');
+  assert.strictEqual(app._tapSnapshot.refreshUsed, true);
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(alerts.length, 0, 'the whole quiet path never alerts');
+});
+
+check('TAP on a stale quote: a CHANGED price never auto-submits — it asks for a new tap', async () => {
+  let firstQuote = true;
+  const f = routedFetch({
+    '/api/quote-ride': () => {
+      if (firstQuote) { firstQuote = false; return { body: quoteWithTtl(15) }; }
+      const dearer = quoteWithTtl(15);
+      dearer.quote.vehicles.tesla.finalCents = 4900;   // the refresh got dearer
+      return { body: dearer };
+    },
+    '/api/create-booking': CREATED,
+  });
+  const { app, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  app.showTripSheet = () => { throw new Error('must not reach the trip sheet'); };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+
+  await tap(app);
+
+  assert.strictEqual(f.to('/api/create-booking').length, 0,
+    'a different number is shown, never auto-sent');
+  assert.strictEqual(alerts.length, 0, 'the note is quiet — no alert, no "refused"');
+  assert.strictEqual(app.selectedQuoteVehicle().finalCents, 4900,
+    'the refreshed price is on screen for the passenger to review');
+  const note = app.els.bookBtn.children.find((c) => c.className === 'btn-sub-text');
+  assert.ok(note && /review the new price/i.test(note.textContent),
+    'the quiet one-liner actually RENDERS (the note target is created if missing)');
+});
+
+check('REQUOTE: a server requote spends the tap budget — refresh, ONE resubmit, then stop', async () => {
+  let created = 0;
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': () => (++created === 1
+      ? { status: 409, body: { error: 'quote_expired', requote: true } }
+      : CREATED),
+  });
+  const { app, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+
+  const posts = f.to('/api/create-booking');
+  assert.strictEqual(posts.length, 2, 'refresh then ONE automatic resubmit');
+  const id1 = JSON.parse(posts[0].opts.body).operationId;
+  const id2 = JSON.parse(posts[1].opts.body).operationId;
+  assert.notStrictEqual(id1, id2, 'a refreshed quote is a NEW payload and a NEW operation');
+  assert.strictEqual(f.to('/api/quote-ride').length, 2, 'the resubmit bought exactly one refresh');
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(alerts.length, 0);
+});
+
+check('REQUOTE: an exhausted tap budget returns to a visible tap — no third submit, NO background quote', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': { status: 409, body: { error: 'quote_expired', requote: true } },
+  });
+  const { app, carousel, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  app.showTripSheet = () => { throw new Error('must not reach the trip sheet'); };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.strictEqual(f.to('/api/create-booking').length, 2,
+    'the per-tap ceiling is one refresh + one resubmit, full stop');
+  assert.strictEqual(f.to('/api/quote-ride').length, 2,
+    'provider ceiling: the initial quote + ONE quiet refresh — exhaustion buys nothing');
+  assert.strictEqual(alerts.length, 0, 'the return to a visible tap is quiet');
+  // The refused quote is marked expired locally: Expired cards, and the
+  // primary action stays clickable — the NEXT tap owns the refresh.
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: 'Expired', escalade: 'Expired', sprinter: 'Expired' });
+  assert.strictEqual(app.els.bookBtn.disabled, false,
+    'the passenger can tap again once they have reviewed');
+  assert.match(app.els.bookBtn.innerHTML, /Refresh and Book/);
+  const note = app.els.bookBtn.children.find((c) => c.className === 'btn-sub-text');
+  assert.ok(note && /needs a refresh/i.test(note.textContent));
+});
+
+check('UNKNOWN result: exact-byte retry once, then the recovery card — and Check again recovers', async () => {
+  let outage = true;
+  const f = routedFetch({
+    '/api/quote-ride': { body: quoteWithTtl(15) },
+    '/api/create-booking': () => (outage
+      ? { status: 502, body: { error: 'gateway hiccup' } }   // 502 is NOT a mapped outcome
+      : CREATED),
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+
+  const posts = f.to('/api/create-booking');
+  assert.strictEqual(posts.length, 2, 'an unknown result retries exactly once');
+  assert.strictEqual(posts[0].opts.body, posts[1].opts.body,
+    'the retry resends the identical bytes — same operationId, same everything');
+  assert.strictEqual(alerts.length, 1);
+  assert.match(alerts[0], /Check again/);
+  assert.ok(ctx.sessionStorage.getItem('lm_pending_envelope'),
+    'the envelope survives an unknown result');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  assert.ok(card, 'the recovery card is offered');
+  const [span, checkBtn] = card.children;
+  assert.match(span.textContent, /couldn't confirm your last booking/);
+
+  // The outage ends; "Check again" re-sends the exact stored bytes.
+  outage = false;
+  await checkBtn.listeners.click[0]();
+  const after = f.to('/api/create-booking');
+  assert.strictEqual(after.length, 3);
+  assert.strictEqual(after[2].opts.body, posts[0].opts.body,
+    'recovery submits the very same envelope bytes');
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'a definitive recovery settles the envelope');
+  assert.strictEqual(card.removed, true, 'the card leaves with the envelope');
+});
+
+check('RECOVERY OFFER: bound to the account — another subject\'s envelope is dropped, never shown', async () => {
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'op-1', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'someone-else', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'an envelope from a different account is discarded');
+  assert.ok(!ctx.document.body.children.some((c) => c.id === 'pendingEnvelopeCard'),
+    'and never offered');
+
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'op-2', bodyString: '{}', kind: 'edit',
+    bookingId: 'b-1', authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  assert.ok(card, 'the same account gets the offer');
+  assert.match(card.children[0].textContent, /couldn't confirm your last ride change/,
+    'an edit envelope says change, not booking');
+
+  // "Check again" on the edit envelope: a recovered edit is a COMMITTED
+  // edit — the edit session closes and the server's version is adopted,
+  // exactly like the direct save path.
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  ctx.fetch = routedFetch({
+    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: 'b-1', tripId: 'LM-1', detailsVersion: 9 } },
+  });
+  await card.children[1].listeners.click[0]();
+  assert.deepStrictEqual(sheets, ['b-1']);
+  assert.strictEqual(app.pendingEdit, null, 'the recovered edit closes the edit session');
+  assert.strictEqual(ctx.currentActiveBooking?.details_version, 9,
+    'the committed version is adopted for the next edit');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null);
+  assert.strictEqual(card.removed, true);
+});
+
+check('IN-FLIGHT: nothing re-enables the button mid-POST, and a second tap is inert', async () => {
+  let releaseCreate;
+  const createGate = new Promise((r) => { releaseCreate = r; });
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': async () => { await createGate; return CREATED; },
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  const storedEnvelopes = [];
+  const origSet = ctx.sessionStorage.setItem;
+  ctx.sessionStorage.setItem = (k, v) => { if (k === 'lm_pending_envelope') storedEnvelopes.push(v); return origSet(k, v); };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const pending = tap(app);
+  assert.ok(pending);
+  await new Promise((r) => setTimeout(r, 0));   // let the chain reach the gated POST
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'sanity: the POST is in flight');
+
+  // Mid-flight, the quote expires and the expiry path recomputes the button…
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+  app.renderQuoteState();
+  assert.strictEqual(app.els.bookBtn.disabled, true,
+    'expiry recompute must NOT resurrect the button while a submission is in flight');
+
+  // …and the passenger taps again anyway (keyboard, ghost click):
+  app.handleBookingClick();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'no second concurrent POST');
+  assert.strictEqual(storedEnvelopes.length, 1, 'no second envelope — the slot is never clobbered');
+
+  releaseCreate();
+  await pending;
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(alerts.length, 0);
+  assert.strictEqual(app._submitInFlight, false, 'the flag is released when the chain settles');
+});
+
+check('MARKERS: carousel auto-select (userInitiated:false) never grants the vehicle marker', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  app.editMarkers = {
+    routeDirection: true, routeAddress: true, pickupAt: true,
+    vehicle: false, traveler: false
+  };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39, userInitiated: false });
+  assert.strictEqual(app.editMarkers.vehicle, false,
+    'the boot-time auto-select is not a passenger choice');
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'Save stays blocked');
+  // the passenger's own tap counts
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39, userInitiated: true });
+  assert.strictEqual(app.editMarkers.vehicle, true);
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, false);
+});
+
+check('STATIC: the carousel stamps userInitiated=false on every non-user selection', () => {
+  const carousel = fs.readFileSync(path.join(repoRoot, 'vehicle-carousel-standalone.html'), 'utf8');
+  assert.match(carousel, /selectCard\(index, userInitiated = true\)/);
+  assert.match(carousel, /this\.selectCard\(0, false\), 100\)/, 'boot auto-select');
+  assert.match(carousel, /case 'reset':\s*\n\s*this\.selectCard\(0, false\)/, 'host reset');
+  assert.match(carousel, /case 'selectVehicle':[\s\S]{0,400}?this\.selectCard\(index, false\)/, 'host restore');
+  assert.match(carousel, /this\.selectCard\(next, false\)/, 'unavailable auto-advance');
+  assert.match(carousel, /userInitiated: userInitiated === true/, 'the flag rides in vehicleData');
+});
+
+// ============ PR-2 round 1 (Codex findings 1–5) ============
+
+check('GATE: an unresolved operation blocks new Book/Save chains until resolved or discarded', async () => {
+  let outage = true;
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': () => (outage
+      ? { status: 502, body: { error: 'gateway hiccup' } }
+      : CREATED),
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  ctx.currentSession = { user: { id: 'auth-user-1' } };
+
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.strictEqual(f.to('/api/create-booking').length, 2, 'sanity: unknown after one retry');
+  const storedBytes = ctx.sessionStorage.getItem('lm_pending_envelope');
+  assert.ok(storedBytes, 'sanity: the envelope is unresolved');
+  assert.strictEqual(alerts.length, 1);
+
+  // A later tap must not mint a new operation while this one is unresolved —
+  // ambassadors are multi-ride, so a committed-but-unacknowledged create
+  // plus a fresh chain would be a second REAL guest ride and a lost handle.
+  const callsBefore = f.calls.length;
+  assert.strictEqual(tap(app), null, 'the tap is refused before any chain starts');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.calls.length, callsBefore, 'zero new POSTs of any kind');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), storedBytes,
+    'the unresolved envelope is retained byte-identically');
+  assert.ok(ctx.document.body.children.some((c) => c.id === 'pendingEnvelopeCard' && !c.removed),
+    'the recovery card is re-offered instead');
+  assert.strictEqual(alerts.length, 1, 'the refusal is quiet — the card speaks');
+
+  // Positive control: explicit Discard releases the gate and a new tap books.
+  const cards = ctx.document.body.children.filter((c) => c.id === 'pendingEnvelopeCard' && !c.removed);
+  await cards[cards.length - 1].children[2].listeners.click[0]();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null);
+  outage = false;
+  const createsBefore = f.to('/api/create-booking').length;
+  const pending2 = tap(app);
+  assert.ok(pending2, 'after Discard the tap proceeds');
+  await pending2;
+  assert.strictEqual(f.to('/api/create-booking').length, createsBefore + 1);
+  assert.deepStrictEqual(sheets, ['db-1']);
+});
+
+check('DEFINITIVE means REGISTRY-SHAPED: 200 {} and a generic JSON 503 stay unknown', async () => {
+  for (const bad of [
+    { status: 200, body: {} },                                  // parsed 2xx, no success shape
+    { status: 200, body: { success: true } },                   // still no bookingId
+    { status: 503, body: { error: 'Service Unavailable' } },    // a gateway, not the writer
+    { status: 428, body: { error: 'outdated_client' } },        // no reload:true
+  ]) {
+    const f = routedFetch({
+      '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+      '/api/create-booking': bad,
+    });
+    const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+    app.showTripSheet = () => { throw new Error('must not open a sheet'); };
+    await app.requestServerQuote();
+    app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+    await tap(app);
+    const posts = f.to('/api/create-booking');
+    assert.strictEqual(posts.length, 2, `${bad.status}: one exact-byte retry, then unknown`);
+    assert.strictEqual(posts[0].opts.body, posts[1].opts.body);
+    assert.ok(ctx.sessionStorage.getItem('lm_pending_envelope'),
+      `${bad.status}: a contract-invalid response must NOT settle the envelope`);
+    assert.strictEqual(alerts.length, 1);
+    assert.match(alerts[0], /Check again/);
+  }
+});
+
+check('DEFINITIVE: an edit success without its version is unknown; with it, definitive', async () => {
+  for (const [body, wantPosts, wantEnvelope] of [
+    [{ success: true, bookingId: 'b-9', tripId: 'LM-9' }, 2, true],                    // missing detailsVersion
+    [{ success: true, bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 }, 1, false],
+  ]) {
+    const f = routedFetch({
+      '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+      '/api/update-pending-booking': { status: 200, body },
+    });
+    const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+    app.showTripSheet = () => {};
+    app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 7 };
+    app.editMarkers = {
+      routeDirection: true, routeAddress: true, pickupAt: true,
+      vehicle: false, traveler: false
+    };
+    await app.requestServerQuote();
+    app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+    await tap(app);
+    assert.strictEqual(f.to('/api/update-pending-booking').length, wantPosts);
+    assert.strictEqual(!!ctx.sessionStorage.getItem('lm_pending_envelope'), wantEnvelope,
+      'the edit success shape REQUIRES its committed version');
+  }
+});
+
+check('DEFINITIVE: the writer\'s exact blocked copy IS definitive — one attempt, envelope settled', async () => {
+  const BLOCKED = 'Bookings are temporarily unavailable. Message us on WhatsApp and a human will arrange your ride.';
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': { status: 503, body: { error: BLOCKED } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  let shownError = '';
+  app.showPaymentError = (m) => { shownError = String(m); };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'a recognized outcome is not retried');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null, 'settled');
+  assert.match(shownError, /nothing was booked/i, 'the failure is spoken honestly');
+});
+
+check('STATIC: the blocked registry copy is pinned identically in writer and browser', () => {
+  const copy = 'Bookings are temporarily unavailable. Message us on WhatsApp and a human will arrange your ride.';
+  const writer = fs.readFileSync(path.join(repoRoot, 'backend/functions/lib/booking-writer.js'), 'utf8');
+  assert.ok(writer.includes(copy), 'the writer serves this exact copy for blocked');
+  assert.ok(appBlock.includes(copy), 'the browser recognizes this exact copy as definitive');
+});
+
+check('RECOVERY OVERLAP: an older completion cannot clear or act on a newer operation', async () => {
+  let releaseCheck;
+  const checkGate = new Promise((r) => { releaseCheck = r; });
+  const f = routedFetch({
+    '/api/create-booking': async () => { await checkGate; return CREATED; },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'op-OLD', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  const [, checkBtn, discardBtn] = card.children;
+  const oldCheck = checkBtn.listeners.click[0]();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(discardBtn.disabled, true, 'BOTH controls freeze during a check');
+
+  // While the old check awaits, the slot is repointed to a newer operation.
+  const newer = JSON.stringify({
+    operationId: 'op-NEW', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 2,
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', newer);
+  releaseCheck();
+  await oldCheck;
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+    'the newer operation survives the older completion');
+  assert.deepStrictEqual(sheets, [], 'the older result is not displayed as current');
+  // Round 2: the stale card must NOT be re-enabled — it yields: removes
+  // itself and the CURRENT operation gets a fresh offer.
+  assert.strictEqual(card.removed, true, 'the stale card yields the stage');
+  const fresh = ctx.document.body.children.find(
+    (c) => c.id === 'pendingEnvelopeCard' && !c.removed && c !== card);
+  assert.ok(fresh, 'the current operation is offered immediately');
+  // …and even a ghost click on the detached stale Discard cannot delete
+  // the newer operation (Discard is scoped to its own card's operation).
+  await card.children[2].listeners.click[0]();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+    'a stale Discard can never delete the newer envelope');
+});
+
+check('DISCARD SCOPE: a stale card\'s Discard removes only itself — the newer operation survives', async () => {
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'op-OLD', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const oldCard = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard' && !c.removed);
+  // The slot moves on to a newer operation while the old card is on screen.
+  const newer = JSON.stringify({
+    operationId: 'op-NEW', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 2,
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', newer);
+  await oldCard.children[2].listeners.click[0]();   // stale Discard
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+    'op-NEW survives byte-exact');
+  assert.strictEqual(oldCard.removed, true, 'the stale card removes only itself');
+  const cards = ctx.document.body.children.filter(
+    (c) => c.id === 'pendingEnvelopeCard' && !c.removed);
+  assert.ok(cards.length >= 1, 'the current operation is offered in its place');
+  // The OWNING card's Discard still discards.
+  await cards[cards.length - 1].children[2].listeners.click[0]();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the operation that owns the slot can still be discarded');
+});
+
+check('SINGLE-FLIGHT: the lock survives the recursive auto-resubmit end to end', async () => {
+  let created = 0;
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': () => (++created === 1
+      ? { status: 409, body: { error: 'quote_expired', requote: true } }
+      : CREATED),
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  // The initial quote happens BEFORE the counter is installed — it makes
+  // its own getSession call, and counting it would shift the gate onto
+  // the quiet refresh instead of the boundary under test (the exact
+  // miscount Codex's final review caught: the no-await mutant passed).
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  // Session acquisitions from the tap onward: (1) the outer submit,
+  // (2) the quiet refresh inside the requote branch, (3) the RECURSIVE
+  // resubmit. Park call 3 — the exact instant round 2 proved the lock
+  // used to drop.
+  let sessionCalls = 0;
+  let releaseThird; const thirdGate = new Promise((r) => { releaseThird = r; });
+  let thirdEntered; const thirdIn = new Promise((r) => { thirdEntered = r; });
+  ctx.window.supabaseClient.auth.getSession = async () => {
+    sessionCalls++;
+    if (sessionCalls === 3) { thirdEntered(); await thirdGate; }
+    return { data: { session: { access_token: 'jwt-abc', user: { id: 'auth-user-1' } } } };
+  };
+  const pending = tap(app);
+  await thirdIn;   // the recursive chain is pending at session acquisition
+  assert.strictEqual(app._submitInFlight, true,
+    'the lock holds through the recursive handoff — the outer finally has not run');
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'the primary button stays blocked');
+  const callsBefore = f.calls.length;
+  assert.strictEqual(tap(app), null, 'a second tap cannot start another chain');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.strictEqual(f.calls.length, callsBefore, 'the refused tap makes zero calls');
+  releaseThird();
+  await pending;
+  assert.strictEqual(f.to('/api/create-booking').length, 2, 'original + exactly one resubmit');
+  assert.deepStrictEqual(sheets, ['db-1']);
+  assert.strictEqual(app._submitInFlight, false, 'the lock releases once everything settles');
+});
+
+check('CHANNEL: outbound messages pin the same-origin target — never *', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, carousel, postedTargets } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();           // posts placeholders/prices to the iframe
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  assert.ok(postedTargets.length > 0, 'sanity: the parent posted to the iframe');
+  postedTargets.forEach((t) => assert.strictEqual(t, 'https://example.test',
+    'every parent->iframe message names the same-origin target'));
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } });   // makes the iframe answer
+  assert.ok(carousel.parentTargets.length > 0, 'sanity: the iframe posted to the parent');
+  carousel.parentTargets.forEach((t) => assert.strictEqual(t, 'https://example.test',
+    'every iframe->parent message names the same-origin target'));
+});
+
+check('SCOPED CLEAR: clearPendingEnvelope touches only its own operation — and callers are pinned', () => {
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  const env = JSON.stringify({
+    operationId: 'op-A', bodyString: '{}', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', env);
+  app.clearPendingEnvelope('op-B');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), env,
+    'another operation cannot clear the slot');
+  app.clearPendingEnvelope('op-A');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the owning operation clears it');
+  ctx.sessionStorage.setItem('lm_pending_envelope', env);
+  app.clearPendingEnvelope();
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the unscoped form (logout semantics) clears whatever holds the slot');
+  // The settle and recovery call sites use the SCOPED form — a bare clear
+  // there passed every check until this pin.
+  assert.ok(appBlock.includes('this.clearPendingEnvelope(envelope.operationId)'),
+    'the submission settle clears by its own operationId');
+  assert.ok(appBlock.includes('this.clearPendingEnvelope(env.operationId)'),
+    'recovery completion and Discard clear by their own operationId');
+});
+
+check('CHANNEL: vehicle selection is accepted only from the same-origin carousel frame', async () => {
+  const f = okFetch(quoteWithTtl(15));
+  const { app, sendToApp } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();
+  const vehicle = { id: 'escalade', name: 'Cadillac Escalade', passengers: 7, bags: 8, price: 55 };
+  sendToApp({ type: 'vehicleSelected', vehicle }, { origin: 'https://evil.example' });
+  assert.strictEqual(app.state.vehicle?.type ?? null, null,
+    'a cross-origin sender must not drive the priced vehicle/token');
+  sendToApp({ type: 'vehicleSelected', vehicle }, { source: {} });
+  assert.strictEqual(app.state.vehicle?.type ?? null, null,
+    'right origin but wrong window must not either');
+  sendToApp({ type: 'vehicleSelected', vehicle });
+  assert.strictEqual(app.state.vehicle?.type, 'escalade',
+    'the genuine carousel frame still drives selection');
+});
+
+check('CHANNEL: the carousel obeys only its same-origin parent', () => {
+  const { carousel } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  const before = carousel.parentMessages.length;
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } },
+    { origin: 'https://evil.example' });
+  assert.strictEqual(carousel.parentMessages.length, before, 'hostile origin: ignored');
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } },
+    { source: {} });
+  assert.strictEqual(carousel.parentMessages.length, before, 'hostile source: ignored');
+  carousel.deliver({ type: 'selectVehicle', data: { vehicleId: 'escalade' } });
+  const last = carousel.parentMessages[carousel.parentMessages.length - 1];
+  assert.strictEqual(last?.type, 'vehicleSelected', 'the genuine parent still commands');
+  assert.strictEqual(last?.vehicle?.id, 'escalade');
+  assert.strictEqual(last?.vehicle?.userInitiated, false, 'host restore stays non-user');
+});
+
+check('REFRESH BINDING: an answer the tap did not launch is refused, even at the same price', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': CREATED,
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  app.showTripSheet = () => { throw new Error('must not submit'); };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const past = new Date(Date.now() - 1000).toISOString();
+  Object.keys(app.state.quote.data.vehicles).forEach((k) => {
+    app.state.quote.data.vehicles[k].expiresAt = past;
+  });
+
+  // Park ONLY the tap's own quiet refresh at the auth step.
+  let gateFirst = true;
+  let releaseFirst; const firstGate = new Promise((r) => { releaseFirst = r; });
+  let firstEntered; const firstIn = new Promise((r) => { firstEntered = r; });
+  ctx.window.supabaseClient.auth.getSession = async () => {
+    if (gateFirst) { gateFirst = false; firstEntered(); await firstGate; }
+    return { data: { session: { access_token: 'jwt-abc', user: { id: 'auth-user-1' } } } };
+  };
+  const pending = tap(app);
+  await firstIn;
+  // An interleaved re-quote completes fully while the tap's refresh is parked.
+  await app.requestServerQuote({ force: true });
+  assert.strictEqual(app.quoteIsFresh(), true,
+    'sanity: the interloper produced a fresh quote at the identical price');
+  releaseFirst();
+  await pending;
+  assert.strictEqual(f.to('/api/create-booking').length, 0,
+    'same intent, same cents — but not the request THIS tap launched: refused');
+  assert.strictEqual(alerts.length, 0);
+  assert.strictEqual(app.els.bookBtn.disabled, false,
+    'the fresh price is reviewable and a new tap can accept it');
+});
+
+check('STATIC: envelope lifecycle wiring — boot offer on every path, sign-outs clear it', () => {
+  const full = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+  const resumeIdx = full.indexOf('function resumeAccountBookingWhenReady()');
+  const offerIdx = full.indexOf('offerPendingEnvelope(subject)', resumeIdx);
+  const bookingBranchIdx = full.indexOf('const bookingId = currentActiveBooking?.id', resumeIdx);
+  assert.ok(resumeIdx >= 0 && offerIdx > resumeIdx && offerIdx < bookingBranchIdx,
+    'the recovery offer must run BEFORE the active-booking early returns — a normal passenger\'s edit recovery always coexists with a live booking');
+  const logoutIdx = full.indexOf('async function logout()');
+  const logoutBlock = full.slice(logoutIdx, full.indexOf('}', full.indexOf('window.location.href', logoutIdx)));
+  assert.ok(logoutBlock.includes("removeItem('lm_pending_envelope')"),
+    'explicit sign-out clears the pending envelope');
+  const revokedIdx = full.indexOf('revoked server-side');
+  assert.ok(full.slice(revokedIdx, revokedIdx + 600).includes("removeItem('lm_pending_envelope')"),
+    'the revoked-session bounce clears it too');
+});
+
+check('428 reload:true — the outdated bundle reloads instead of arguing', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': { body: quoteWithTtl(15) },
+    '/api/create-booking': { status: 428, body: { error: 'outdated_client', reload: true } },
+  });
+  const { app, ctx, alerts } = makeContext({ enabled: true, fetchImpl: f });
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.strictEqual(ctx.__reloads, 1, 'the fix for an outdated client is the fresh bundle');
+  assert.strictEqual(alerts.length, 1);
+  assert.match(alerts[0], /updated/i);
+});
+
+check('EDIT: a full edit submission — edit envelope, forced traveler review, CAS carried', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': { body: quoteWithTtl(15) },
+    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 7 };
+  app.editMarkers = {
+    routeDirection: true, routeAddress: true, pickupAt: true,
+    vehicle: false, traveler: false
+  };
+
+  await app.requestServerQuote();
+  const quoteBody = JSON.parse(f.to('/api/quote-ride')[0].opts.body);
+  assert.strictEqual(quoteBody.bookingId, 'b-9');
+  assert.strictEqual(quoteBody.expectedDetailsVersion, 7);
+
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const before = ctx.__modalOpens || 0;
+  await tap(app);
+  assert.strictEqual((ctx.__modalOpens || 0) - before, 1,
+    'prefilled traveler data never counts — the modal is REOPENED for review');
+
+  const posts = f.to('/api/update-pending-booking');
+  assert.strictEqual(posts.length, 1, 'edits write through the edit lane');
+  const sent = JSON.parse(posts[0].opts.body);
+  assert.strictEqual(sent.bookingId, 'b-9');
+  assert.strictEqual(sent.expectedDetailsVersion, 7,
+    'the CAPTURED version is the CAS — a server echo never replaces it');
+  assert.match(sent.operationId, /^[0-9a-f-]{36}$/i);
+  assert.strictEqual(sent.quoteToken, 'tok.tesla');
+  assert.ok(!('paymentMethod' in sent),
+    'plan v3.1: the edit contract carries NO payment method — stored values survive');
+  assert.deepStrictEqual(sheets, ['b-9']);
+  assert.strictEqual(app.pendingEdit, null, 'a saved edit closes the edit session');
+});
+
+check('EDIT_STALE: a stale edit quote fails closed with honest reopen copy', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': { status: 409, body: { error: 'edit_stale', reason: 'version', currentDetailsVersion: 5 } },
+  });
+  const { app, carousel } = makeContext({ enabled: true, fetchImpl: f });
+  app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 3 };
+  app.editMarkers = {
+    routeDirection: true, routeAddress: true, pickupAt: true,
+    vehicle: true, traveler: false
+  };
+
+  await app.requestServerQuote();
+  assert.strictEqual(app.state.quote.status, 'error');
+  assert.strictEqual(app.state.quote.error.retryable, false,
+    'the captured CAS is sacred — never silently refreshed into a retry');
+  assert.strictEqual(app.state.quote.error.editStale, true);
+  assert.match(app.state.quote.error.message, /reopen/i);
+  assert.strictEqual(app.pendingEdit.detailsVersion, 3,
+    'the server-echoed currentDetailsVersion must NEVER be adopted silently');
+  await app.requestServerQuote();
+  assert.strictEqual(f.calls.length, 1,
+    'a stale edit is a dead intent — re-entry must not buy another provider call');
+  assert.deepStrictEqual(carousel.visible(),
+    { tesla: 'Unavailable', escalade: 'Unavailable', sprinter: 'Unavailable' });
+  app.updateBookAvailability();
+  assert.strictEqual(app.els.bookBtn.disabled, true);
+});
+
+check('STATIC: every interaction marker is wired to its real explicit action', () => {
+  // beginPendingEdit resets all five markers at edit start
+  assert.match(appBlock,
+    /beginPendingEdit[\s\S]{0,2000}?routeDirection:\s*false,\s*routeAddress:\s*false,[\s\S]{0,40}?pickupAt:\s*false,\s*vehicle:\s*false,\s*traveler:\s*false/,
+    'beginPendingEdit must reset every marker');
+  // each setter is guarded so create flows AND flag-off legacy flows never
+  // touch markers or call updateBookAvailability (dark invariance)
+  assert.match(appBlock, /this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\) &&\s*\n\s*this\.state\.locations\.placeId[\s\S]{0,120}?routeAddress = true/,
+    'routeAddress: only a LIVE autocomplete selection, quote flow only');
+  assert.match(appBlock, /invalidateQuote\('airport changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\)\) \{\s*\n\s*this\.editMarkers\.routeDirection = true/,
+    'routeDirection: an explicit airport choice, quote flow only');
+  assert.match(appBlock, /invalidateQuote\('pickup time changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\)\) \{\s*\n\s*this\.editMarkers\.pickupAt = true/,
+    'pickupAt: an explicit time set, quote flow only');
+  assert.match(appBlock, /this\.quoteFlowActive\(\) &&\s*\n\s*!\(isObject && vehicleData\.userInitiated === false\)[\s\S]{0,80}?this\.editMarkers\.vehicle = true/,
+    'vehicle: an explicit USER selection — carousel auto-select never counts');
+  // traveler is set ONLY inside the modal completion callback
+  assert.match(appBlock, /openRequired\(\(\) => \{[\s\S]{0,200}?editMarkers\.traveler = true/,
+    'traveler: only the modal review sets it');
+  // an edit session under the quote flow starts with Save honestly DISABLED
+  assert.ok(appBlock.includes('if (this.quoteFlowActive()) this.updateBookAvailability();'),
+    'beginPendingEdit recomputes availability so zero-marker Save is not a silent no-op');
+});
+
+// A check that awaits a promise that never settles drains node's event loop
+// and would otherwise exit 0 with zero output — pre-arm failure so silence
+// is loud. run() flips this to 0 only after the summary prints.
+process.exitCode = 1;
 run().catch((e) => { console.error(e); process.exit(1); });

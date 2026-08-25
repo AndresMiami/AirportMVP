@@ -57,6 +57,13 @@ const { quoteRide } = require('./lib/ride-quote');
 
 // The strict intent allowlist — the boundary is enforced, not advisory.
 const ALLOWED_FIELDS = ['mode', 'airportCode', 'placeId', 'pickupAt', 'passengers'];
+// EDIT-PURPOSE QUOTING (PR 3C-2C-B PR-2): the SAME intent plus the booking
+// being edited. Both fields travel together; either alone is a 400. The
+// owner/status/version gates run BEFORE any paid provider call, and the
+// captured CAS version is echoed back but NEVER replaces the browser's
+// captured expectedDetailsVersion (SQL's CAS stays authoritative at save).
+const EDIT_FIELDS_ALLOWED = ['bookingId', 'expectedDetailsVersion'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // RFC 3339 with a MANDATORY offset. `Date.parse` would happily accept
 // '2026-08-20' and '2026-08-20T10:00:00' — the latter is interpreted in
@@ -292,7 +299,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Body must be a JSON object' }) };
     }
     for (const key of Object.keys(body)) {
-      if (!ALLOWED_FIELDS.includes(key)) {
+      if (!ALLOWED_FIELDS.includes(key) && !EDIT_FIELDS_ALLOWED.includes(key)) {
         // Route facts, prices, coordinates, bags, vehicle preference —
         // anything beyond the intent — is rejected by NAME so the
         // boundary is visible.
@@ -300,6 +307,20 @@ exports.handler = async (event) => {
       }
     }
     const { mode, airportCode, placeId, pickupAt, passengers } = body;
+
+    // ---- edit-purpose request shape (both fields or neither) ----
+    const hasBookingId = Object.prototype.hasOwnProperty.call(body, 'bookingId');
+    const hasExpectedVersion = Object.prototype.hasOwnProperty.call(body, 'expectedDetailsVersion');
+    if (hasBookingId !== hasExpectedVersion) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'bookingId and expectedDetailsVersion must be supplied together' }) };
+    }
+    const isEditQuote = hasBookingId;
+    if (isEditQuote && (typeof body.bookingId !== 'string' || !UUID_RE.test(body.bookingId))) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid booking identity' }) };
+    }
+    if (isEditQuote && (!Number.isInteger(body.expectedDetailsVersion) || body.expectedDetailsVersion < 1)) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid booking edit version' }) };
+    }
 
     if (mode !== 'pickup' && mode !== 'dropoff') {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "mode must be 'pickup' or 'dropoff'" }) };
@@ -323,6 +344,43 @@ exports.handler = async (event) => {
     }
     if (!Number.isInteger(passengers) || passengers < 1 || passengers > 100) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'passengers must be a positive integer' }) };
+    }
+
+    // ---- edit gates: owner, editability, and CAS version — all BEFORE any
+    // paid provider call (plan v3.1 §G). A stale form must never buy a
+    // Places + Compute Routes pair it can only waste. The response echoes
+    // the live version for display; the browser's captured
+    // expectedDetailsVersion is never replaced by it.
+    let editBooking = null;
+    if (isEditQuote) {
+      const { data: bookingRow, error: bookingError } = await db
+        .from('bookings')
+        .select('id, customer_id, status, assigned_driver, details_version, assignment_epoch')
+        .eq('id', body.bookingId)
+        .maybeSingle();
+      if (bookingError) {
+        console.error('❌ quote-ride edit booking lookup failed');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Could not load booking' }) };
+      }
+      // Missing and foreign look identical — non-disclosure.
+      if (!bookingRow || bookingRow.customer_id !== customerId) {
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
+      }
+      if (bookingRow.status !== 'pending' || bookingRow.assigned_driver) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'edit_stale', reason: 'not_editable', currentStatus: bookingRow.status })
+        };
+      }
+      if (bookingRow.details_version !== body.expectedDetailsVersion) {
+        return {
+          statusCode: 409,
+          headers,
+          body: JSON.stringify({ error: 'edit_stale', reason: 'version', currentDetailsVersion: bookingRow.details_version })
+        };
+      }
+      editBooking = bookingRow;
     }
     const card0 = await resolveRateCard({ authUserId, customerId, pickupAtMs });
     if (!card0 || !card0.ok) {
@@ -454,8 +512,12 @@ exports.handler = async (event) => {
         q.quote.finalCents,
         signing.current.secret
       );
-      const quoteToken = signQuoteToken({
-        purpose: 'create',
+      // Edit tokens additionally bind the booking and its driver era: the
+      // RPC compares bookingId and assignmentEpoch against the live row
+      // inside the guarded write, so a token minted before an Accept or a
+      // Release can never apply to the new era (epoch_conflict).
+      const tokenFields = {
+        purpose: isEditQuote ? 'edit' : 'create',
         jti: quoteJti,
         authUserId,
         customerId,
@@ -467,7 +529,13 @@ exports.handler = async (event) => {
         pricingVersion: q.quote.pricingVersion,
         engineVersion: q.quote.engineVersion,
         resolvedVersion
-      }, { keyId: signing.current.id, secret: signing.current.secret, nowMs });
+      };
+      if (isEditQuote) {
+        tokenFields.bookingId = editBooking.id;
+        tokenFields.assignmentEpoch = editBooking.assignment_epoch;
+      }
+      const quoteToken = signQuoteToken(tokenFields,
+        { keyId: signing.current.id, secret: signing.current.secret, nowMs });
       vehicles[key] = {
         ok: true,
         vehicleName: q.quote.vehicleName,
@@ -527,6 +595,11 @@ exports.handler = async (event) => {
           vehiclesOk,
           vehiclesRefused: Object.keys(card.vehicles).length - vehiclesOk,
           bookable: vehiclesOk > 0,
+          // Edit-purpose echo (display only — the browser keeps ITS captured
+          // expectedDetailsVersion for the CAS; this never replaces it).
+          edit: editBooking
+            ? { bookingId: editBooking.id, detailsVersion: editBooking.details_version }
+            : null,
           pricingVersion: card.pricingVersion,
           resolvedVersion,
           cardSource: card0.source,

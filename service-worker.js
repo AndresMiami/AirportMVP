@@ -7,9 +7,9 @@
 // so no cancel-and-recreate client survives this deployment. (v1.3.17
 // shipped PR 1A pending cancellation with the owner-session auto-cancel
 // header; that whole rebook path is deleted by the edit flow.)
-// v1.3.20: api-config.js (a precached asset) dropped its retired
-// calculate-price endpoint — house rule: bump when cached assets change.
-const CACHE_NAME = 'linkmia-v1.3.20';
+// v1.3.21: PR 3C-2C-B PR-2 — indexMVP.html (precached) gained edit
+// quoting, the submission envelope, and the quiet Refresh-and-Book flow.
+const CACHE_NAME = 'linkmia-v1.3.21';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

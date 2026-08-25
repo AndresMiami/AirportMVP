@@ -49,7 +49,9 @@ check('edit preserves trip identity and calls only the in-place endpoint', () =>
 
 check('an edit never writes provisional local success before the server commits', () => {
   const guardedWrite = booking.indexOf('if (!isEditing) {\n                        localStorage.setItem(`trip_${tripId}`');
-  const request = booking.indexOf("? '/api/update-pending-booking'");
+  // PR-2's recovery card also names the edit endpoint, earlier in the file —
+  // anchor to the submit that FOLLOWS the guarded provisional write.
+  const request = booking.indexOf("? '/api/update-pending-booking'", guardedWrite);
   assert.ok(guardedWrite >= 0 && request > guardedWrite);
 });
 

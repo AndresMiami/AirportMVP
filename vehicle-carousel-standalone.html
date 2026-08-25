@@ -445,8 +445,10 @@
                 this.setupCommunication();
                 this.updateNavButtons();
                 
-                // Initial selection - use selectCard to notify parent of default vehicle
-                setTimeout(() => this.selectCard(0), 100);
+                // Initial selection - use selectCard to notify parent of default
+                // vehicle. NOT user-initiated: the host must never treat the
+                // boot-time auto-select as an explicit passenger choice.
+                setTimeout(() => this.selectCard(0, false), 100);
                 
                 console.log('🚗 Vehicle Carousel Standalone initialized');
             }
@@ -548,20 +550,20 @@
                 const current = this.vehicles && this.vehicles[this.currentIndex];
                 if (current && this.unavailableIds.has(current.id)) {
                     const next = (this.vehicles || []).findIndex(v => !this.unavailableIds.has(v.id));
-                    if (next >= 0) this.selectCard(next);
+                    if (next >= 0) this.selectCard(next, false);
                 }
             }
 
-            selectCard(index) {
+            selectCard(index, userInitiated = true) {
                 if (index < 0 || index >= this.vehicles.length) return;
                 const target = this.vehicles[index];
                 if (this.unavailableIds && target && this.unavailableIds.has(target.id)) return;
-                
+
                 this.currentIndex = index;
                 this.centerCard(index);
                 this.updateActiveStates();
                 this.updateNavButtons();
-                this.notifySelection();
+                this.notifySelection(userInitiated);
             }
 
             centerCard(index) {
@@ -647,8 +649,13 @@
                 const isInIframe = window.parent !== window;
                 
                 if (isInIframe) {
-                    // Listen for messages from parent (iframe mode)
+                    // Listen for messages from parent (iframe mode). Only the
+                    // SAME-ORIGIN embedding parent may command this carousel —
+                    // any other sender could repaint prices or move the
+                    // selection out from under the booking page.
                     window.addEventListener('message', (event) => {
+                        if (event.origin !== location.origin) return;
+                        if (event.source !== window.parent) return;
                         const { type, data } = event.data || {};
                         
                         switch(type) {
@@ -659,7 +666,7 @@
                                     window.parent.postMessage({
                                         type: 'pricesUpdated',
                                         prices: data
-                                    }, '*');
+                                    }, location.origin);
                                 }
                                 break;
                                 
@@ -678,22 +685,23 @@
                                 break;
 
                             case 'selectVehicle':
+                                // Host-driven restore, not a passenger tap.
                                 if (data?.vehicleId) {
                                     const index = this.vehicles.findIndex(v => v.id === data.vehicleId);
                                     if (index !== -1) {
-                                        this.selectCard(index);
+                                        this.selectCard(index, false);
                                     }
                                 }
                                 break;
-                                
+
                             case 'reset':
-                                this.selectCard(0);
+                                this.selectCard(0, false);
                                 break;
                         }
                     });
                     
                     // Notify parent that carousel is ready
-                    window.parent.postMessage({ type: 'carouselReady' }, '*');
+                    window.parent.postMessage({ type: 'carouselReady' }, location.origin);
                     
                 } else {
                     // Standard event listeners for non-iframe mode
@@ -709,7 +717,7 @@
                         const vehicleId = event.detail;
                         const index = this.vehicles.findIndex(v => v.id === vehicleId);
                         if (index !== -1) {
-                            this.selectCard(index);
+                            this.selectCard(index, false);
                         }
                     });
                 }
@@ -749,7 +757,7 @@
                 });
             }
 
-            notifySelection() {
+            notifySelection(userInitiated = true) {
                 const vehicle = this.vehicles[this.currentIndex];
                 const card = this.cards[this.currentIndex];
                 const priceElement = card?.querySelector('.vehicle-price-tag');
@@ -758,6 +766,9 @@
                 const priceNumber = parseFloat(priceText.replace(/[^0-9.]/g, '')) || vehicle.basePrice;
 
                 // Send complete vehicle data - capacity from vehicles array (matches pricing.js)
+                // userInitiated distinguishes a passenger's explicit tap/keys/swipe
+                // from auto-select, host restore, and unavailable-advance — the
+                // host's edit-session interaction markers rely on this.
                 const vehicleData = {
                     id: vehicle.id,
                     name: vehicle.name,
@@ -765,18 +776,19 @@
                     price: priceNumber,
                     priceFormatted: priceText,
                     passengers: vehicle.passengers,
-                    bags: vehicle.bags
+                    bags: vehicle.bags,
+                    userInitiated: userInitiated === true
                 };
                 
                 // Check if we're in an iframe
                 const isInIframe = window.parent !== window;
                 
                 if (isInIframe) {
-                    // Send postMessage to parent
+                    // Send postMessage to parent (same-origin channel only)
                     window.parent.postMessage({
                         type: 'vehicleSelected',
                         vehicle: vehicleData
-                    }, '*');
+                    }, location.origin);
                 } else {
                     // Dispatch event for non-iframe mode
                     window.dispatchEvent(new CustomEvent('vehicleSelected', {
