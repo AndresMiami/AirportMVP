@@ -684,6 +684,21 @@ button {
     font-weight: var(--font-normal);
 }
 
+.route-attribution {
+    display: none;
+    margin-top: 4px;
+    color: #FFFFFF;
+    font-family: Roboto, Arial, sans-serif;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    letter-spacing: normal;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.route-attribution.visible { display: block; }
+
 .panel-actions .arrival-info {
     margin-top: 0;
     margin-bottom: var(--space-sm);
@@ -1909,5 +1924,3 @@ select:focus-visible {
         -webkit-overflow-scrolling: touch;
     }
 }
-
-

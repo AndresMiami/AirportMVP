@@ -103,6 +103,18 @@
   to = "/driver.html"
   status = 200
 
+# Public legal notices. These must precede the SPA catch-all or /terms and
+# /privacy would incorrectly serve the booking page with HTTP 200.
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
 [[redirects]]
   from = "/trip"
   to = "/trip.html"

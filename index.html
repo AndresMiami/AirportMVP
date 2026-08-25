@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>LinkMia - Miami Airport Transfers</title>
 
     <!-- PWA Meta Tags -->
@@ -44,6 +44,7 @@
             align-items: center;
             justify-content: center;
             flex-direction: column;
+            padding: 16px 16px calc(92px + env(safe-area-inset-bottom));
         }
 
         .card {
@@ -126,9 +127,28 @@
 
         .footer {
             position: fixed;
-            bottom: 20px;
-            color: #444;
+            left: 16px;
+            right: 16px;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            color: #AEAEB2;
             font-size: 12px;
+            text-align: center;
+            line-height: 1.7;
+        }
+        .footer nav { display: flex; justify-content: center; gap: 7px; }
+        .footer a { color: #D1D1D6; text-underline-offset: 2px; }
+
+        @media (max-height: 560px) {
+            body {
+                justify-content: flex-start;
+                padding-bottom: calc(20px + env(safe-area-inset-bottom));
+            }
+            .footer {
+                position: static;
+                width: 100%;
+                margin-top: auto;
+                padding-top: 20px;
+            }
         }
     </style>
 </head>
@@ -155,7 +175,14 @@
         </p>
     </div>
 
-    <div class="footer">Premium Transportation</div>
+    <footer class="footer">
+        <div>Premium Transportation</div>
+        <nav aria-label="Legal">
+            <a href="/terms">Terms</a>
+            <span aria-hidden="true">·</span>
+            <a href="/privacy">Privacy</a>
+        </nav>
+    </footer>
 
     <script>
         // PWA Install prompt

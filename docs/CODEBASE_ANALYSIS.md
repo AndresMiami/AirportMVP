@@ -545,7 +545,7 @@ CREATE TABLE delivery_proofs (
 | Component | Reusable for B2B | Notes |
 |-----------|------------------|-------|
 | Google Maps integration | ✅ 100% | Autocomplete, directions work for any address |
-| Railway proxy server | ✅ 100% | API key protection, caching |
+| Railway proxy server | ✅ 100% | API key protection and request-scoped provider access |
 | Supabase integration | ✅ 90% | Schema needs extension |
 | Stripe payments | ✅ 100% | Works for any payment |
 | Twilio notifications | ✅ 100% | WhatsApp/SMS for any use case |
@@ -578,7 +578,7 @@ CREATE TABLE delivery_proofs (
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Location autocomplete | ✅ Complete | Google Places with caching |
+| Location autocomplete | ✅ Complete | Live Google Places sessions; no result cache |
 | Distance/duration calculation | ✅ Complete | Google Directions API |
 | Tiered pricing engine | ✅ Complete | Full surcharge support |
 | Vehicle selection carousel | ✅ Complete | 3 vehicle types |

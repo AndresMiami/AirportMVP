@@ -59,7 +59,7 @@ function createHarness(responses, storage = new Map()) {
   const hiddenIds = new Set([
     'tripView', 'pausedCard', 'pausedNote', 'mapCard', 'liveMap', 'waBtn',
     'backBtn', 'cancelBtn', 'rebookBtn', 'actionError', 'rideDuration',
-    'etaTime', 'flightLine', 'reassignCard', 'cancelQuoteCard'
+    'etaTime', 'routeAttribution', 'flightLine', 'reassignCard', 'cancelQuoteCard'
   ]);
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new FakeElement(hiddenIds.has(id)));
@@ -230,6 +230,22 @@ function check(name, fn) {
   check('hiding the page clears the healthy polling timer', () => {
     assert.strictEqual(failures.fetchCount, 7);
     assert.strictEqual(failures.timers.size, 0);
+  });
+
+  const routeFacts = createHarness([
+    response(200, { booking: { ...pendingBooking, duration_minutes: 27 }, driver: null }),
+    response(200, { booking: { ...pendingBooking, duration_minutes: null }, driver: null })
+  ]);
+  await routeFacts.settle();
+  check('a displayed Google route duration carries visible attribution', () => {
+    assert.strictEqual(routeFacts.element('rideDuration').textContent, '⏱ ~27 min ride');
+    assert.ok(!routeFacts.element('rideDuration').classList.contains('hidden'));
+    assert.ok(!routeFacts.element('routeAttribution').classList.contains('hidden'));
+  });
+  await routeFacts.runNextTimer();
+  check('a later payload without route duration removes both fact and attribution', () => {
+    assert.ok(routeFacts.element('rideDuration').classList.contains('hidden'));
+    assert.ok(routeFacts.element('routeAttribution').classList.contains('hidden'));
   });
 
   const farFuture = {

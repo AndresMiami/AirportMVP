@@ -133,7 +133,7 @@ AirportMVP/
 - Directions for route calculation
 - Distance/duration estimation
 - Map display on vehicle panel
-- **Caching** - 24hr route cache, 7-day place cache
+- **Provider-data handling** - live Places/Directions results, `private,no-store`; GCP is the billing authority
 - **Rate Limiting** - 100 requests per 15 minutes
 
 ### Authentication ✅ (Development mode)

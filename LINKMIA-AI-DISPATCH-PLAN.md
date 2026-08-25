@@ -21,7 +21,7 @@
 |-------|-----------|--------|
 | Frontend | Vanilla HTML/CSS/JS (no framework) | Deployed on Netlify |
 | Backend | Netlify serverless functions (Node.js) | 6 functions live |
-| API Proxy | Express.js on Railway | Google Maps proxy with caching |
+| API Proxy | Express.js on Railway | Google Maps proxy with request-scoped data handling |
 | Database | Supabase PostgreSQL | 6 tables, views, RLS enabled |
 | Payments | Stripe (test mode) | Fully integrated, disabled in flow |
 | Telegram | Telegram Bot API | Passenger + driver + admin messaging |
@@ -66,12 +66,12 @@ Deployed at `reliable-warmth-production-d382.up.railway.app`
 | Endpoint | Purpose | Caching |
 |----------|---------|---------|
 | GET `/api/places/autocomplete` | Address suggestions | None |
-| GET `/api/places/details` | Place details | 7-day cache |
-| POST `/api/directions` | Route distance/duration | 24-hour cache |
+| GET `/api/places/details` | Place details | None (`private, no-store`) |
+| POST `/api/directions` | Route distance/duration | None (`private, no-store`) |
 | GET `/api/geocoding` | Address → coordinates | None |
 | GET `/api/maps-script` | Google Maps JS library | Cached |
 
-Features: Rate limiting (100 req/15 min), in-memory caching, CORS, pre-cached airports (MIA, FLL, PBI).
+Features: Rate limiting, CORS, path-only access logging, and no storage of Places/Directions response content. The Maps JavaScript loader cache is a separate open Google-policy question.
 
 ### Frontend Application
 
@@ -82,7 +82,7 @@ Features: Rate limiting (100 req/15 min), in-memory caching, CORS, pre-cached ai
 
 **JavaScript files (7,216 lines total):**
 - `pricing.js` (794 lines) — Tiered pricing, surcharges (night +15%, weekend +10%, rush +20%), popular route flat rates, psychological pricing
-- `autocomplete.js` (532 lines) — Google Places API wrapper with session tokens and caching
+- `autocomplete.js` — Google Places API wrapper with session tokens and live provider results only
 - `datetime-utils.js` (313 lines) — Date/time picker logic
 - `js/payment-modal.js` (1,302 lines) — Card selection, Apple Pay detection
 - `js/passenger-modal.js` (840 lines) — Self/guest passenger forms
@@ -98,7 +98,7 @@ Features: Rate limiting (100 req/15 min), in-memory caching, CORS, pre-cached ai
 
 **Telegram:** `create-booking.js` sends formatted admin notifications with inline keyboard buttons for approve/reject. Bot token stored in `TELEGRAM_BOT_TOKEN`.
 
-**Google Maps:** Full integration via Railway proxy — autocomplete, directions, geocoding with caching.
+**Google Maps:** Integration via Railway proxy — autocomplete, directions, and geocoding. Provider data calls are not cached; usage and billing are reconciled in Google Cloud.
 
 ### What Does NOT Exist
 
@@ -153,7 +153,7 @@ ADMIN_TELEGRAM_CHAT_ID=[get via getUpdates API]
 |-------|------|-----|
 | Pricing engine | `backend/functions/lib/ride-quote.js` + rate-card resolver | Canonical server calculator and validated rate-card seam; future tooling must wrap this authority rather than browser `pricing.js`. |
 | Database schema | `database/linkmia-schema.sql` | Booking status flow, driver/customer tables, payment tracking — all designed for dispatch. |
-| Google Maps proxy | `backend/api-proxy/server.js` | Caching, rate limiting, all needed endpoints. MCP server wraps existing proxy. |
+| Google Maps proxy | `backend/api-proxy/server.js` | Request-scoped provider access, rate limiting, and narrow public contracts. MCP server wraps the existing proxy. |
 | Stripe payment functions | `backend/functions/create-payment-intent.js` | PaymentIntent creation logic reusable for payment links. |
 | Admin dashboard | `admin.html` | Realtime Supabase subscriptions, booking/driver/customer management — works as admin view. |
 | Supabase client | `supabase.js` | Connection config, CRUD helpers. |

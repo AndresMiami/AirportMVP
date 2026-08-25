@@ -32,6 +32,26 @@
     <link rel="stylesheet" href="css/style.css?v=refined-dark-theme"> <!-- Core Styles with Variables -->
     <link rel="stylesheet" href="css/booking-confirmation.css?v=dark-theme-fix" media="print" onload="this.media='all'; this.onload=null;"> <!-- Booking Confirmation Modal -->
     <link rel="stylesheet" href="css/maps-autocomplete.css?v=fix-visibility"> <!-- Maps Integration -->
+    <style>
+        .app-legal-nav {
+            position: fixed;
+            left: 20px;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            z-index: 900;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 999px;
+            background: rgba(28, 28, 30, 0.92);
+            color: #D1D1D6;
+            font-size: 12px;
+            line-height: 1;
+        }
+        .app-legal-nav a { color: #D1D1D6; text-underline-offset: 2px; }
+        .app-legal-nav a:focus-visible { outline: 2px solid #FF9933; outline-offset: 2px; }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -112,6 +132,7 @@
                                         <div class="spinner"></div>
                                     </div>
                                     <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+                                    <div class="selected-place-attribution" translate="no">Google Maps</div>
                                 </div>
                                 <div class="error-message" id="addressError">Please select a valid address from the suggestions.</div>
                             </div>
@@ -229,6 +250,7 @@
                             <div class="arrival-details">
                                 <div class="arrival-title" id="arrivalTitle">Drop-off at airport approx. --</div>
                                 <div class="trip-duration" id="tripDuration">Estimated ride duration of -- min</div>
+                                <div class="route-attribution" id="routeAttribution" translate="no">Google Maps</div>
                             </div>
                         </div>
                     </div>
@@ -310,6 +332,12 @@
             </div>
         </div>
     </div>
+
+    <nav class="app-legal-nav" aria-label="Legal">
+        <a href="/terms">Terms</a>
+        <span aria-hidden="true">·</span>
+        <a href="/privacy">Privacy</a>
+    </nav>
 
 
 
@@ -405,7 +433,6 @@
                     currentAmbassador = ambassador || null;
                     currentActiveBooking = activeBooking || null;
 
-                    console.log('✅ Signed in as:', session.user.email);
                     addAuthPill(true);
                     overlay.remove();
                     return true;
@@ -794,6 +821,7 @@
                 this.directionsRenderer = null;
                 this.pricingService = null;
                 this.pendingEdit = null;
+                this.routeRequestSeq = 0;
                 
                 this.init();
             }
@@ -820,7 +848,6 @@
                     
                     this.vehicleConfig = this.pricingService.getAllVehicleConfigs();
                     console.log('✅ Pricing service loaded successfully');
-                    console.log('📊 Vehicle configurations:', this.vehicleConfig);
                     
                     // Test psychological pricing to verify it's working
                     const testPrice = this.pricingService.applyPsychologicalPricing(234.67);
@@ -889,7 +916,7 @@
                     'airportBadge', 'airportTitle', 'flowConnector',
                     'hourSelect', 'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
                     'backBtn', 'summaryBackBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
-                    'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration',
+                    'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration', 'routeAttribution',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
                     'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap',
@@ -958,21 +985,9 @@
                     const { CustomAutocomplete } = autocompleteModule;
                     
                     this.autocomplete = new CustomAutocomplete(
-                            this.els.addressInput, 
+                            this.els.addressInput,
                             this.els.autocompleteDropdown,
-                            (locationData) => {
-                                this.handleAddressSelected({
-                                    placeId: locationData.place?.id || 'unknown',
-                                    description: locationData.address
-                                });
-                                
-                                const coords = locationData.coordinates || { lat: 25.7617, lng: -80.1918 };
-                                this.handleAddressCoordinates({
-                                    lat: coords.lat,
-                                    lng: coords.lng,
-                                    address: locationData.address
-                                });
-                            }
+                            null
                         );
                         
                         // Add event listeners with safety checks
@@ -1121,7 +1136,7 @@
             
             resetSelections() {
                 this.state.locations = { address: null, airport: null, placeId: null };
-                this.state.route = { distance: null, duration: null, price: null };
+                this.clearRouteState();
                 this.invalidateQuote('selection reset');
                 
                 this.els.addressInput.value = '';
@@ -1171,6 +1186,7 @@
                     coordinates: { lat: detail.lat, lng: detail.lng }
                 };
 
+                this.clearRouteState();
                 this.invalidateQuote('address changed');
                 this.updateAddressStepState();
                 this.calculateRoute();
@@ -1179,6 +1195,7 @@
             handleAddressValidationCleared() {
                 this.state.locations.address = null;
                 this.state.locations.placeId = null;
+                this.clearRouteState();
                 this.invalidateQuote('address cleared');
                 this.updateAddressStepState();
                 this.updateAirportStepState();
@@ -1208,6 +1225,7 @@
                     code: airportCode,
                     name: this.getAirportName(airportCode)
                 };
+                this.clearRouteState();
                 this.invalidateQuote('airport changed');
                 if (this.pendingEdit && this.editMarkers && this.quoteFlowActive()) {
                     this.editMarkers.routeDirection = true;
@@ -1243,27 +1261,61 @@
             }
             
             async calculateRoute() {
-                if (!this.state.locations.address || !this.state.locations.airport) return;
+                if (!this.state.locations.address || !this.state.locations.airport) {
+                    this.clearRouteState();
+                    return;
+                }
+
+                const requestSeq = ++this.routeRequestSeq;
+                const requestKey = this.currentRouteRequestKey();
+                this.state.route = { distance: null, duration: null, price: null };
+                this.updateRouteDisplay();
                 
                 try {
                     const routeData = await this.getRouteData(
                         this.state.locations.address.coordinates,
                         this.state.locations.airport.code
                     );
-                    
-                    if (routeData) {
-                        this.state.route = routeData;
-                        
-                        // Update vehicle prices once route data is available
-                        console.log('📍 Route calculated, updating vehicle prices...');
-                        this.updateVehiclePrices();
+
+                    if (requestSeq !== this.routeRequestSeq ||
+                        requestKey !== this.currentRouteRequestKey()) {
+                        return;
                     }
-                    
+
+                    if (!routeData) {
+                        this.state.route = { distance: null, duration: null, price: null };
+                        this.updateRouteDisplay();
+                        return;
+                    }
+
+                    this.state.route = routeData;
+                    this.updateVehiclePrices();
                     this.updateRouteDisplay();
-                    
                 } catch (error) {
-                    console.error('Route calculation error:', error);
+                    if (requestSeq !== this.routeRequestSeq) return;
+                    this.state.route = { distance: null, duration: null, price: null };
+                    this.updateRouteDisplay();
+                    console.error('Route calculation unavailable');
                 }
+            }
+
+            currentRouteRequestKey() {
+                const address = this.state.locations.address;
+                const airport = this.state.locations.airport;
+                if (!address || !airport) return '';
+                return JSON.stringify({
+                    mode: this.state.mode,
+                    address: address.address,
+                    lat: address.coordinates?.lat,
+                    lng: address.coordinates?.lng,
+                    airport: airport.code
+                });
+            }
+
+            clearRouteState() {
+                this.routeRequestSeq += 1;
+                this.state.route = { distance: null, duration: null, price: null };
+                this.updateRouteDisplay();
             }
             
             async getRouteData(addressCoords, airportCode) {
@@ -1334,7 +1386,7 @@
                     };
                     
                 } catch (error) {
-                    console.error('Error getting route data:', error);
+                    console.error('Route facts unavailable');
                     return null;
                 }
             }
@@ -1363,6 +1415,16 @@
             }
             
             updateRouteDisplay() {
+                const hasRoute = this.state.route?.realData === true &&
+                    Number.isFinite(this.state.route.duration) && this.state.route.duration > 0 &&
+                    Number.isFinite(this.state.route.distance) && this.state.route.distance > 0;
+                if (!hasRoute) {
+                    this.els.arrivalTitle.textContent = 'Route estimate unavailable';
+                    this.els.tripDuration.textContent = 'Select a valid route to continue';
+                    this.els.routeAttribution.classList.remove('visible');
+                    return;
+                }
+
                 const now = new Date();
                 const arrivalTime = new Date(now.getTime() + this.state.route.duration * 60 * 1000);
                 const formattedArrivalTime = arrivalTime.toLocaleTimeString('en-US', {
@@ -1379,11 +1441,8 @@
                 this.els.arrivalTitle.textContent = `${actionText} at ${locationText} approx. ${formattedArrivalTime}`;
                 this.els.tripDuration.textContent = `Estimated ride duration of ${formattedDuration}`;
                 
-                if (this.state.route.realData) {
-                    this.els.tripDuration.textContent += ' (live data)';
-                } else {
-                    this.els.tripDuration.textContent += ' (estimated)';
-                }
+                this.els.tripDuration.textContent += ' (live data)';
+                this.els.routeAttribution.classList.add('visible');
             }
             
             canContinue() {
@@ -2386,7 +2445,7 @@
                             deltaPct: +(((server / local.finalPrice) - 1) * 100).toFixed(1)
                         };
                     });
-                    console.log('🔍 quote shadow (browser vs server, not displayed):', rows);
+                    console.log('Quote shadow comparison completed');
                 } catch (_) { /* a shadow must never affect the booking */ }
             }
 
@@ -2541,25 +2600,7 @@
                         options.destination = this.state.locations.address.place_id || 'CUSTOM';
                     }
                     
-                    console.log(`💵 Calculating price for ${vehicleType}:`, {
-                        distance: distance + ' mi',
-                        duration: Math.round(duration) + ' min', 
-                        passengers: options.passengers,
-                        dateTime: options.dateTime?.toLocaleString(),
-                        origin: options.origin
-                    });
-                    
                     const pricing = this.pricingService.calculateVehiclePrice(vehicleType, distance, duration, options);
-                    
-                    if (pricing) {
-                        console.log(`✅ ${vehicleType.toUpperCase()} pricing:`, {
-                            basePrice: '$' + pricing.basePrice,
-                            finalPrice: '$' + pricing.finalPrice,
-                            protectionType: pricing.protectionApplied,
-                            surcharges: pricing.breakdown.appliedSurcharges.length,
-                            psychologicalPricing: pricing.finalPrice % 1 !== 0 ? 'Applied' : 'Rounded'
-                        });
-                    }
                     
                     return pricing;
                 } else {
@@ -2588,26 +2629,6 @@
                 const vehicleTypes = this.pricingService ? 
                     this.pricingService.getAllVehicles() : 
                     ['tesla', 'escalade', 'sprinter'];
-                
-                console.log('🔄 Updating prices for route:', {
-                    distance: this.state.route.distance + ' miles',
-                    duration: Math.round(this.state.route.duration) + ' minutes',
-                    from: this.state.locations.address?.description || 'Custom address',
-                    to: this.state.locations.airport?.name || 'Airport'
-                });
-                
-                // Log surge pricing information if applicable
-                if (this.pricingService && this.state.dateTime.time) {
-                    const surgeInfo = this.pricingService.checkSurgePeriod(new Date(this.state.dateTime.time));
-                    if (surgeInfo.hasSurge) {
-                        console.log('⚡ Surge pricing active:', {
-                            surges: surgeInfo.surges.map(s => s.description).join(', '),
-                            totalMultiplier: surgeInfo.totalMultiplier + 'x'
-                        });
-                    } else {
-                        console.log('✅ No surge pricing applied');
-                    }
-                }
                 
                 // Update standalone carousel prices
                 const prices = {};
@@ -2641,7 +2662,6 @@
                             type: 'setUnavailable',
                             data: { ids: [] }
                         }, location.origin);
-                        console.log('💸 Sent prices to carousel iframe:', prices);
                     }
                     
                     // Store prices for later use
@@ -2657,7 +2677,6 @@
                         if (selectedVehiclePricing && !selectedVehiclePricing.error) {
                             this.state.vehicle.pricing = selectedVehiclePricing;
                             this.state.route.price = selectedVehiclePricing.finalPrice;
-                            console.log('✅ Updated selected vehicle pricing:', this.state.vehicle.type, '$' + selectedVehiclePricing.finalPrice);
                         }
                     }
                 }
@@ -3588,7 +3607,7 @@
                         return;
                     }
                     if (!response.ok || !result?.bookingId) {
-                        console.error('❌ Booking API failed:', response.status, result);
+                        console.error('Booking request refused', response.status);
                         throw new Error(isEditing
                             ? 'Changes not saved. Your original ride is unchanged. Please try again.'
                             : 'Booking could not be submitted — nothing was booked. Please try again.');
@@ -4193,7 +4212,7 @@
                     break;
                     
                 case 'pricesUpdated':
-                    console.log('Carousel prices updated:', prices);
+                    console.log('Carousel prices updated');
                     break;
             }
         });

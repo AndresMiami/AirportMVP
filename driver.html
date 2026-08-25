@@ -315,6 +315,20 @@
             background: linear-gradient(135deg, #FF9933, #FF5733); color: white;
         }
         #gateError { color: #d33; font-size: 13px; margin-top: 12px; min-height: 18px; }
+        .driver-legal {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            color: #5F5F69;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        #gate .driver-legal { margin-top: 22px; }
+        #app > .driver-legal { padding: 4px 16px calc(20px + env(safe-area-inset-bottom)); }
+        .driver-legal a,
+        .geo-privacy-link { color: #2668D9; text-underline-offset: 2px; }
+        .driver-legal a:focus-visible,
+        .geo-privacy-link:focus-visible { outline: 2px solid #FF5733; outline-offset: 2px; }
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
             25% { transform: translateX(-6px); }
@@ -330,6 +344,11 @@
         <input type="password" id="gateInput" placeholder="Password" autocomplete="current-password">
         <button id="gateBtn">Sign in</button>
         <div id="gateError"></div>
+        <nav class="driver-legal" aria-label="Legal">
+            <a href="/terms">Terms</a>
+            <span aria-hidden="true">·</span>
+            <a href="/privacy">Privacy</a>
+        </nav>
     </div>
 
     <div id="app" class="hidden">
@@ -392,6 +411,11 @@
                 <button id="pushEnableBtn" class="btn-push hidden" type="button">🔔 Enable notifications</button>
             </section>
         </main>
+        <nav class="driver-legal" aria-label="Legal">
+            <a href="/terms">Terms</a>
+            <span aria-hidden="true">·</span>
+            <a href="/privacy">Privacy</a>
+        </nav>
     </div>
 
     <script>
@@ -1096,7 +1120,7 @@
                     // prompt can appear: On my way is where location is first
                     // requested (never at Accept).
                     const geoNote = b.status === 'confirmed'
-                        ? `<div style="color:#8e8e93;font-size:12px;margin-top:8px;">📍 On my way captures your location once, so the passenger sees your verified departure point.</div>`
+                        ? `<div style="color:#5f5f69;font-size:12px;margin-top:8px;line-height:1.45;">📍 On my way asks for one location capture so the passenger sees a verified departure point. You may decline or later revoke location access. <a class="geo-privacy-link" href="/privacy">Privacy details</a>.</div>`
                         : '';
                     // ONE secondary message action, accepted rides only,
                     // hidden without a valid passenger phone; never rendered
@@ -1232,7 +1256,7 @@
         function showGeoBanner() {
             if (document.getElementById('geoBanner')) return;
             document.querySelector('main')?.insertAdjacentHTML('afterbegin',
-                `<div id="geoBanner" style="background:#fff3e0;color:#cc7000;border:1px solid #f0b060;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;">📍 Allow location access so this checkpoint can be verified for the passenger.</div>`);
+                `<div id="geoBanner" style="background:#fff3e0;color:#8a4d00;border:1px solid #f0b060;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;">📍 Allow location access so this checkpoint can be verified for the passenger. You may later revoke access in browser or device settings. <a class="geo-privacy-link" href="/privacy">Privacy details</a>.</div>`);
         }
 
         // One fresh bounded position fix. Always resolves — null on timeout,

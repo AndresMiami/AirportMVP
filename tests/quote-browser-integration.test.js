@@ -326,6 +326,7 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     quote: { status: 'idle', key: null, data: null, error: null, seq: 0 },
   };
   app.els = { bookBtn: byId.bookBtn = makeEl('button') };
+  app.routeRequestSeq = 0;
   app.updateSummary = () => {};
   app.updateBookButton = () => {};
   app.pricingService = null;
@@ -405,6 +406,63 @@ check('DISABLED: updateVehiclePrices keeps its legacy early-return, not the new 
   app.state.route = { distance: null, duration: null, price: null };
   app.updateVehiclePrices();          // legacy guard: no route data -> returns
   assert.strictEqual(app.state.quote.status, 'idle');
+});
+
+check('ROUTE: clearing an address clears old route facts and their attribution', () => {
+  const { app } = makeContext({ enabled: false, fetchImpl: okFetch({}) });
+  const arrivalTitle = makeEl('div');
+  const tripDuration = makeEl('div');
+  const routeAttribution = makeEl('div');
+  routeAttribution.classList.add('visible');
+  Object.assign(app.els, {
+    arrivalTitle, tripDuration, routeAttribution,
+    airportBadge: makeEl('div'), flowConnector: makeEl('div'),
+    airportStep: makeEl('div'), airportOptions: [], continueBtn: makeEl('button'),
+  });
+  app.autocomplete = { isValidated: false };
+  app.state.route = { distance: 12.3, duration: 28, price: 85, realData: true };
+  app.handleAddressValidationCleared();
+  assert.strictEqual(app.state.route.distance, null);
+  assert.strictEqual(app.state.route.duration, null);
+  assert.strictEqual(routeAttribution.classList.contains('visible'), false);
+  assert.strictEqual(tripDuration.textContent, 'Select a valid route to continue');
+  assert.ok(!/null min/i.test(`${arrivalTitle.textContent} ${tripDuration.textContent}`));
+});
+
+check('ROUTE: an older delayed response cannot overwrite the newest address route', async () => {
+  const { app } = makeContext({ enabled: false, fetchImpl: okFetch({}) });
+  Object.assign(app.els, {
+    arrivalTitle: makeEl('div'), tripDuration: makeEl('div'), routeAttribution: makeEl('div'),
+  });
+  app.updateVehiclePrices = () => {};
+  let releaseOld;
+  const oldResult = new Promise((resolve) => { releaseOld = resolve; });
+  app.getRouteData = async () => {
+    if (app.state.locations.address.address === 'Old address') return oldResult;
+    return { distance: 22, duration: 44, price: null, realData: true };
+  };
+  app.state.locations.address = { address: 'Old address', coordinates: { lat: 25.7, lng: -80.2 } };
+  const old = app.calculateRoute();
+  app.state.locations.address = { address: 'New address', coordinates: { lat: 25.8, lng: -80.3 } };
+  await app.calculateRoute();
+  releaseOld({ distance: 5, duration: 10, price: null, realData: true });
+  await old;
+  assert.strictEqual(app.state.route.distance, 22);
+  assert.strictEqual(app.state.route.duration, 44);
+  assert.strictEqual(app.els.routeAttribution.classList.contains('visible'), true);
+});
+
+check('ROUTE: a null provider result renders a neutral state with no attribution', async () => {
+  const { app } = makeContext({ enabled: false, fetchImpl: okFetch({}) });
+  Object.assign(app.els, {
+    arrivalTitle: makeEl('div'), tripDuration: makeEl('div'), routeAttribution: makeEl('div'),
+  });
+  app.getRouteData = async () => null;
+  await app.calculateRoute();
+  assert.strictEqual(app.els.arrivalTitle.textContent, 'Route estimate unavailable');
+  assert.strictEqual(app.els.tripDuration.textContent, 'Select a valid route to continue');
+  assert.strictEqual(app.els.routeAttribution.classList.contains('visible'), false);
+  assert.ok(!/null min/i.test(`${app.els.arrivalTitle.textContent} ${app.els.tripDuration.textContent}`));
 });
 
 // ============ the request contract ============

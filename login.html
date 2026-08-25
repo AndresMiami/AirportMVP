@@ -27,6 +27,7 @@
             align-items: center;
             justify-content: center;
             padding: 20px 16px;
+            padding-bottom: calc(20px + env(safe-area-inset-bottom));
         }
         .brand {
             font-size: 30px; font-weight: 700; margin-bottom: 4px;
@@ -113,7 +114,24 @@
         }
         .welcome-back #welcomeBackText { color: var(--text-primary); font-weight: 600; }
         .welcome-back a { color: #FF9933; text-decoration: none; font-size: 13px; }
+        .signup-legal, .page-legal {
+            color: #AEAEB2;
+            font-size: 12px;
+            line-height: 1.5;
+            text-align: center;
+        }
+        .signup-legal { margin-top: 13px; }
+        .page-legal { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+        .signup-legal a, .page-legal a { color: #FF9933; text-underline-offset: 2px; }
         .hidden { display: none !important; }
+
+        @media (forced-colors: active) {
+            .brand {
+                background: none;
+                color: LinkText;
+                -webkit-text-fill-color: LinkText;
+            }
+        }
     </style>
 </head>
 <body>
@@ -168,12 +186,22 @@
             <button type="submit" class="submit-btn" id="submitBtn">Sign in</button>
             <div class="error" id="errorBox"></div>
             <div class="notice" id="noticeBox"></div>
+            <p class="signup-legal hidden" id="signupLegal">
+                By creating an account, you agree to the <a href="/terms">Terms of Use</a>
+                and acknowledge the <a href="/privacy">Privacy Policy</a>.
+            </p>
         </form>
 
         <div class="guest-link">
             <span class="guest-disabled" aria-disabled="true">Guest checkout — coming later</span>
         </div>
     </div>
+
+    <nav class="page-legal" aria-label="Legal">
+        <a href="/terms">Terms</a>
+        <span aria-hidden="true">·</span>
+        <a href="/privacy">Privacy</a>
+    </nav>
 
     <script>
         const sb = window.supabaseClient;
@@ -189,6 +217,7 @@
             $('tabSignIn').classList.toggle('active', m === 'signin');
             $('tabSignUp').classList.toggle('active', m === 'signup');
             $('signupFields').classList.toggle('hidden', m === 'signin');
+            $('signupLegal').classList.toggle('hidden', m === 'signin');
             $('submitBtn').textContent = m === 'signin' ? 'Sign in' : 'Create account';
             $('password').autocomplete = m === 'signin' ? 'current-password' : 'new-password';
             clearMsgs();

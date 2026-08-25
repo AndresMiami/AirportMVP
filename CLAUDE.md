@@ -16,6 +16,9 @@ verified checkpoint locations all live in the web app backed by Supabase.
   with the service key (Netlify env only).
 - **Railway** (`reliable-warmth-production-d382.up.railway.app`): Google Maps
   proxy ONLY (`backend/api-proxy/server.js`). No booking logic lives there.
+  Google Places and Directions content is request-scoped and never cached or
+  logged by the proxy. The Maps JavaScript loader remains separately cached;
+  its policy treatment is open under Google support case 74744701.
 - **Telegram**: send-only "bookkeeper" — new-request doorbell, trip-started
   ping, completion receipt. No webhook, no buttons, no state. Never rebuild
   dispatch inside a chat app (tried once; removed deliberately).
@@ -654,6 +657,12 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     post-enforce emergency = mode `blocked` ONLY). Graduation blocks on
     zero non-test no_request_id/no_token/verify_failed traffic; the Google
     storage/policy review gate remains OPEN and is carried to activation.
+    US billing means the non-EEA Maps terms apply. Public Terms/Privacy and
+    custom-autocomplete/route attribution are prepared on the dark policy
+    branch. Andres ratified Dale Miami Ventures LLC as LinkMia's
+    contracting/privacy entity on 2026-08-25.
+    Activation remains blocked on Google's written answers for the open
+    storage/proxy questions. Do not infer those answers.
     One mechanism serves pending and future confirmed edits; confirmed
     editing remains a later product step.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
@@ -685,7 +694,7 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
   implement post-RLS.
 - Two-ETA model (Codex-outlined, follows identity) — booking-time estimate
   must use the scheduled pickup as departure time (Railway proxy currently
-  uses `now` and its route cache ignores time-of-day); fresh driver→pickup
+  uses `now`); fresh driver→pickup
   ETA at On-my-way and pickup→dropoff at Start-trip (one route call per
   leg, stored via the next numbered migration). Use Google's current
   Routes API (`computeRoutes`, `departureTime` + TRAFFIC_AWARE), not more
