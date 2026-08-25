@@ -2204,4 +2204,37 @@ check('STATIC: every interaction marker is wired to its real explicit action', (
 // and would otherwise exit 0 with zero output — pre-arm failure so silence
 // is loud. run() flips this to 0 only after the summary prints.
 process.exitCode = 1;
+// ============ policy round 2: selection-state transition ============
+
+check('SELECTION TRANSITION: airport and Continue re-evaluate once coordinates land (success AND fallback)', async () => {
+  // autocomplete.applySelection dispatches place-selected BEFORE
+  // place-coordinates. The first handler evaluates airport/Continue while
+  // state.locations.address is still null; the coordinates handler must
+  // re-evaluate with the address present, for a normal Details success AND
+  // for the null-coordinate details-failure fallback (Codex round 2).
+  const { app } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  for (const detail of [
+    { lat: 25.76, lng: -80.19, address: '1 Brickell Ave' },
+    { lat: null, lng: null, address: '100 Main St' }
+  ]) {
+    const evals = [];
+    app.state.locations.address = null;
+    app.updateAddressStepState = () => {};
+    app.updateAirportStepState = () => evals.push(['airport', !!app.state.locations.address]);
+    app.updateContinueButton = () => evals.push(['continue', !!app.state.locations.address]);
+    app.clearRouteState = () => {};
+    app.calculateRoute = () => {};
+    app.handleAddressSelected({ placeId: 'ChIJ_place_abc' });   // real event order
+    app.handleAddressCoordinates(detail);
+    const last = {};
+    evals.forEach(([surface, hadAddress]) => { last[surface] = hadAddress; });
+    assert.strictEqual(last.airport, true,
+      'the airport step must be re-evaluated with the address present');
+    assert.strictEqual(last.continue, true,
+      'Continue must be re-evaluated with the address present');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(app.state.locations.address.coordinates)),
+      { lat: detail.lat, lng: detail.lng });
+  }
+});
+
 run().catch((e) => { console.error(e); process.exit(1); });

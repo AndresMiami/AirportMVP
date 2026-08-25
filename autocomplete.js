@@ -295,7 +295,11 @@ export class CustomAutocomplete {
                 location: {
                     lat: data.result.geometry.location.lat,
                     lng: data.result.geometry.location.lng
-                }
+                },
+                // Sanitized {text, href} entries from the proxy — Google
+                // policy requires displaying supplied third-party
+                // attributions alongside the content.
+                attributions: Array.isArray(data.attributions) ? data.attributions : []
             };
             this.applySelection(place);
         } catch (error) {
@@ -319,7 +323,8 @@ export class CustomAutocomplete {
                 id: prediction.place_id,
                 formattedAddress: description,
                 displayName: { text: description },
-                location: { lat: null, lng: null }
+                location: { lat: null, lng: null },
+                attributions: []
             });
         }
     }
@@ -333,6 +338,7 @@ export class CustomAutocomplete {
         this.input.classList.add('validated');
         this.input.classList.remove('error');
         this.setSelectedAttributionVisible(true);
+        this.renderThirdPartyAttributions(place.attributions || []);
 
         if (document.getElementById('addressError')) {
             document.getElementById('addressError').classList.remove('visible');
@@ -361,6 +367,45 @@ export class CustomAutocomplete {
         }
     }
 
+    // Third-party attributions (Google policy): render the proxy's sanitized
+    // {text, href} entries beside the Google Maps attribution. DOM is built
+    // with textContent and validated hrefs only — provider strings are never
+    // interpreted as HTML here, whatever the server sends.
+    renderThirdPartyAttributions(attributions) {
+        if (!this.selectedAttribution ||
+            typeof this.selectedAttribution.querySelector !== 'function') return;
+        let holder = this.selectedAttribution.querySelector('.third-party-attribution');
+        if (!Array.isArray(attributions) || attributions.length === 0) {
+            if (holder) holder.remove();
+            return;
+        }
+        if (!holder) {
+            holder = document.createElement('span');
+            holder.className = 'third-party-attribution';
+            this.selectedAttribution.appendChild(holder);
+        }
+        holder.textContent = '';
+        for (const entry of attributions.slice(0, 4)) {
+            const text = typeof entry?.text === 'string' ? entry.text.slice(0, 200) : '';
+            if (!text) continue;
+            const href = typeof entry?.href === 'string' && /^https?:\/\//i.test(entry.href)
+                ? entry.href : null;
+            let node;
+            if (href) {
+                node = document.createElement('a');
+                node.href = href;
+                node.target = '_blank';
+                node.rel = 'noopener noreferrer';
+                node.textContent = text;
+            } else {
+                node = document.createElement('span');
+                node.textContent = text;
+            }
+            if (holder.childNodes.length) holder.appendChild(document.createTextNode(' · '));
+            holder.appendChild(node);
+        }
+    }
+
     handleKeydown(e) {
         const items = this.suggestionsContainer.querySelectorAll('.suggestion-item');
         
@@ -383,9 +428,21 @@ export class CustomAutocomplete {
                 break;
             case 'Escape':
                 ++this.selectionSequence;
+                this.cancelPendingSuggestions();
                 this.clearSuggestions();
                 break;
         }
+    }
+
+    // A dismissed dropdown must STAY dismissed: kill the queued debounce and
+    // invalidate any in-flight prediction request, so a late response can
+    // never re-render the private address list after Escape or blur.
+    cancelPendingSuggestions() {
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+        ++this.requestSequence;
     }
 
     highlightItem() {
@@ -400,6 +457,9 @@ export class CustomAutocomplete {
     }
 
     handleBlur() {
+        // Cancel pending work immediately; the 200ms delay below exists only
+        // so a click on a suggestion can land before the list clears.
+        this.cancelPendingSuggestions();
         setTimeout(() => {
             this.clearSuggestions();
         }, 200);
@@ -429,6 +489,7 @@ export class CustomAutocomplete {
         this.isValidated = false;
         this.selectedPlace = null;
         this.setSelectedAttributionVisible(false);
+        this.renderThirdPartyAttributions([]);
         this.input.classList.remove('validated');
         this.input.classList.remove('error');
         if (document.getElementById('addressError')) {

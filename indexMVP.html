@@ -1189,6 +1189,13 @@
                 this.clearRouteState();
                 this.invalidateQuote('address changed');
                 this.updateAddressStepState();
+                // place-selected fires BEFORE place-coordinates, so the
+                // airport/Continue evaluation it ran saw a still-null
+                // address. Re-evaluate now that the address exists —
+                // otherwise a fresh selection leaves the airport buttons
+                // disabled until some unrelated interaction recomputes them.
+                this.updateAirportStepState();
+                this.updateContinueButton();
                 this.calculateRoute();
             }
 

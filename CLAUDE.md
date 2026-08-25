@@ -18,7 +18,11 @@ verified checkpoint locations all live in the web app backed by Supabase.
   proxy ONLY (`backend/api-proxy/server.js`). No booking logic lives there.
   Google Places and Directions content is request-scoped and never cached or
   logged by the proxy. The Maps JavaScript loader remains separately cached;
-  its policy treatment is open under Google support case 74744701.
+  its policy treatment is an OPEN question (tracked privately — this file is
+  publicly served, so no support-case identifiers belong here). The
+  google-policy-readiness branch is dark policy HARDENING, not completed
+  policy readiness: durable route-fact/Google-content retention remains a
+  separately blocking pre-activation decision.
 - **Telegram**: send-only "bookkeeper" — new-request doorbell, trip-started
   ping, completion receipt. No webhook, no buttons, no state. Never rebuild
   dispatch inside a chat app (tried once; removed deliberately).

@@ -50,13 +50,20 @@ function escapeHtml(value) {
 
 const documentStub = {
   getElementById: () => null,
-  createElement: () => {
+  createElement: (tag) => {
     let text = '';
     return {
+      tagName: String(tag || 'div').toUpperCase(),
+      className: '',
+      childNodes: [],
+      appendChild(child) { this.childNodes.push(child); return child; },
+      remove() { this.removed = true; },
       set textContent(value) { text = String(value); },
+      get textContent() { return text; },
       get innerHTML() { return escapeHtml(text); }
     };
-  }
+  },
+  createTextNode: (value) => ({ text: String(value) })
 };
 
 const ctx = {
@@ -297,6 +304,111 @@ async function check(name, fn) {
     instance.showError();
     assert.strictEqual(instance.predictions.length, 0);
     assert.ok(!container.innerHTML.includes('Another address'));
+  });
+
+  await check('a delayed response cannot reopen a dismissed dropdown (Escape), and Escape kills the queued debounce', async () => {
+    const { instance, input, container } = makeAutocomplete();
+    let release;
+    let fetches = 0;
+    instance.fetchWithTimeout = async () => {
+      fetches++;
+      return new Promise((resolve) => {
+        release = () => resolve({
+          ok: true, json: async () => ({ predictions: [{ description: 'Private address' }] })
+        });
+      });
+    };
+    input.value = '100 Priv';
+    const pending = instance.fetchSuggestions('100 Priv', ++instance.requestSequence);
+    instance.handleKeydown({ key: 'Escape', preventDefault() {} });
+    release();
+    await pending;
+    assert.strictEqual(container.innerHTML, '', 'a late response must not re-render the private list');
+    assert.strictEqual(container.classList.contains('visible'), false, 'the dropdown stays dismissed');
+
+    input.value = '100 Private Rd';
+    instance.handleInput({ target: input });
+    assert.ok(instance.debounceTimer, 'sanity: a debounce is queued');
+    instance.handleKeydown({ key: 'Escape', preventDefault() {} });
+    assert.strictEqual(instance.debounceTimer, null, 'Escape cancels the queued debounce');
+    await new Promise((resolve) => setTimeout(resolve, 620));
+    assert.strictEqual(fetches, 1, 'the cancelled debounce never buys a provider call');
+  });
+
+  await check('a delayed response cannot reopen after blur, and blur cancels queued work', async () => {
+    const { instance, input, container } = makeAutocomplete();
+    let release;
+    let fetches = 0;
+    instance.fetchWithTimeout = async () => {
+      fetches++;
+      return new Promise((resolve) => {
+        release = () => resolve({
+          ok: true, json: async () => ({ predictions: [{ description: 'Private address' }] })
+        });
+      });
+    };
+    input.value = '100 Priv';
+    const pending = instance.fetchSuggestions('100 Priv', ++instance.requestSequence);
+    instance.handleBlur();
+    release();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.ok(!container.innerHTML.includes('Private address'),
+      'a response landing after blur must not render the private list');
+    assert.strictEqual(container.classList.contains('visible'), false);
+
+    input.value = '100 Private Rd';
+    instance.handleInput({ target: input });
+    assert.ok(instance.debounceTimer, 'sanity: a debounce is queued');
+    instance.handleBlur();
+    assert.strictEqual(instance.debounceTimer, null, 'blur cancels the queued debounce');
+    await new Promise((resolve) => setTimeout(resolve, 620));
+    assert.strictEqual(fetches, 1, 'the cancelled debounce never buys a provider call');
+  });
+
+  await check('third-party attributions render as text and safe links only — hostile entries cannot inject', async () => {
+    const { instance, input } = makeAutocomplete();
+    const attributionHost = {
+      classList: classList(),
+      children: [],
+      querySelector() {
+        return this.children.find((c) => c.className === 'third-party-attribution') || null;
+      },
+      appendChild(child) { this.children.push(child); return child; }
+    };
+    instance.selectedAttribution = attributionHost;
+    instance.fetchWithTimeout = async () => ({
+      ok: true,
+      json: async () => ({
+        attributions: [
+          { text: 'Listings by Example', href: 'https://listings.example.com/p/1' },
+          { text: '<img src=x onerror=alert(1)>', href: 'javascript:alert(2)' }
+        ],
+        result: {
+          formatted_address: '100 Main St, Miami, FL',
+          geometry: { location: { lat: 25.7, lng: -80.2 } }
+        }
+      })
+    });
+    instance.predictions = [{ place_id: 'ChIJattribution1', description: '100 Main St' }];
+    await instance.selectSuggestion(0);
+
+    const holder = attributionHost.querySelector();
+    assert.ok(holder, 'a third-party attribution holder renders beside the selection');
+    const nodes = holder.childNodes.filter((n) => n.tagName);
+    assert.strictEqual(nodes.length, 2);
+    assert.strictEqual(nodes[0].tagName, 'A');
+    assert.strictEqual(nodes[0].href, 'https://listings.example.com/p/1');
+    assert.strictEqual(nodes[0].rel, 'noopener noreferrer');
+    assert.strictEqual(nodes[0].textContent, 'Listings by Example');
+    assert.strictEqual(nodes[1].tagName, 'SPAN', 'a javascript: href renders as plain text, never a link');
+    assert.strictEqual(nodes[1].textContent, '<img src=x onerror=alert(1)>',
+      'hostile text stays textContent — it is data, never markup');
+    assert.strictEqual(nodes[1].href, undefined);
+
+    input.value = 'edited';
+    instance.clearValidation();
+    assert.strictEqual(holder.removed, true, 'clearing the selection clears the attribution');
   });
 
   await check('Places sessions expire after inactivity, not while the passenger is actively typing', () => {

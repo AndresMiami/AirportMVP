@@ -7,6 +7,7 @@
 
 const assert = require('assert');
 const path = require('path');
+const fs = require('fs');
 const { spawnSync } = require('child_process');
 
 process.env.NODE_ENV = 'test';
@@ -131,6 +132,14 @@ async function invokeError(error) {
         return {
           data: {
             status: 'OK',
+            // Google returns html_attributions regardless of the field mask;
+            // policy requires DISPLAYING third-party attribution. The second
+            // entry is a hostile fixture: the sanitizer must strip markup and
+            // refuse the javascript: href.
+            html_attributions: [
+              '<a href="https://listings.example.com/p/1">Listings by Example</a>',
+              '<script>alert(1)</script><a href="javascript:alert(2)">Evil Co</a>'
+            ],
             result: {
               formatted_address: `${ADDRESS_SENTINEL}, Miami, FL 33101`,
               name: 'UNREQUESTED_NAME',
@@ -204,6 +213,65 @@ async function invokeError(error) {
         '/api/:unmatched'
       );
       assert.strictEqual(testSeam.safeAccessPath(`/tracking/${TOKEN}`), '/tracking/:tripId');
+      // Express serves trailing-slash and case variants of real routes, so
+      // classification must too — a request the router answered must never
+      // be logged as unmatched (telemetry correctness, Codex round 2).
+      assert.strictEqual(testSeam.safeAccessPath('/api/places/details/?place_id=x'), '/api/places/details');
+      assert.strictEqual(testSeam.safeAccessPath('/API/Places/Autocomplete?input=x'), '/api/places/autocomplete');
+      assert.strictEqual(testSeam.safeAccessPath('/api/directions///'), '/api/directions');
+      assert.strictEqual(testSeam.safeAccessPath('/api/definitely-not-a-route'), '/api/:unmatched');
+      assert.strictEqual(testSeam.safeAccessPath('/HEALTH/'), '/health');
+    });
+
+    await check('Third-party attributions pass through SANITIZED — text and https hrefs only, hostile markup dies', async () => {
+      testSeam.resetApiUsageStats();
+      providerCalls = [];
+      const query = new URLSearchParams({ place_id: PLACE_ID, sessiontoken: TOKEN });
+      const response = await request(`/api/places/details?${query}`);
+      const body = await response.json();
+      assert.deepStrictEqual(body.attributions, [
+        { text: 'Listings by Example', href: 'https://listings.example.com/p/1' },
+        { text: 'alert(1) Evil Co', href: null }
+      ], 'markup stripped, javascript: href refused, text preserved');
+      assert.ok(!JSON.stringify(body.attributions).includes('<'),
+        'no raw markup may cross the proxy boundary');
+
+      // Pure-function edges: non-arrays, oversized entries, and bounded count.
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(undefined), []);
+      assert.deepStrictEqual(testSeam.sanitizeAttributions('nope'), []);
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['x'.repeat(1001)]), []);
+      assert.strictEqual(testSeam.sanitizeAttributions(
+        Array(10).fill('<a href="https://a.example">A</a>')).length, 4,
+        'attribution count is bounded');
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(
+        ['<a href=\'https://b.example/x\'>B</a>']),
+        [{ text: 'B', href: 'https://b.example/x' }], 'single-quoted hrefs parse too');
+    });
+
+    await check('The proxy is deployment-layout safe and its place-ID rules match the quote service exactly', async () => {
+      const proxySource = fs.readFileSync(
+        path.join(__dirname, '..', 'backend', 'api-proxy', 'server.js'), 'utf8');
+      assert.ok(!/require\(['"]\.\.\/functions/.test(proxySource),
+        'Railway\'s documented root is /backend/api-proxy — no import may reach outside it');
+      const identity = require('../backend/functions/lib/place-identity');
+      assert.strictEqual(testSeam.MAX_PLACE_ID_LEN, identity.MAX_PLACE_ID_LEN,
+        'the local bound must equal the ratified place-identity bound');
+      for (const [candidate, expected] of [
+        [LONG_PLACE_ID, true],
+        ['ChIJLSeUuFi32YgRgpwdRDtxYkg', true],
+        ['C'.repeat(2048), true],
+        ['C'.repeat(2049), false],
+        ['short', false],
+        ['ChIJ!bad$chars', false],
+        [12345, false]
+      ]) {
+        assert.strictEqual(testSeam.isValidPlaceId(candidate), expected,
+          `proxy verdict for ${String(candidate).slice(0, 24)}…`);
+        if (typeof candidate === 'string') {
+          assert.strictEqual(identity.isValidPlaceId(candidate), expected,
+            'the two validators must agree on every candidate');
+        }
+      }
     });
 
     await check('Autocomplete is live-only, no-store and uses only pinned provider params', async () => {

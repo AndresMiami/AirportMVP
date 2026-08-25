@@ -5,11 +5,21 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const axios = require('axios');
 const path = require('path');
-const {
-  isValidPlaceId,
-  MAX_PLACE_ID_LEN
-} = require('../functions/lib/place-identity');
 require('dotenv').config();
+
+// Place-ID validation, LOCAL COPY. Railway's documented deployment root is
+// /backend/api-proxy (README/SETUP), which pulls only this directory — a
+// require of ../functions/lib/place-identity would be MODULE_NOT_FOUND on
+// deploy and take the proxy down. These values are pinned to
+// backend/functions/lib/place-identity.js by a repo-level alignment test
+// (tests/maps-proxy-policy.test.js); change them only together. The 2048
+// bound is LinkMia's declared operational bound from the 2B1 correction:
+// Google documents no maximum and its long-form example exceeds 600 chars.
+const MAX_PLACE_ID_LEN = 2048;
+const PLACE_ID_RE = new RegExp(`^[A-Za-z0-9_-]{10,${MAX_PLACE_ID_LEN}}$`);
+function isValidPlaceId(value) {
+  return typeof value === 'string' && PLACE_ID_RE.test(value);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -98,13 +108,37 @@ function safeAccessPath(originalUrl) {
   // stripped a mounted catch-all from req.url/req.path by then, while
   // originalUrl remains the immutable request target. Remove its query before
   // classification and return only a fixed allowlisted label.
+  // Express routes match case-insensitively and tolerate trailing slashes by
+  // default, so classification normalizes the same way — a request the
+  // router actually served must never be logged as unmatched.
   const raw = typeof originalUrl === 'string' ? originalUrl : '';
   const queryAt = raw.indexOf('?');
-  const reqPath = queryAt === -1 ? raw : raw.slice(0, queryAt);
+  let reqPath = (queryAt === -1 ? raw : raw.slice(0, queryAt)).toLowerCase();
+  while (reqPath.length > 1 && reqPath.endsWith('/')) reqPath = reqPath.slice(0, -1);
   if (SAFE_ACCESS_PATHS.has(reqPath)) return reqPath;
   if (reqPath.startsWith('/tracking/')) return '/tracking/:tripId';
   if (reqPath.startsWith('/api/')) return '/api/:unmatched';
   return '/other';
+}
+
+// Google html_attributions arrive as provider-authored HTML strings (e.g.
+// '<a href="https://example.com">Listings by Foo</a>'). Policy requires
+// DISPLAYING them; security forbids forwarding raw HTML. Reduce each entry
+// to {text, href}: tags stripped from the text, href kept only when it is a
+// plain http(s) URL. Bounded in count and length; anything else is dropped.
+function sanitizeAttributions(htmlAttributions) {
+  if (!Array.isArray(htmlAttributions)) return [];
+  const out = [];
+  for (const entry of htmlAttributions.slice(0, 4)) {
+    if (typeof entry !== 'string' || entry.length > 1000) continue;
+    const hrefMatch = entry.match(/href\s*=\s*"([^"]{1,300})"/i) ||
+      entry.match(/href\s*=\s*'([^']{1,300})'/i);
+    let href = hrefMatch ? hrefMatch[1] : null;
+    if (href && !/^https?:\/\//i.test(href)) href = null;
+    const text = entry.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (text) out.push({ text, href });
+  }
+  return out;
 }
 
 function valueOnly(providerValue) {
@@ -364,6 +398,11 @@ app.get('/api/places/details', mapsDataNoStore, trackApiUsage('placeDetails'), a
 
     const filteredResponse = {
       status: response.data.status,
+      // Google returns html_attributions independently of the requested
+      // fields, and its policy requires displaying supplied third-party
+      // attributions. Pass through a narrowly SANITIZED representation only
+      // ({text, href}), never raw provider HTML — see sanitizeAttributions.
+      attributions: sanitizeAttributions(response.data.html_attributions),
       result: response.data.result ? {
         formatted_address: response.data.result.formatted_address,
         geometry: location ? { location: { lat: location.lat, lng: location.lng } } : undefined
@@ -594,7 +633,10 @@ const testSeam = Object.freeze({
   getApiUsageStats() {
     return JSON.parse(JSON.stringify(apiUsageStats));
   },
-  safeAccessPath
+  safeAccessPath,
+  sanitizeAttributions,
+  isValidPlaceId,
+  MAX_PLACE_ID_LEN
 });
 
 if (require.main === module) {
