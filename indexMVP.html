@@ -947,6 +947,10 @@
                 debug.info(`Found ${this.els.modeBtns.length} mode buttons, ${this.els.airportOptions.length} airport options`);
             }
             
+            loadAutocompleteModule() {
+                return import('./autocomplete.js');
+            }
+
             async initializeAutocomplete() {
                 try {
                     // Check if required elements exist
@@ -967,7 +971,7 @@
                     // Address suggestions/details are LinkMia's custom
                     // Railway-backed flow. They do not depend on the optional
                     // Google map renderer or its browser key.
-                    const autocompleteModule = await import('./autocomplete.js');
+                    const autocompleteModule = await this.loadAutocompleteModule();
                     const { CustomAutocomplete } = autocompleteModule;
                     
                     this.autocomplete = new CustomAutocomplete(
@@ -2783,8 +2787,24 @@
                         });
                     }
                 } catch (error) {
+                    this.handleMapsFailure();
                     console.error('Map update error:', error);
                 }
+            }
+
+            handleMapsFailure() {
+                const mapCanvas = this.els.vehicleMap;
+                if (mapCanvas) {
+                    // Remove Google's authorization/error overlay and hide
+                    // only the optional canvas. Vehicle selection, pricing,
+                    // Back, and Book remain available in the surrounding UI.
+                    mapCanvas.replaceChildren();
+                    mapCanvas.style.visibility = 'hidden';
+                    mapCanvas.setAttribute('aria-hidden', 'true');
+                }
+                this.vehicleMap = null;
+                this.directionsRenderer = null;
+                this.directionsService = null;
             }
             
             // Handle booking button click - open passenger modal first
@@ -4285,6 +4305,13 @@
                 app.navigateToPanel('when');
             }
         };
+
+        // Google can report a referrer/key authorization failure after its
+        // loader callback has already resolved. Clear the broken-map overlay
+        // without disturbing address search, pricing, or booking controls.
+        window.addEventListener('linkmia:maps-error', () => {
+            window.airportApp?.handleMapsFailure();
+        });
 
         // Initialize Application with proper timing
         // Carousel is now loaded as standalone component

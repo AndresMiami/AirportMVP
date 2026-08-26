@@ -63,7 +63,10 @@ nano .env
    Production and Deploy Preview values (and Branch Deploy if enabled). It is
    public after the build; use exact website referrers and never reuse the
    Railway key.
-4. Deploy
+4. Before merge, configure production first. A missing value leaves the last
+   published deploy serving, but freezes all subsequent production deploys
+   until a corrected build succeeds.
+5. Deploy
 
 #### Railway (API Proxy)
 1. Go to Variables tab
@@ -96,6 +99,8 @@ Or use Netlify environment variables with build plugin.
 - [ ] All `.env` files in `.gitignore`
 - [ ] No private keys hardcoded in JavaScript
 - [ ] Browser key is dedicated and website/API restricted
+- [ ] Maps JavaScript + Directions project quotas are capped and alerted
+- [ ] Project-scoped Cloud Billing budget alerts are active (alerts do not cap)
 - [ ] Private keys only in server environment variables
 - [ ] Proxy server for external APIs
 - [ ] CORS properly configured

@@ -22,6 +22,9 @@ verified checkpoint locations all live in the web app backed by Supabase.
   and protected by GCP website/API restrictions. Address autocomplete remains
   independent through Railway. The old Railway `/api/maps-script` route is a
   one-release stale-client transition only; retire it after zero traffic.
+  The retirement instrument is `/api/usage-stats`'s `mapsScript` counters plus
+  Railway access logs; a single zero snapshot is not sufficient because the
+  in-memory counters reset daily and on restart.
   Direct-loader activation changes map delivery but not pricing authority;
   durable route-fact/Google-content retention remains a separately blocking
   pre-activation decision.
@@ -243,6 +246,10 @@ Production/Deploy Preview values, plus Branch Deploy if enabled), Stripe keys (S
 `REQUIRE_PAYMENT=false` in indexMVP; payment = cash/Zelle to driver).
 Railway env: private `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost
 allowed). Never reuse the Railway key for the browser loader.
+The browser-key rollout requires project/API quota caps + quota alerts for Maps
+JavaScript and Directions (quota is project-wide, not per key), a project
+billing budget, and the Production Builds value BEFORE merge. Missing it keeps
+the old published deploy online but freezes every subsequent production build.
 
 ## Workflow
 

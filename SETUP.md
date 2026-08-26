@@ -46,7 +46,9 @@ the Netlify production alias, and any exact preview origin used for testing).
 
 ### Create two dedicated keys
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create new project or select existing
+2. Select the **existing LinkMia project** where Directions API (Legacy) is
+   already enabled. Do not create a new project for these browser keys:
+   Directions API (Legacy) cannot be newly enabled on a new project.
 3. Enable the APIs used today:
    - Maps JavaScript API
    - Places API (legacy web-service endpoints)
@@ -61,6 +63,14 @@ the Netlify production alias, and any exact preview origin used for testing).
    plus **Directions API (Legacy)**. Add each preview's exact hostname; never
    grant a broad `*.netlify.app` referrer. The first preview build intentionally
    fails until its Deploy Preview value exists in Netlify.
+7. **Required cost controls before merge:** in Google Maps Platform → Quotas,
+   set conservative pilot-appropriate limits and quota alerts for Maps
+   JavaScript API and Directions API (Legacy). Standard Maps quotas are
+   project/API limits, not per-key limits, so the Directions limit must leave
+   room for both this browser key and Railway's existing Directions traffic.
+   Then create a project-scoped Cloud Billing budget with actual and forecast
+   email thresholds. A budget alert warns—it does not stop charges; quota is
+   the hard usage bound. Record the chosen limits in the rollout evidence.
 
 Because the loader sends only the origin as its referrer, add both the
 pathless and wildcard form for every supported host. Production examples:
@@ -90,9 +100,33 @@ not secrecy. Address autocomplete still goes through Railway and does not
 depend on the browser map loader.
 
 Local/static checkouts intentionally use a null browser config: autocomplete
-and booking work, but the optional map is disabled. To exercise maps locally,
-generate `maps-browser-config.js` with a separate localhost-restricted browser
-key, then restore the committed null file before committing.
+and booking work, but the optional map is disabled. Test real maps through a
+restricted Deploy Preview; the generator refuses to write a non-null key
+outside Netlify's disposable cloud build so a local build cannot dirty the
+tracked config with a real credential.
+
+### Required preview and production order
+
+1. Push/open the draft PR first. Its initial preview build may fail closed;
+   that safely reveals the exact `deploy-preview-N--...` hostname.
+2. Create/restrict the preview browser key to that exact hostname pair, set
+   `GOOGLE_MAPS_BROWSER_API_KEY` with **Builds** scope in Netlify's **Deploy
+   Previews** context, then retry the preview deploy and field-test it.
+3. Before merge, create/restrict the separate production browser key, finish
+   the quota/billing controls above, and set the same variable with **Builds**
+   scope in Netlify's **Production** context.
+4. Only then merge. If the production value is missing, the currently
+   published site stays online, but the new build fails. That freezes every
+   later production deployment—including an unrelated emergency function
+   hotfix—until the variable is corrected and a clean build succeeds.
+5. After merge, verify direct `maps.googleapis.com` loading, address search,
+   Vehicle and trip maps, and the existing pricing kill switch/browser flag.
+
+The old Railway `/api/maps-script` route is retired separately. Use
+`/api/usage-stats` (`stats.mapsScript.acceptedRouteRequests` and
+`providerAttempts`) together with Railway access logs. Require zero traffic
+through a documented observation window and account for process restarts and
+the counter's daily reset; one isolated zero snapshot is not sufficient.
 
 ## 🧪 Testing
 

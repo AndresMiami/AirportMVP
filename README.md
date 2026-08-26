@@ -105,6 +105,10 @@ and only Maps JavaScript API + Directions API (Legacy). Use the exact preview
 hostname—never a broad `*.netlify.app` referrer. Never reuse the private
 Railway key.
 
+Before merge, also complete the quota caps, billing alerts, and fail-closed
+Netlify ordering in [SETUP.md](SETUP.md). A missing Production build value does
+not take the current site offline, but it blocks every later production deploy.
+
 **For Netlify Functions (set in Netlify dashboard):**
 ```env
 SUPABASE_URL=your_supabase_url

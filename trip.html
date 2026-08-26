@@ -502,6 +502,11 @@
         function loadMapsScript() {
             if (mapsRequested) return;
             mapsRequested = true;
+            if (typeof window.LinkMiaMapsLoader?.load !== 'function') {
+                mapsFailed = true;
+                $('liveMap').classList.add('hidden');
+                return;
+            }
             window.LinkMiaMapsLoader.load()
                 .then(() => Promise.all([
                     google.maps.importLibrary('maps'),

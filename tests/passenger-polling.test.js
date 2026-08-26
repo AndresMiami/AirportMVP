@@ -126,6 +126,7 @@ function createHarness(responses, storage = new Map(), { mapsLoad } = {}) {
       }
     }
   };
+  if (mapsLoad === null) delete context.window.LinkMiaMapsLoader;
   context.window.window = context.window;
   context.google = {
     maps: {
@@ -317,6 +318,19 @@ function check(name, fn) {
   await activeToTerminal.settle();
   check('late Maps readiness cannot reopen a terminal trip map', () => {
     assert.ok(activeToTerminal.element('mapCard').classList.contains('hidden'));
+  });
+
+  const missingLoader = createHarness([
+    response(200, { booking: activeBooking, driver: null })
+  ], new Map(), { mapsLoad: null });
+  await missingLoader.settle();
+  check('a missing shared loader hides only the optional trip map without throwing', () => {
+    assert.ok(!missingLoader.element('mapCard').classList.contains('hidden'),
+      'the honest active-trip status card remains visible');
+    assert.ok(missingLoader.element('liveMap').classList.contains('hidden'),
+      'the unusable canvas is hidden');
+    assert.strictEqual(missingLoader.fetchCount, 1,
+      'status polling still completed normally');
   });
 
   let finishSlowRequest;

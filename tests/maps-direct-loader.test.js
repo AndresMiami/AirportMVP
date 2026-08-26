@@ -149,7 +149,12 @@ function makeRealm({ key = VALID_KEY } = {}) {
     try {
       const prodFile = path.join(dir, 'prod.js');
       const result = generator.generateMapsBrowserConfig({
-        env: { CONTEXT: 'production', GOOGLE_MAPS_BROWSER_API_KEY: VALID_KEY },
+        env: {
+          CONTEXT: 'production',
+          NETLIFY: 'true',
+          BUILD_ID: 'test-production-build',
+          GOOGLE_MAPS_BROWSER_API_KEY: VALID_KEY
+        },
         outputPath: prodFile
       });
       assert.deepStrictEqual(
@@ -176,6 +181,35 @@ function makeRealm({ key = VALID_KEY } = {}) {
     }
   });
 
+  await check('a real key cannot overwrite tracked config outside Netlify cloud builds', () => {
+    const target = path.join(os.tmpdir(), `linkmia-local-key-${process.pid}.js`);
+    try {
+      for (const env of [
+        { CONTEXT: 'dev', GOOGLE_MAPS_BROWSER_API_KEY: VALID_KEY },
+        {
+          CONTEXT: 'production',
+          NETLIFY: 'true',
+          NETLIFY_LOCAL: 'true',
+          BUILD_ID: 'local-cli-build',
+          GOOGLE_MAPS_BROWSER_API_KEY: VALID_KEY
+        },
+        {
+          CONTEXT: 'deploy-preview',
+          NETLIFY: 'true',
+          NETLIFY_DEV: 'true',
+          BUILD_ID: 'local-dev-build',
+          GOOGLE_MAPS_BROWSER_API_KEY: VALID_KEY
+        }
+      ]) {
+        assert.throws(() => generator.generateMapsBrowserConfig({ env, outputPath: target }),
+          /outside a Netlify cloud build/);
+      }
+      assert.strictEqual(fs.existsSync(target), false, 'local guard wrote the key before refusing');
+    } finally {
+      fs.rmSync(target, { force: true });
+    }
+  });
+
   await check('both map pages use the shared loader; clients never call the Railway loader', () => {
     for (const [name, source] of [
       ['booking', bookingPage], ['trip', tripPage], ['landing', landingPage], ['api config', apiConfig]
@@ -192,13 +226,70 @@ function makeRealm({ key = VALID_KEY } = {}) {
   });
 
   await check('custom autocomplete is independent from the optional Maps loader', () => {
+    const loaderStart = bookingPage.indexOf('loadAutocompleteModule()');
     const start = bookingPage.indexOf('async initializeAutocomplete()');
-    const end = bookingPage.indexOf('async fetchSuggestions', start);
-    const method = bookingPage.slice(start, end > start ? end : start + 7000);
-    assert.ok(start > 0);
-    assert.match(method, /import\('\.\/autocomplete\.js'\)/);
-    assert.ok(!/google\.maps|importLibrary\(["']places/.test(method),
+    const end = bookingPage.indexOf('bindEvents()', start);
+    const helper = bookingPage.slice(loaderStart, start);
+    const method = bookingPage.slice(start, end);
+    assert.ok(loaderStart > 0 && start > loaderStart && end > start);
+    assert.match(helper, /import\('\.\/autocomplete\.js'\)/);
+    assert.ok(!/google\.maps|importLibrary\(["']places|LinkMiaMapsLoader/.test(helper + method),
       'address search must not wait for Google Maps JavaScript');
+  });
+
+  await check('custom autocomplete executes while the optional Maps loader rejects', async () => {
+    const start = bookingPage.indexOf('async initializeAutocomplete()');
+    const end = bookingPage.indexOf('bindEvents()', start);
+    assert.ok(start > 0 && end > start, 'initializeAutocomplete source markers moved');
+    const method = bookingPage.slice(start, end).trim();
+    let mapsLoadCalls = 0;
+    let constructions = 0;
+    const errors = [];
+    const listeners = new Map();
+    const input = {
+      placeholder: '',
+      addEventListener(type, fn) { listeners.set(type, fn); }
+    };
+    class FakeCustomAutocomplete {
+      constructor(receivedInput, receivedDropdown, options) {
+        constructions++;
+        assert.strictEqual(receivedInput, input);
+        assert.strictEqual(receivedDropdown, dropdown);
+        assert.strictEqual(options, null);
+      }
+    }
+    const dropdown = {};
+    const context = vm.createContext({
+      window: {
+        LinkMiaMapsLoader: {
+          load: async () => {
+            mapsLoadCalls++;
+            throw new Error('optional maps unavailable');
+          }
+        }
+      },
+      debug: { warn() {}, success() {} },
+      errorHandler: { handleError(error) { errors.push(error); } },
+      console
+    });
+    const holder = vm.runInContext(`({ ${method} })`, context);
+    const app = {
+      ...holder,
+      els: { addressInput: input, autocompleteDropdown: dropdown },
+      loadAutocompleteModule: async () => ({ CustomAutocomplete: FakeCustomAutocomplete }),
+      handleAddressSelected() {},
+      handleAddressCoordinates() {},
+      handleAddressValidationCleared() {}
+    };
+
+    await app.initializeAutocomplete();
+    assert.strictEqual(mapsLoadCalls, 0, 'address search touched the optional Maps loader');
+    assert.strictEqual(constructions, 1);
+    assert.strictEqual(errors.length, 0);
+    assert.strictEqual(input.placeholder, 'Enter pickup address, hotel, or landmark...');
+    assert.deepStrictEqual([...listeners.keys()], [
+      'place-selected', 'place-coordinates', 'validation-cleared'
+    ]);
   });
 
   await check('optional map consumers import their exact runtime libraries', () => {
@@ -215,7 +306,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
 
   await check('only the newest delayed vehicle-map render creates and routes', async () => {
     const start = bookingPage.indexOf('async updateVehicleMap()');
-    const end = bookingPage.indexOf('// Handle booking button click', start);
+    const end = bookingPage.indexOf('\n            handleMapsFailure() {', start);
     assert.ok(start > 0 && end > start, 'updateVehicleMap source markers moved');
     const method = bookingPage.slice(start, end).trim();
 
@@ -272,7 +363,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
 
   await check('leaving Vehicle while libraries load spends no map route', async () => {
     const start = bookingPage.indexOf('async updateVehicleMap()');
-    const end = bookingPage.indexOf('// Handle booking button click', start);
+    const end = bookingPage.indexOf('\n            handleMapsFailure() {', start);
     const method = bookingPage.slice(start, end).trim();
     let releaseLibraries;
     const libraryGate = new Promise((resolve) => { releaseLibraries = resolve; });
@@ -320,7 +411,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
 
   await check('an older Directions callback cannot overwrite a newer map', async () => {
     const start = bookingPage.indexOf('async updateVehicleMap()');
-    const end = bookingPage.indexOf('// Handle booking button click', start);
+    const end = bookingPage.indexOf('\n            handleMapsFailure() {', start);
     const method = bookingPage.slice(start, end).trim();
     const callbacks = [];
     const rendered = [];
@@ -358,6 +449,38 @@ function makeRealm({ key = VALID_KEY } = {}) {
     callbacks[1]({ id: 'new' }, 'OK');
     callbacks[0]({ id: 'old' }, 'OK');
     assert.deepStrictEqual(rendered, ['new']);
+  });
+
+  await check('booking map authorization failure clears only the optional canvas', () => {
+    const declaration = '\n            handleMapsFailure() {';
+    const start = bookingPage.indexOf(declaration) + 13;
+    const end = bookingPage.indexOf('// Handle booking button click', start);
+    assert.ok(start > 0 && end > start, 'handleMapsFailure source markers moved');
+    const method = bookingPage.slice(start, end).trim();
+    let cleared = false;
+    const attrs = new Map();
+    const mapCanvas = {
+      style: {},
+      replaceChildren() { cleared = true; },
+      setAttribute(name, value) { attrs.set(name, value); }
+    };
+    const holder = vm.runInNewContext(`({ ${method} })`);
+    const app = {
+      ...holder,
+      els: { vehicleMap: mapCanvas },
+      vehicleMap: {},
+      directionsRenderer: {},
+      directionsService: {}
+    };
+    app.handleMapsFailure();
+    assert.strictEqual(cleared, true);
+    assert.strictEqual(mapCanvas.style.visibility, 'hidden');
+    assert.strictEqual(attrs.get('aria-hidden'), 'true');
+    assert.strictEqual(app.vehicleMap, null);
+    assert.strictEqual(app.directionsRenderer, null);
+    assert.strictEqual(app.directionsService, null);
+    assert.match(bookingPage,
+      /addEventListener\('linkmia:maps-error',[\s\S]*airportApp\?\.handleMapsFailure\(\)/);
   });
 
   await check('service worker refreshes loader code but never caches generated key config', () => {
