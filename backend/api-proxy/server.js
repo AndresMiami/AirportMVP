@@ -144,47 +144,110 @@ function safeAccessPath(originalUrl) {
 // returns: 16 entries, 2000 raw chars, 1000-char text, 1000-char href.
 const ATTRIBUTION_CEILINGS = Object.freeze({ entries: 16, raw: 2000, text: 1000, href: 1000 });
 
-function decodeBasicEntities(value) {
-  // &amp; is decoded LAST so '&amp;lt;' correctly yields the literal '&lt;'.
-  return String(value)
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0*39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
+// Strict single-pass character-reference decoder. Decodes numeric decimal
+// and hexadecimal references (validated: real Unicode scalar values, no
+// controls, no surrogates) plus the five core named entities. Returns NULL —
+// which fails the whole set closed — for any OTHER named reference (&nbsp;
+// and friends: displaying the reference text literally would be altered
+// credit) and for any malformed numeric-looking reference. A bare '&' that
+// does not begin a reference is literal character data, exactly as in HTML.
+const CORE_NAMED_ENTITIES = Object.freeze({
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'"
+});
+
+function decodeEntitiesStrict(value) {
+  const s = String(value);
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch !== '&') { out += ch; i++; continue; }
+    const rest = s.slice(i);
+    const numeric = /^&#(?:(\d{1,7})|[xX]([0-9a-fA-F]{1,6}));/.exec(rest);
+    if (numeric) {
+      const cp = numeric[1] !== undefined ? Number(numeric[1]) : parseInt(numeric[2], 16);
+      if (!Number.isInteger(cp) || cp > 0x10FFFF || cp < 0x20 || cp === 0x7F ||
+          (cp >= 0xD800 && cp <= 0xDFFF)) return null;
+      out += String.fromCodePoint(cp);
+      i += numeric[0].length;
+      continue;
+    }
+    if (rest.startsWith('&#')) return null;   // malformed numeric reference
+    const named = /^&([a-zA-Z][a-zA-Z0-9]{1,31});/.exec(rest);
+    if (named) {
+      const decoded = CORE_NAMED_ENTITIES[named[1].toLowerCase()];
+      if (decoded === undefined) return null; // unsupported named reference
+      out += decoded;
+      i += named[0].length;
+      continue;
+    }
+    out += '&';                               // literal ampersand character data
+    i++;
+  }
+  return out;
 }
 
-function collapseText(value) {
-  return decodeBasicEntities(value).replace(/\s+/g, ' ').trim();
+// One attribution entry becomes an ordered list of SEGMENTS — {text, href}
+// with href null for unlinked text — preserving Google's published format
+// ('Listings by <a …>Example Company</a>': the prefix stays UNLINKED).
+// Collapsing everything into one link would change the link's scope, which
+// is altered credit. Whitespace collapses within segments; the entry's
+// outer edges are trimmed; interior boundary spaces survive.
+function segmentText(raw) {
+  const decoded = decodeEntitiesStrict(raw);
+  if (decoded === null) return null;
+  return decoded.replace(/\s+/g, ' ');
 }
 
 function parseAttributionEntry(entry) {
   if (typeof entry !== 'string' || entry.length === 0 ||
       entry.length > ATTRIBUTION_CEILINGS.raw) return null;
-  // Grammar A: plain text only — no markup of any kind.
+  let segments;
   if (!/[<>]/.test(entry)) {
-    const text = collapseText(entry);
-    if (!text || text.length > ATTRIBUTION_CEILINGS.text) return null;
-    return { text, href: null };
+    const text = segmentText(entry);
+    if (text === null) return null;
+    segments = [{ text, href: null }];
+  } else {
+    // Optional plain text, exactly ONE anchor whose only attribute is a
+    // double-quoted href, optional plain text. Anything else — data-href,
+    // target=, script tags, nested markup — refuses to parse, fails closed.
+    const m = entry.match(/^([^<>]*)<a\s+href="([^"<>]+)"\s*>([^<>]*)<\/a>([^<>]*)$/i);
+    if (!m) return null;
+    const before = segmentText(m[1]);
+    const label = segmentText(m[3]);
+    const after = segmentText(m[4]);
+    if (before === null || label === null || after === null) return null;
+    if (!label.trim()) return null;           // a link needs a visible label
+    const rawHref = decodeEntitiesStrict(m[2]);
+    if (rawHref === null || rawHref.length > ATTRIBUTION_CEILINGS.href) return null;
+    let parsed;
+    try { parsed = new URL(rawHref); } catch (_) { return null; }
+    if (parsed.protocol !== 'https:') return null;  // https-only, as documented
+    segments = [
+      { text: before, href: null },
+      { text: label, href: parsed.href },
+      { text: after, href: null }
+    ];
   }
-  // Grammar B: optional plain text, exactly ONE anchor whose only attribute
-  // is a double-quoted href, optional plain text. Anything else — data-href,
-  // target=, script tags, nested markup — refuses to parse and fails closed.
-  const m = entry.match(/^([^<>]*)<a\s+href="([^"<>]+)"\s*>([^<>]*)<\/a>([^<>]*)$/i);
-  if (!m) return null;
-  const text = collapseText(`${m[1]} ${m[3]} ${m[4]}`);
-  if (!text || text.length > ATTRIBUTION_CEILINGS.text) return null;
-  const rawHref = decodeBasicEntities(m[2]);
-  if (rawHref.length > ATTRIBUTION_CEILINGS.href) return null;
-  let parsed;
-  try { parsed = new URL(rawHref); } catch (_) { return null; }
-  if (parsed.protocol !== 'https:') return null;   // https-only, exactly as documented
-  return { text, href: parsed.href };
+  // Trim the entry's outer edges, drop empty plain segments, enforce
+  // per-segment ceilings, and require visible text overall.
+  segments[0].text = segments[0].text.replace(/^\s+/, '');
+  segments[segments.length - 1].text = segments[segments.length - 1].text.replace(/\s+$/, '');
+  segments = segments.filter((seg) => seg.href !== null || seg.text.length > 0);
+  if (segments.length === 0) return null;
+  let visible = '';
+  for (const seg of segments) {
+    if (seg.text.length > ATTRIBUTION_CEILINGS.text) return null;
+    visible += seg.text;
+  }
+  if (!visible.trim()) return null;
+  return { segments };
 }
 
 function sanitizeAttributions(htmlAttributions) {
-  if (htmlAttributions == null) return { ok: true, entries: [] };
+  // Legacy Place Details documents html_attributions as a REQUIRED array,
+  // returned even when empty. Only an actual array proves the check ran:
+  // a missing/null field fails closed — it is not an empty set.
   if (!Array.isArray(htmlAttributions) ||
       htmlAttributions.length > ATTRIBUTION_CEILINGS.entries) return { ok: false, entries: [] };
   const entries = [];
@@ -699,7 +762,8 @@ const testSeam = Object.freeze({
   safeAccessPath,
   sanitizeAttributions,
   isValidPlaceId,
-  MAX_PLACE_ID_LEN
+  MAX_PLACE_ID_LEN,
+  PLACE_ID_RE
 });
 
 if (require.main === module) {

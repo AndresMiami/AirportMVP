@@ -172,5 +172,8 @@ module.exports = {
   airportByCode,
   isValidPlaceId,
   resolvePlace,
-  MAX_PLACE_ID_LEN
+  MAX_PLACE_ID_LEN,
+  // Exported for the exact drift guard in tests/maps-proxy-policy.test.js:
+  // the proxy's deployment-isolated pinned copy must match this source.
+  PLACE_ID_RE
 };

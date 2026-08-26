@@ -139,7 +139,8 @@ async function invokeError(error) {
             // by the dedicated fail-closed check via setMapsGet overrides.
             html_attributions: [
               '<a href="https://listings.example.com/p/1">Listings by Example</a>',
-              '<a href="https://partners.example.com/?a=1&amp;b=2">Fish &amp; Chips Data</a>'
+              '<a href="https://partners.example.com/?a=1&amp;b=2">Fish &amp; Chips Data</a>',
+              'Listings by <a href="https://companies.example.com/co">Example Company</a>'
             ],
             result: {
               formatted_address: `${ADDRESS_SENTINEL}, Miami, FL 33101`,
@@ -230,37 +231,68 @@ async function invokeError(error) {
       assert.strictEqual(testSeam.safeAccessPath('/tracking//'), '/other');
     });
 
-    await check('Third-party attributions pass through FAITHFULLY — every entry, entities decoded, https URLs exact', async () => {
+    await check('Third-party attributions pass through FAITHFULLY — structure, entities, and limits exact', async () => {
       testSeam.resetApiUsageStats();
       providerCalls = [];
       const query = new URLSearchParams({ place_id: PLACE_ID, sessiontoken: TOKEN });
       const response = await request(`/api/places/details?${query}`);
       const body = await response.json();
       assert.deepStrictEqual(body.attributions, [
-        { text: 'Listings by Example', href: 'https://listings.example.com/p/1' },
-        { text: 'Fish & Chips Data', href: 'https://partners.example.com/?a=1&b=2' }
-      ], 'every returned entry survives, entities decode, encoded query separators decode');
+        { segments: [{ text: 'Listings by Example', href: 'https://listings.example.com/p/1' }] },
+        { segments: [{ text: 'Fish & Chips Data', href: 'https://partners.example.com/?a=1&b=2' }] },
+        { segments: [
+          { text: 'Listings by ', href: null },
+          { text: 'Example Company', href: 'https://companies.example.com/co' }
+        ] }
+      ], 'every entry survives; entities decode; the UNLINKED prefix stays outside the link');
       assert.ok(!JSON.stringify(body.attributions).includes('<'),
         'no raw markup may cross the proxy boundary');
 
-      // Pure-function contract: absent/empty = nothing to display (ok);
-      // anything unrepresentable = NOT ok, and never a partial set.
-      assert.deepStrictEqual(testSeam.sanitizeAttributions(undefined), { ok: true, entries: [] });
+      // Entity decoding is COMPLETE-or-closed: numeric decimal and hex
+      // decode; any other named reference or malformed numeric fails the
+      // set rather than displaying altered credit.
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Fish &#38; Chips']),
+        { ok: true, entries: [{ segments: [{ text: 'Fish & Chips', href: null }] }] });
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Fish &#x26; Chips']),
+        { ok: true, entries: [{ segments: [{ text: 'Fish & Chips', href: null }] }] });
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(
+        ['<a href="https://p.example/?a=1&#38;b=2">P</a>']).entries[0].segments[0].href,
+        'https://p.example/?a=1&b=2', 'numeric references inside hrefs decode into the query');
+      assert.strictEqual(testSeam.sanitizeAttributions(['Alpha&nbsp;Beta']).ok, false,
+        'unsupported named references fail closed, never display literally');
+      assert.strictEqual(testSeam.sanitizeAttributions(['&bogus;']).ok, false);
+      assert.strictEqual(testSeam.sanitizeAttributions(['Bad &#xZZ; ref']).ok, false,
+        'malformed numeric-looking references fail closed');
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Fish & Chips']),
+        { ok: true, entries: [{ segments: [{ text: 'Fish & Chips', href: null }] }] },
+        'a bare ampersand is literal character data');
+
+      // REQUIRED-array contract: legacy Details always returns the array,
+      // even empty — only an actual array proves the check ran.
       assert.deepStrictEqual(testSeam.sanitizeAttributions([]), { ok: true, entries: [] });
+      assert.strictEqual(testSeam.sanitizeAttributions(undefined).ok, false,
+        'a MISSING html_attributions field fails closed');
+      assert.strictEqual(testSeam.sanitizeAttributions(null).ok, false);
       assert.strictEqual(testSeam.sanitizeAttributions('nope').ok, false);
-      // Six valid entries: ALL preserved — Google publishes no count cap.
-      const six = testSeam.sanitizeAttributions(
-        Array.from({ length: 6 }, (_, i) => `<a href="https://p${i}.example/x">Partner ${i}</a>`));
-      assert.strictEqual(six.ok, true);
-      assert.strictEqual(six.entries.length, 6, 'no silent count cap on valid entries');
-      // A long valid name is preserved verbatim — no semantic truncation.
-      const longName = 'Very Long Partner Name '.repeat(20).trim();   // ~460 chars
+
+      // Declared limits, exercised exactly: 16 entries pass, 999/1000 text
+      // and href lengths pass, 1001 fails — no smaller silent caps.
+      const sixteen = testSeam.sanitizeAttributions(
+        Array.from({ length: 16 }, (_, i) => `<a href="https://p${i}.example/x">Partner ${i}</a>`));
+      assert.strictEqual(sixteen.ok, true);
+      assert.strictEqual(sixteen.entries.length, 16, 'all 16 valid entries cross the proxy');
+      for (const [n, expected] of [[999, true], [1000, true], [1001, false]]) {
+        assert.strictEqual(testSeam.sanitizeAttributions(['x'.repeat(n)]).ok, expected,
+          `plain text length ${n}`);
+        const href = 'https://l.example/' + 'a'.repeat(n - 18);
+        assert.strictEqual(href.length, n);
+        assert.strictEqual(testSeam.sanitizeAttributions([`<a href="${href}">P</a>`]).ok, expected,
+          `href length ${n}`);
+      }
+      const longName = 'Very Long Partner Name '.repeat(20).trim();
       const long = testSeam.sanitizeAttributions([`<a href="https://long.example/x">${longName}</a>`]);
       assert.strictEqual(long.ok, true);
-      assert.strictEqual(long.entries[0].text, longName, 'valid text is never truncated');
-      // Plain-text entries (no anchor) are legitimate attributions too.
-      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Data &amp; Listings CC-BY']),
-        { ok: true, entries: [{ text: 'Data & Listings CC-BY', href: null }] });
+      assert.strictEqual(long.entries[0].segments[0].text, longName, 'valid text is never truncated');
     });
 
     await check('Unrepresentable attributions FAIL THE DETAILS RESULT CLOSED — never partial or altered credit', async () => {
@@ -272,22 +304,25 @@ async function invokeError(error) {
         ['<a href="https://a.example" target="_blank">A</a>'],         // extra attributes refuse to parse
         Array.from({ length: 17 }, (_, i) => `<a href="https://p${i}.example/x">P${i}</a>`), // ceiling
         ['x'.repeat(2001)],                                            // raw-length ceiling
+        ['Alpha&nbsp;Beta'],                                           // unsupported named reference
+        undefined,                                                     // REQUIRED array missing entirely
       ];
       for (const set of hostileSets) {
-        testSeam.setMapsGet(async () => ({
-          data: {
+        testSeam.setMapsGet(async () => {
+          const data = {
             status: 'OK',
-            html_attributions: set,
             result: {
               formatted_address: `${ADDRESS_SENTINEL}, Miami, FL 33101`,
               geometry: { location: { lat: 25.76, lng: -80.19 } }
             }
-          }
-        }));
+          };
+          if (set !== undefined) data.html_attributions = set;
+          return { data };
+        });
         const query = new URLSearchParams({ place_id: PLACE_ID, sessiontoken: TOKEN });
         const response = await request(`/api/places/details?${query}`);
         assert.strictEqual(response.status, 502,
-          `unrepresentable set must fail closed: ${JSON.stringify(set[0]).slice(0, 60)}`);
+          `unrepresentable set must fail closed: ${JSON.stringify(set ? set[0] : 'MISSING FIELD').slice(0, 60)}`);
         const body = await response.json();
         assert.ok(!JSON.stringify(body).includes('formatted_address'),
           'no Google content may ship without its full required credit');
@@ -303,6 +338,24 @@ async function invokeError(error) {
       const identity = require('../backend/functions/lib/place-identity');
       assert.strictEqual(testSeam.MAX_PLACE_ID_LEN, identity.MAX_PLACE_ID_LEN,
         'the local bound must equal the ratified place-identity bound');
+      // EXACT spec parity first: the two regexes must be the same source and
+      // flags, so ANY divergence — an added character class member, a
+      // shifted bound — fails without needing a probe to guess it.
+      assert.strictEqual(testSeam.PLACE_ID_RE.source, identity.PLACE_ID_RE.source,
+        'the pinned proxy regex must be byte-identical to the canonical source');
+      assert.strictEqual(testSeam.PLACE_ID_RE.flags, identity.PLACE_ID_RE.flags);
+      // Full printable-ASCII fuzz on BOTH validators: a character admitted
+      // by only one copy (e.g. adding ~ or : to the proxy) fails here even
+      // if the source comparison were removed.
+      for (let code = 0x20; code <= 0x7e; code++) {
+        const c = String.fromCharCode(code);
+        const candidate = c.repeat(10);
+        const expected = /^[A-Za-z0-9_-]$/.test(c);
+        assert.strictEqual(testSeam.isValidPlaceId(candidate), expected,
+          `proxy verdict for char ${code}`);
+        assert.strictEqual(identity.isValidPlaceId(candidate), expected,
+          `canonical verdict for char ${code}`);
+      }
       // Exhaustive boundary parity: every length edge (a 10->9 or 2048->2047
       // mutation in EITHER copy fails here) and every character class.
       for (const [candidate, expected] of [

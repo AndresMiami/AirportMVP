@@ -136,10 +136,86 @@
 # Internal documentation is not a public surface (Andres, 2026-08-26):
 # the site publishes the repo root, so without these rules every project
 # .md — the operating playbook included — is served to anyone who asks.
-# force = true is required: Netlify otherwise serves an existing static
-# file instead of applying the redirect.
+# Netlify does NOT support mid-path splats like "/*.md" (documented:
+# /jobs/*.html-style patterns are unsupported; such a rule silently falls
+# through to the catch-all with 200), so every internal Markdown path is
+# ENUMERATED — and tests/google-policy-readiness.test.js walks the repo
+# and fails when a tracked .md lacks a rule here. force = true is
+# required: Netlify otherwise serves the existing static file.
 [[redirects]]
-  from = "/*.md"
+  from = "/APPLE_PAY_SETUP.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/ARCHITECTURE.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/AUTH_IMPLEMENTATION_GUIDE.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/CLAUDE.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/IOS_APP_GUIDE.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/LINKMIA-AI-DISPATCH-PLAN.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/LOCAL_DEVELOPMENT.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/PAYMENT_SECURITY.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/README.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/SECURITY.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/SETUP.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/STRIPE_SETUP.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/database/SETUP.md"
   to = "/admin-retired.html"
   status = 404
   force = true

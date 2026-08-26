@@ -366,7 +366,7 @@ async function check(name, fn) {
     assert.strictEqual(fetches, 1, 'the cancelled debounce never buys a provider call');
   });
 
-  await check('every third-party attribution renders — separators, safe links, no truncation', async () => {
+  await check('every third-party attribution renders — all 16, structured segments, separators, no truncation', async () => {
     const { instance } = makeAutocomplete();
     const attributionHost = {
       classList: classList(),
@@ -378,14 +378,22 @@ async function check(name, fn) {
     };
     instance.selectedAttribution = attributionHost;
     const longName = 'Very Long Partner Name '.repeat(20).trim();
+    // 16 entries — the declared ceiling — must ALL render: the first is
+    // Google's own published format (unlinked prefix + linked name), the
+    // second a long uncut name, the rest simple linked partners.
+    const entries = [
+      { segments: [
+        { text: 'Listings by ', href: null },
+        { text: 'Example Company', href: 'https://companies.example.com/co' }
+      ] },
+      { segments: [{ text: longName, href: 'https://long.example/x' }] },
+      ...Array.from({ length: 14 }, (_, i) => (
+        { segments: [{ text: `Partner ${i}`, href: `https://p${i}.example/x` }] }))
+    ];
     instance.fetchWithTimeout = async () => ({
       ok: true,
       json: async () => ({
-        attributions: [
-          { text: 'Listings by Example', href: 'https://listings.example.com/p/1' },
-          { text: 'Data CC-BY Partner', href: null },
-          { text: longName, href: 'https://long.example/x' }
-        ],
+        attributions: entries,
         result: {
           formatted_address: '100 Main St, Miami, FL',
           geometry: { location: { lat: 25.7, lng: -80.2 } }
@@ -397,27 +405,28 @@ async function check(name, fn) {
 
     const holder = attributionHost.querySelector();
     assert.ok(holder, 'a third-party attribution holder renders beside the selection');
-    // The host element begins with the text "Google Maps": EVERY entry —
-    // the first included — must be preceded by an explicit separator, or
-    // the credit reads "Google MapsListings by Example".
-    assert.strictEqual(holder.childNodes[0]?.text, ' \u00b7 ',
-      'a separator precedes the FIRST entry');
-    const nodes = holder.childNodes.filter((n) => n.tagName);
-    assert.strictEqual(nodes.length, 3, 'EVERY returned entry renders — no count cap');
-    assert.strictEqual(nodes[0].tagName, 'A');
-    assert.strictEqual(nodes[0].href, 'https://listings.example.com/p/1');
-    assert.strictEqual(nodes[0].rel, 'noopener noreferrer');
-    assert.strictEqual(nodes[0].textContent, 'Listings by Example');
-    assert.strictEqual(nodes[1].tagName, 'SPAN', 'a null-href entry is plain text');
-    assert.strictEqual(nodes[2].textContent, longName, 'long valid credit is never truncated');
+    // The host text is "Google Maps": every ENTRY gets a leading separator.
     const separators = holder.childNodes.filter((n) => n.text === ' \u00b7 ');
-    assert.strictEqual(separators.length, 3, 'one separator per entry');
+    assert.strictEqual(separators.length, 16, 'one separator per entry — 16 of 16 render');
+    assert.strictEqual(holder.childNodes[0]?.text, ' \u00b7 ',
+      'a separator precedes the FIRST entry (never "Google MapsListings…")');
+    const anchors = holder.childNodes.filter((n) => n.tagName === 'A');
+    assert.strictEqual(anchors.length, 16, 'every linked segment renders as a link');
+    // Structure preservation: the unlinked prefix is a TEXT node, and only
+    // the company name is inside the anchor — link scope is not widened.
+    const prefixIdx = holder.childNodes.findIndex((n) => n.text === 'Listings by ');
+    assert.ok(prefixIdx >= 0, 'the unlinked prefix renders as plain text');
+    assert.strictEqual(holder.childNodes[prefixIdx + 1]?.tagName, 'A');
+    assert.strictEqual(holder.childNodes[prefixIdx + 1]?.textContent, 'Example Company');
+    assert.strictEqual(holder.childNodes[prefixIdx + 1]?.rel, 'noopener noreferrer');
+    const longNode = anchors.find((n) => n.textContent === longName);
+    assert.ok(longNode, 'long valid credit is never truncated');
 
     instance.clearValidation();
     assert.strictEqual(holder.removed, true, 'clearing the selection clears the attribution');
   });
 
-  await check('an unrepresentable attribution FAILS the Details result closed — fallback shows no Details content', async () => {
+  await check('an unrepresentable OR MISSING attribution set fails the Details result closed — fallback shows no Details content', async () => {
     const { instance, input, dispatched } = makeAutocomplete();
     const attributionHost = {
       classList: classList(),
@@ -428,29 +437,39 @@ async function check(name, fn) {
       appendChild(child) { this.children.push(child); return child; }
     };
     instance.selectedAttribution = attributionHost;
-    for (const hostile of [
-      [{ text: '<img src=x onerror=alert(1)>', href: 'javascript:alert(2)' }],
-      [{ text: 'Partner', href: 'http://insecure.example/x' }],
-      [{ text: '', href: 'https://ok.example/x' }],
-      'not-an-array'
-    ]) {
+    const hostileSets = [
+      undefined,                                                        // REQUIRED field missing
+      null,
+      'not-an-array',
+      [{ segments: [{ text: 'Partner', href: 'http://insecure.example/x' }] }],  // https-only
+      [{ segments: [{ text: 'Partner', href: 'javascript:alert(1)' }] }],
+      [{ segments: [{ text: 'Partner' }] }],                            // href must be an OWN property
+      [{ segments: [{ text: 'Partner', href: undefined }] }],           // exactly null or https string
+      [{ segments: [{ text: '', href: 'https://ok.example/x' }] }],     // a link needs a label
+      [{ text: 'flat-shape entry', href: null }],                       // old flat shape refused
+      Array.from({ length: 17 }, (_, i) => (
+        { segments: [{ text: `P${i}`, href: null }] })),                // ceiling: 17 fails
+    ];
+    for (const hostile of hostileSets) {
       dispatched.length = 0;
       attributionHost.children.length = 0;
       instance.fetchWithTimeout = async () => ({
         ok: true,
-        json: async () => ({
-          attributions: hostile,
-          result: {
-            formatted_address: '100 Main St, Miami, FL',
-            geometry: { location: { lat: 25.7, lng: -80.2 } }
-          }
-        })
+        json: async () => {
+          const body = {
+            result: {
+              formatted_address: '100 Main St, Miami, FL',
+              geometry: { location: { lat: 25.7, lng: -80.2 } }
+            }
+          };
+          if (hostile !== undefined) body.attributions = hostile;
+          return body;
+        }
       });
       instance.predictions = [{ place_id: 'ChIJattribution2', description: '100 Main St' }];
       await instance.selectSuggestion(0);
       // The selection still completes — via the prediction-description
-      // fallback, which displays NO Details content and therefore owes no
-      // third-party credit. Google content with partial credit never shows.
+      // fallback, which displays NO Details content and owes no credit.
       assert.strictEqual(instance.isValidated, true, 'the passenger is not stranded');
       assert.strictEqual(input.value, '100 Main St');
       assert.deepStrictEqual(
@@ -471,18 +490,36 @@ async function check(name, fn) {
       'links must be visibly links');
   });
 
-  await check('internal markdown and docs are blocked from public serving, ahead of the catch-all', () => {
-    const mdRule = netlify.indexOf('from = "/*.md"');
-    const docsRule = netlify.indexOf('from = "/docs/*"');
+  await check('every tracked internal .md is UNSERVABLE by an enumerated force-404 rule', () => {
+    // Netlify does not support mid-path splats ("/*.md" silently falls to
+    // the SPA catch-all with 200 — false green), so the rules are
+    // enumerated and THIS inventory walk is the guard: a newly added .md
+    // without a rule fails here before it can ship publicly readable.
     const catchAll = netlify.indexOf('from = "/*"\n');
-    assert.ok(mdRule >= 0, 'the /*.md rule must exist');
-    assert.ok(docsRule >= 0, 'the /docs/* rule must exist');
-    for (const at of [mdRule, docsRule]) {
-      const block = netlify.slice(at, netlify.indexOf('[[redirects]]', at + 1));
-      assert.match(block, /status = 404/);
-      assert.match(block, /force = true/, 'force is required — Netlify otherwise serves the real file');
+    const docsRule = netlify.indexOf('from = "/docs/*"');
+    assert.ok(docsRule >= 0 && docsRule < catchAll, 'the /docs/* rule must precede the catch-all');
+    const walk = (dir) => {
+      const found = [];
+      for (const item of fs.readdirSync(path.join(repoRoot, dir))) {
+        if (item === 'node_modules' || item === '.git' || item === '.claude') continue;
+        const rel = dir ? `${dir}/${item}` : item;
+        const stat = fs.statSync(path.join(repoRoot, rel));
+        if (stat.isDirectory()) found.push(...walk(rel));
+        else if (item.endsWith('.md')) found.push(rel);
+      }
+      return found;
+    };
+    const tracked = walk('');
+    assert.ok(tracked.length >= 15, `sanity: expected the repo's .md inventory, saw ${tracked.length}`);
+    for (const rel of tracked) {
+      if (rel.startsWith('docs/')) continue;   // covered by the /docs/* rule
+      const ruleAt = netlify.indexOf(`from = "/${rel}"`);
+      assert.ok(ruleAt >= 0, `PUBLICLY SERVABLE: /${rel} has no netlify.toml rule — add a force-404 rule`);
+      assert.ok(ruleAt < catchAll, `/${rel} rule must precede the catch-all`);
+      const block = netlify.slice(ruleAt, netlify.indexOf('[[redirects]]', ruleAt + 1));
+      assert.match(block, /status = 404/, `/${rel} rule must be a 404`);
+      assert.match(block, /force = true/, `/${rel} needs force — Netlify otherwise serves the real file`);
     }
-    assert.ok(catchAll > mdRule && catchAll > docsRule, 'blocking rules precede the SPA catch-all');
   });
 
   await check('Places sessions expire after inactivity, not while the passenger is actively typing', () => {

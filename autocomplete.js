@@ -374,28 +374,44 @@ export class CustomAutocomplete {
         }
     }
 
-    // Browser-side attribution boundary. Returns [] when the proxy sent no
-    // attributions, the validated entries when every one is well-formed
-    // ({text, https href|null}), and NULL when ANY entry is invalid — the
-    // caller then fails the Details result closed instead of displaying
-    // Google content with partial or altered credit. HTTPS-only, exactly as
-    // documented; entries are never truncated or dropped.
+    // Browser-side attribution boundary. Entries arrive as ordered SEGMENT
+    // lists ({text, href} with href null for unlinked text) so Google's
+    // published format — unlinked prefixes around a linked name — survives
+    // structurally. Returns the validated entries, or NULL when the set is
+    // unrepresentable, and the caller fails the Details result closed
+    // rather than display Google content with partial or altered credit.
+    // The attributions field itself is REQUIRED (legacy Place Details
+    // always returns the array, even empty): a missing field fails closed
+    // too. Every segment must carry an OWN href property that is exactly
+    // null or a valid https URL — never undefined, never http.
     validAttributionEntries(list) {
-        if (list == null) return [];
         if (!Array.isArray(list) || list.length > 16) return null;
         const out = [];
         for (const entry of list) {
-            const text = typeof entry?.text === 'string' ? entry.text.trim() : '';
-            if (!text || text.length > 1000) return null;
-            let href = entry.href ?? null;
-            if (href !== null) {
-                if (typeof href !== 'string' || href.length > 1000) return null;
-                let parsed;
-                try { parsed = new URL(href); } catch (_) { return null; }
-                if (parsed.protocol !== 'https:') return null;
-                href = parsed.href;
+            if (!entry || typeof entry !== 'object' ||
+                !Array.isArray(entry.segments) ||
+                entry.segments.length === 0 || entry.segments.length > 8) return null;
+            const segments = [];
+            let visible = '';
+            for (const segment of entry.segments) {
+                if (!segment || typeof segment !== 'object' ||
+                    !Object.prototype.hasOwnProperty.call(segment, 'href')) return null;
+                const text = typeof segment.text === 'string' ? segment.text : null;
+                if (text === null || text.length > 1000) return null;
+                let href = segment.href;
+                if (href !== null) {
+                    if (typeof href !== 'string' || href.length > 1000) return null;
+                    let parsed;
+                    try { parsed = new URL(href); } catch (_) { return null; }
+                    if (parsed.protocol !== 'https:') return null;
+                    href = parsed.href;
+                    if (!text.trim()) return null;   // a link needs a visible label
+                }
+                visible += text;
+                segments.push({ text, href });
             }
-            out.push({ text, href });
+            if (!visible.trim()) return null;
+            out.push({ segments });
         }
         return out;
     }
@@ -421,23 +437,24 @@ export class CustomAutocomplete {
         }
         holder.textContent = '';
         for (const entry of attributions) {
-            const text = typeof entry?.text === 'string' ? entry.text : '';
-            if (!text) continue;
-            const href = typeof entry?.href === 'string' && /^https:\/\//i.test(entry.href)
-                ? entry.href : null;
-            let node;
-            if (href) {
-                node = document.createElement('a');
-                node.href = href;
-                node.target = '_blank';
-                node.rel = 'noopener noreferrer';
-                node.textContent = text;
-            } else {
-                node = document.createElement('span');
-                node.textContent = text;
-            }
+            if (!Array.isArray(entry?.segments)) continue;
             holder.appendChild(document.createTextNode(' · '));
-            holder.appendChild(node);
+            for (const segment of entry.segments) {
+                const text = typeof segment?.text === 'string' ? segment.text : '';
+                if (!text) continue;
+                const href = typeof segment?.href === 'string' && /^https:\/\//i.test(segment.href)
+                    ? segment.href : null;
+                if (href) {
+                    const node = document.createElement('a');
+                    node.href = href;
+                    node.target = '_blank';
+                    node.rel = 'noopener noreferrer';
+                    node.textContent = text;
+                    holder.appendChild(node);
+                } else {
+                    holder.appendChild(document.createTextNode(text));
+                }
+            }
         }
     }
 
