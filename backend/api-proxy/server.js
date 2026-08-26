@@ -232,7 +232,10 @@ function parseAttributionEntry(entry) {
     // Optional plain text, exactly ONE anchor whose only attribute is a
     // double-quoted href, optional plain text. Anything else — data-href,
     // target=, script tags, nested markup — refuses to parse, fails closed.
-    const m = entry.match(/^([^<>]*)<a\s+href="([^"<>]+)"\s*>([^<>]*)<\/a>([^<>]*)$/i);
+    // Tag-internal whitespace is HTML's ASCII class ONLY: JS \s would admit
+    // NBSP/Unicode spacing there, converting markup that HTML itself would
+    // NOT parse as an anchor into a clickable link (invented link scope).
+    const m = entry.match(/^([^<>]*)<a[ \t\n\f\r]+href="([^"<>]+)"[ \t\n\f\r]*>([^<>]*)<\/a>([^<>]*)$/i);
     if (!m) return null;
     const before = segmentText(m[1]);
     const label = segmentText(m[3]);

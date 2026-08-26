@@ -302,6 +302,18 @@ async function invokeError(error) {
       }
       assert.strictEqual(testSeam.sanitizeAttributions(['x &amp y']).ok, false,
         'a reference-looking semicolonless sequence fails closed');
+      // Tag-internal whitespace is ASCII-only: HTML would not parse these
+      // as anchors, so accepting them would INVENT a clickable link.
+      assert.strictEqual(testSeam.sanitizeAttributions(['<a\u00a0href="https://p.example/x">P</a>']).ok, false,
+        'NBSP between <a and href fails closed');
+      assert.strictEqual(testSeam.sanitizeAttributions(['<a href="https://p.example/x"\u00a0>P</a>']).ok, false,
+        'NBSP before > fails closed');
+      assert.strictEqual(testSeam.sanitizeAttributions(['<a\u2003href="https://p.example/x">P</a>']).ok, false,
+        'EM SPACE between <a and href fails closed');
+      assert.strictEqual(testSeam.sanitizeAttributions(['<a\u2009href="https://p.example/x"\u00a0>P</a>']).ok, false,
+        'THIN SPACE + NBSP combination fails closed');
+      assert.strictEqual(testSeam.sanitizeAttributions(['<a\thref="https://p.example/x">P</a>']).ok, true,
+        'ASCII tab remains valid HTML tag whitespace');
       assert.strictEqual(testSeam.sanitizeAttributions(
         ['<a href="https://p.example/?q=&amp">P</a>']).ok, false);
 
