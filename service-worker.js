@@ -11,7 +11,9 @@
 // quoting, the submission envelope, and the quiet Refresh-and-Book flow.
 // v1.3.22: Google policy readiness — refreshed landing/booking attribution
 // and autocomplete behavior. Legal pages remain network-first by design.
-const CACHE_NAME = 'linkmia-v1.3.22';
+// v1.3.23: the Maps JavaScript API loads directly from Google through the
+// shared maps-loader; autocomplete remains independent through Railway.
+const CACHE_NAME = 'linkmia-v1.3.23';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';
@@ -27,6 +29,7 @@ const STATIC_CACHE_URLS = [
   '/error-handler.js',
   '/config.js',
   '/api-config.js',
+  '/maps-loader.js',
   '/datetime-utils.js',
   '/pricing.js',
   '/supabase.js',
@@ -99,6 +102,13 @@ self.addEventListener('activate', (event) => {
         );
       })
       .then(() => {
+        // A v1.3.22 worker could briefly network-cache the newly introduced
+        // generated config before this worker took control. Purge that exact
+        // entry during activation; v1.3.23 then bypasses it permanently.
+        return caches.open(RUNTIME_CACHE);
+      })
+      .then((runtimeCache) => runtimeCache.delete('/maps-browser-config.js'))
+      .then(() => {
         console.log('[Service Worker] Activated');
         // Take control of all clients immediately
         return self.clients.claim();
@@ -127,6 +137,13 @@ self.addEventListener('fetch', (event) => {
   // the network directly with no service-worker involvement.
   if (url.origin === self.location.origin &&
       (url.pathname.startsWith('/api/') || url.pathname.startsWith('/.netlify/functions/'))) {
+    return;
+  }
+
+  // This small public file is generated independently for each Netlify
+  // context. Never cache it: a key restriction/rotation must take effect on
+  // the next navigation without waiting for another service-worker version.
+  if (url.origin === self.location.origin && url.pathname === '/maps-browser-config.js') {
     return;
   }
 

@@ -353,6 +353,8 @@
         <a href="/privacy">Privacy</a>
     </nav>
 
+    <script src="/maps-browser-config.js"></script>
+    <script src="/maps-loader.js"></script>
     <script>
         const SUPPORT_PHONE = '+1 (786) 509-3955';
         // Defaults for legacy/unassigned bookings; overwritten from the
@@ -487,9 +489,8 @@
         }
 
         // ===== Live tracking map =====
-        // Same Google Maps loader as the booking page (Railway proxy) —
-        // loaded lazily, only once a ride is actually active.
-        const MAPS_SCRIPT_URL = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
+        // Same direct Google loader as the booking page, loaded lazily only
+        // once a ride is active. A map failure never hides trip status.
         let mapsRequested = false;
         let mapsReady = false;
         let mapsFailed = false;
@@ -498,35 +499,37 @@
         let routeRequested = false;
         let pendingMapBooking = null;
 
-        // The maps proxy serves Google's loader configured to invoke a global
-        // `initGoogleMaps` callback (indexMVP defines its own). This page must
-        // define it too, and must build the map ONLY after the callback fires
-        // — script.onload can precede library readiness, which caused
-        // "initGoogleMaps is not a function" / "google.maps.Map is not a
-        // constructor" in the field.
-        window.initGoogleMaps = function() {
-            mapsReady = true;
-            if (pendingMapBooking) {
-                const b = pendingMapBooking;
-                pendingMapBooking = null;
-                updateLiveMap(b);
-            }
-        };
-
         function loadMapsScript() {
             if (mapsRequested) return;
             mapsRequested = true;
-            const s = document.createElement('script');
-            s.src = MAPS_SCRIPT_URL;
-            s.async = true;
-            // Maps failing must not silence the checkpoint message: hide only
-            // the unusable canvas, keep the card and its honest state line.
-            s.onerror = () => {
+            window.LinkMiaMapsLoader.load()
+                .then(() => Promise.all([
+                    google.maps.importLibrary('maps'),
+                    google.maps.importLibrary('routes'),
+                    google.maps.importLibrary('marker')
+                ]))
+                .then(() => {
+                    mapsReady = true;
+                    if (pendingMapBooking) {
+                        const b = pendingMapBooking;
+                        pendingMapBooking = null;
+                        updateLiveMap(b);
+                    }
+                })
+                .catch(() => {
+                    // Maps failing must not silence the checkpoint message:
+                    // hide only the unusable canvas, keep the honest state.
+                    mapsFailed = true;
+                    $('liveMap').classList.add('hidden');
+                });
+        }
+
+        window.addEventListener('linkmia:maps-error', () => {
+            if (mapsRequested) {
                 mapsFailed = true;
                 $('liveMap').classList.add('hidden');
-            };
-            document.head.appendChild(s);
-        }
+            }
+        });
 
         function initLiveMap(b) {
             liveMap = new google.maps.Map($('liveMap'), {
@@ -570,7 +573,13 @@
         function updateLiveMap(b) {
             const showCard = TRACKING_STATUSES.includes(b.status);
             $('mapCard').classList.toggle('hidden', !showCard);
-            if (!showCard) return;
+            if (!showCard) {
+                // A terminal poll may arrive while the optional Maps loader
+                // is still pending. Do not let its older active-ride snapshot
+                // reopen the map card after this terminal render.
+                pendingMapBooking = null;
+                return;
+            }
 
             // Static verified checkpoint — not live tracking. The text state
             // renders FIRST: it depends only on booking fields and must never

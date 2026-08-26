@@ -22,8 +22,7 @@ export const API_CONFIG = {
     // Google Maps (via proxy for custom autocomplete)
     maps: {
       autocomplete: () => `${API_CONFIG.getMapsProxyUrl()}/api/places/autocomplete`,
-      directions: () => `${API_CONFIG.getMapsProxyUrl()}/api/directions`,
-      mapsScript: () => `${API_CONFIG.getMapsProxyUrl()}/api/maps-script`
+      directions: () => `${API_CONFIG.getMapsProxyUrl()}/api/directions`
     },
     
     // Netlify Functions (serverless)

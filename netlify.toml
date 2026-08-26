@@ -2,6 +2,11 @@
 # This file configures how Netlify builds and serves your site
 
 [build]
+  # Inject the dedicated public browser key into a generated runtime config.
+  # The key is still visible in the browser by design; GCP website + API
+  # restrictions provide the security. Production/preview builds fail closed
+  # if their context-specific value has not been configured.
+  command = "node scripts/generate-maps-browser-config.js"
   # Directory with serverless functions
   functions = "backend/functions"
   # Directory to publish (your site root)
@@ -255,6 +260,12 @@
   status = 200
 
 # Headers for JavaScript files
+[[headers]]
+  for = "/maps-browser-config.js"
+  [headers.values]
+    Content-Type = "application/javascript"
+    Cache-Control = "private, no-store, max-age=0"
+
 [[headers]]
   for = "/*.js"
   [headers.values]

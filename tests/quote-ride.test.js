@@ -1325,7 +1325,7 @@ async function check(name, fn) {
     const worker = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
     const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(cacheName, 'linkmia-v1.3.22', 'policy readiness ships with the reviewed cache bump');
+    assert.strictEqual(cacheName, 'linkmia-v1.3.23', 'direct Maps loader ships with the reviewed cache bump');
     // The bump is only meaningful if BOTH changed assets are actually in the
     // precache list — a dropped entry would serve a stale page under a new
     // cache name.

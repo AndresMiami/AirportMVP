@@ -719,6 +719,9 @@
     <!-- Core Utilities - Load First -->
     <script src="./debug.js"></script>
     <script src="./error-handler.js"></script>
+    <!-- Public, deploy-generated Maps browser key + direct Google loader. -->
+    <script src="/maps-browser-config.js"></script>
+    <script src="/maps-loader.js"></script>
     
     <!-- Stripe SDK - Load before payment modules -->
     <script src="https://js.stripe.com/v3/"></script>
@@ -944,10 +947,7 @@
                 debug.info(`Found ${this.els.modeBtns.length} mode buttons, ${this.els.airportOptions.length} airport options`);
             }
             
-            async initializeAutocomplete(retryCount = 0) {
-                const MAX_RETRIES = 5;
-                const RETRY_DELAY = 500; // ms
-
+            async initializeAutocomplete() {
                 try {
                     // Check if required elements exist
                     if (!this.els.addressInput) {
@@ -959,29 +959,15 @@
                         return;
                     }
 
-                    // Wait for Google Maps to load with retry mechanism
-                    if (typeof google === 'undefined' || !google.maps) {
-                        if (retryCount < MAX_RETRIES) {
-                            console.log(`⏳ Google Maps not ready, retrying in ${RETRY_DELAY}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-                            if (this.els.addressInput) {
-                                this.els.addressInput.placeholder = 'Loading maps...';
-                            }
-                            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-                            return this.initializeAutocomplete(retryCount + 1);
-                        }
-                        throw new Error('Google Maps not loaded after retries');
-                    }
-                    
                     // Show loading state
                     if (this.els.addressInput) {
                         this.els.addressInput.placeholder = 'Loading address search...';
                     }
                     
-                    const [placesLib, autocompleteModule] = await Promise.all([
-                        google.maps.importLibrary("places"),
-                        import('./autocomplete.js')
-                    ]);
-                    
+                    // Address suggestions/details are LinkMia's custom
+                    // Railway-backed flow. They do not depend on the optional
+                    // Google map renderer or its browser key.
+                    const autocompleteModule = await import('./autocomplete.js');
                     const { CustomAutocomplete } = autocompleteModule;
                     
                     this.autocomplete = new CustomAutocomplete(
@@ -2708,10 +2694,26 @@
             
             async updateVehicleMap() {
                 if (!this.els.vehicleMap) return;
+                const mapRequestSeq = (this._vehicleMapRequestSeq || 0) + 1;
+                this._vehicleMapRequestSeq = mapRequestSeq;
                 
                 try {
+                    // Maps are optional presentation. A loader/key failure is
+                    // caught below and must never block address search, quote,
+                    // or booking submission.
+                    await window.LinkMiaMapsLoader.load();
+                    if (mapRequestSeq !== this._vehicleMapRequestSeq ||
+                        this.state.ui.currentPanel !== 'vehicle') return;
                     if (!this.vehicleMap) {
-                        await google.maps.importLibrary("maps");
+                        await Promise.all([
+                            google.maps.importLibrary("maps"),
+                            google.maps.importLibrary("routes")
+                        ]);
+                        // A second Vehicle render may have started while the
+                        // optional libraries loaded. Only the newest render
+                        // may create the map or spend a Directions request.
+                        if (mapRequestSeq !== this._vehicleMapRequestSeq ||
+                            this.state.ui.currentPanel !== 'vehicle') return;
                         
                         const mapOptions = {
                             center: { lat: 25.7617, lng: -80.1918 },
@@ -2750,6 +2752,9 @@
                         // Initialize DirectionsService for map display
                         this.directionsService = new google.maps.DirectionsService();
                     }
+
+                    if (mapRequestSeq !== this._vehicleMapRequestSeq ||
+                        this.state.ui.currentPanel !== 'vehicle') return;
                     
                     if (this.state.locations.address && this.state.locations.airport) {
                         const airportCoords = this.getAirportCoordinates(this.state.locations.airport.code);
@@ -2770,7 +2775,9 @@
                         };
                         
                         this.directionsService.route(request, (result, status) => {
-                            if (status === google.maps.DirectionsStatus.OK) {
+                            if (mapRequestSeq === this._vehicleMapRequestSeq &&
+                                this.state.ui.currentPanel === 'vehicle' &&
+                                status === google.maps.DirectionsStatus.OK) {
                                 this.directionsRenderer.setDirections(result);
                             }
                         });
@@ -4278,105 +4285,6 @@
                 app.navigateToPanel('when');
             }
         };
-
-        // Google Maps initialization
-        window.initGoogleMaps = function() {
-            console.log('🗺️ Google Maps callback triggered');
-            
-            // Wait a moment to ensure the app is fully initialized
-            setTimeout(() => {
-                if (window.airportApp) {
-                    console.log('🔄 Initializing autocomplete...');
-                    
-                    // Ensure elements are cached before initializing autocomplete
-                    if (!window.airportApp.els.addressInput) {
-                        console.log('🔄 Re-caching elements for autocomplete...');
-                        window.airportApp.cacheElements();
-                    }
-                    
-                    // Autocomplete now loads lazily on first focus
-                    // window.airportApp.initializeAutocomplete();
-                } else {
-                    console.warn('⚠️ AirportApp not yet initialized, retrying...');
-                    // Retry after a short delay
-                    setTimeout(() => {
-                        if (window.airportApp) {
-                            // Autocomplete now loads lazily on first focus
-                    // window.airportApp.initializeAutocomplete();
-                        } else {
-                            console.error('❌ AirportApp still not available after retry');
-                        }
-                    }, 500);
-                }
-            }, 100);
-        };
-
-        // Global callback function for Google Maps
-        window.initGoogleMaps = function() {
-            console.log('✅ Google Maps initialized successfully');
-            
-            // Initialize autocomplete when Google Maps is ready
-            // Wait a bit to ensure the app is fully initialized
-            setTimeout(() => {
-                if (window.airportApp) {
-                    try {
-                        // Autocomplete now loads lazily on first focus
-                    // window.airportApp.initializeAutocomplete();
-                        console.log('✅ Autocomplete initialized from Google Maps callback');
-                    } catch (error) {
-                        console.error('❌ Failed to initialize autocomplete:', error);
-                    }
-                } else {
-                    console.warn('⚠️ AirportApp not yet initialized when Google Maps loaded');
-                    // Try again in a moment
-                    setTimeout(() => {
-                        if (window.airportApp) {
-                            try {
-                                // Autocomplete now loads lazily on first focus
-                    // window.airportApp.initializeAutocomplete();
-                                console.log('✅ Autocomplete initialized (delayed)');
-                            } catch (error) {
-                                console.error('❌ Failed to initialize autocomplete (delayed):', error);
-                            }
-                        }
-                    }, 500);
-                }
-            }, 100);
-        };
-
-        // Load Google Maps script from proxy
-        const script = document.createElement('script');
-
-        // Use Railway proxy for Google Maps script
-        const apiUrl = 'https://reliable-warmth-production-d382.up.railway.app/api/maps-script';
-
-        debug.network('GET', apiUrl, { source: 'Google Maps Script' });
-        script.src = apiUrl;
-        script.async = true;  // Use async for better performance (fixes Google Maps warning)
-
-        // Timeout handling for slow networks
-        const scriptTimeout = setTimeout(() => {
-            if (!window.google || !window.google.maps) {
-                console.warn('⏱️ Google Maps taking longer than expected to load...');
-                showNetworkWarning('Maps loading slowly. Please wait or check your connection.');
-            }
-        }, 10000); // 10 second warning
-
-        // Add success handling
-        script.onload = function() {
-            clearTimeout(scriptTimeout);
-            debug.success('Google Maps script loaded from proxy');
-        };
-
-        // Add error handling for script loading
-        script.onerror = function() {
-            clearTimeout(scriptTimeout);
-            debug.error('Failed to load Google Maps from proxy. Please ensure the server is running on port 3001.');
-            showNetworkWarning('Unable to load maps. Please check your internet connection.');
-            // Note: No fallback with exposed API key - proxy is required for security
-        };
-        
-        document.head.appendChild(script);
 
         // Initialize Application with proper timing
         // Carousel is now loaded as standalone component

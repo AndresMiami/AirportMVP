@@ -54,7 +54,7 @@ function response(status, body = {}) {
 
 // `storage` may be shared between harnesses to simulate a RELOAD of the
 // same browser (persistent localStorage identity — poll anchor + budget).
-function createHarness(responses, storage = new Map()) {
+function createHarness(responses, storage = new Map(), { mapsLoad } = {}) {
   const elements = new Map();
   const hiddenIds = new Set([
     'tripView', 'pausedCard', 'pausedNote', 'mapCard', 'liveMap', 'waBtn',
@@ -67,6 +67,7 @@ function createHarness(responses, storage = new Map()) {
   };
 
   const visibilityListeners = [];
+  const windowListeners = new Map();
   const timers = new Map();
   let nextTimerId = 1;
   let fetchCount = 0;
@@ -114,10 +115,29 @@ function createHarness(responses, storage = new Map()) {
     JSON,
     encodeURIComponent,
     window: {
-      parent: { postMessage() {} }
+      parent: { postMessage() {} },
+      LinkMiaMapsLoader: { load: mapsLoad || (() => Promise.reject(new Error('maps disabled in harness'))) },
+      addEventListener(type, fn) {
+        if (!windowListeners.has(type)) windowListeners.set(type, []);
+        windowListeners.get(type).push(fn);
+      },
+      dispatchEvent(event) {
+        for (const fn of windowListeners.get(event.type) || []) fn(event);
+      }
     }
   };
   context.window.window = context.window;
+  context.google = {
+    maps: {
+      importLibrary: async () => ({}),
+      Map: class FakeMap {},
+      Marker: class FakeMarker {},
+      DirectionsRenderer: class FakeDirectionsRenderer {},
+      DirectionsService: class FakeDirectionsService {},
+      SymbolPath: { CIRCLE: 'CIRCLE' },
+      TravelMode: { DRIVING: 'DRIVING' }
+    }
+  };
   vm.createContext(context);
   vm.runInContext(tripScript, context, { filename: 'trip.html:inline-script' });
 
@@ -272,6 +292,31 @@ function check(name, fn) {
   check('terminal status never restarts on visibility return', () => {
     assert.strictEqual(terminal.fetchCount, 1);
     assert.strictEqual(terminal.timers.size, 0);
+  });
+
+  let finishMapsLoad;
+  const delayedMaps = new Promise((resolve) => { finishMapsLoad = resolve; });
+  const activeBooking = {
+    ...pendingBooking,
+    status: 'on_the_way',
+    driver_lat: 25.76,
+    driver_lng: -80.19,
+    driver_location_at: new Date().toISOString()
+  };
+  const activeToTerminal = createHarness([
+    response(200, { booking: activeBooking, driver: null }),
+    response(200, { booking: terminalBooking, driver: null })
+  ], new Map(), { mapsLoad: () => delayedMaps });
+  await activeToTerminal.settle();
+  assert.ok(!activeToTerminal.element('mapCard').classList.contains('hidden'));
+  await activeToTerminal.runNextTimer();
+  check('terminal status clears an active map snapshot pending behind the loader', () => {
+    assert.ok(activeToTerminal.element('mapCard').classList.contains('hidden'));
+  });
+  finishMapsLoad({});
+  await activeToTerminal.settle();
+  check('late Maps readiness cannot reopen a terminal trip map', () => {
+    assert.ok(activeToTerminal.element('mapCard').classList.contains('hidden'));
   });
 
   let finishSlowRequest;
