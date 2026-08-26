@@ -66,11 +66,14 @@ const AIRPORTS = Object.freeze({
 // so neither the bound nor the class is the only thing standing between
 // a client string and a request URL.
 //
-// ONE CONTRACT, BOTH DIRECTIONS: this is the ONLY place-id validator,
-// applied identically to a client's submitted id and to Google's
-// returned id. Validating them differently is what lets the service
-// hand the browser a "canonical" id that its own next request would
-// reject with 400.
+// ONE CONTRACT, BOTH DIRECTIONS: this is the CANONICAL place-id
+// validator, applied identically to a client's submitted id and to
+// Google's returned id. (backend/api-proxy/server.js carries a
+// deployment-isolated PINNED COPY — Railway's root pulls only that
+// directory, so it cannot import this module — kept identical by the
+// parity checks in tests/maps-proxy-policy.test.js.) Validating the
+// two directions differently is what lets the service hand the browser
+// a "canonical" id that its own next request would reject with 400.
 const MAX_PLACE_ID_LEN = 2048;
 const PLACE_ID_RE = new RegExp(`^[A-Za-z0-9_-]{10,${MAX_PLACE_ID_LEN}}$`);
 
@@ -169,5 +172,8 @@ module.exports = {
   airportByCode,
   isValidPlaceId,
   resolvePlace,
-  MAX_PLACE_ID_LEN
+  MAX_PLACE_ID_LEN,
+  // Exported for the exact drift guard in tests/maps-proxy-policy.test.js:
+  // the proxy's deployment-isolated pinned copy must match this source.
+  PLACE_ID_RE
 };

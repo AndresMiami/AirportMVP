@@ -5,7 +5,7 @@
  * 
  * Google Maps Places Autocomplete wrapper with:
  * - Session token management for cost optimization
- * - Result caching to minimize API calls
+ * - Live results only (Google prediction content is never cached or reused)
  * - Keyboard navigation support
  * - Custom styling and validation
  * 
@@ -30,22 +30,20 @@ export class CustomAutocomplete {
         
         // Session management
         this.sessionToken = null;
-        this.sessionStartTime = null;
+        this.sessionLastActivityTime = null;
         this.sessionRequestCount = 0;
-        this.maxSessionRequests = 10;
         this.sessionDuration = 3 * 60 * 1000; // 3 minutes
-        
-        // Caching
-        this.suggestionCache = new Map();
-        this.cacheTTL = 5 * 60 * 1000; // 5 minutes
-        
+
         // State
         this.predictions = [];
         this.selectedIndex = -1;
         this.debounceTimer = null;
+        this.requestSequence = 0;
+        this.selectionSequence = 0;
         this.selectedPlace = null;
         this.isValidated = false;
-        this.lastInput = '';
+        this.selectedAttribution = this.input.closest?.('.input-wrapper')
+            ?.querySelector?.('.selected-place-attribution') || null;
         
         this.init();
     }
@@ -129,123 +127,27 @@ export class CustomAutocomplete {
 
     generateSessionToken() {
         this.sessionToken = this.newSessionUuid();
-        this.sessionStartTime = Date.now();
+        this.sessionLastActivityTime = Date.now();
         this.sessionRequestCount = 0;
-        console.log('Generated new session token:', this.sessionToken);
     }
 
     shouldGenerateNewSession() {
-        if (!this.sessionToken || !this.sessionStartTime) return true;
+        if (!this.sessionToken || !this.sessionLastActivityTime) return true;
         
-        const elapsed = Date.now() - this.sessionStartTime;
-        const sessionExpired = elapsed > this.sessionDuration;
-        const maxRequestsReached = this.sessionRequestCount >= this.maxSessionRequests;
-        
-        return sessionExpired || maxRequestsReached;
+        const elapsed = Date.now() - this.sessionLastActivityTime;
+        return elapsed > this.sessionDuration;
     }
 
     clearSession() {
-        console.log('Clearing session token:', this.sessionToken);
         this.sessionToken = null;
-        this.sessionStartTime = null;
+        this.sessionLastActivityTime = null;
         this.sessionRequestCount = 0;
-    }
-
-    // Cache management
-    getCacheKey(input) {
-        return `autocomplete_${input.toLowerCase()}`;
-    }
-
-    getCachedSuggestions(input) {
-        const cacheKey = this.getCacheKey(input);
-        const cached = this.suggestionCache.get(cacheKey);
-        
-        if (cached && (Date.now() - cached.timestamp) < this.cacheTTL) {
-            console.log('Cache hit for:', input);
-            return cached.data;
-        }
-        
-        if (cached) {
-            this.suggestionCache.delete(cacheKey);
-        }
-        return null;
-    }
-
-    setCachedSuggestions(input, data) {
-        const cacheKey = this.getCacheKey(input);
-        this.suggestionCache.set(cacheKey, {
-            data: data,
-            timestamp: Date.now()
-        });
-        
-        // Cleanup old cache entries
-        if (this.suggestionCache.size > 50) {
-            const oldestKey = this.suggestionCache.keys().next().value;
-            this.suggestionCache.delete(oldestKey);
-        }
-    }
-
-    // Check if input change is minor (for local filtering)
-    isMinorChange(newInput, oldInput) {
-        if (!oldInput || oldInput.length === 0) return false;
-        if (newInput.length < oldInput.length) return false; // User is deleting
-        
-        const similarity = this.calculateSimilarity(newInput.toLowerCase(), oldInput.toLowerCase());
-        return similarity > 0.8 && newInput.toLowerCase().startsWith(oldInput.toLowerCase());
-    }
-
-    calculateSimilarity(str1, str2) {
-        const longer = str1.length > str2.length ? str1 : str2;
-        const shorter = str1.length > str2.length ? str2 : str1;
-        
-        if (longer.length === 0) return 1.0;
-        
-        const distance = this.levenshteinDistance(longer, shorter);
-        return (longer.length - distance) / longer.length;
-    }
-
-    levenshteinDistance(str1, str2) {
-        const matrix = [];
-        for (let i = 0; i <= str2.length; i++) {
-            matrix[i] = [i];
-        }
-        for (let j = 0; j <= str1.length; j++) {
-            matrix[0][j] = j;
-        }
-        for (let i = 1; i <= str2.length; i++) {
-            for (let j = 1; j <= str1.length; j++) {
-                if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-                    matrix[i][j] = matrix[i - 1][j - 1];
-                } else {
-                    matrix[i][j] = Math.min(
-                        matrix[i - 1][j - 1] + 1,
-                        matrix[i][j - 1] + 1,
-                        matrix[i - 1][j] + 1
-                    );
-                }
-            }
-        }
-        return matrix[str2.length][str1.length];
-    }
-
-    // Filter existing predictions for minor changes
-    filterPredictions(input, predictions) {
-        if (!predictions || predictions.length === 0) return [];
-        
-        const lowerInput = input.toLowerCase();
-        return predictions.filter(prediction => {
-            const description = prediction.description || '';
-            const mainText = prediction.structured_formatting?.main_text || '';
-            const secondaryText = prediction.structured_formatting?.secondary_text || '';
-            
-            return description.toLowerCase().includes(lowerInput) ||
-                   mainText.toLowerCase().includes(lowerInput) ||
-                   secondaryText.toLowerCase().includes(lowerInput);
-        });
     }
 
     async handleInput(e) {
         const value = e.target.value.trim();
+        const requestSequence = ++this.requestSequence;
+        ++this.selectionSequence;
         
         if (this.isValidated) {
             this.clearValidation();
@@ -258,58 +160,33 @@ export class CustomAutocomplete {
         
         // Minimum 3 characters
         if (value.length < 3) {
-            this.hideSuggestions();
-            this.lastInput = value;
+            this.clearSuggestions();
             return;
         }
         
         // Increased debounce to 500ms for cost optimization
         this.debounceTimer = setTimeout(() => {
-            this.fetchSuggestions(value);
+            this.fetchSuggestions(value, requestSequence);
         }, 500);
     }
 
-    async fetchSuggestions(input) {
+    async fetchSuggestions(input, requestSequence = ++this.requestSequence) {
         try {
-            // Check cache first
-            const cached = this.getCachedSuggestions(input);
-            if (cached) {
-                this.predictions = cached;
-                this.renderSuggestions(this.predictions);
-                this.lastInput = input;
-                return;
-            }
-            
-            // Check if this is a minor change and we can filter existing results
-            if (this.isMinorChange(input, this.lastInput) && this.predictions.length > 0) {
-                console.log('Filtering existing predictions for minor change');
-                const filtered = this.filterPredictions(input, this.predictions);
-                if (filtered.length > 0) {
-                    this.predictions = filtered;
-                    this.renderSuggestions(this.predictions);
-                    this.lastInput = input;
-                    return;
-                }
-            }
-            
             this.showLoading();
             
             // Session management
             if (this.shouldGenerateNewSession()) {
                 this.generateSessionToken();
             }
-            
+
+            this.sessionLastActivityTime = Date.now();
             this.sessionRequestCount++;
             
             const params = new URLSearchParams({
                 input: input,
-                sessiontoken: this.sessionToken,
-                location: `${25.7617},${-80.1918}`,
-                radius: '30000'
+                sessiontoken: this.sessionToken
             });
             
-            console.log('Making API request for:', input, 'Session:', this.sessionToken, 'Count:', this.sessionRequestCount);
-
             // Use Railway proxy for autocomplete
             // For local testing, use production proxy (localhost:3001 requires running backend locally)
             const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
@@ -320,25 +197,19 @@ export class CustomAutocomplete {
             }
 
             const data = await response.json();
-            console.log('📦 API response data:', data);
+            if (requestSequence !== this.requestSequence || this.input.value.trim() !== input) {
+                return;
+            }
             this.predictions = data.predictions || [];
-            console.log('📊 Predictions count:', this.predictions.length);
-            
-            // Cache the results
-            this.setCachedSuggestions(input, this.predictions);
-            
             this.renderSuggestions(this.predictions);
-            this.lastInput = input;
-            
         } catch (error) {
-            console.error('Autocomplete error:', error);
+            if (requestSequence !== this.requestSequence) return;
+            console.error('Autocomplete request unavailable');
             this.showError();
         }
     }
 
     renderSuggestions(suggestions) {
-        console.log('🎨 renderSuggestions called with:', suggestions?.length, 'items');
-        console.log('📍 suggestionsContainer:', this.suggestionsContainer);
         if (!suggestions || suggestions.length === 0) {
             this.suggestionsContainer.innerHTML = '<div class="no-results">No results found</div>';
             this.showSuggestions();
@@ -371,7 +242,11 @@ export class CustomAutocomplete {
             `;
         }).join('');
         
-        this.suggestionsContainer.innerHTML = html;
+        this.suggestionsContainer.innerHTML = html +
+            '<div class="google-maps-attribution">' +
+                '<img src="/images/google-maps-attribution-dark-gray.svg" ' +
+                     'alt="Google Maps" width="98" height="18">' +
+            '</div>';
         this.showSuggestions();
         
         this.suggestionsContainer.querySelectorAll('.suggestion-item').forEach(item => {
@@ -385,105 +260,201 @@ export class CustomAutocomplete {
     async selectSuggestion(index) {
         const suggestion = this.predictions[index];
         if (!suggestion) return;
-        
-        try {
-            const prediction = suggestion;
-            let place;
-            
-            try {
-                // Ensure we have a session token for place details
-                if (!this.sessionToken) {
-                    this.generateSessionToken();
-                }
-                
-                this.sessionRequestCount++;
-                
-                // Use proxy endpoint for place details
-                const params = new URLSearchParams({
-                    place_id: prediction.place_id,
-                    fields: 'name,formatted_address,geometry',
-                    sessiontoken: this.sessionToken
-                });
-                
-                console.log('Fetching place details with session:', this.sessionToken);
-                
-                // Use Railway proxy for place details
-                // For local testing, use production proxy (localhost:3001 requires running backend locally)
-                const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
-                const response = await this.fetchWithTimeout(`${apiBase}/api/places/details?${params}`, {}, 10000);
 
-                if (response.ok) {
-                    const data = await response.json();
-                    place = {
-                        id: prediction.place_id,
-                        formattedAddress: data.result.formatted_address,
-                        displayName: { text: data.result.name || data.result.formatted_address },
-                        location: {
-                            lat: data.result.geometry.location.lat,
-                            lng: data.result.geometry.location.lng
-                        }
-                    };
-                } else {
-                    throw new Error('Failed to fetch place details');
-                }
-            } catch (placeError) {
-                console.error('Place details error:', placeError);
-                place = {
-                    id: prediction.place_id,
-                    formattedAddress: prediction.description,
-                    displayName: { text: prediction.description },
-                    location: { lat: 0, lng: 0 }
-                };
+        const selectionSequence = ++this.selectionSequence;
+        const prediction = suggestion;
+        try {
+            // Ensure we have a session token for place details.
+            if (!this.sessionToken) {
+                this.generateSessionToken();
             }
-            
-            const address = place.formattedAddress || place.displayName?.text || '';
-            this.input.value = address;
-            
-            this.selectedPlace = {
-                place_id: place.id,
-                description: address
+
+            this.sessionLastActivityTime = Date.now();
+            this.sessionRequestCount++;
+
+            // The Railway proxy owns the provider field mask. The browser may
+            // identify the selected place but cannot expand Google content.
+            const params = new URLSearchParams({
+                place_id: prediction.place_id,
+                sessiontoken: this.sessionToken
+            });
+
+            const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
+            const response = await this.fetchWithTimeout(`${apiBase}/api/places/details?${params}`, {}, 10000);
+            if (!response.ok) throw new Error('Place details unavailable');
+
+            const data = await response.json();
+            if (selectionSequence !== this.selectionSequence) return;
+            if (!data.result?.formatted_address || !data.result?.geometry?.location) {
+                throw new Error('Incomplete place details');
+            }
+            // Google's contract requires displaying EVERY returned
+            // third-party attribution. The proxy already fails closed on
+            // unrepresentable sets; this re-validation is the browser's own
+            // boundary — if any entry is invalid here, the Details result
+            // is treated as failed and the prediction-description fallback
+            // (which shows no Details content) takes over.
+            const attributions = this.validAttributionEntries(data.attributions);
+            if (attributions === null) {
+                throw new Error('Attribution unrepresentable');
+            }
+            const place = {
+                id: prediction.place_id,
+                formattedAddress: data.result.formatted_address,
+                displayName: { text: data.result.formatted_address },
+                location: {
+                    lat: data.result.geometry.location.lat,
+                    lng: data.result.geometry.location.lng
+                },
+                attributions
             };
-            this.isValidated = true;
-            this.input.classList.add('validated');
-            this.input.classList.remove('error');
-            
-            if (document.getElementById('addressError')) {
-                document.getElementById('addressError').classList.remove('visible');
-            }
-            
-            if (this.onSelect) {
-                this.onSelect({
-                    address: address,
-                    coordinates: place.location ? {
-                        lat: typeof place.location.lat === 'function' ? place.location.lat() : place.location.lat,
-                        lng: typeof place.location.lng === 'function' ? place.location.lng() : place.location.lng
-                    } : null,
-                    place: place
-                });
-            }
-            
-            this.input.dispatchEvent(new CustomEvent('place-selected', { 
-                detail: { 
-                    placeId: place.id, 
-                    description: address
-                } 
-            }));
-            
-            this.input.dispatchEvent(new CustomEvent('place-coordinates', {
-                detail: {
-                    lat: typeof place.location.lat === 'function' ? place.location.lat() : place.location.lat,
-                    lng: typeof place.location.lng === 'function' ? place.location.lng() : place.location.lng,
-                    address: address
-                }
-            }));
-            
-            // Clear session after successful place selection
-            this.clearSession();
-            this.hideSuggestions();
-            this.selectedIndex = -1;
-            
+            this.applySelection(place);
         } catch (error) {
-            console.error('Selection error:', error);
+            if (selectionSequence !== this.selectionSequence) return;
+            // A transient Details failure must not strand a passenger after a
+            // deliberate live prediction selection. Preserve the Google
+            // prediction's ID and visible description, but never manufacture
+            // coordinates (the former 0,0 fallback silently routed to the
+            // wrong continent). The authoritative quote service will resolve
+            // the Place ID again before it can price an enabled booking.
+            const description = typeof prediction.description === 'string'
+                ? prediction.description.trim()
+                : '';
+            if (!description || typeof prediction.place_id !== 'string') {
+                console.error('Place details unavailable');
+                this.showError();
+                return;
+            }
+            console.error('Place details unavailable; using selected prediction');
+            this.applySelection({
+                id: prediction.place_id,
+                formattedAddress: description,
+                displayName: { text: description },
+                location: { lat: null, lng: null },
+                attributions: []
+            });
+        }
+    }
+
+    applySelection(place) {
+        const address = place.formattedAddress || place.displayName?.text || '';
+        this.input.value = address;
+
+        this.selectedPlace = { place_id: place.id, description: address };
+        this.isValidated = true;
+        this.input.classList.add('validated');
+        this.input.classList.remove('error');
+        this.setSelectedAttributionVisible(true);
+        this.renderThirdPartyAttributions(place.attributions || []);
+
+        if (document.getElementById('addressError')) {
+            document.getElementById('addressError').classList.remove('visible');
+        }
+
+        const rawLat = typeof place.location?.lat === 'function' ? place.location.lat() : place.location?.lat;
+        const rawLng = typeof place.location?.lng === 'function' ? place.location.lng() : place.location?.lng;
+        const lat = Number.isFinite(rawLat) ? rawLat : null;
+        const lng = Number.isFinite(rawLng) ? rawLng : null;
+        if (this.onSelect) this.onSelect({ address, coordinates: { lat, lng }, place });
+
+        this.input.dispatchEvent(new CustomEvent('place-selected', {
+            detail: { placeId: place.id, description: address }
+        }));
+        this.input.dispatchEvent(new CustomEvent('place-coordinates', {
+            detail: { lat, lng, address }
+        }));
+
+        this.clearSession();
+        this.clearSuggestions();
+    }
+
+    setSelectedAttributionVisible(visible) {
+        if (this.selectedAttribution) {
+            this.selectedAttribution.classList.toggle('visible', visible);
+        }
+    }
+
+    // Browser-side attribution boundary. Entries arrive as ordered SEGMENT
+    // lists ({text, href} with href null for unlinked text) so Google's
+    // published format — unlinked prefixes around a linked name — survives
+    // structurally. Returns the validated entries, or NULL when the set is
+    // unrepresentable, and the caller fails the Details result closed
+    // rather than display Google content with partial or altered credit.
+    // The attributions field itself is REQUIRED (legacy Place Details
+    // always returns the array, even empty): a missing field fails closed
+    // too. Every segment must carry an OWN href property that is exactly
+    // null or a valid https URL — never undefined, never http.
+    validAttributionEntries(list) {
+        if (!Array.isArray(list) || list.length > 16) return null;
+        const out = [];
+        for (const entry of list) {
+            if (!entry || typeof entry !== 'object' ||
+                !Array.isArray(entry.segments) ||
+                entry.segments.length === 0 || entry.segments.length > 8) return null;
+            const segments = [];
+            let visible = '';
+            for (const segment of entry.segments) {
+                if (!segment || typeof segment !== 'object' ||
+                    !Object.prototype.hasOwnProperty.call(segment, 'href')) return null;
+                const text = typeof segment.text === 'string' ? segment.text : null;
+                if (text === null || text.length > 1000) return null;
+                let href = segment.href;
+                if (href !== null) {
+                    if (typeof href !== 'string' || href.length > 1000) return null;
+                    let parsed;
+                    try { parsed = new URL(href); } catch (_) { return null; }
+                    if (parsed.protocol !== 'https:') return null;
+                    href = parsed.href;
+                    if (!text.trim()) return null;   // a link needs a visible label
+                }
+                visible += text;
+                segments.push({ text, href });
+            }
+            if (!visible.trim()) return null;
+            out.push({ segments });
+        }
+        return out;
+    }
+
+    // Third-party attributions (Google policy): render EVERY validated
+    // {text, href} entry beside the Google Maps attribution. The host
+    // element begins with the text "Google Maps", so every entry — the
+    // first included — is preceded by an explicit ' · ' separator. DOM is
+    // built with textContent and validated https hrefs only — provider
+    // strings are never interpreted as HTML here, whatever the server sends.
+    renderThirdPartyAttributions(attributions) {
+        if (!this.selectedAttribution ||
+            typeof this.selectedAttribution.querySelector !== 'function') return;
+        let holder = this.selectedAttribution.querySelector('.third-party-attribution');
+        if (!Array.isArray(attributions) || attributions.length === 0) {
+            if (holder) holder.remove();
+            return;
+        }
+        if (!holder) {
+            holder = document.createElement('span');
+            holder.className = 'third-party-attribution';
+            this.selectedAttribution.appendChild(holder);
+        }
+        holder.textContent = '';
+        for (const entry of attributions) {
+            if (!Array.isArray(entry?.segments)) continue;
+            holder.appendChild(document.createTextNode(' · '));
+            for (const segment of entry.segments) {
+                const text = typeof segment?.text === 'string' ? segment.text : '';
+                if (!text) continue;
+                const href = typeof segment?.href === 'string' && /^https:\/\//i.test(segment.href)
+                    ? segment.href : null;
+                if (href) {
+                    const node = document.createElement('a');
+                    node.href = href;
+                    node.target = '_blank';
+                    node.rel = 'noopener noreferrer';
+                    node.textContent = text;
+                    holder.appendChild(node);
+                } else {
+                    holder.appendChild(document.createTextNode(text));
+                }
+            }
         }
     }
 
@@ -508,9 +479,22 @@ export class CustomAutocomplete {
                 }
                 break;
             case 'Escape':
-                this.hideSuggestions();
+                ++this.selectionSequence;
+                this.cancelPendingSuggestions();
+                this.clearSuggestions();
                 break;
         }
+    }
+
+    // A dismissed dropdown must STAY dismissed: kill the queued debounce and
+    // invalidate any in-flight prediction request, so a late response can
+    // never re-render the private address list after Escape or blur.
+    cancelPendingSuggestions() {
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+        ++this.requestSequence;
     }
 
     highlightItem() {
@@ -525,13 +509,22 @@ export class CustomAutocomplete {
     }
 
     handleBlur() {
+        // Cancel pending work immediately; the 200ms delay below exists only
+        // so a click on a suggestion can land before the list clears.
+        this.cancelPendingSuggestions();
         setTimeout(() => {
-            this.hideSuggestions();
+            this.clearSuggestions();
         }, 200);
     }
 
+    clearSuggestions() {
+        this.predictions = [];
+        this.selectedIndex = -1;
+        this.suggestionsContainer.innerHTML = '';
+        this.hideSuggestions();
+    }
+
     showSuggestions() {
-        console.log('👁️ showSuggestions called, adding .visible class');
         this.suggestionsContainer.classList.add('visible');
     }
 
@@ -547,6 +540,8 @@ export class CustomAutocomplete {
     clearValidation() {
         this.isValidated = false;
         this.selectedPlace = null;
+        this.setSelectedAttributionVisible(false);
+        this.renderThirdPartyAttributions([]);
         this.input.classList.remove('validated');
         this.input.classList.remove('error');
         if (document.getElementById('addressError')) {
@@ -555,6 +550,8 @@ export class CustomAutocomplete {
     }
 
     showError() {
+        this.predictions = [];
+        this.selectedIndex = -1;
         this.suggestionsContainer.innerHTML = '<div class="no-results">Error loading suggestions</div>';
         this.showSuggestions();
         if (document.getElementById('addressError')) {

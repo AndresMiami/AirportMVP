@@ -62,6 +62,60 @@
     margin-top: 2px;
 }
 
+/* Google Maps content is rendered by LinkMia's custom DOM rather than by a
+   Google widget, so attribution must travel with both the live result list
+   and the selected result. The dropdown uses Google's unmodified official
+   logo; compact selected/route labels use Google's permitted exact text. */
+.google-maps-attribution {
+    position: sticky;
+    bottom: 0;
+    padding: 10px 10px 5px;
+    background: #FFFFFF;
+    border-top: 1px solid #E5E5E7;
+    text-align: right;
+}
+
+.google-maps-attribution img {
+    display: inline-block;
+    width: 98px;
+    height: 18px;
+    vertical-align: middle;
+}
+
+.selected-place-attribution {
+    display: none;
+    margin-top: 5px;
+    color: #FFFFFF;
+    font-family: Roboto, Arial, sans-serif;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    letter-spacing: normal;
+    line-height: 1;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.selected-place-attribution.visible { display: block; }
+
+/* Third-party Places attributions (Google contract: every returned entry
+   must be displayed). The host is nowrap for the plain "Google Maps" badge,
+   but once provider entries join it the line MUST wrap: long required
+   credit may never be pushed off a mobile viewport. */
+.selected-place-attribution:has(.third-party-attribution) {
+    white-space: normal;
+    line-height: 1.5;
+}
+.selected-place-attribution .third-party-attribution {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.selected-place-attribution .third-party-attribution a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 /* Loading and no-results states for autocomplete */
 .loading-results,
 .no-results {

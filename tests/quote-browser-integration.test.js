@@ -326,6 +326,7 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     quote: { status: 'idle', key: null, data: null, error: null, seq: 0 },
   };
   app.els = { bookBtn: byId.bookBtn = makeEl('button') };
+  app.routeRequestSeq = 0;
   app.updateSummary = () => {};
   app.updateBookButton = () => {};
   app.pricingService = null;
@@ -405,6 +406,63 @@ check('DISABLED: updateVehiclePrices keeps its legacy early-return, not the new 
   app.state.route = { distance: null, duration: null, price: null };
   app.updateVehiclePrices();          // legacy guard: no route data -> returns
   assert.strictEqual(app.state.quote.status, 'idle');
+});
+
+check('ROUTE: clearing an address clears old route facts and their attribution', () => {
+  const { app } = makeContext({ enabled: false, fetchImpl: okFetch({}) });
+  const arrivalTitle = makeEl('div');
+  const tripDuration = makeEl('div');
+  const routeAttribution = makeEl('div');
+  routeAttribution.classList.add('visible');
+  Object.assign(app.els, {
+    arrivalTitle, tripDuration, routeAttribution,
+    airportBadge: makeEl('div'), flowConnector: makeEl('div'),
+    airportStep: makeEl('div'), airportOptions: [], continueBtn: makeEl('button'),
+  });
+  app.autocomplete = { isValidated: false };
+  app.state.route = { distance: 12.3, duration: 28, price: 85, realData: true };
+  app.handleAddressValidationCleared();
+  assert.strictEqual(app.state.route.distance, null);
+  assert.strictEqual(app.state.route.duration, null);
+  assert.strictEqual(routeAttribution.classList.contains('visible'), false);
+  assert.strictEqual(tripDuration.textContent, 'Select a valid route to continue');
+  assert.ok(!/null min/i.test(`${arrivalTitle.textContent} ${tripDuration.textContent}`));
+});
+
+check('ROUTE: an older delayed response cannot overwrite the newest address route', async () => {
+  const { app } = makeContext({ enabled: false, fetchImpl: okFetch({}) });
+  Object.assign(app.els, {
+    arrivalTitle: makeEl('div'), tripDuration: makeEl('div'), routeAttribution: makeEl('div'),
+  });
+  app.updateVehiclePrices = () => {};
+  let releaseOld;
+  const oldResult = new Promise((resolve) => { releaseOld = resolve; });
+  app.getRouteData = async () => {
+    if (app.state.locations.address.address === 'Old address') return oldResult;
+    return { distance: 22, duration: 44, price: null, realData: true };
+  };
+  app.state.locations.address = { address: 'Old address', coordinates: { lat: 25.7, lng: -80.2 } };
+  const old = app.calculateRoute();
+  app.state.locations.address = { address: 'New address', coordinates: { lat: 25.8, lng: -80.3 } };
+  await app.calculateRoute();
+  releaseOld({ distance: 5, duration: 10, price: null, realData: true });
+  await old;
+  assert.strictEqual(app.state.route.distance, 22);
+  assert.strictEqual(app.state.route.duration, 44);
+  assert.strictEqual(app.els.routeAttribution.classList.contains('visible'), true);
+});
+
+check('ROUTE: a null provider result renders a neutral state with no attribution', async () => {
+  const { app } = makeContext({ enabled: false, fetchImpl: okFetch({}) });
+  Object.assign(app.els, {
+    arrivalTitle: makeEl('div'), tripDuration: makeEl('div'), routeAttribution: makeEl('div'),
+  });
+  app.getRouteData = async () => null;
+  await app.calculateRoute();
+  assert.strictEqual(app.els.arrivalTitle.textContent, 'Route estimate unavailable');
+  assert.strictEqual(app.els.tripDuration.textContent, 'Select a valid route to continue');
+  assert.strictEqual(app.els.routeAttribution.classList.contains('visible'), false);
+  assert.ok(!/null min/i.test(`${app.els.arrivalTitle.textContent} ${app.els.tripDuration.textContent}`));
 });
 
 // ============ the request contract ============
@@ -2146,4 +2204,37 @@ check('STATIC: every interaction marker is wired to its real explicit action', (
 // and would otherwise exit 0 with zero output — pre-arm failure so silence
 // is loud. run() flips this to 0 only after the summary prints.
 process.exitCode = 1;
+// ============ policy round 2: selection-state transition ============
+
+check('SELECTION TRANSITION: airport and Continue re-evaluate once coordinates land (success AND fallback)', async () => {
+  // autocomplete.applySelection dispatches place-selected BEFORE
+  // place-coordinates. The first handler evaluates airport/Continue while
+  // state.locations.address is still null; the coordinates handler must
+  // re-evaluate with the address present, for a normal Details success AND
+  // for the null-coordinate details-failure fallback (Codex round 2).
+  const { app } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  for (const detail of [
+    { lat: 25.76, lng: -80.19, address: '1 Brickell Ave' },
+    { lat: null, lng: null, address: '100 Main St' }
+  ]) {
+    const evals = [];
+    app.state.locations.address = null;
+    app.updateAddressStepState = () => {};
+    app.updateAirportStepState = () => evals.push(['airport', !!app.state.locations.address]);
+    app.updateContinueButton = () => evals.push(['continue', !!app.state.locations.address]);
+    app.clearRouteState = () => {};
+    app.calculateRoute = () => {};
+    app.handleAddressSelected({ placeId: 'ChIJ_place_abc' });   // real event order
+    app.handleAddressCoordinates(detail);
+    const last = {};
+    evals.forEach(([surface, hadAddress]) => { last[surface] = hadAddress; });
+    assert.strictEqual(last.airport, true,
+      'the airport step must be re-evaluated with the address present');
+    assert.strictEqual(last.continue, true,
+      'Continue must be re-evaluated with the address present');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(app.state.locations.address.coordinates)),
+      { lat: detail.lat, lng: detail.lng });
+  }
+});
+
 run().catch((e) => { console.error(e); process.exit(1); });

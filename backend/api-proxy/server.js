@@ -7,122 +7,319 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config();
 
+// Place-ID validation, LOCAL COPY. Railway's documented deployment root is
+// /backend/api-proxy (README/SETUP), which pulls only this directory — a
+// require of ../functions/lib/place-identity would be MODULE_NOT_FOUND on
+// deploy and take the proxy down. These values are pinned to
+// backend/functions/lib/place-identity.js by a repo-level alignment test
+// (tests/maps-proxy-policy.test.js); change them only together. The 2048
+// bound is LinkMia's declared operational bound from the 2B1 correction:
+// Google documents no maximum and its long-form example exceeds 600 chars.
+const MAX_PLACE_ID_LEN = 2048;
+const PLACE_ID_RE = new RegExp(`^[A-Za-z0-9_-]{10,${MAX_PLACE_ID_LEN}}$`);
+function isValidPlaceId(value) {
+  return typeof value === 'string' && PLACE_ID_RE.test(value);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ============================================
-// CACHING IMPLEMENTATION
-// ============================================
-
-// Simple in-memory cache (use Redis in production)
-const routeCache = new Map();
-const placeCache = new Map();
-const ROUTE_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours for routes
-const PLACE_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days for places
-const MAX_CACHE_SIZE = 1000; // Prevent memory issues
-
-// Popular places cache (airports, hotels, landmarks)
-const popularPlaces = new Map([
-  // Current airport identities. Keep these data-only Place Details
-  // cache keys aligned with functions/lib/place-identity.js.
-  ['ChIJLSeUuFi32YgRgpwdRDtxYkg', { // MIA
-    formatted_address: 'Miami International Airport (MIA), 2100 NW 42nd Ave, Miami, FL 33142',
-    geometry: { location: { lat: 25.7931, lng: -80.2906 } },
-    name: 'Miami International Airport'
-  }],
-  ['ChIJhTflH4aq2YgR9m9hZLFOmoo', { // FLL
-    formatted_address: 'Fort Lauderdale-Hollywood International Airport (FLL), 100 Terminal Dr, Fort Lauderdale, FL 33315',
-    geometry: { location: { lat: 26.0742, lng: -80.1506 } },
-    name: 'Fort Lauderdale-Hollywood International Airport'
-  }],
-  ['ChIJCboyqy3W2IgRdLKci4qxznw', { // PBI
-    formatted_address: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33406',
-    geometry: { location: { lat: 26.6832, lng: -80.0956 } },
-    name: 'Palm Beach International Airport'
-  }]
-]);
-
-// Cache helper functions
-function getCacheKey(origin, destination) {
-  return `route:${origin}:${destination}`.toLowerCase().replace(/\s+/g, '');
-}
-
-function cleanCache(cache, maxSize = MAX_CACHE_SIZE) {
-  if (cache.size > maxSize) {
-    const entriesToRemove = cache.size - maxSize + 100;
-    const keys = Array.from(cache.keys()).slice(0, entriesToRemove);
-    keys.forEach(key => cache.delete(key));
-  }
-}
+const defaultMapsGet = axios.get.bind(axios);
+let mapsGet = defaultMapsGet;
+let accessLogSink = (line) => process.stdout.write(line);
+let diagnosticLogSink = (line) => console.error(line);
 
 // ============================================
 // API USAGE TRACKING
 // ============================================
 
 const apiUsageStats = {
-  autocomplete: { count: 0, cached: 0 },
-  placeDetails: { count: 0, cached: 0 },
-  directions: { count: 0, cached: 0 },
-  geocoding: { count: 0, cached: 0 }
+  autocomplete: { acceptedRouteRequests: 0, providerAttempts: 0 },
+  placeDetails: { acceptedRouteRequests: 0, providerAttempts: 0 },
+  directions: { acceptedRouteRequests: 0, providerAttempts: 0 },
+  geocoding: { acceptedRouteRequests: 0, providerAttempts: 0 },
+  mapsScript: { acceptedRouteRequests: 0, providerAttempts: 0 }
 };
 
+function resetApiUsageStats() {
+  Object.keys(apiUsageStats).forEach((key) => {
+    apiUsageStats[key] = { acceptedRouteRequests: 0, providerAttempts: 0 };
+  });
+}
+
 // Reset stats daily
-setInterval(() => {
+const usageResetTimer = setInterval(() => {
   const date = new Date().toISOString().split('T')[0];
   console.log(`📊 API Usage for ${date}:`, apiUsageStats);
-  
-  // Reset counters
-  Object.keys(apiUsageStats).forEach(key => {
-    apiUsageStats[key] = { count: 0, cached: 0 };
-  });
+  resetApiUsageStats();
 }, 24 * 60 * 60 * 1000);
+usageResetTimer.unref?.();
 
 // Usage tracking middleware
 const trackApiUsage = (apiType) => {
   return (req, res, next) => {
-    apiUsageStats[apiType].count++;
-    
-    // Add tracking header to response
-    res.on('finish', () => {
-      const cacheHit = res.getHeader('X-Cache-Hit') === 'true';
-      if (cacheHit) {
-        apiUsageStats[apiType].cached++;
-      }
-    });
-    
+    // This middleware runs only after CORS, parsing and rate limiting. Name
+    // the metric for that precise boundary instead of overclaiming that it
+    // counts every socket-level request Railway received.
+    apiUsageStats[apiType].acceptedRouteRequests++;
     next();
   };
 };
 
-// Middleware for caching directions
-const directionsCache = (req, res, next) => {
-  const { origin, destination } = req.body;
-  const cacheKey = getCacheKey(origin, destination);
-  
-  const cached = routeCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < ROUTE_CACHE_DURATION) {
-    console.log('🎯 Cache hit for route:', cacheKey);
-    res.setHeader('X-Cache-Hit', 'true');
-    return res.json(cached.data);
+function recordProviderAttempt(apiType) {
+  apiUsageStats[apiType].providerAttempts++;
+}
+
+function sanitizedProviderStatus(error) {
+  const status = Number(error?.response?.status);
+  return Number.isInteger(status) && status >= 100 && status <= 599
+    ? String(status)
+    : 'unavailable';
+}
+
+function logProviderFailure(apiType, error) {
+  diagnosticLogSink(`maps_provider_failure endpoint=${apiType} status=${sanitizedProviderStatus(error)}`);
+}
+
+function boundedString(value, maxLength) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength) return null;
+  return trimmed;
+}
+
+const SESSION_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LAT_LNG_RE = /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/;
+const SAFE_ACCESS_PATHS = new Set([
+  '/', '/health', '/passenger', '/driver',
+  '/api/usage-stats', '/api/places/autocomplete', '/api/places/details',
+  '/api/directions', '/api/geocoding', '/api/maps-script'
+]);
+
+function isValidLatLng(value) {
+  if (!LAT_LNG_RE.test(value)) return false;
+  const [lat, lng] = value.split(',').map(Number);
+  return Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function safeAccessPath(originalUrl) {
+  // Morgan evaluates tokens when the response finishes. Express may have
+  // stripped a mounted catch-all from req.url/req.path by then, while
+  // originalUrl remains the immutable request target. Remove its query before
+  // classification and return only a fixed allowlisted label.
+  // Express matches routes case-insensitively and tolerates exactly ONE
+  // trailing slash ('/api/directions/' matches, '//' and '///' do not), so
+  // classification mirrors the router precisely — a request the router
+  // served is never logged as unmatched, and a request it refused is never
+  // labeled as legitimate provider traffic.
+  const raw = typeof originalUrl === 'string' ? originalUrl : '';
+  const queryAt = raw.indexOf('?');
+  let reqPath = (queryAt === -1 ? raw : raw.slice(0, queryAt)).toLowerCase();
+  if (reqPath.length > 1 && reqPath.endsWith('/') && !reqPath.endsWith('//')) {
+    reqPath = reqPath.slice(0, -1);
   }
-  
-  // Store original json method
-  const originalJson = res.json;
-  res.json = function(data) {
-    // Only cache successful responses
-    if (data.status === 'OK') {
-      routeCache.set(cacheKey, {
-        data: data,
-        timestamp: Date.now()
-      });
-      cleanCache(routeCache);
-      console.log('💾 Cached route:', cacheKey);
+  if (SAFE_ACCESS_PATHS.has(reqPath)) return reqPath;
+  // '/tracking/:tripId?' has an OPTIONAL param: bare '/tracking' (and its
+  // one-slash variant, stripped above) are real router matches. A path
+  // still ending in '/' after the single strip (double slashes) is one the
+  // router refused — never label it as the tracking route.
+  if (!reqPath.endsWith('/') &&
+      (reqPath === '/tracking' || reqPath.startsWith('/tracking/'))) return '/tracking/:tripId';
+  if (reqPath.startsWith('/api/')) return '/api/:unmatched';
+  return '/other';
+}
+
+// Google html_attributions arrive as provider-authored HTML (typically
+// '<a href="https://…">Name</a>'). Google's contract requires displaying
+// EVERY returned attribution; security forbids forwarding raw HTML. Each
+// entry is parsed by a STRICT grammar — optional plain text around exactly
+// one plain href-only anchor, or plain text alone — entities are decoded,
+// and an href is accepted only when it parses as a real https: URL. Valid
+// entries are NEVER truncated or dropped. An entry the grammar cannot
+// represent faithfully (extra attributes, scripts, non-https links,
+// ceilings exceeded) makes the whole set unrepresentable, and the Details
+// handler FAILS CLOSED rather than serving Google content with partial or
+// altered credit. Ceilings are defensive only, far above anything Google
+// returns: 16 entries, 2000 raw chars, 1000-char text, 1000-char href.
+const ATTRIBUTION_CEILINGS = Object.freeze({ entries: 16, raw: 2000, text: 1000, href: 1000 });
+
+// Strict single-pass character-reference decoder. Decodes numeric decimal
+// and hexadecimal references (validated: real Unicode scalar values, no
+// controls, no surrogates) plus the five core named entities. Returns NULL —
+// which fails the whole set closed — for any OTHER named reference (&nbsp;
+// and friends: displaying the reference text literally would be altered
+// credit) and for any malformed numeric-looking reference. A bare '&' that
+// does not begin a reference is literal character data, exactly as in HTML.
+// Null prototype + own-property + EXACT-CASE lookup: a normal object let
+// '&constructor;' resolve through the prototype chain into rendered
+// function source, and case-folding accepted '&Lt;' as '<' although
+// HTML's case-sensitive &Lt; means U+226A. Only these five exact names
+// decode; every other name — valid HTML entities included — fails the
+// whole set closed rather than being coerced.
+const CORE_NAMED_ENTITIES = Object.freeze(Object.assign(Object.create(null), {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'"
+}));
+
+function decodeEntitiesStrict(value) {
+  const s = String(value);
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch !== '&') { out += ch; i++; continue; }
+    const rest = s.slice(i);
+    const numeric = /^&#(?:(\d{1,7})|[xX]([0-9a-fA-F]{1,6}));/.exec(rest);
+    if (numeric) {
+      const cp = numeric[1] !== undefined ? Number(numeric[1]) : parseInt(numeric[2], 16);
+      // Reject controls INCLUDING the C1 range 0x80-0x9F: HTML parsing
+      // remaps those (0x80 is EURO SIGN); emitting them verbatim would be
+      // altered credit, so the conservative move is to fail the set.
+      if (!Number.isInteger(cp) || cp > 0x10FFFF || cp < 0x20 ||
+          (cp >= 0x7F && cp <= 0x9F) ||
+          (cp >= 0xD800 && cp <= 0xDFFF)) return null;
+      out += String.fromCodePoint(cp);
+      i += numeric[0].length;
+      continue;
     }
-    return originalJson.call(this, data);
+    if (rest.startsWith('&#')) return null;   // malformed numeric reference
+    const named = /^&([a-zA-Z][a-zA-Z0-9]{0,31});/.exec(rest);
+    if (named) {
+      const decoded = Object.prototype.hasOwnProperty.call(CORE_NAMED_ENTITIES, named[1])
+        ? CORE_NAMED_ENTITIES[named[1]]
+        : undefined;
+      if (decoded === undefined) return null; // unsupported named reference
+      out += decoded;
+      i += named[0].length;
+      continue;
+    }
+    // A reference-LOOKING semicolonless sequence ('&amp', '&ltx…') is
+    // ambiguous — HTML may interpret it contextually — so it fails closed
+    // per the complete-or-closed contract. A genuinely bare ampersand
+    // ('Fish & Chips': '&' followed by non-name characters) is literal
+    // character data.
+    if (/^&[a-zA-Z]/.test(rest)) return null;
+    out += '&';
+    i++;
+  }
+  return out;
+}
+
+// One attribution entry becomes an ordered list of SEGMENTS — {text, href}
+// with href null for unlinked text — preserving Google's published format
+// ('Listings by <a …>Example Company</a>': the prefix stays UNLINKED).
+// Collapsing everything into one link would change the link's scope, which
+// is altered credit. Whitespace collapses within segments; the entry's
+// outer edges are trimmed; interior boundary spaces survive.
+function segmentText(raw) {
+  const decoded = decodeEntitiesStrict(raw);
+  if (decoded === null) return null;
+  // Collapse only HTML's ASCII whitespace (space, tab, LF, FF, CR). \s
+  // would also swallow NBSP (&#160;) and other Unicode spacing that is
+  // PART of the credit text, not formatting.
+  return decoded.replace(/[ \t\n\f\r]+/g, ' ');
+}
+
+function parseAttributionEntry(entry) {
+  if (typeof entry !== 'string' || entry.length === 0 ||
+      entry.length > ATTRIBUTION_CEILINGS.raw) return null;
+  let segments;
+  if (!/[<>]/.test(entry)) {
+    const text = segmentText(entry);
+    if (text === null) return null;
+    segments = [{ text, href: null }];
+  } else {
+    // Optional plain text, exactly ONE anchor whose only attribute is a
+    // double-quoted href, optional plain text. Anything else — data-href,
+    // target=, script tags, nested markup — refuses to parse, fails closed.
+    // Tag-internal whitespace is HTML's ASCII class ONLY: JS \s would admit
+    // NBSP/Unicode spacing there, converting markup that HTML itself would
+    // NOT parse as an anchor into a clickable link (invented link scope).
+    const m = entry.match(/^([^<>]*)<a[ \t\n\f\r]+href="([^"<>]+)"[ \t\n\f\r]*>([^<>]*)<\/a>([^<>]*)$/i);
+    if (!m) return null;
+    const before = segmentText(m[1]);
+    const label = segmentText(m[3]);
+    const after = segmentText(m[4]);
+    if (before === null || label === null || after === null) return null;
+    if (!label.trim()) return null;           // a link needs a visible label
+    const rawHref = decodeEntitiesStrict(m[2]);
+    if (rawHref === null || rawHref.length > ATTRIBUTION_CEILINGS.href) return null;
+    let parsed;
+    try { parsed = new URL(rawHref); } catch (_) { return null; }
+    if (parsed.protocol !== 'https:') return null;  // https-only, as documented
+    segments = [
+      { text: before, href: null },
+      { text: label, href: parsed.href },
+      { text: after, href: null }
+    ];
+  }
+  // Trim the entry's outer edges, drop empty plain segments, enforce
+  // per-segment ceilings, and require visible text overall.
+  // Edge trims use the same ASCII-only class: an NBSP at an entry's edge
+  // is credit text, not formatting, and must survive.
+  segments[0].text = segments[0].text.replace(/^[ \t\n\f\r]+/, '');
+  segments[segments.length - 1].text = segments[segments.length - 1].text.replace(/[ \t\n\f\r]+$/, '');
+  segments = segments.filter((seg) => seg.href !== null || seg.text.length > 0);
+  if (segments.length === 0) return null;
+  let visible = '';
+  for (const seg of segments) {
+    if (seg.text.length > ATTRIBUTION_CEILINGS.text) return null;
+    visible += seg.text;
+  }
+  if (!visible.trim()) return null;
+  return { segments };
+}
+
+function sanitizeAttributions(htmlAttributions) {
+  // Legacy Place Details documents html_attributions as a REQUIRED array,
+  // returned even when empty. Only an actual array proves the check ran:
+  // a missing/null field fails closed — it is not an empty set.
+  if (!Array.isArray(htmlAttributions) ||
+      htmlAttributions.length > ATTRIBUTION_CEILINGS.entries) return { ok: false, entries: [] };
+  const entries = [];
+  for (const entry of htmlAttributions) {
+    const parsedEntry = parseAttributionEntry(entry);
+    if (!parsedEntry) return { ok: false, entries: [] };   // fail CLOSED, never partial
+    entries.push(parsedEntry);
+  }
+  return { ok: true, entries };
+}
+
+function valueOnly(providerValue) {
+  const value = Number(providerValue?.value);
+  return Number.isFinite(value) && value >= 0 ? { value } : undefined;
+}
+
+function filteredGeocodingResponse(providerData) {
+  if (providerData?.status === 'ZERO_RESULTS') {
+    return { ok: true, body: { status: 'ZERO_RESULTS', results: [] } };
+  }
+  if (providerData?.status !== 'OK' || !Array.isArray(providerData.results)) {
+    return { ok: false, body: null };
+  }
+  return {
+    ok: true,
+    body: {
+      status: 'OK',
+      results: providerData.results.map((result) => {
+        const location = result?.geometry?.location;
+        return {
+          formatted_address: result?.formatted_address,
+          place_id: result?.place_id,
+          geometry: location ? { location: { lat: location.lat, lng: location.lng } } : undefined
+        };
+      })
+    }
   };
-  
-  next();
-};
+}
+
+function optionalSessionToken(value) {
+  if (value === undefined) return { ok: true, value: null };
+  const token = boundedString(value, 64);
+  return token && SESSION_TOKEN_RE.test(token)
+    ? { ok: true, value: token }
+    : { ok: false, value: null };
+}
 
 // ============================================
 // MIDDLEWARE SETUP
@@ -169,12 +366,25 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Logging
-app.use(morgan('combined'));
+// Path-only access telemetry. Never log query strings: Maps proxy queries
+// contain typed addresses, place IDs and billing session tokens.
+morgan.token('safe-path', (req) => safeAccessPath(req.originalUrl));
+app.use(morgan(':method :safe-path :status :response-time ms', {
+  stream: { write: (line) => accessLogSink(line) }
+}));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Google response content must not be cached by this proxy, browsers or
+// intermediary CDNs. The Maps JavaScript loader has its own separate policy
+// and route below; do not apply this middleware to /api/maps-script.
+const mapsDataNoStore = (req, res, next) => {
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+};
 
 // Serve static files
 app.use(express.static(path.join(__dirname, '..')));
@@ -197,11 +407,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    service: 'Airport Booking Server with Google Maps Proxy',
-    cacheStats: {
-      routes: routeCache.size,
-      places: placeCache.size
-    }
+    service: 'Airport Booking Server with Google Maps Proxy'
   });
 });
 
@@ -222,66 +428,30 @@ app.get('/tracking/:tripId?', (req, res) => {
   res.sendFile(path.join(__dirname, '../tracking-app/index.html'));
 });
 
-// Serve monitoring dashboard
-app.get('/dashboard.html', (req, res) => {
-  res.sendFile(path.join(__dirname, '../dashboard.html'));
-});
-
 // API Usage Stats Endpoint
 app.get('/api/usage-stats', (req, res) => {
-  const totalRequests = Object.values(apiUsageStats)
-    .reduce((sum, stat) => sum + stat.count, 0);
-  
-  const totalCached = Object.values(apiUsageStats)
-    .reduce((sum, stat) => sum + stat.cached, 0);
-  
-  const cacheHitRate = totalRequests > 0 
-    ? ((totalCached / totalRequests) * 100).toFixed(2) 
-    : 0;
-  
+  const acceptedRouteRequests = Object.values(apiUsageStats)
+    .reduce((sum, stat) => sum + stat.acceptedRouteRequests, 0);
+  const providerAttempts = Object.values(apiUsageStats)
+    .reduce((sum, stat) => sum + stat.providerAttempts, 0);
+
   res.json({
     stats: apiUsageStats,
     summary: {
-      totalRequests,
-      totalCached,
-      cacheHitRate: `${cacheHitRate}%`,
-      estimatedMonthlyCost: calculateEstimatedCost(apiUsageStats)
+      acceptedRouteRequests,
+      providerAttempts
     }
   });
 });
-
-function calculateEstimatedCost(stats) {
-  const dailyMultiplier = 30;
-  
-  const costs = {
-    autocomplete: (stats.autocomplete.count - stats.autocomplete.cached) * dailyMultiplier * 0.00283,
-    placeDetails: (stats.placeDetails.count - stats.placeDetails.cached) * dailyMultiplier * 0.017,
-    directions: (stats.directions.count - stats.directions.cached) * dailyMultiplier * 0.005,
-    geocoding: (stats.geocoding.count - stats.geocoding.cached) * dailyMultiplier * 0.005
-  };
-  
-  const total = Object.values(costs).reduce((sum, cost) => sum + cost, 0);
-  const afterCredit = Math.max(0, total - 200);
-  
-  return {
-    breakdown: costs,
-    totalBeforeCredit: total.toFixed(2),
-    monthlyCredit: 200,
-    estimatedCharge: afterCredit.toFixed(2)
-  };
-}
 
 // ============================================
 // GOOGLE MAPS API PROXY ROUTES
 // ============================================
 
 // Google Places Autocomplete
-app.get('/api/places/autocomplete', trackApiUsage('autocomplete'), async (req, res) => {
+app.get('/api/places/autocomplete', mapsDataNoStore, trackApiUsage('autocomplete'), async (req, res) => {
   try {
-    const { input, types, location, radius, components, sessiontoken } = req.query;
-    
-    const trimmedInput = input?.trim();
-    
+    const trimmedInput = boundedString(req.query.input, 100);
     if (!trimmedInput) {
       return res.status(400).json({ 
         error: 'Bad Request',
@@ -289,9 +459,11 @@ app.get('/api/places/autocomplete', trackApiUsage('autocomplete'), async (req, r
       });
     }
 
-    if (trimmedInput.length > 100) {
+    const sessiontoken = req.query.sessiontoken;
+    const session = optionalSessionToken(sessiontoken);
+    if (!session.ok) {
       return res.status(400).json({ 
-        error: 'Input too long',
+        error: 'Bad Request',
         status: 'ERROR'
       });
     }
@@ -299,15 +471,17 @@ app.get('/api/places/autocomplete', trackApiUsage('autocomplete'), async (req, r
     const params = {
       input: trimmedInput,
       key: process.env.GOOGLE_MAPS_API_KEY,
-      components: 'country:us' // Restrict to US for airport app
+      components: 'country:us',
+      location: '25.7617,-80.1918',
+      radius: '30000'
     };
 
-    if (types) params.types = types.trim();
-    if (location) params.location = location.trim();
-    if (radius) params.radius = radius;
+    // `sessiontoken` was validated above; forwarding the trimmed original
+    // preserves the one browser session across Autocomplete and Details.
     if (sessiontoken) params.sessiontoken = sessiontoken.trim();
 
-    const response = await axios.get(
+    recordProviderAttempt('autocomplete');
+    const response = await mapsGet(
       'https://maps.googleapis.com/maps/api/place/autocomplete/json',
       { params }
     );
@@ -317,14 +491,16 @@ app.get('/api/places/autocomplete', trackApiUsage('autocomplete'), async (req, r
       predictions: response.data.predictions?.map(prediction => ({
         place_id: prediction.place_id,
         description: prediction.description,
-        structured_formatting: prediction.structured_formatting,
-        types: prediction.types
+        structured_formatting: prediction.structured_formatting ? {
+          main_text: prediction.structured_formatting.main_text,
+          secondary_text: prediction.structured_formatting.secondary_text
+        } : undefined
       })) || []
     };
 
     res.json(filteredResponse);
   } catch (error) {
-    console.error('Places Autocomplete Error:', error.message);
+    logProviderFailure('autocomplete', error);
     res.status(500).json({ 
       error: 'Internal Server Error',
       status: 'ERROR'
@@ -332,72 +508,62 @@ app.get('/api/places/autocomplete', trackApiUsage('autocomplete'), async (req, r
   }
 });
 
-// Place Details with Caching
-app.get('/api/places/details', trackApiUsage('placeDetails'), async (req, res) => {
+// Place Details is deliberately live-only. The selected place ID may be
+// retained by the booking flow; Google result content is not cached here.
+app.get('/api/places/details', mapsDataNoStore, trackApiUsage('placeDetails'), async (req, res) => {
   try {
-    const { place_id, fields, sessiontoken } = req.query;
-    
-    if (!place_id?.trim()) {
+    const placeId = boundedString(req.query.place_id, MAX_PLACE_ID_LEN);
+    const sessiontoken = req.query.sessiontoken;
+    const session = optionalSessionToken(sessiontoken);
+
+    if (!placeId || !isValidPlaceId(placeId) || !session.ok) {
       return res.status(400).json({ 
         error: 'Bad Request',
         status: 'ERROR'
       });
     }
 
-    // Check popular places first (instant, no API call)
-    const popularPlace = popularPlaces.get(place_id);
-    if (popularPlace) {
-      console.log('⭐ Popular place cache hit:', place_id);
-      res.setHeader('X-Cache-Hit', 'true');
-      return res.json({
-        status: 'OK',
-        result: popularPlace
-      });
-    }
-
-    // Check regular cache
-    const cached = placeCache.get(place_id);
-    if (cached && Date.now() - cached.timestamp < PLACE_CACHE_DURATION) {
-      console.log('🎯 Place cache hit:', place_id);
-      res.setHeader('X-Cache-Hit', 'true');
-      return res.json(cached.data);
-    }
-
     // Make API call
     const params = {
-      place_id: place_id.trim(),
+      place_id: placeId,
       key: process.env.GOOGLE_MAPS_API_KEY,
-      fields: fields?.trim() || 'geometry,formatted_address,name'
+      fields: 'geometry,formatted_address'
     };
 
     if (sessiontoken) params.sessiontoken = sessiontoken.trim();
 
-    const response = await axios.get(
+    recordProviderAttempt('placeDetails');
+    const response = await mapsGet(
       'https://maps.googleapis.com/maps/api/place/details/json',
       { params }
     );
 
+    const location = response.data.result?.geometry?.location;
+
+    // Google returns html_attributions independently of the requested
+    // fields, and its contract requires displaying EVERY supplied
+    // third-party attribution. If the set cannot be represented faithfully
+    // through the strict sanitizer, the result FAILS CLOSED: serving
+    // Google content with partial or altered credit is not an option, and
+    // the browser's prediction-description fallback needs no Details body.
+    const attribution = sanitizeAttributions(response.data.html_attributions);
+    if (!attribution.ok) {
+      diagnosticLogSink('maps_provider_failure endpoint=placeDetails status=attribution_unrepresentable');
+      return res.status(502).json({ error: 'Bad Gateway', status: 'ERROR' });
+    }
+
     const filteredResponse = {
       status: response.data.status,
+      attributions: attribution.entries,
       result: response.data.result ? {
         formatted_address: response.data.result.formatted_address,
-        geometry: response.data.result.geometry,
-        name: response.data.result.name
+        geometry: location ? { location: { lat: location.lat, lng: location.lng } } : undefined
       } : null
     };
 
-    // Cache successful responses
-    if (response.data.status === 'OK') {
-      placeCache.set(place_id, {
-        data: filteredResponse,
-        timestamp: Date.now()
-      });
-      cleanCache(placeCache, 5000);
-    }
-
     res.json(filteredResponse);
   } catch (error) {
-    console.error('Place Details Error:', error.message);
+    logProviderFailure('placeDetails', error);
     res.status(500).json({ 
       error: 'Internal Server Error',
       status: 'ERROR'
@@ -405,13 +571,12 @@ app.get('/api/places/details', trackApiUsage('placeDetails'), async (req, res) =
   }
 });
 
-// Directions API with Caching
-app.post('/api/directions', trackApiUsage('directions'), directionsCache, async (req, res) => {
+// Directions results are live-only. Departure-time traffic makes route-result
+// reuse both policy-sensitive and functionally stale.
+app.post('/api/directions', mapsDataNoStore, trackApiUsage('directions'), async (req, res) => {
   try {
-    const { origin, destination, mode, waypoints, alternatives, avoid } = req.body;
-    
-    const trimmedOrigin = origin?.trim();
-    const trimmedDestination = destination?.trim();
+    const trimmedOrigin = boundedString(req.body?.origin, 500);
+    const trimmedDestination = boundedString(req.body?.destination, 500);
     
     if (!trimmedOrigin || !trimmedDestination) {
       return res.status(400).json({ 
@@ -424,16 +589,13 @@ app.post('/api/directions', trackApiUsage('directions'), directionsCache, async 
       origin: trimmedOrigin,
       destination: trimmedDestination,
       key: process.env.GOOGLE_MAPS_API_KEY,
-      mode: mode?.trim() || 'driving',
+      mode: 'driving',
       departure_time: 'now',
       traffic_model: 'best_guess'
     };
 
-    if (waypoints) params.waypoints = waypoints.trim();
-    if (alternatives) params.alternatives = alternatives;
-    if (avoid) params.avoid = avoid.trim();
-
-    const response = await axios.get(
+    recordProviderAttempt('directions');
+    const response = await mapsGet(
       'https://maps.googleapis.com/maps/api/directions/json',
       { params }
     );
@@ -447,17 +609,16 @@ app.post('/api/directions', trackApiUsage('directions'), directionsCache, async 
       if (firstRoute.legs && firstRoute.legs.length > 0) {
         const firstLeg = firstRoute.legs[0];
         filteredResponse.route = {
-          distance: firstLeg.distance,
-          duration: firstLeg.duration,
-          duration_in_traffic: firstLeg.duration_in_traffic,
-          overview_polyline: firstRoute.overview_polyline
+          distance: valueOnly(firstLeg.distance),
+          duration: valueOnly(firstLeg.duration),
+          duration_in_traffic: valueOnly(firstLeg.duration_in_traffic)
         };
       }
     }
 
     res.json(filteredResponse);
   } catch (error) {
-    console.error('Directions Error:', error.message);
+    logProviderFailure('directions', error);
     res.status(500).json({ 
       error: 'Internal Server Error',
       status: 'ERROR'
@@ -466,14 +627,22 @@ app.post('/api/directions', trackApiUsage('directions'), directionsCache, async 
 });
 
 // Geocoding API
-app.get('/api/geocoding', trackApiUsage('geocoding'), async (req, res) => {
+app.get('/api/geocoding', mapsDataNoStore, trackApiUsage('geocoding'), async (req, res) => {
   try {
-    const { address, latlng, components } = req.query;
+    const trimmedAddress = req.query.address === undefined
+      ? null
+      : boundedString(req.query.address, 500);
+    const trimmedLatlng = req.query.latlng === undefined
+      ? null
+      : boundedString(req.query.latlng, 100);
+    const components = req.query.components === undefined
+      ? null
+      : boundedString(req.query.components, 200);
     
-    const trimmedAddress = address?.trim();
-    const trimmedLatlng = latlng?.trim();
-    
-    if (!trimmedAddress && !trimmedLatlng) {
+    if ((!trimmedAddress && !trimmedLatlng) ||
+        (req.query.latlng !== undefined && (!trimmedLatlng || !isValidLatLng(trimmedLatlng))) ||
+        (req.query.address !== undefined && !trimmedAddress) ||
+        (req.query.components !== undefined && !components)) {
       return res.status(400).json({ 
         error: 'Bad Request',
         status: 'ERROR'
@@ -486,16 +655,26 @@ app.get('/api/geocoding', trackApiUsage('geocoding'), async (req, res) => {
 
     if (trimmedAddress) params.address = trimmedAddress;
     if (trimmedLatlng) params.latlng = trimmedLatlng;
-    if (components) params.components = components.trim();
+    if (components) params.components = components;
 
-    const response = await axios.get(
+    recordProviderAttempt('geocoding');
+    const response = await mapsGet(
       'https://maps.googleapis.com/maps/api/geocode/json',
       { params }
     );
 
-    res.json(response.data);
+    const filtered = filteredGeocodingResponse(response.data);
+    if (!filtered.ok) {
+      diagnosticLogSink('maps_provider_failure endpoint=geocoding status=semantic_failure');
+      return res.status(502).json({
+        error: 'Provider request failed',
+        status: 'ERROR'
+      });
+    }
+
+    res.json(filtered.body);
   } catch (error) {
-    console.error('Geocoding Error:', error.message);
+    logProviderFailure('geocoding', error);
     res.status(500).json({ 
       error: 'Internal Server Error',
       status: 'ERROR'
@@ -505,7 +684,7 @@ app.get('/api/geocoding', trackApiUsage('geocoding'), async (req, res) => {
 
 // Google Maps Script Proxy
 // Note: CORS is handled by the global middleware above
-app.get('/api/maps-script', async (req, res) => {
+app.get('/api/maps-script', trackApiUsage('mapsScript'), async (req, res) => {
   try {
     const mapsUrl = 'https://maps.googleapis.com/maps/api/js';
     const params = new URLSearchParams({
@@ -516,7 +695,8 @@ app.get('/api/maps-script', async (req, res) => {
       loading: 'async'  // Fix Google Maps async loading warning
     });
     
-    const response = await axios.get(`${mapsUrl}?${params}`, {
+    recordProviderAttempt('mapsScript');
+    const response = await mapsGet(`${mapsUrl}?${params}`, {
       responseType: 'text'
     });
     
@@ -532,7 +712,7 @@ app.get('/api/maps-script', async (req, res) => {
     
     res.send(response.data);
   } catch (error) {
-    console.error('Maps script error:', error.message);
+    logProviderFailure('mapsScript', error);
     res.status(500).set('Content-Type', 'application/javascript').send('// Error loading Google Maps');
   }
 });
@@ -544,10 +724,12 @@ app.get('/api/maps-script', async (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!'
+  const status = Number(err?.status);
+  const safeStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+  diagnosticLogSink(`maps_proxy_request_failure status=${safeStatus}`);
+  res.status(safeStatus).json({
+    error: safeStatus >= 500 ? 'Internal server error' : 'Bad Request',
+    message: safeStatus >= 500 ? 'Something went wrong!' : 'Request could not be processed'
   });
 });
 
@@ -564,18 +746,54 @@ app.use('*', (req, res) => {
   res.status(404).sendFile(path.join(__dirname, '..', '..', 'indexMVP.html'));
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Airport Booking Server with Maps Proxy running on port ${PORT}`);
-  console.log(`🏠 Main App: http://localhost:${PORT}/`);
-  console.log(`🎫 Passenger App: http://localhost:${PORT}/passenger`);
-  console.log(`🚗 Driver App: http://localhost:${PORT}/driver`);
-  console.log(`📍 Tracking App: http://localhost:${PORT}/tracking`);
-  console.log(`📊 Cost Monitor: http://localhost:${PORT}/dashboard.html`);
-  console.log(`🔍 Health check: http://localhost:${PORT}/health`);
-  console.log(`🗺️  Maps API: http://localhost:${PORT}/api/places/autocomplete`);
-  console.log(`📈 Usage Stats: http://localhost:${PORT}/api/usage-stats`);
-  console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
+function startServer(port = PORT, host) {
+  const onListening = () => {
+    console.log(`🚀 Airport Booking Server with Maps Proxy running on port ${port}`);
+    console.log(`🏠 Main App: http://localhost:${port}/`);
+    console.log(`🎫 Passenger App: http://localhost:${port}/passenger`);
+    console.log(`🚗 Driver App: http://localhost:${port}/driver`);
+    console.log(`📍 Tracking App: http://localhost:${port}/tracking`);
+    console.log(`🔍 Health check: http://localhost:${port}/health`);
+    console.log(`🗺️  Maps API: http://localhost:${port}/api/places/autocomplete`);
+    console.log(`📈 Usage Stats: http://localhost:${port}/api/usage-stats`);
+    console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
+  };
+  return host ? app.listen(port, host, onListening) : app.listen(port, onListening);
+}
+
+const testSeam = Object.freeze({
+  setMapsGet(fn) {
+    if (typeof fn !== 'function') throw new TypeError('maps getter must be a function');
+    mapsGet = fn;
+  },
+  resetMapsGet() {
+    mapsGet = defaultMapsGet;
+  },
+  setAccessLogSink(fn) {
+    if (typeof fn !== 'function') throw new TypeError('access log sink must be a function');
+    accessLogSink = fn;
+  },
+  setDiagnosticLogSink(fn) {
+    if (typeof fn !== 'function') throw new TypeError('diagnostic log sink must be a function');
+    diagnosticLogSink = fn;
+  },
+  resetLogSinks() {
+    accessLogSink = (line) => process.stdout.write(line);
+    diagnosticLogSink = (line) => console.error(line);
+  },
+  resetApiUsageStats,
+  getApiUsageStats() {
+    return JSON.parse(JSON.stringify(apiUsageStats));
+  },
+  safeAccessPath,
+  sanitizeAttributions,
+  isValidPlaceId,
+  MAX_PLACE_ID_LEN,
+  PLACE_ID_RE
 });
 
-module.exports = app;
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, startServer, testSeam };

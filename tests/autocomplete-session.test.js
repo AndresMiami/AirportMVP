@@ -120,7 +120,18 @@ check('generateSessionToken stores a v4 and resets the session counters', () => 
   gen.generateSessionToken();
   assert.match(gen.sessionToken, UUID_V4);
   assert.strictEqual(gen.sessionRequestCount, 0);
-  assert.ok(typeof gen.sessionStartTime === 'number' && gen.sessionStartTime > 0);
+  assert.ok(typeof gen.sessionLastActivityTime === 'number' && gen.sessionLastActivityTime > 0);
+});
+
+check('session lifetime is measured from last activity rather than initial creation', () => {
+  const gen = makeGenerator({ randomUUID: true });
+  gen.sessionDuration = 3 * 60 * 1000;
+  gen.sessionToken = gen.newSessionUuid();
+  gen.sessionLastActivityTime = Date.now() - gen.sessionDuration + 1000;
+  assert.strictEqual(gen.shouldGenerateNewSession(), false);
+  gen.sessionLastActivityTime = Date.now() - gen.sessionDuration - 1000;
+  assert.strictEqual(gen.shouldGenerateNewSession(), true);
+  assert.ok(!source.includes('sessionStartTime'));
 });
 
 check('the SAME token goes to both autocomplete and place details', () => {

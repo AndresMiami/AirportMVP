@@ -139,6 +139,16 @@
         }
         .route-addr { font-size: 13px; line-height: 1.35; margin-top: 2px; color: var(--text-primary); }
         .route-duration { font-size: 11px; color: var(--text-light); margin: -4px 0 8px 36px; }
+        .route-attribution {
+            font-family: Roboto, Arial, sans-serif;
+            font-size: 12px;
+            font-style: normal;
+            font-weight: 400;
+            letter-spacing: normal;
+            color: #FFFFFF;
+            margin: -4px 0 8px 36px;
+            white-space: nowrap;
+        }
 
         /* Flight reference (only when provided) */
         .flight-line {
@@ -222,6 +232,23 @@
         .hidden { display: none !important; }
         .center-msg { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
         .center-msg a { color: var(--orange); font-weight: 600; text-decoration: none; }
+        .map-privacy {
+            padding: 0 14px 10px;
+            color: #AEAEB2;
+            font-size: 11px;
+            line-height: 1.45;
+            text-align: center;
+        }
+        .map-privacy a,
+        .page-legal a { color: #FF9F55; text-underline-offset: 2px; }
+        .page-legal {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            padding: 4px 16px calc(22px + env(safe-area-inset-bottom));
+            color: #AEAEB2;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -260,6 +287,7 @@
             <div class="card hidden" id="mapCard">
                 <div id="liveMap"></div>
                 <div class="map-freshness" id="mapFreshness"></div>
+                <div class="map-privacy">A verified checkpoint is displayed through Google Maps. <a href="/privacy">Privacy details</a></div>
             </div>
 
             <div class="card">
@@ -286,6 +314,7 @@
                         </div>
                     </div>
                     <div class="route-duration hidden" id="rideDuration"></div>
+                    <div class="route-attribution hidden" id="routeAttribution" translate="no">Google Maps</div>
                     <div class="route-row">
                         <div class="route-rail">
                             <div class="route-marker b">B</div>
@@ -317,6 +346,12 @@
             <div class="support" id="supportText"></div>
         </div>
     </div>
+
+    <nav class="page-legal" aria-label="Legal">
+        <a href="/terms">Terms</a>
+        <span aria-hidden="true">·</span>
+        <a href="/privacy">Privacy</a>
+    </nav>
 
     <script>
         const SUPPORT_PHONE = '+1 (786) 509-3955';
@@ -657,10 +692,12 @@
                 const eta = new Date(new Date(b.pickup_datetime).getTime() + b.duration_minutes * 60000);
                 $('rideDuration').textContent = `⏱ ~${b.duration_minutes} min ride`;
                 $('rideDuration').classList.remove('hidden');
+                $('routeAttribution').classList.remove('hidden');
                 $('etaTime').innerHTML = `~${fmtTime(eta)} <span class="eta-badge">EST. ARRIVAL</span>`;
                 $('etaTime').classList.remove('hidden');
             } else {
                 $('rideDuration').classList.add('hidden');
+                $('routeAttribution').classList.add('hidden');
                 $('etaTime').classList.add('hidden');
             }
 

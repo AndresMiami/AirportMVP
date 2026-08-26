@@ -9,7 +9,9 @@
 // header; that whole rebook path is deleted by the edit flow.)
 // v1.3.21: PR 3C-2C-B PR-2 — indexMVP.html (precached) gained edit
 // quoting, the submission envelope, and the quiet Refresh-and-Book flow.
-const CACHE_NAME = 'linkmia-v1.3.21';
+// v1.3.22: Google policy readiness — refreshed landing/booking attribution
+// and autocomplete behavior. Legal pages remain network-first by design.
+const CACHE_NAME = 'linkmia-v1.3.22';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

@@ -784,7 +784,7 @@ async function check(name, fn) {
   });
 
   // ---------- canonical place identity ----------
-  await check('all three airport pins match the current rollout identities and Railway cache', async () => {
+  await check('all three airport pins match the current rollout identities without a duplicate Railway content cache', async () => {
     assert.deepStrictEqual(Object.keys(AIRPORTS).sort(), Object.keys(EXPECTED_AIRPORTS).sort());
     const ids = new Set();
     for (const [code, expected] of Object.entries(EXPECTED_AIRPORTS)) {
@@ -797,21 +797,18 @@ async function check(name, fn) {
     }
     assert.strictEqual(ids.size, 3, 'each airport must have a distinct place identity');
 
-    // Railway's custom autocomplete and route logic are deliberately
-    // untouched. Its data-only popular Place Details cache must still
-    // carry the same current IDs so the two runtimes do not drift.
+    // Google Place Details content is live-only at Railway. Airport routing
+    // identities have one server registry instead of a second permanent
+    // formatted-address/geometry cache in the proxy.
     const proxySource = fs.readFileSync(path.join(repoRoot, 'backend/api-proxy/server.js'), 'utf8');
-    for (const [code, expected] of Object.entries(EXPECTED_AIRPORTS)) {
-      assert.ok(proxySource.includes(`['${expected.placeId}', { // ${code}`),
-        `Railway's ${code} cache must match the quote-service registry`);
-      assert.ok(proxySource.includes(`formatted_address: '${expected.formattedAddress}',`),
-        `Railway's ${code} display address must match the quote-service registry`);
-    }
+    // Place IDs themselves are the policy-permitted stable identifiers. This
+    // guard bans duplicated Google response content/caching, not the harmless
+    // appearance of a current airport ID in a live-only request path or test.
+    assert.ok(!/popularPlaces|PLACE_CACHE_DURATION|placeCache\s*=\s*new Map/.test(proxySource),
+      'Railway must not restore a permanent or multi-day Place Details cache');
     for (const previous of PREVIOUS_AIRPORT_PLACE_IDS) {
       assert.ok(!Object.values(AIRPORTS).some((airport) => airport.placeId === previous),
         'the quote service must not route with a replaced airport pin');
-      assert.ok(!proxySource.includes(previous),
-        'Railway must not advertise a replaced airport pin as current');
     }
   });
 
@@ -1298,7 +1295,7 @@ async function check(name, fn) {
     }
   });
 
-  await check('calculate-price retirement is complete and pinned behind the cache refresh', async () => {
+  await check('calculate-price retirement remains complete through the policy-readiness cache refresh', async () => {
     const fs = require('fs');
     const retiredHandlerPath = path.join(repoRoot, 'backend/functions/calculate-price.js');
     assert.strictEqual(fs.existsSync(retiredHandlerPath), true,
@@ -1328,7 +1325,7 @@ async function check(name, fn) {
     const worker = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
     const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(cacheName, 'linkmia-v1.3.21', 'PR-2 ships with the reviewed cache bump');
+    assert.strictEqual(cacheName, 'linkmia-v1.3.22', 'policy readiness ships with the reviewed cache bump');
     // The bump is only meaningful if BOTH changed assets are actually in the
     // precache list — a dropped entry would serve a stale page under a new
     // cache name.
