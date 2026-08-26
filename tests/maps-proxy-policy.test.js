@@ -266,6 +266,29 @@ async function invokeError(error) {
       assert.deepStrictEqual(testSeam.sanitizeAttributions(['Fish & Chips']),
         { ok: true, entries: [{ segments: [{ text: 'Fish & Chips', href: null }] }] },
         'a bare ampersand is literal character data');
+      // Round-5 scanner precision (each executed against the prior scanner):
+      assert.strictEqual(testSeam.sanitizeAttributions(['By &constructor; Co']).ok, false,
+        'prototype-chain names must never resolve — no own property, no decode');
+      assert.strictEqual(testSeam.sanitizeAttributions(
+        ['<a href="https://p.example/?q=&constructor;">P</a>']).ok, false,
+        'prototype-chain names fail closed inside hrefs too');
+      assert.strictEqual(testSeam.sanitizeAttributions(['a &Lt; b']).ok, false,
+        'entity names are case-sensitive — &Lt; is not &lt; and must not fold');
+      assert.strictEqual(testSeam.sanitizeAttributions(['a &Gt; b']).ok, false);
+      assert.strictEqual(testSeam.sanitizeAttributions(['a &AmP; b']).ok, false,
+        'invalid mixed-case names fail closed, never coerce to &');
+      assert.strictEqual(testSeam.sanitizeAttributions(['x &#128; y']).ok, false,
+        'C1 controls (decimal) fail the set — HTML remaps them; verbatim would alter credit');
+      assert.strictEqual(testSeam.sanitizeAttributions(['x &#x80; y']).ok, false,
+        'C1 controls (hex) fail the set');
+      assert.strictEqual(testSeam.sanitizeAttributions(['x &#x9F; y']).ok, false);
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Alpha&#160;Beta']),
+        { ok: true, entries: [{ segments: [{ text: 'Alpha\u00a0Beta', href: null }] }] },
+        'NBSP is credit text: it decodes and SURVIVES — never collapsed to a space');
+      assert.strictEqual(testSeam.sanitizeAttributions(['x &amp y']).ok, false,
+        'a reference-looking semicolonless sequence fails closed');
+      assert.strictEqual(testSeam.sanitizeAttributions(
+        ['<a href="https://p.example/?q=&amp">P</a>']).ok, false);
 
       // REQUIRED-array contract: legacy Details always returns the array,
       // even empty — only an actual array proves the check ran.

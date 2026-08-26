@@ -481,6 +481,22 @@ async function check(name, fn) {
     }
   });
 
+  await check('browser attribution ceilings match the declared limits exactly (999/1000/1001)', () => {
+    const { instance } = makeAutocomplete();
+    const entryWithText = (n) => [{ segments: [{ text: 'x'.repeat(n), href: null }] }];
+    const entryWithHref = (n) => {
+      const href = 'https://l.example/' + 'a'.repeat(n - 18);
+      assert.strictEqual(href.length, n);
+      return [{ segments: [{ text: 'P', href }] }];
+    };
+    for (const [n, expected] of [[999, true], [1000, true], [1001, false]]) {
+      assert.strictEqual(instance.validAttributionEntries(entryWithText(n)) !== null, expected,
+        `browser text ceiling at ${n} — a silently lowered cap drops valid credit`);
+      assert.strictEqual(instance.validAttributionEntries(entryWithHref(n)) !== null, expected,
+        `browser href ceiling at ${n}`);
+    }
+  });
+
   await check('attribution CSS wraps required credit instead of pushing it off a mobile viewport', () => {
     assert.match(mapsCss, /\.selected-place-attribution:has\(\.third-party-attribution\)\s*\{[^}]*white-space:\s*normal/,
       'the host must stop nowrap once provider entries join it');

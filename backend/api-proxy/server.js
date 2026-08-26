@@ -151,9 +151,15 @@ const ATTRIBUTION_CEILINGS = Object.freeze({ entries: 16, raw: 2000, text: 1000,
 // and friends: displaying the reference text literally would be altered
 // credit) and for any malformed numeric-looking reference. A bare '&' that
 // does not begin a reference is literal character data, exactly as in HTML.
-const CORE_NAMED_ENTITIES = Object.freeze({
+// Null prototype + own-property + EXACT-CASE lookup: a normal object let
+// '&constructor;' resolve through the prototype chain into rendered
+// function source, and case-folding accepted '&Lt;' as '<' although
+// HTML's case-sensitive &Lt; means U+226A. Only these five exact names
+// decode; every other name — valid HTML entities included — fails the
+// whole set closed rather than being coerced.
+const CORE_NAMED_ENTITIES = Object.freeze(Object.assign(Object.create(null), {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'"
-});
+}));
 
 function decodeEntitiesStrict(value) {
   const s = String(value);
@@ -166,22 +172,34 @@ function decodeEntitiesStrict(value) {
     const numeric = /^&#(?:(\d{1,7})|[xX]([0-9a-fA-F]{1,6}));/.exec(rest);
     if (numeric) {
       const cp = numeric[1] !== undefined ? Number(numeric[1]) : parseInt(numeric[2], 16);
-      if (!Number.isInteger(cp) || cp > 0x10FFFF || cp < 0x20 || cp === 0x7F ||
+      // Reject controls INCLUDING the C1 range 0x80-0x9F: HTML parsing
+      // remaps those (0x80 is EURO SIGN); emitting them verbatim would be
+      // altered credit, so the conservative move is to fail the set.
+      if (!Number.isInteger(cp) || cp > 0x10FFFF || cp < 0x20 ||
+          (cp >= 0x7F && cp <= 0x9F) ||
           (cp >= 0xD800 && cp <= 0xDFFF)) return null;
       out += String.fromCodePoint(cp);
       i += numeric[0].length;
       continue;
     }
     if (rest.startsWith('&#')) return null;   // malformed numeric reference
-    const named = /^&([a-zA-Z][a-zA-Z0-9]{1,31});/.exec(rest);
+    const named = /^&([a-zA-Z][a-zA-Z0-9]{0,31});/.exec(rest);
     if (named) {
-      const decoded = CORE_NAMED_ENTITIES[named[1].toLowerCase()];
+      const decoded = Object.prototype.hasOwnProperty.call(CORE_NAMED_ENTITIES, named[1])
+        ? CORE_NAMED_ENTITIES[named[1]]
+        : undefined;
       if (decoded === undefined) return null; // unsupported named reference
       out += decoded;
       i += named[0].length;
       continue;
     }
-    out += '&';                               // literal ampersand character data
+    // A reference-LOOKING semicolonless sequence ('&amp', '&ltx…') is
+    // ambiguous — HTML may interpret it contextually — so it fails closed
+    // per the complete-or-closed contract. A genuinely bare ampersand
+    // ('Fish & Chips': '&' followed by non-name characters) is literal
+    // character data.
+    if (/^&[a-zA-Z]/.test(rest)) return null;
+    out += '&';
     i++;
   }
   return out;
@@ -196,7 +214,10 @@ function decodeEntitiesStrict(value) {
 function segmentText(raw) {
   const decoded = decodeEntitiesStrict(raw);
   if (decoded === null) return null;
-  return decoded.replace(/\s+/g, ' ');
+  // Collapse only HTML's ASCII whitespace (space, tab, LF, FF, CR). \s
+  // would also swallow NBSP (&#160;) and other Unicode spacing that is
+  // PART of the credit text, not formatting.
+  return decoded.replace(/[ \t\n\f\r]+/g, ' ');
 }
 
 function parseAttributionEntry(entry) {
@@ -231,8 +252,10 @@ function parseAttributionEntry(entry) {
   }
   // Trim the entry's outer edges, drop empty plain segments, enforce
   // per-segment ceilings, and require visible text overall.
-  segments[0].text = segments[0].text.replace(/^\s+/, '');
-  segments[segments.length - 1].text = segments[segments.length - 1].text.replace(/\s+$/, '');
+  // Edge trims use the same ASCII-only class: an NBSP at an entry's edge
+  // is credit text, not formatting, and must survive.
+  segments[0].text = segments[0].text.replace(/^[ \t\n\f\r]+/, '');
+  segments[segments.length - 1].text = segments[segments.length - 1].text.replace(/[ \t\n\f\r]+$/, '');
   segments = segments.filter((seg) => seg.href !== null || seg.text.length > 0);
   if (segments.length === 0) return null;
   let visible = '';
