@@ -133,12 +133,13 @@ async function invokeError(error) {
           data: {
             status: 'OK',
             // Google returns html_attributions regardless of the field mask;
-            // policy requires DISPLAYING third-party attribution. The second
-            // entry is a hostile fixture: the sanitizer must strip markup and
-            // refuse the javascript: href.
+            // its contract requires DISPLAYING every one. The defaults here
+            // are VALID (the second carries entities and an encoded query
+            // separator to pin faithful decoding); hostile sets are exercised
+            // by the dedicated fail-closed check via setMapsGet overrides.
             html_attributions: [
               '<a href="https://listings.example.com/p/1">Listings by Example</a>',
-              '<script>alert(1)</script><a href="javascript:alert(2)">Evil Co</a>'
+              '<a href="https://partners.example.com/?a=1&amp;b=2">Fish &amp; Chips Data</a>'
             ],
             result: {
               formatted_address: `${ADDRESS_SENTINEL}, Miami, FL 33101`,
@@ -213,17 +214,23 @@ async function invokeError(error) {
         '/api/:unmatched'
       );
       assert.strictEqual(testSeam.safeAccessPath(`/tracking/${TOKEN}`), '/tracking/:tripId');
-      // Express serves trailing-slash and case variants of real routes, so
-      // classification must too — a request the router answered must never
-      // be logged as unmatched (telemetry correctness, Codex round 2).
+      // Classification mirrors the Express matcher EXACTLY: case-insensitive,
+      // at most ONE trailing slash forgiven ('//' and '///' are router
+      // rejections, never legitimate provider traffic), and the optional
+      // ':tripId?' means bare /tracking is a real match.
       assert.strictEqual(testSeam.safeAccessPath('/api/places/details/?place_id=x'), '/api/places/details');
       assert.strictEqual(testSeam.safeAccessPath('/API/Places/Autocomplete?input=x'), '/api/places/autocomplete');
-      assert.strictEqual(testSeam.safeAccessPath('/api/directions///'), '/api/directions');
+      assert.strictEqual(testSeam.safeAccessPath('/api/directions/'), '/api/directions');
+      assert.strictEqual(testSeam.safeAccessPath('/api/directions//'), '/api/:unmatched');
+      assert.strictEqual(testSeam.safeAccessPath('/api/directions///'), '/api/:unmatched');
       assert.strictEqual(testSeam.safeAccessPath('/api/definitely-not-a-route'), '/api/:unmatched');
       assert.strictEqual(testSeam.safeAccessPath('/HEALTH/'), '/health');
+      assert.strictEqual(testSeam.safeAccessPath('/tracking'), '/tracking/:tripId');
+      assert.strictEqual(testSeam.safeAccessPath('/tracking/'), '/tracking/:tripId');
+      assert.strictEqual(testSeam.safeAccessPath('/tracking//'), '/other');
     });
 
-    await check('Third-party attributions pass through SANITIZED — text and https hrefs only, hostile markup dies', async () => {
+    await check('Third-party attributions pass through FAITHFULLY — every entry, entities decoded, https URLs exact', async () => {
       testSeam.resetApiUsageStats();
       providerCalls = [];
       const query = new URLSearchParams({ place_id: PLACE_ID, sessiontoken: TOKEN });
@@ -231,21 +238,61 @@ async function invokeError(error) {
       const body = await response.json();
       assert.deepStrictEqual(body.attributions, [
         { text: 'Listings by Example', href: 'https://listings.example.com/p/1' },
-        { text: 'alert(1) Evil Co', href: null }
-      ], 'markup stripped, javascript: href refused, text preserved');
+        { text: 'Fish & Chips Data', href: 'https://partners.example.com/?a=1&b=2' }
+      ], 'every returned entry survives, entities decode, encoded query separators decode');
       assert.ok(!JSON.stringify(body.attributions).includes('<'),
         'no raw markup may cross the proxy boundary');
 
-      // Pure-function edges: non-arrays, oversized entries, and bounded count.
-      assert.deepStrictEqual(testSeam.sanitizeAttributions(undefined), []);
-      assert.deepStrictEqual(testSeam.sanitizeAttributions('nope'), []);
-      assert.deepStrictEqual(testSeam.sanitizeAttributions(['x'.repeat(1001)]), []);
-      assert.strictEqual(testSeam.sanitizeAttributions(
-        Array(10).fill('<a href="https://a.example">A</a>')).length, 4,
-        'attribution count is bounded');
-      assert.deepStrictEqual(testSeam.sanitizeAttributions(
-        ['<a href=\'https://b.example/x\'>B</a>']),
-        [{ text: 'B', href: 'https://b.example/x' }], 'single-quoted hrefs parse too');
+      // Pure-function contract: absent/empty = nothing to display (ok);
+      // anything unrepresentable = NOT ok, and never a partial set.
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(undefined), { ok: true, entries: [] });
+      assert.deepStrictEqual(testSeam.sanitizeAttributions([]), { ok: true, entries: [] });
+      assert.strictEqual(testSeam.sanitizeAttributions('nope').ok, false);
+      // Six valid entries: ALL preserved — Google publishes no count cap.
+      const six = testSeam.sanitizeAttributions(
+        Array.from({ length: 6 }, (_, i) => `<a href="https://p${i}.example/x">Partner ${i}</a>`));
+      assert.strictEqual(six.ok, true);
+      assert.strictEqual(six.entries.length, 6, 'no silent count cap on valid entries');
+      // A long valid name is preserved verbatim — no semantic truncation.
+      const longName = 'Very Long Partner Name '.repeat(20).trim();   // ~460 chars
+      const long = testSeam.sanitizeAttributions([`<a href="https://long.example/x">${longName}</a>`]);
+      assert.strictEqual(long.ok, true);
+      assert.strictEqual(long.entries[0].text, longName, 'valid text is never truncated');
+      // Plain-text entries (no anchor) are legitimate attributions too.
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Data &amp; Listings CC-BY']),
+        { ok: true, entries: [{ text: 'Data & Listings CC-BY', href: null }] });
+    });
+
+    await check('Unrepresentable attributions FAIL THE DETAILS RESULT CLOSED — never partial or altered credit', async () => {
+      const hostileSets = [
+        ['<a data-href="https://evil.example">Trusted</a>'],          // data-href is not href
+        ['<script>alert(1)</script>'],                                 // markup that is not one anchor
+        ['<a href="http://insecure.example/x">Partner</a>'],           // https-only, exactly as documented
+        ['<a href="javascript:alert(2)">Evil</a>'],                    // non-URL scheme
+        ['<a href="https://a.example" target="_blank">A</a>'],         // extra attributes refuse to parse
+        Array.from({ length: 17 }, (_, i) => `<a href="https://p${i}.example/x">P${i}</a>`), // ceiling
+        ['x'.repeat(2001)],                                            // raw-length ceiling
+      ];
+      for (const set of hostileSets) {
+        testSeam.setMapsGet(async () => ({
+          data: {
+            status: 'OK',
+            html_attributions: set,
+            result: {
+              formatted_address: `${ADDRESS_SENTINEL}, Miami, FL 33101`,
+              geometry: { location: { lat: 25.76, lng: -80.19 } }
+            }
+          }
+        }));
+        const query = new URLSearchParams({ place_id: PLACE_ID, sessiontoken: TOKEN });
+        const response = await request(`/api/places/details?${query}`);
+        assert.strictEqual(response.status, 502,
+          `unrepresentable set must fail closed: ${JSON.stringify(set[0]).slice(0, 60)}`);
+        const body = await response.json();
+        assert.ok(!JSON.stringify(body).includes('formatted_address'),
+          'no Google content may ship without its full required credit');
+      }
+      installProviderStub();
     });
 
     await check('The proxy is deployment-layout safe and its place-ID rules match the quote service exactly', async () => {
@@ -256,22 +303,54 @@ async function invokeError(error) {
       const identity = require('../backend/functions/lib/place-identity');
       assert.strictEqual(testSeam.MAX_PLACE_ID_LEN, identity.MAX_PLACE_ID_LEN,
         'the local bound must equal the ratified place-identity bound');
+      // Exhaustive boundary parity: every length edge (a 10->9 or 2048->2047
+      // mutation in EITHER copy fails here) and every character class.
       for (const [candidate, expected] of [
         [LONG_PLACE_ID, true],
         ['ChIJLSeUuFi32YgRgpwdRDtxYkg', true],
-        ['C'.repeat(2048), true],
-        ['C'.repeat(2049), false],
-        ['short', false],
+        ['A'.repeat(9), false],      // one under the floor
+        ['A'.repeat(10), true],      // the floor itself
+        ['A'.repeat(11), true],
+        ['A'.repeat(2047), true],
+        ['A'.repeat(2048), true],    // the ceiling itself
+        ['A'.repeat(2049), false],   // one over the ceiling
+        ['abcXYZ089_-', true],       // every legal character class at once
         ['ChIJ!bad$chars', false],
-        [12345, false]
+        ['ChIJ bad space', false],
+        ['ChIJbad/slash1', false],
+        ['ChIJbad.dot123', false],
+        [12345, false],
+        [null, false],
+        ['', false]
       ]) {
         assert.strictEqual(testSeam.isValidPlaceId(candidate), expected,
           `proxy verdict for ${String(candidate).slice(0, 24)}…`);
         if (typeof candidate === 'string') {
           assert.strictEqual(identity.isValidPlaceId(candidate), expected,
-            'the two validators must agree on every candidate');
+            `the two validators must agree on ${String(candidate).slice(0, 24)}…`);
         }
       }
+    });
+
+    await check('root-only packaging smoke: the proxy boots from an ISOLATED /backend/api-proxy copy', () => {
+      // Railway's documented root pulls only backend/api-proxy. Copy just
+      // that directory's files somewhere with no repo ancestors and require
+      // the server there: ANY import escaping the directory — the old
+      // ../functions one or a future different one — fails this boot.
+      const os = require('os');
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-root-'));
+      const proxyDir = path.join(__dirname, '..', 'backend', 'api-proxy');
+      for (const file of fs.readdirSync(proxyDir)) {
+        if (file === 'node_modules') continue;
+        fs.copyFileSync(path.join(proxyDir, file), path.join(tmp, file));
+      }
+      fs.symlinkSync(path.join(__dirname, '..', 'node_modules'),
+        path.join(tmp, 'node_modules'), 'dir');
+      const boot = spawnSync(process.execPath,
+        ['-e', "require('./server.js'); console.log('BOOT_OK');"],
+        { cwd: tmp, env: { ...process.env, NODE_ENV: 'test' }, encoding: 'utf8' });
+      assert.ok(boot.stdout.includes('BOOT_OK'),
+        `isolated proxy boot failed:\n${boot.stderr.slice(0, 600)}`);
     });
 
     await check('Autocomplete is live-only, no-store and uses only pinned provider params', async () => {

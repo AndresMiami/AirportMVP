@@ -288,6 +288,16 @@ export class CustomAutocomplete {
             if (!data.result?.formatted_address || !data.result?.geometry?.location) {
                 throw new Error('Incomplete place details');
             }
+            // Google's contract requires displaying EVERY returned
+            // third-party attribution. The proxy already fails closed on
+            // unrepresentable sets; this re-validation is the browser's own
+            // boundary — if any entry is invalid here, the Details result
+            // is treated as failed and the prediction-description fallback
+            // (which shows no Details content) takes over.
+            const attributions = this.validAttributionEntries(data.attributions);
+            if (attributions === null) {
+                throw new Error('Attribution unrepresentable');
+            }
             const place = {
                 id: prediction.place_id,
                 formattedAddress: data.result.formatted_address,
@@ -296,10 +306,7 @@ export class CustomAutocomplete {
                     lat: data.result.geometry.location.lat,
                     lng: data.result.geometry.location.lng
                 },
-                // Sanitized {text, href} entries from the proxy — Google
-                // policy requires displaying supplied third-party
-                // attributions alongside the content.
-                attributions: Array.isArray(data.attributions) ? data.attributions : []
+                attributions
             };
             this.applySelection(place);
         } catch (error) {
@@ -367,10 +374,38 @@ export class CustomAutocomplete {
         }
     }
 
-    // Third-party attributions (Google policy): render the proxy's sanitized
-    // {text, href} entries beside the Google Maps attribution. DOM is built
-    // with textContent and validated hrefs only — provider strings are never
-    // interpreted as HTML here, whatever the server sends.
+    // Browser-side attribution boundary. Returns [] when the proxy sent no
+    // attributions, the validated entries when every one is well-formed
+    // ({text, https href|null}), and NULL when ANY entry is invalid — the
+    // caller then fails the Details result closed instead of displaying
+    // Google content with partial or altered credit. HTTPS-only, exactly as
+    // documented; entries are never truncated or dropped.
+    validAttributionEntries(list) {
+        if (list == null) return [];
+        if (!Array.isArray(list) || list.length > 16) return null;
+        const out = [];
+        for (const entry of list) {
+            const text = typeof entry?.text === 'string' ? entry.text.trim() : '';
+            if (!text || text.length > 1000) return null;
+            let href = entry.href ?? null;
+            if (href !== null) {
+                if (typeof href !== 'string' || href.length > 1000) return null;
+                let parsed;
+                try { parsed = new URL(href); } catch (_) { return null; }
+                if (parsed.protocol !== 'https:') return null;
+                href = parsed.href;
+            }
+            out.push({ text, href });
+        }
+        return out;
+    }
+
+    // Third-party attributions (Google policy): render EVERY validated
+    // {text, href} entry beside the Google Maps attribution. The host
+    // element begins with the text "Google Maps", so every entry — the
+    // first included — is preceded by an explicit ' · ' separator. DOM is
+    // built with textContent and validated https hrefs only — provider
+    // strings are never interpreted as HTML here, whatever the server sends.
     renderThirdPartyAttributions(attributions) {
         if (!this.selectedAttribution ||
             typeof this.selectedAttribution.querySelector !== 'function') return;
@@ -385,10 +420,10 @@ export class CustomAutocomplete {
             this.selectedAttribution.appendChild(holder);
         }
         holder.textContent = '';
-        for (const entry of attributions.slice(0, 4)) {
-            const text = typeof entry?.text === 'string' ? entry.text.slice(0, 200) : '';
+        for (const entry of attributions) {
+            const text = typeof entry?.text === 'string' ? entry.text : '';
             if (!text) continue;
-            const href = typeof entry?.href === 'string' && /^https?:\/\//i.test(entry.href)
+            const href = typeof entry?.href === 'string' && /^https:\/\//i.test(entry.href)
                 ? entry.href : null;
             let node;
             if (href) {
@@ -401,7 +436,7 @@ export class CustomAutocomplete {
                 node = document.createElement('span');
                 node.textContent = text;
             }
-            if (holder.childNodes.length) holder.appendChild(document.createTextNode(' · '));
+            holder.appendChild(document.createTextNode(' · '));
             holder.appendChild(node);
         }
     }

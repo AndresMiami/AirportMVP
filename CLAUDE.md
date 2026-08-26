@@ -665,8 +665,17 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     custom-autocomplete/route attribution are prepared on the dark policy
     branch. Andres ratified Dale Miami Ventures LLC as LinkMia's
     contracting/privacy entity on 2026-08-25.
-    Activation remains blocked on Google's written answers for the open
-    storage/proxy questions. Do not infer those answers.
+    Activation remains blocked on the durable-Google-content decision.
+    Google Support explicitly declined to interpret or certify compliance
+    (support answers technical questions only), so closing that gate
+    requires qualified counsel review or conservative removal of durable
+    Google-derived content. The one technical answer on file: the Maps
+    JavaScript API script must load DIRECTLY from maps.googleapis.com —
+    proxied/cached loading is unsupported and may fail — so the proxied
+    one-hour loader needs a separately planned remediation (a
+    referrer-restricted browser key), untouched by this branch. Andres
+    ratified (2026-08-26): this branch is dark HARDENING only; merging it
+    does not clear the activation gate. Do not infer policy answers.
     One mechanism serves pending and future confirmed edits; confirmed
     editing remains a later product step.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit

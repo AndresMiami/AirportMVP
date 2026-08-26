@@ -73,7 +73,7 @@ const ctx = {
   window: {},
   crypto: { randomUUID: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
   CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
-  AbortController, URLSearchParams, Uint8Array, Set, Array, Math, Date, String, Number, JSON, Object,
+  AbortController, URL, URLSearchParams, Uint8Array, Set, Array, Math, Date, String, Number, JSON, Object,
   setTimeout, clearTimeout
 };
 ctx.globalThis = ctx;
@@ -366,8 +366,8 @@ async function check(name, fn) {
     assert.strictEqual(fetches, 1, 'the cancelled debounce never buys a provider call');
   });
 
-  await check('third-party attributions render as text and safe links only — hostile entries cannot inject', async () => {
-    const { instance, input } = makeAutocomplete();
+  await check('every third-party attribution renders — separators, safe links, no truncation', async () => {
+    const { instance } = makeAutocomplete();
     const attributionHost = {
       classList: classList(),
       children: [],
@@ -377,12 +377,14 @@ async function check(name, fn) {
       appendChild(child) { this.children.push(child); return child; }
     };
     instance.selectedAttribution = attributionHost;
+    const longName = 'Very Long Partner Name '.repeat(20).trim();
     instance.fetchWithTimeout = async () => ({
       ok: true,
       json: async () => ({
         attributions: [
           { text: 'Listings by Example', href: 'https://listings.example.com/p/1' },
-          { text: '<img src=x onerror=alert(1)>', href: 'javascript:alert(2)' }
+          { text: 'Data CC-BY Partner', href: null },
+          { text: longName, href: 'https://long.example/x' }
         ],
         result: {
           formatted_address: '100 Main St, Miami, FL',
@@ -395,20 +397,92 @@ async function check(name, fn) {
 
     const holder = attributionHost.querySelector();
     assert.ok(holder, 'a third-party attribution holder renders beside the selection');
+    // The host element begins with the text "Google Maps": EVERY entry —
+    // the first included — must be preceded by an explicit separator, or
+    // the credit reads "Google MapsListings by Example".
+    assert.strictEqual(holder.childNodes[0]?.text, ' \u00b7 ',
+      'a separator precedes the FIRST entry');
     const nodes = holder.childNodes.filter((n) => n.tagName);
-    assert.strictEqual(nodes.length, 2);
+    assert.strictEqual(nodes.length, 3, 'EVERY returned entry renders — no count cap');
     assert.strictEqual(nodes[0].tagName, 'A');
     assert.strictEqual(nodes[0].href, 'https://listings.example.com/p/1');
     assert.strictEqual(nodes[0].rel, 'noopener noreferrer');
     assert.strictEqual(nodes[0].textContent, 'Listings by Example');
-    assert.strictEqual(nodes[1].tagName, 'SPAN', 'a javascript: href renders as plain text, never a link');
-    assert.strictEqual(nodes[1].textContent, '<img src=x onerror=alert(1)>',
-      'hostile text stays textContent — it is data, never markup');
-    assert.strictEqual(nodes[1].href, undefined);
+    assert.strictEqual(nodes[1].tagName, 'SPAN', 'a null-href entry is plain text');
+    assert.strictEqual(nodes[2].textContent, longName, 'long valid credit is never truncated');
+    const separators = holder.childNodes.filter((n) => n.text === ' \u00b7 ');
+    assert.strictEqual(separators.length, 3, 'one separator per entry');
 
-    input.value = 'edited';
     instance.clearValidation();
     assert.strictEqual(holder.removed, true, 'clearing the selection clears the attribution');
+  });
+
+  await check('an unrepresentable attribution FAILS the Details result closed — fallback shows no Details content', async () => {
+    const { instance, input, dispatched } = makeAutocomplete();
+    const attributionHost = {
+      classList: classList(),
+      children: [],
+      querySelector() {
+        return this.children.find((c) => c.className === 'third-party-attribution') || null;
+      },
+      appendChild(child) { this.children.push(child); return child; }
+    };
+    instance.selectedAttribution = attributionHost;
+    for (const hostile of [
+      [{ text: '<img src=x onerror=alert(1)>', href: 'javascript:alert(2)' }],
+      [{ text: 'Partner', href: 'http://insecure.example/x' }],
+      [{ text: '', href: 'https://ok.example/x' }],
+      'not-an-array'
+    ]) {
+      dispatched.length = 0;
+      attributionHost.children.length = 0;
+      instance.fetchWithTimeout = async () => ({
+        ok: true,
+        json: async () => ({
+          attributions: hostile,
+          result: {
+            formatted_address: '100 Main St, Miami, FL',
+            geometry: { location: { lat: 25.7, lng: -80.2 } }
+          }
+        })
+      });
+      instance.predictions = [{ place_id: 'ChIJattribution2', description: '100 Main St' }];
+      await instance.selectSuggestion(0);
+      // The selection still completes — via the prediction-description
+      // fallback, which displays NO Details content and therefore owes no
+      // third-party credit. Google content with partial credit never shows.
+      assert.strictEqual(instance.isValidated, true, 'the passenger is not stranded');
+      assert.strictEqual(input.value, '100 Main St');
+      assert.deepStrictEqual(
+        JSON.parse(JSON.stringify(dispatched[1].detail)),
+        { lat: null, lng: null, address: '100 Main St' },
+        'the fallback carries no Details coordinates');
+      assert.strictEqual(attributionHost.querySelector(), null,
+        'no partial attribution ever renders');
+    }
+  });
+
+  await check('attribution CSS wraps required credit instead of pushing it off a mobile viewport', () => {
+    assert.match(mapsCss, /\.selected-place-attribution:has\(\.third-party-attribution\)\s*\{[^}]*white-space:\s*normal/,
+      'the host must stop nowrap once provider entries join it');
+    assert.match(mapsCss, /\.third-party-attribution\s*\{[^}]*overflow-wrap:\s*anywhere/,
+      'long URLs and names must wrap, not overflow');
+    assert.match(mapsCss, /\.third-party-attribution a\s*\{[^}]*text-decoration:\s*underline/,
+      'links must be visibly links');
+  });
+
+  await check('internal markdown and docs are blocked from public serving, ahead of the catch-all', () => {
+    const mdRule = netlify.indexOf('from = "/*.md"');
+    const docsRule = netlify.indexOf('from = "/docs/*"');
+    const catchAll = netlify.indexOf('from = "/*"\n');
+    assert.ok(mdRule >= 0, 'the /*.md rule must exist');
+    assert.ok(docsRule >= 0, 'the /docs/* rule must exist');
+    for (const at of [mdRule, docsRule]) {
+      const block = netlify.slice(at, netlify.indexOf('[[redirects]]', at + 1));
+      assert.match(block, /status = 404/);
+      assert.match(block, /force = true/, 'force is required — Netlify otherwise serves the real file');
+    }
+    assert.ok(catchAll > mdRule && catchAll > docsRule, 'blocking rules precede the SPA catch-all');
   });
 
   await check('Places sessions expire after inactivity, not while the passenger is actively typing', () => {

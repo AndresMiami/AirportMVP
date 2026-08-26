@@ -108,37 +108,92 @@ function safeAccessPath(originalUrl) {
   // stripped a mounted catch-all from req.url/req.path by then, while
   // originalUrl remains the immutable request target. Remove its query before
   // classification and return only a fixed allowlisted label.
-  // Express routes match case-insensitively and tolerate trailing slashes by
-  // default, so classification normalizes the same way — a request the
-  // router actually served must never be logged as unmatched.
+  // Express matches routes case-insensitively and tolerates exactly ONE
+  // trailing slash ('/api/directions/' matches, '//' and '///' do not), so
+  // classification mirrors the router precisely — a request the router
+  // served is never logged as unmatched, and a request it refused is never
+  // labeled as legitimate provider traffic.
   const raw = typeof originalUrl === 'string' ? originalUrl : '';
   const queryAt = raw.indexOf('?');
   let reqPath = (queryAt === -1 ? raw : raw.slice(0, queryAt)).toLowerCase();
-  while (reqPath.length > 1 && reqPath.endsWith('/')) reqPath = reqPath.slice(0, -1);
+  if (reqPath.length > 1 && reqPath.endsWith('/') && !reqPath.endsWith('//')) {
+    reqPath = reqPath.slice(0, -1);
+  }
   if (SAFE_ACCESS_PATHS.has(reqPath)) return reqPath;
-  if (reqPath.startsWith('/tracking/')) return '/tracking/:tripId';
+  // '/tracking/:tripId?' has an OPTIONAL param: bare '/tracking' (and its
+  // one-slash variant, stripped above) are real router matches. A path
+  // still ending in '/' after the single strip (double slashes) is one the
+  // router refused — never label it as the tracking route.
+  if (!reqPath.endsWith('/') &&
+      (reqPath === '/tracking' || reqPath.startsWith('/tracking/'))) return '/tracking/:tripId';
   if (reqPath.startsWith('/api/')) return '/api/:unmatched';
   return '/other';
 }
 
-// Google html_attributions arrive as provider-authored HTML strings (e.g.
-// '<a href="https://example.com">Listings by Foo</a>'). Policy requires
-// DISPLAYING them; security forbids forwarding raw HTML. Reduce each entry
-// to {text, href}: tags stripped from the text, href kept only when it is a
-// plain http(s) URL. Bounded in count and length; anything else is dropped.
-function sanitizeAttributions(htmlAttributions) {
-  if (!Array.isArray(htmlAttributions)) return [];
-  const out = [];
-  for (const entry of htmlAttributions.slice(0, 4)) {
-    if (typeof entry !== 'string' || entry.length > 1000) continue;
-    const hrefMatch = entry.match(/href\s*=\s*"([^"]{1,300})"/i) ||
-      entry.match(/href\s*=\s*'([^']{1,300})'/i);
-    let href = hrefMatch ? hrefMatch[1] : null;
-    if (href && !/^https?:\/\//i.test(href)) href = null;
-    const text = entry.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (text) out.push({ text, href });
+// Google html_attributions arrive as provider-authored HTML (typically
+// '<a href="https://…">Name</a>'). Google's contract requires displaying
+// EVERY returned attribution; security forbids forwarding raw HTML. Each
+// entry is parsed by a STRICT grammar — optional plain text around exactly
+// one plain href-only anchor, or plain text alone — entities are decoded,
+// and an href is accepted only when it parses as a real https: URL. Valid
+// entries are NEVER truncated or dropped. An entry the grammar cannot
+// represent faithfully (extra attributes, scripts, non-https links,
+// ceilings exceeded) makes the whole set unrepresentable, and the Details
+// handler FAILS CLOSED rather than serving Google content with partial or
+// altered credit. Ceilings are defensive only, far above anything Google
+// returns: 16 entries, 2000 raw chars, 1000-char text, 1000-char href.
+const ATTRIBUTION_CEILINGS = Object.freeze({ entries: 16, raw: 2000, text: 1000, href: 1000 });
+
+function decodeBasicEntities(value) {
+  // &amp; is decoded LAST so '&amp;lt;' correctly yields the literal '&lt;'.
+  return String(value)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function collapseText(value) {
+  return decodeBasicEntities(value).replace(/\s+/g, ' ').trim();
+}
+
+function parseAttributionEntry(entry) {
+  if (typeof entry !== 'string' || entry.length === 0 ||
+      entry.length > ATTRIBUTION_CEILINGS.raw) return null;
+  // Grammar A: plain text only — no markup of any kind.
+  if (!/[<>]/.test(entry)) {
+    const text = collapseText(entry);
+    if (!text || text.length > ATTRIBUTION_CEILINGS.text) return null;
+    return { text, href: null };
   }
-  return out;
+  // Grammar B: optional plain text, exactly ONE anchor whose only attribute
+  // is a double-quoted href, optional plain text. Anything else — data-href,
+  // target=, script tags, nested markup — refuses to parse and fails closed.
+  const m = entry.match(/^([^<>]*)<a\s+href="([^"<>]+)"\s*>([^<>]*)<\/a>([^<>]*)$/i);
+  if (!m) return null;
+  const text = collapseText(`${m[1]} ${m[3]} ${m[4]}`);
+  if (!text || text.length > ATTRIBUTION_CEILINGS.text) return null;
+  const rawHref = decodeBasicEntities(m[2]);
+  if (rawHref.length > ATTRIBUTION_CEILINGS.href) return null;
+  let parsed;
+  try { parsed = new URL(rawHref); } catch (_) { return null; }
+  if (parsed.protocol !== 'https:') return null;   // https-only, exactly as documented
+  return { text, href: parsed.href };
+}
+
+function sanitizeAttributions(htmlAttributions) {
+  if (htmlAttributions == null) return { ok: true, entries: [] };
+  if (!Array.isArray(htmlAttributions) ||
+      htmlAttributions.length > ATTRIBUTION_CEILINGS.entries) return { ok: false, entries: [] };
+  const entries = [];
+  for (const entry of htmlAttributions) {
+    const parsedEntry = parseAttributionEntry(entry);
+    if (!parsedEntry) return { ok: false, entries: [] };   // fail CLOSED, never partial
+    entries.push(parsedEntry);
+  }
+  return { ok: true, entries };
 }
 
 function valueOnly(providerValue) {
@@ -396,13 +451,21 @@ app.get('/api/places/details', mapsDataNoStore, trackApiUsage('placeDetails'), a
 
     const location = response.data.result?.geometry?.location;
 
+    // Google returns html_attributions independently of the requested
+    // fields, and its contract requires displaying EVERY supplied
+    // third-party attribution. If the set cannot be represented faithfully
+    // through the strict sanitizer, the result FAILS CLOSED: serving
+    // Google content with partial or altered credit is not an option, and
+    // the browser's prediction-description fallback needs no Details body.
+    const attribution = sanitizeAttributions(response.data.html_attributions);
+    if (!attribution.ok) {
+      diagnosticLogSink('maps_provider_failure endpoint=placeDetails status=attribution_unrepresentable');
+      return res.status(502).json({ error: 'Bad Gateway', status: 'ERROR' });
+    }
+
     const filteredResponse = {
       status: response.data.status,
-      // Google returns html_attributions independently of the requested
-      // fields, and its policy requires displaying supplied third-party
-      // attributions. Pass through a narrowly SANITIZED representation only
-      // ({text, href}), never raw provider HTML — see sanitizeAttributions.
-      attributions: sanitizeAttributions(response.data.html_attributions),
+      attributions: attribution.entries,
       result: response.data.result ? {
         formatted_address: response.data.result.formatted_address,
         geometry: location ? { location: { lat: location.lat, lng: location.lng } } : undefined

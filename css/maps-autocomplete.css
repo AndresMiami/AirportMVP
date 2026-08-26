@@ -98,6 +98,24 @@
 
 .selected-place-attribution.visible { display: block; }
 
+/* Third-party Places attributions (Google contract: every returned entry
+   must be displayed). The host is nowrap for the plain "Google Maps" badge,
+   but once provider entries join it the line MUST wrap: long required
+   credit may never be pushed off a mobile viewport. */
+.selected-place-attribution:has(.third-party-attribution) {
+    white-space: normal;
+    line-height: 1.5;
+}
+.selected-place-attribution .third-party-attribution {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.selected-place-attribution .third-party-attribution a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 /* Loading and no-results states for autocomplete */
 .loading-results,
 .no-results {
