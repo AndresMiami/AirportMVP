@@ -495,6 +495,15 @@ async function check(name, fn) {
       assert.strictEqual(instance.validAttributionEntries(entryWithHref(n)) !== null, expected,
         `browser href ceiling at ${n}`);
     }
+    // Segment-count ceiling: 8 accepted, 9 refused (defense-in-depth — the
+    // proxy emits at most three segments per entry today).
+    const entryWithSegments = (n) => [{
+      segments: Array.from({ length: n }, (_, i) => ({ text: `s${i}`, href: null }))
+    }];
+    assert.ok(instance.validAttributionEntries(entryWithSegments(8)) !== null,
+      '8 segments are within the declared ceiling');
+    assert.strictEqual(instance.validAttributionEntries(entryWithSegments(9)), null,
+      '9 segments exceed the ceiling and fail closed');
   });
 
   await check('attribution CSS wraps required credit instead of pushing it off a mobile viewport', () => {

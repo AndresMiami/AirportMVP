@@ -285,6 +285,21 @@ async function invokeError(error) {
       assert.deepStrictEqual(testSeam.sanitizeAttributions(['Alpha&#160;Beta']),
         { ok: true, entries: [{ segments: [{ text: 'Alpha\u00a0Beta', href: null }] }] },
         'NBSP is credit text: it decodes and SURVIVES — never collapsed to a space');
+      // Edge NBSPs survive the entry-edge trims too: the trims are
+      // ASCII-only by contract, and reverting them to \s strips these.
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['&#160;Alpha']),
+        { ok: true, entries: [{ segments: [{ text: '\u00a0Alpha', href: null }] }] },
+        'a LEADING NBSP survives the edge trim');
+      assert.deepStrictEqual(testSeam.sanitizeAttributions(['Alpha&#160;']),
+        { ok: true, entries: [{ segments: [{ text: 'Alpha\u00a0', href: null }] }] },
+        'a TRAILING NBSP survives the edge trim');
+      // The WHOLE C1 range fails closed, not just the endpoints.
+      for (let cp = 0x80; cp <= 0x9f; cp++) {
+        assert.strictEqual(testSeam.sanitizeAttributions([`x &#${cp}; y`]).ok, false,
+          `C1 decimal ${cp} must fail the set`);
+        assert.strictEqual(testSeam.sanitizeAttributions([`x &#x${cp.toString(16)}; y`]).ok, false,
+          `C1 hex 0x${cp.toString(16)} must fail the set`);
+      }
       assert.strictEqual(testSeam.sanitizeAttributions(['x &amp y']).ok, false,
         'a reference-looking semicolonless sequence fails closed');
       assert.strictEqual(testSeam.sanitizeAttributions(
