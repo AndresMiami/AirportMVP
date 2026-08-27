@@ -69,9 +69,9 @@ Deployed at `reliable-warmth-production-d382.up.railway.app`
 | GET `/api/places/details` | Place details | None (`private, no-store`) |
 | POST `/api/directions` | Route distance/duration | None (`private, no-store`) |
 | GET `/api/geocoding` | Address → coordinates | None |
-| GET `/api/maps-script` | Google Maps JS library | Cached |
+| GET `/api/maps-script` | Transitional stale-client loader only; fresh clients use Google direct | Retire after zero traffic |
 
-Features: Rate limiting, CORS, path-only access logging, and no storage of Places/Directions response content. The Maps JavaScript loader cache is a separate open Google-policy question.
+Features: Rate limiting, CORS, path-only access logging, and no storage of Places/Directions response content. Fresh browsers load Maps JavaScript directly from Google with a dedicated website-restricted browser key; the proxy route remains only for the one-release stale-client transition.
 
 ### Frontend Application
 

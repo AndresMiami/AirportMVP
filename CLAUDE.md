@@ -17,12 +17,17 @@ verified checkpoint locations all live in the web app backed by Supabase.
 - **Railway** (`reliable-warmth-production-d382.up.railway.app`): Google Maps
   proxy ONLY (`backend/api-proxy/server.js`). No booking logic lives there.
   Google Places and Directions content is request-scoped and never cached or
-  logged by the proxy. The Maps JavaScript loader remains separately cached;
-  its policy treatment is an OPEN question (tracked privately — this file is
-  publicly served, so no support-case identifiers belong here). The
-  google-policy-readiness branch is dark policy HARDENING, not completed
-  policy readiness: durable route-fact/Google-content retention remains a
-  separately blocking pre-activation decision.
+  logged by the proxy. Browsers load Maps JavaScript directly from Google via
+  `maps-loader.js`, using a dedicated public key generated per Netlify context
+  and protected by GCP website/API restrictions. Address autocomplete remains
+  independent through Railway. The old Railway `/api/maps-script` route is a
+  one-release stale-client transition only; retire it after zero traffic.
+  The retirement instrument is `/api/usage-stats`'s `mapsScript` counters plus
+  Railway access logs; a single zero snapshot is not sufficient because the
+  in-memory counters reset daily and on restart.
+  Direct-loader activation changes map delivery but not pricing authority;
+  durable route-fact/Google-content retention remains a separately blocking
+  pre-activation decision.
 - **Telegram**: send-only "bookkeeper" — new-request doorbell, trip-started
   ping, completion receipt. No webhook, no buttons, no state. Never rebuild
   dispatch inside a chat app (tried once; removed deliberately).
@@ -236,9 +241,15 @@ captures nothing.
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY` (secret),
 `TELEGRAM_BOT_TOKEN` (secret), `ADMIN_TELEGRAM_CHAT_ID`,
-`GOOGLE_MAPS_API_KEY`, Stripe keys (Stripe currently disabled,
+`GOOGLE_MAPS_BROWSER_API_KEY` (Builds scope; PUBLIC after generation; separate
+Production/Deploy Preview values, plus Branch Deploy if enabled), Stripe keys (Stripe currently disabled,
 `REQUIRE_PAYMENT=false` in indexMVP; payment = cash/Zelle to driver).
-Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
+Railway env: private `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost
+allowed). Never reuse the Railway key for the browser loader.
+The browser-key rollout requires project/API quota caps + quota alerts for Maps
+JavaScript and Directions (quota is project-wide, not per key), a project
+billing budget, and the Production Builds value BEFORE merge. Missing it keeps
+the old published deploy online but freezes every subsequent production build.
 
 ## Workflow
 
@@ -662,8 +673,8 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     zero non-test no_request_id/no_token/verify_failed traffic; the Google
     storage/policy review gate remains OPEN and is carried to activation.
     US billing means the non-EEA Maps terms apply. Public Terms/Privacy and
-    custom-autocomplete/route attribution are prepared on the dark policy
-    branch. Andres ratified Dale Miami Ventures LLC as LinkMia's
+    custom-autocomplete/route attribution are live. Andres ratified Dale
+    Miami Ventures LLC as LinkMia's
     contracting/privacy entity on 2026-08-25.
     Activation remains blocked on the durable-Google-content decision.
     Google Support explicitly declined to interpret or certify compliance
@@ -671,13 +682,16 @@ Railway env: `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost allowed).
     requires qualified counsel review or conservative removal of durable
     Google-derived content. The one technical answer on file: the Maps
     JavaScript API script must load DIRECTLY from maps.googleapis.com —
-    proxied/cached loading is unsupported and may fail — so the proxied
-    one-hour loader needs a separately planned remediation (a
-    referrer-restricted browser key), untouched by this branch. Andres
-    ratified (2026-08-26): this branch is dark HARDENING only; merging it
-    does not clear the activation gate. Do not infer policy answers.
+    proxied/cached loading is unsupported and may fail. That mechanism is now
+    corrected with a dedicated referrer-restricted browser key, but it does
+    NOT answer the separate durable-content question. Do not infer policy
+    answers.
     One mechanism serves pending and future confirmed edits; confirmed
     editing remains a later product step.
+  * The booking/trip presentation maps still use the existing Maps JavaScript
+    `DirectionsService` and legacy `Marker`. Modernize those with the future
+    dashboard/tracking-map work; do not expand the direct-loader correction
+    into a map-product rewrite.
   * PR 3C-3 Manage ride — confirmed-ride editing = the PR #59 pending-edit
     machinery extended (same form/row/details_version CAS), edits
     immediately authoritative, NO driver approval queue (release is the

@@ -7,7 +7,7 @@ A professional airport transfer booking platform with real-time pricing, Google 
 ### Prerequisites
 - Node.js 18+ 
 - npm or yarn
-- Google Maps API key
+- Two dedicated Google Maps keys: private Railway REST + public browser Maps JS
 - Supabase account (for database)
 - Stripe account (for payments)
 
@@ -86,13 +86,28 @@ AirportMVP/
 
 ### Environment Variables
 
-**For Google Maps Proxy (backend/api-proxy/.env):**
+**For Google Maps REST Proxy (Railway, private):**
 ```env
 GOOGLE_MAPS_API_KEY=your_api_key_here
-ALLOWED_ORIGINS=http://localhost:*,https://i-love-miami.netlify.app
+ALLOWED_ORIGINS=http://localhost:*,https://linkmia.com,https://i-love-miami.netlify.app
 NODE_ENV=production
 PORT=3001
 ```
+
+**For Netlify builds (public browser key):**
+```env
+GOOGLE_MAPS_BROWSER_API_KEY=your_referrer_restricted_browser_key
+```
+Use separate Production and Deploy Preview contextual values (and a Branch
+Deploy value if branch deploys are enabled). This browser key is visible to
+every browser by design; restrict it in GCP to the approved website referrers
+and only Maps JavaScript API + Directions API (Legacy). Use the exact preview
+hostname—never a broad `*.netlify.app` referrer. Never reuse the private
+Railway key.
+
+Before merge, also complete the quota caps, billing alerts, and fail-closed
+Netlify ordering in [SETUP.md](SETUP.md). A missing Production build value does
+not take the current site offline, but it blocks every later production deploy.
 
 **For Netlify Functions (set in Netlify dashboard):**
 ```env
@@ -109,7 +124,8 @@ ADMIN_TELEGRAM_CHAT_ID=your_admin_chat_id
 
 1. Connect GitHub repository to Netlify
 2. Build settings are auto-configured via `netlify.toml`
-3. Add environment variables in Netlify dashboard
+3. Add environment variables in Netlify dashboard, including the
+   context-specific `GOOGLE_MAPS_BROWSER_API_KEY` with **Builds** scope
 4. Deploy - auto deploys on push to main
 
 **Live URL:** https://i-love-miami.netlify.app
@@ -135,6 +151,10 @@ git checkout -b feature/your-feature
 2. **Test locally**
 - Start the proxy server: `npm start`
 - Open `indexMVP.html` in Live Server
+- The committed Maps browser config is deliberately disabled. Address search
+  and booking still work locally; the optional map stays hidden. Exercise the
+  real map through a referrer-restricted Deploy Preview—the generator refuses
+  to place a non-null browser key in an ordinary local checkout.
 - Test all features thoroughly
 
 3. **Commit changes**

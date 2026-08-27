@@ -3,7 +3,9 @@
 ## 🔒 Current Security Status
 
 ### ✅ Secure (Protected)
-- **Google Maps API Key**: Protected via Railway proxy server
+- **Google Maps REST key**: Private in Railway and never sent to browsers
+- **Google Maps browser key**: Public by design, isolated from the REST key,
+  and protected by GCP Website + API restrictions
 - **Stripe Secret Key**: Only on backend (Netlify Functions)
 - **Telegram Bot Token**: Only on backend (Netlify Functions)
 
@@ -17,9 +19,9 @@
 Frontend (Public)          Backend (Secure)
 -----------------          -----------------
 indexMVP.html              Railway Proxy
-├─ NO API KEYS            ├─ GOOGLE_MAPS_API_KEY
-├─ Uses proxy URLs        └─ Rate limiting
-└─ Public keys only       
+├─ Restricted browser key ├─ GOOGLE_MAPS_API_KEY
+├─ Google JS direct       └─ Rate limiting
+└─ REST calls via proxy
                           Netlify Functions
                           ├─ STRIPE_SECRET_KEY
                           ├─ TELEGRAM_BOT_TOKEN
@@ -53,8 +55,18 @@ nano .env
 
 #### Netlify (Frontend + Functions)
 1. Go to Site Settings → Environment Variables
-2. Add all variables from `.env.example`
-3. Deploy
+2. Add the Netlify-only/function values required by the deployed code
+   (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, server-side service/notification
+   values, and the existing feature switches). Do **not** copy Railway's
+   private `GOOGLE_MAPS_API_KEY` or proxy variables into Netlify.
+3. Give `GOOGLE_MAPS_BROWSER_API_KEY` **Builds** scope with separate
+   Production and Deploy Preview values (and Branch Deploy if enabled). It is
+   public after the build; use exact website referrers and never reuse the
+   Railway key.
+4. Before merge, configure production first. A missing value leaves the last
+   published deploy serving, but freezes all subsequent production deploys
+   until a corrected build succeeds.
+5. Deploy
 
 #### Railway (API Proxy)
 1. Go to Variables tab
@@ -62,6 +74,9 @@ nano .env
    - `GOOGLE_MAPS_API_KEY`
    - `ALLOWED_ORIGINS`
    - `NODE_ENV=production`
+3. During the stale-client transition, the private key still needs Maps
+   JavaScript API as well as Places, Directions and Geocoding. Remove Maps
+   JavaScript access when the old `/api/maps-script` route is retired.
 
 ### 4. Frontend Configuration
 
@@ -82,8 +97,11 @@ Or use Netlify environment variables with build plugin.
 ## 🚨 Security Checklist
 
 - [ ] All `.env` files in `.gitignore`
-- [ ] No hardcoded keys in JavaScript
-- [ ] API keys only in environment variables
+- [ ] No private keys hardcoded in JavaScript
+- [ ] Browser key is dedicated and website/API restricted
+- [ ] Maps JavaScript + Directions project quotas are capped and alerted
+- [ ] Project-scoped Cloud Billing budget alerts are active (alerts do not cap)
+- [ ] Private keys only in server environment variables
 - [ ] Proxy server for external APIs
 - [ ] CORS properly configured
 - [ ] Rate limiting enabled
@@ -107,6 +125,7 @@ git log -S "API_KEY" --oneline
 
 ### Required for Basic Functionality
 - `GOOGLE_MAPS_API_KEY` (Railway)
+- `GOOGLE_MAPS_BROWSER_API_KEY` (Netlify Builds; public, restricted)
 - `SUPABASE_URL` (Frontend/Backend)
 - `SUPABASE_ANON_KEY` (Frontend/Backend)
 
