@@ -28,6 +28,30 @@ indexMVP.html              Railway Proxy
                           └─ SUPABASE_SERVICE_KEY
 ```
 
+### Browser-key REST boundary observed in Deploy Preview
+
+`GOOGLE_MAPS_BROWSER_API_KEY` is intentionally delivered to the browser and
+must be treated as public. In a controlled Deploy Preview test, Google refused
+direct requests using the dedicated preview key at each REST/web-service
+endpoint LinkMia currently uses: Places Autocomplete, Place Details, Geocoding,
+and Directions. The test covered requests carrying the expected preview
+`Referer`, an unrelated `Referer`, and no `Referer`.
+
+This is point-in-time evidence for that key's combined Website and API
+restrictions—not proof that the key is secret, that all Google REST services
+are universally unreachable, or that future configuration changes cannot
+weaken the boundary. The Directions distinction is intentional: LinkMia uses
+the browser key through the allowed Maps JavaScript API client-library path for
+optional map rendering, while Railway uses a separate private server key for
+REST/web-service requests. Never reuse the browser key as Railway's key or
+broaden it to cover Railway's APIs.
+
+Keep exact Website and API restrictions in place. Because Maps quotas are
+project/API-wide and the Google Cloud project is shared with Railway, maintain
+the recorded quota caps with enough room for both traffic paths. Keep the
+project billing-budget alerts as well; those alerts warn about spend but do not
+stop charges.
+
 ## 🔐 How to Secure Your Application
 
 ### 1. Never Commit Secrets
