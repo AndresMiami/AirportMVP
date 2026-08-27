@@ -48,9 +48,9 @@ broaden it to cover Railway's APIs.
 
 Keep exact Website and API restrictions in place. Because Maps quotas are
 project/API-wide and the Google Cloud project is shared with Railway, maintain
-the recorded quota caps and quota alerts with enough room for both traffic
-paths. Keep project billing-budget alerts as well; those alerts warn about
-spend but do not stop charges.
+the recorded quota caps with enough room for both traffic paths. Keep the
+project billing-budget alerts as well; those alerts warn about spend but do not
+stop charges.
 
 ## 🔐 How to Secure Your Application
 
