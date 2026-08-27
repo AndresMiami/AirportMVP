@@ -152,8 +152,9 @@ git checkout -b feature/your-feature
 - Start the proxy server: `npm start`
 - Open `indexMVP.html` in Live Server
 - The committed Maps browser config is deliberately disabled. Address search
-  and booking still work locally; the optional map stays hidden unless you
-  generate a localhost-restricted browser config.
+  and booking still work locally; the optional map stays hidden. Exercise the
+  real map through a referrer-restricted Deploy Preview—the generator refuses
+  to place a non-null browser key in an ordinary local checkout.
 - Test all features thoroughly
 
 3. **Commit changes**

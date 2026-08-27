@@ -112,14 +112,19 @@ tracked config with a real credential.
 2. Create/restrict the preview browser key to that exact hostname pair, set
    `GOOGLE_MAPS_BROWSER_API_KEY` with **Builds** scope in Netlify's **Deploy
    Previews** context, then retry the preview deploy and field-test it.
-3. Before merge, create/restrict the separate production browser key, finish
+3. If Branch Deploys are enabled, create/restrict their separate browser key
+   to the exact enabled branch hostname(s), set the Builds-scoped **Branch
+   Deploys** value, and verify that context too. Otherwise leave Branch Deploys
+   disabled; the generator intentionally fails closed if one is built without
+   its context-specific value.
+4. Before merge, create/restrict the separate production browser key, finish
    the quota/billing controls above, and set the same variable with **Builds**
    scope in Netlify's **Production** context.
-4. Only then merge. If the production value is missing, the currently
+5. Only then merge. If the production value is missing, the currently
    published site stays online, but the new build fails. That freezes every
    later production deployment—including an unrelated emergency function
    hotfix—until the variable is corrected and a clean build succeeds.
-5. After merge, verify direct `maps.googleapis.com` loading, address search,
+6. After merge, verify direct `maps.googleapis.com` loading, address search,
    Vehicle and trip maps, and the existing pricing kill switch/browser flag.
 
 The old Railway `/api/maps-script` route is retired separately. Use

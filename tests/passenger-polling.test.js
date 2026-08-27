@@ -310,6 +310,13 @@ function check(name, fn) {
   ], new Map(), { mapsLoad: () => delayedMaps });
   await activeToTerminal.settle();
   assert.ok(!activeToTerminal.element('mapCard').classList.contains('hidden'));
+  activeToTerminal.evaluate("window.dispatchEvent({ type: 'linkmia:maps-error' })");
+  check('the real trip maps-error event hides only the optional canvas', () => {
+    assert.ok(!activeToTerminal.element('mapCard').classList.contains('hidden'),
+      'the honest active-trip status card was hidden');
+    assert.ok(activeToTerminal.element('liveMap').classList.contains('hidden'),
+      'the broken map canvas remained visible');
+  });
   await activeToTerminal.runNextTimer();
   check('terminal status clears an active map snapshot pending behind the loader', () => {
     assert.ok(activeToTerminal.element('mapCard').classList.contains('hidden'));

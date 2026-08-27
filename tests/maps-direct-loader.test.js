@@ -166,7 +166,20 @@ function makeRealm({ key = VALID_KEY } = {}) {
 
       const devFile = path.join(dir, 'dev.js');
       generator.generateMapsBrowserConfig({ env: { CONTEXT: 'dev' }, outputPath: devFile });
-      assert.match(fs.readFileSync(devFile, 'utf8'), /apiKey:\s*null/);
+      assert.strictEqual(fs.readFileSync(devFile, 'utf8'), committedConfig,
+        'local null generation must preserve the committed placeholder byte-for-byte');
+      assert.strictEqual(generator.NULL_CONFIG_SOURCE, committedConfig);
+
+      const originalWrite = fs.writeFileSync;
+      let trackedWrites = 0;
+      try {
+        fs.writeFileSync = () => { trackedWrites++; };
+        generator.generateMapsBrowserConfig({ env: { CONTEXT: 'dev' } });
+      } finally {
+        fs.writeFileSync = originalWrite;
+      }
+      assert.strictEqual(trackedWrites, 0,
+        'an ordinary local invocation touched the already-correct tracked config');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -338,7 +351,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
     const holder = vm.runInContext(`({ ${method} })`, context);
     const app = {
       ...holder,
-      els: { vehicleMap: {} },
+      els: { vehicleMap: { style: {}, removeAttribute() {} } },
       vehicleMap: null,
       state: {
         mode: 'dropoff',
@@ -387,7 +400,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
     const holder = vm.runInContext(`({ ${method} })`, context);
     const app = {
       ...holder,
-      els: { vehicleMap: {} },
+      els: { vehicleMap: { style: {}, removeAttribute() {} } },
       vehicleMap: null,
       state: {
         mode: 'dropoff',
@@ -427,7 +440,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
     const holder = vm.runInContext(`({ ${method} })`, context);
     const app = {
       ...holder,
-      els: { vehicleMap: {} },
+      els: { vehicleMap: { style: {}, removeAttribute() {} } },
       vehicleMap: {},
       directionsRenderer: { setDirections(result) { rendered.push(result.id); } },
       directionsService: { route(_request, callback) { callbacks.push(callback); } },
@@ -451,36 +464,119 @@ function makeRealm({ key = VALID_KEY } = {}) {
     assert.deepStrictEqual(rendered, ['new']);
   });
 
-  await check('booking map authorization failure clears only the optional canvas', () => {
-    const declaration = '\n            handleMapsFailure() {';
-    const start = bookingPage.indexOf(declaration) + 13;
-    const end = bookingPage.indexOf('// Handle booking button click', start);
-    assert.ok(start > 0 && end > start, 'handleMapsFailure source markers moved');
-    const method = bookingPage.slice(start, end).trim();
-    let cleared = false;
+  await check('booking map failure clears only its canvas and a later success restores it', async () => {
+    const updateStart = bookingPage.indexOf('async updateVehicleMap()');
+    const failureStart = bookingPage.indexOf('handleMapsFailure() {', updateStart);
+    const end = bookingPage.indexOf('// Handle booking button click', failureStart);
+    assert.ok(updateStart > 0 && failureStart > updateStart && end > failureStart,
+      'vehicle-map source markers moved');
+    const updateMethod = bookingPage.slice(updateStart, failureStart).trim();
+    const failureMethod = bookingPage.slice(failureStart, end).trim();
+    let clears = 0;
+    let failLoad = false;
+    let mapCreations = 0;
+    let routeCalls = 0;
     const attrs = new Map();
     const mapCanvas = {
       style: {},
-      replaceChildren() { cleared = true; },
-      setAttribute(name, value) { attrs.set(name, value); }
+      replaceChildren() { clears++; },
+      setAttribute(name, value) { attrs.set(name, value); },
+      removeAttribute(name) { attrs.delete(name); }
     };
-    const holder = vm.runInNewContext(`({ ${method} })`);
+    const listeners = new Map();
+    const context = vm.createContext({
+      window: {
+        LinkMiaMapsLoader: {
+          async load() {
+            if (failLoad) throw new Error('maps unavailable');
+            return {};
+          }
+        },
+        addEventListener(type, fn) { listeners.set(type, fn); },
+        dispatchEvent(event) { listeners.get(event.type)?.(event); }
+      },
+      google: { maps: {
+        importLibrary: async () => ({}),
+        Map: class FakeMap { constructor() { mapCreations++; } },
+        DirectionsRenderer: class FakeRenderer { setDirections() {} },
+        DirectionsService: class FakeDirectionsService {
+          route(_request, callback) {
+            routeCalls++;
+            callback({}, 'OK');
+          }
+        },
+        LatLng: class FakeLatLng {},
+        TravelMode: { DRIVING: 'DRIVING' },
+        DirectionsStatus: { OK: 'OK' }
+      } },
+      console: { error() {} }
+    });
+    const holder = vm.runInContext(`({ ${updateMethod}, ${failureMethod} })`, context);
+    const bookBtn = { disabled: false };
+    const addressInput = { value: 'Passenger address' };
+    const vehiclePanel = { hidden: false };
+    const continueBtn = { disabled: false };
     const app = {
       ...holder,
-      els: { vehicleMap: mapCanvas },
+      els: { vehicleMap: mapCanvas, bookBtn, addressInput, vehiclePanel, continueBtn },
       vehicleMap: {},
       directionsRenderer: {},
-      directionsService: {}
+      directionsService: {},
+      state: {
+        mode: 'dropoff',
+        ui: { currentPanel: 'vehicle' },
+        locations: {
+          address: { address: 'Passenger address' },
+          airport: { code: 'MIA' }
+        }
+      },
+      getAirportCoordinates: () => ({ lat: 25.8, lng: -80.3 })
     };
-    app.handleMapsFailure();
-    assert.strictEqual(cleared, true);
+    context.window.airportApp = app;
+    const registrationAt = bookingPage.indexOf("window.addEventListener('linkmia:maps-error'");
+    const eventStart = bookingPage.lastIndexOf('// Google can report', registrationAt);
+    const eventEnd = bookingPage.indexOf('// Initialize Application', registrationAt);
+    assert.ok(registrationAt > 0 && eventStart > 0 && eventEnd > registrationAt,
+      'maps-error listener source moved');
+    // Start before the registration itself so a future `if (false)` wrapper
+    // is executed too, rather than accidentally sliced away by this harness.
+    vm.runInContext(bookingPage.slice(eventStart, eventEnd), context);
+
+    context.window.dispatchEvent({ type: 'linkmia:maps-error' });
+    assert.strictEqual(clears, 1, 'the real maps-error event did not clear the canvas');
     assert.strictEqual(mapCanvas.style.visibility, 'hidden');
     assert.strictEqual(attrs.get('aria-hidden'), 'true');
     assert.strictEqual(app.vehicleMap, null);
     assert.strictEqual(app.directionsRenderer, null);
     assert.strictEqual(app.directionsService, null);
-    assert.match(bookingPage,
-      /addEventListener\('linkmia:maps-error',[\s\S]*airportApp\?\.handleMapsFailure\(\)/);
+
+    // The loader rejection must reach the same cleanup boundary through the
+    // real updateVehicleMap catch, not just through the event listener.
+    mapCanvas.style.visibility = '';
+    attrs.delete('aria-hidden');
+    app.vehicleMap = {};
+    app.directionsRenderer = {};
+    app.directionsService = {};
+    failLoad = true;
+    await app.updateVehicleMap();
+    assert.strictEqual(clears, 2, 'the updateVehicleMap catch skipped cleanup');
+    assert.strictEqual(mapCanvas.style.visibility, 'hidden');
+
+    // Recovery must not spend into an invisible canvas.
+    failLoad = false;
+    await app.updateVehicleMap();
+    assert.strictEqual(mapCanvas.style.visibility, '');
+    assert.strictEqual(attrs.has('aria-hidden'), false);
+    assert.strictEqual(mapCreations, 1);
+    assert.strictEqual(routeCalls, 1);
+
+    assert.deepStrictEqual(
+      { bookDisabled: bookBtn.disabled, address: addressInput.value,
+        panelHidden: vehiclePanel.hidden, continueDisabled: continueBtn.disabled },
+      { bookDisabled: false, address: 'Passenger address',
+        panelHidden: false, continueDisabled: false },
+      'an optional map failure changed booking controls'
+    );
   });
 
   await check('service worker refreshes loader code but never caches generated key config', () => {

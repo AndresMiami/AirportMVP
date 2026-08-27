@@ -2708,6 +2708,12 @@
                     await window.LinkMiaMapsLoader.load();
                     if (mapRequestSeq !== this._vehicleMapRequestSeq ||
                         this.state.ui.currentPanel !== 'vehicle') return;
+                    // A prior network/auth failure hides this optional canvas
+                    // so Google's broken-map overlay cannot linger. If a
+                    // later attempt succeeds, make the same static canvas
+                    // visible again before rebuilding the map.
+                    this.els.vehicleMap.style.visibility = '';
+                    this.els.vehicleMap.removeAttribute('aria-hidden');
                     if (!this.vehicleMap) {
                         await Promise.all([
                             google.maps.importLibrary("maps"),
