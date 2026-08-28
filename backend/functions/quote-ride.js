@@ -468,7 +468,6 @@ exports.handler = async (event) => {
     const { card, resolvedVersion } = card0;
 
     const vehicles = {};
-    const centsByVehicle = {};
     let vehiclesOk = 0;
     // ONE jti for the whole quote, shared by every vehicle's token:
     // consuming any vehicle's token consumes the QUOTE, so sibling
@@ -547,22 +546,17 @@ exports.handler = async (event) => {
         token: quoteToken,
         expiresAt: new Date(nowMs + QUOTE_TTL_MS).toISOString()
       };
-      centsByVehicle[key] = q.quote.finalCents;
       vehiclesOk++;
     }
 
     logTelemetry({
       startedMs, placesMs, routesMs,
       outcome: 'ok',
-      routeQuality: route.routeQuality,
-      miles: Math.round(route.routeMiles),
-      minutes: Math.round(route.routeMinutes / 5) * 5,
       // Whether Google superseded the submitted id — a boolean, never
       // either id.
       placeIdSubstituted: place.substituted === true,
       vehiclesOk,
-      vehiclesRefused: Object.keys(card.vehicles).length - vehiclesOk,
-      cents: centsByVehicle
+      vehiclesRefused: Object.keys(card.vehicles).length - vehiclesOk
     });
 
     return {
@@ -614,13 +608,85 @@ exports.handler = async (event) => {
   }
 };
 
-// Sanitized telemetry: latency, outcome class, quantized route buckets,
-// cents. NEVER addresses, place IDs, coordinates, identities, or raw
-// provider errors — asserted by tests.
-function logTelemetry(fields) {
-  const { startedMs, ...rest } = fields;
-  console.log('quote_telemetry ' + JSON.stringify({
-    totalMs: Date.now() - startedMs,
-    ...rest
-  }));
+// Sanitized telemetry: latency and operational outcome ONLY.
+//
+// Google's support answer (case 74801827) confirms distance and duration are
+// Google Maps Content has no caching exception outside lat/lng, so route
+// facts must not be durably logged — a log line is retention. Quote cents are
+// excluded on the same principle while whether a derived fare is retainable
+// remains an open counsel question: an operational log has no need of either.
+// Route QUALITY is excluded on the same boundary: it is derived from Routes
+// fallbackInfo, so fallback-rate analytics needs its own policy decision
+// rather than a quiet log exception. It stays transient in the response/token.
+//
+// This is a SCHEMA, not a filter, and it carries TWO independent guarantees:
+//   1. only these KEYS are emitted, so a future caller cannot widen the log
+//      by passing extra fields;
+//   2. only values of the declared SHAPE are emitted. A value failing its
+//      check is dropped, or mapped to a fixed literal, and is NEVER
+//      stringified into the line.
+// Key-name allowlisting alone was not a retention boundary: every allowed key
+// copied its value through untouched, so `outcome: '<an address>'` or
+// `placesMs: '<a token>'` would have been logged verbatim. Values are the
+// half that actually carries Google Content, so they are checked, not trusted.
+
+// The complete set of sanitized failure classes produced by resolvePlace()
+// and fetchRouteFacts(), plus success. Anything outside this set is reported
+// as one fixed literal — an unrecognized class must never echo its input.
+const OUTCOME_CLASSES = Object.freeze([
+  'ok',
+  // place-identity.js
+  'invalid_place_id', 'places_timeout', 'places_5xx', 'places_invalid_request',
+  'places_not_found', 'places_denied', 'places_rate_limited',
+  'places_bad_request', 'places_parse_error', 'places_network_error',
+  // route-facts.js
+  'routes_timeout', 'routes_5xx', 'routes_denied', 'routes_rate_limited',
+  'routes_bad_request', 'routes_parse_error', 'routes_no_route',
+  'routes_network_error'
+]);
+const OUTCOME_SET = new Set(OUTCOME_CLASSES);
+const OUTCOME_UNCLASSIFIED = 'unclassified';
+
+// Value checks. Each returns the safe value to emit, or undefined to omit the
+// field entirely. None of them can return any part of a rejected input.
+const asDuration = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+const asCount = (v) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : undefined);
+const asBoolean = (v) => (v === true || v === false ? v : undefined);
+// Absent stays absent; present-but-unrecognized becomes the fixed literal, so
+// an operator still sees that something happened without the value leaking.
+const asOutcome = (v) => (v === undefined ? undefined : (typeof v === 'string' && OUTCOME_SET.has(v) ? v : OUTCOME_UNCLASSIFIED));
+
+const TELEMETRY_SCHEMA = Object.freeze({
+  placesMs: asDuration,           // provider latency, operational
+  routesMs: asDuration,           // provider latency, operational
+  outcome: asOutcome,             // fixed sanitized class
+  placeIdSubstituted: asBoolean,  // boolean; never either id
+  vehiclesOk: asCount,
+  vehiclesRefused: asCount
+});
+const TELEMETRY_FIELDS = Object.freeze(Object.keys(TELEMETRY_SCHEMA));
+
+// PURE projector, exported for tests: the projection is the whole retention
+// guarantee, so it must be exercisable directly with hostile input rather
+// than inferred from the source text.
+function projectTelemetry(fields) {
+  const line = {};
+  // Arithmetic cannot echo a string, but a non-numeric startedMs yields NaN,
+  // which would serialize as null. An unknowable elapsed time is omitted
+  // rather than reported as a fabricated 0.
+  const totalMs = asDuration(Date.now() - fields.startedMs);
+  if (totalMs !== undefined) line.totalMs = totalMs;
+  for (const key of TELEMETRY_FIELDS) {
+    const value = TELEMETRY_SCHEMA[key](fields[key]);
+    if (value !== undefined) line[key] = value;
+  }
+  return line;
 }
+
+function logTelemetry(fields) {
+  console.log('quote_telemetry ' + JSON.stringify(projectTelemetry(fields)));
+}
+
+// Test seam: the projector, its key list and its outcome enum only. No
+// handler state, no provider access, nothing that widens the endpoint.
+exports.testSeam = Object.freeze({ projectTelemetry, TELEMETRY_FIELDS, OUTCOME_CLASSES });

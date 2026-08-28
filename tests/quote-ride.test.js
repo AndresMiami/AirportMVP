@@ -1157,6 +1157,316 @@ async function check(name, fn) {
     assert.ok(telemetry[0].includes('totalMs'));
   });
 
+  await check('TELEMETRY RETENTION: the success line carries an EXACT allowlist — no route facts, no cents', async () => {
+    // Google case 74801827: distance and duration are Google Maps Content
+    // with no caching exception outside lat/lng, so a durable log line is
+    // retention. Quote cents are excluded on the same principle while fare
+    // retention is an open counsel question.
+    state.logLines.length = 0;
+    const res = await post(goodIntent());
+    assert.strictEqual(res.statusCode, 200);
+
+    const lines = state.logLines.filter((l) => l.includes('quote_telemetry'));
+    assert.strictEqual(lines.length, 1, 'one success line');
+    const payload = JSON.parse(lines[0].replace('quote_telemetry ', ''));
+
+    // Pin the EXACT key set — not merely the absence of bad keys, so a
+    // future field cannot be added without failing here.
+    assert.deepStrictEqual(Object.keys(payload).sort(), [
+      'outcome', 'placeIdSubstituted', 'placesMs',
+      'routesMs', 'totalMs', 'vehiclesOk', 'vehiclesRefused'
+    ], 'success telemetry key set is frozen');
+
+    for (const forbidden of ['miles', 'minutes', 'cents', 'distance', 'duration',
+                             'placeId', 'place_id', 'address', 'formattedAddress',
+                             'token', 'jti', 'intentHash', 'customerId', 'authUserId']) {
+      assert.ok(!(forbidden in payload), `telemetry must not carry ${forbidden}`);
+    }
+
+    // Values that ARE present must be the operational ones they claim to be.
+    assert.strictEqual(payload.outcome, 'ok');
+    assert.strictEqual(typeof payload.totalMs, 'number');
+    assert.strictEqual(payload.placeIdSubstituted, false);
+    assert.strictEqual(payload.vehiclesOk, 3);
+
+    // Values are compared against the PARSED payload, never by raw
+    // substring: a latency that happens to equal a fare or a route value
+    // must not create a false pass or a false failure.
+    const body = JSON.parse(res.body);
+    const forbiddenValues = new Set([
+      ...Object.values(body.quote.vehicles).map((v) => v.finalCents),
+      body.quote.route.miles, body.quote.route.milesTenths, body.quote.route.minutes
+    ]);
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === 'totalMs' || key === 'placesMs' || key === 'routesMs') continue;
+      assert.ok(!forbiddenValues.has(value),
+        `telemetry key ${key} carries a route fact or fare value`);
+    }
+  });
+
+  await check('TELEMETRY PROJECTOR: hostile input is structurally dropped, not merely absent', () => {
+    // The allowlist projection IS the retention guarantee, so exercise the
+    // REAL exported projector with a deliberately polluted payload. A
+    // logger that copies caller fields (Object.assign, spread, or a hand
+    // rolled merge) fails here regardless of how the source text reads.
+    const { projectTelemetry, TELEMETRY_FIELDS } = quoteRideEndpoint.testSeam;
+    const POLLUTION = {
+      formattedAddress: '999 Leak Road, Miami, FL',
+      address: '1 Brickell Ave',
+      airportName: 'Miami International Airport',
+      placeId: ADDRESS_PLACE_ID,
+      place_id: MIA_PLACE_ID,
+      miles: 13.9,
+      routeMiles: 13.9,
+      milesTenths: 139,
+      minutes: 25,
+      routeMinutes: 25,
+      duration: '1500s',
+      distance: 22370,
+      cents: { tesla: 3900, escalade: 5500 },
+      finalCents: 3900,
+      customerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      authUserId: '11111111-1111-4111-8111-111111111111',
+      token: 'eyJhbGciOiJIUzI1NiJ9.payload.signature',
+      jti: 'jti-should-never-log',
+      intentHash: 'deadbeefdeadbeef',
+      providerError: 'raw provider secret text',
+      // Seq:58 C1 — route quality is derived from Routes fallbackInfo, so it
+      // is no longer durable telemetry and must now be dropped like any
+      // other non-allowlisted field.
+      routeQuality: 'traffic_aware'
+    };
+    const projected = projectTelemetry({
+      startedMs: Date.now() - 5,
+      placesMs: 11, routesMs: 22, outcome: 'ok',
+      placeIdSubstituted: false, vehiclesOk: 3, vehiclesRefused: 0,
+      ...POLLUTION
+    });
+
+    assert.deepStrictEqual(Object.keys(projected).sort(), [
+      'outcome', 'placeIdSubstituted', 'placesMs',
+      'routesMs', 'totalMs', 'vehiclesOk', 'vehiclesRefused'
+    ], 'projector emits ONLY the operational allowlist');
+
+    const serialized = JSON.stringify(projected);
+    for (const [key, value] of Object.entries(POLLUTION)) {
+      assert.ok(!(key in projected), `polluted key ${key} must be dropped`);
+      const needle = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      assert.ok(!serialized.includes(needle), `polluted value for ${key} must not appear`);
+    }
+    assert.ok(Object.isFrozen(TELEMETRY_FIELDS), 'the allowlist is frozen');
+    for (const banned of ['miles', 'minutes', 'cents']) {
+      assert.ok(!TELEMETRY_FIELDS.includes(banned), `${banned} must not be allowlisted`);
+    }
+  });
+
+  await check('TELEMETRY KEY SETS are pinned for success, Places failure and Routes failure', async () => {
+    const parse = () => state.logLines
+      .filter((l) => l.includes('quote_telemetry'))
+      .map((l) => JSON.parse(l.replace('quote_telemetry ', '')));
+
+    // Places failure
+    resetState();
+    state.placesResponse = () => ({ ok: false, status: 404, json: async () => ({ error: 'nope' }) });
+    await post(goodIntent());
+    let lines = parse();
+    assert.strictEqual(lines.length, 1);
+    // routesMs is initialised to 0 before the Places call, so it is defined
+    // and legitimately projected — a latency field, never content.
+    assert.deepStrictEqual(Object.keys(lines[0]).sort(),
+      ['outcome', 'placesMs', 'routesMs', 'totalMs'],
+      'Places-failure telemetry carries only timings and a sanitized outcome');
+    assert.match(lines[0].outcome, /^places_/);
+
+    // Routes failure
+    resetState();
+    state.routesResponse = () => ({ ok: false, status: 500, json: async () => ({ error: 'nope' }) });
+    await post(goodIntent());
+    lines = parse();
+    assert.strictEqual(lines.length, 1);
+    assert.deepStrictEqual(Object.keys(lines[0]).sort(), ['outcome', 'placesMs', 'routesMs', 'totalMs'],
+      'Routes-failure telemetry carries only timings and a sanitized outcome');
+
+    // Success (re-pinned here so all three paths are asserted together)
+    resetState();
+    await post(goodIntent());
+    lines = parse();
+    assert.strictEqual(lines.length, 1);
+    assert.deepStrictEqual(Object.keys(lines[0]).sort(), [
+      'outcome', 'placeIdSubstituted', 'placesMs',
+      'routesMs', 'totalMs', 'vehiclesOk', 'vehiclesRefused'
+    ]);
+  });
+
+  await check('TELEMETRY VALUE SCHEMA: every allowed slot refuses hostile VALUES, not just hostile keys', () => {
+    // Key-name allowlisting alone was NOT a retention boundary: each allowed
+    // key copied its value through untouched, so `outcome: '<an address>'`
+    // or `placesMs: '<a token>'` serialized verbatim. Values are the half
+    // that actually carries Google Content, so every allowed slot is now
+    // schema-checked. This drives the FULL cross-product: each hostile value
+    // is placed in each allowed slot in turn.
+    const { projectTelemetry, TELEMETRY_FIELDS, OUTCOME_CLASSES } = quoteRideEndpoint.testSeam;
+
+    const HOSTILE = [
+      '999 Leak Road, Miami, FL',
+      ADDRESS_PLACE_ID,
+      MIA_PLACE_ID,
+      'eyJhbGciOiJIUzI1NiJ9.payload.signature',
+      'REQUEST_DENIED: server key referer restriction',
+      'traffic_aware',
+      { formattedAddress: '1 Brickell Ave', finalCents: 3900 },
+      ['13.9 mi', '25 min'],
+      NaN, Infinity, -Infinity, -1, -0.5, 1.5,
+      null, () => 'leak-via-function'
+    ];
+    const SAFE_OUTCOMES = new Set([...OUTCOME_CLASSES, 'unclassified']);
+    const legit = () => ({
+      startedMs: Date.now() - 5, placesMs: 11, routesMs: 22, outcome: 'ok',
+      placeIdSubstituted: false, vehiclesOk: 3, vehiclesRefused: 0
+    });
+
+    for (const slot of [...TELEMETRY_FIELDS, 'startedMs']) {
+      for (const hostile of HOSTILE) {
+        const fields = legit();
+        fields[slot] = hostile;
+        const projected = projectTelemetry(fields);
+        const serialized = JSON.stringify(projected);
+
+        // The COMPLETE invariant: whatever survives is a key from the
+        // allowlist carrying either a finite non-negative number or one
+        // known sanitized outcome class. Nothing else can be emitted, so
+        // this holds regardless of what the hostile value happened to be.
+        for (const [key, value] of Object.entries(projected)) {
+          assert.ok(key === 'totalMs' || TELEMETRY_FIELDS.includes(key),
+            `slot ${slot}: emitted unexpected key ${key}`);
+          if (key === 'outcome') {
+            assert.ok(SAFE_OUTCOMES.has(value),
+              `slot ${slot}: outcome echoed an unsanitized value`);
+          } else if (key === 'placeIdSubstituted') {
+            assert.strictEqual(typeof value, 'boolean', `slot ${slot}: ${key} must be boolean`);
+          } else {
+            assert.ok(typeof value === 'number' && Number.isFinite(value) && value >= 0,
+              `slot ${slot}: ${key} emitted a non-numeric or negative value`);
+          }
+        }
+
+        // Belt and braces on the values the schema REFUSED. A value the
+        // schema legitimately accepted is not a leak — but it must then be
+        // a number, never text or structure, so assert that explicitly
+        // instead of skipping the case.
+        if (projected[slot] === hostile) {
+          assert.ok(typeof hostile === 'number' && Number.isFinite(hostile) && hostile >= 0,
+            `slot ${slot}: accepted a non-numeric value`);
+        } else {
+          // Substring matching applies only to COPIED fields. totalMs is
+          // DERIVED by arithmetic, which cannot echo text — and comparing a
+          // needle against it is actively wrong: `Date.now() - 1.5` renders
+          // as e.g. 1787654321098.5, which contains "1.5" roughly one run in
+          // ten. That false positive made the first version of this check
+          // intermittently red for a value the code handled correctly.
+          const { totalMs, ...copied } = projected;
+          const copiedText = JSON.stringify(copied);
+          const needles = typeof hostile === 'object' && hostile !== null
+            ? [JSON.stringify(hostile), ...Object.values(hostile).map(String)]
+            : [String(hostile)];
+          for (const needle of needles) {
+            if (needle === '') continue;
+            assert.ok(!copiedText.includes(needle),
+              `slot ${slot}: refused value ${needle} still reached the log line`);
+          }
+        }
+      }
+    }
+
+    // A nonsense startedMs cannot echo, because totalMs is arithmetic: the
+    // only two honest outcomes are a shape-valid number or omission.
+    for (const bad of ['999 Leak Road', {}, NaN, null, Number.MAX_VALUE]) {
+      const line = projectTelemetry({ startedMs: bad, outcome: 'ok' });
+      if ('totalMs' in line) {
+        assert.ok(typeof line.totalMs === 'number' && Number.isFinite(line.totalMs) && line.totalMs >= 0,
+          'a derived totalMs is always a finite non-negative number');
+      }
+      assert.ok(!JSON.stringify(line).includes('Leak'), 'startedMs never echoes');
+    }
+
+    // Durations and counts are deliberately DIFFERENT shapes: a latency may
+    // be fractional, a vehicle count may not.
+    assert.strictEqual(projectTelemetry({ startedMs: Date.now(), placesMs: 1.5 }).placesMs, 1.5,
+      'a fractional latency is legitimate');
+    assert.ok(!('vehiclesOk' in projectTelemetry({ startedMs: Date.now(), vehiclesOk: 1.5 })),
+      'a fractional vehicle count is refused');
+    assert.ok(!('placesMs' in projectTelemetry({ startedMs: Date.now(), placesMs: -1 })),
+      'a negative latency is refused');
+
+    // An unrecognized outcome is reported as ONE fixed literal — present, so
+    // the operator still sees that something happened, but never echoed.
+    assert.strictEqual(
+      projectTelemetry({ startedMs: Date.now(), outcome: '999 Leak Road, Miami, FL' }).outcome,
+      'unclassified', 'an unknown outcome maps to the fixed literal');
+    // Absent stays absent rather than becoming 'unclassified'.
+    assert.ok(!('outcome' in projectTelemetry({ startedMs: Date.now() })),
+      'a missing outcome is omitted, not invented');
+
+    // HONEST LIMIT, recorded deliberately: a bare finite non-negative number
+    // in a numeric slot is accepted by shape, because a fare of 3900 and a
+    // latency of 3900ms are indistinguishable once separated from their
+    // variable. The guarantee here is structural — no text, id, structure or
+    // provider string can pass — plus the pinned call sites above, which fix
+    // WHICH variable reaches each slot.
+    assert.strictEqual(projectTelemetry({ startedMs: Date.now(), placesMs: 3900 }).placesMs, 3900);
+
+    // Ordinary behaviour is preserved.
+    const ok = projectTelemetry(legit());
+    assert.deepStrictEqual(Object.keys(ok).sort(), [
+      'outcome', 'placeIdSubstituted', 'placesMs',
+      'routesMs', 'totalMs', 'vehiclesOk', 'vehiclesRefused'
+    ]);
+    assert.strictEqual(ok.outcome, 'ok');
+    assert.strictEqual(ok.placesMs, 11);
+    assert.strictEqual(ok.routesMs, 22);
+    assert.strictEqual(ok.placeIdSubstituted, false);
+    assert.strictEqual(ok.vehiclesOk, 3);
+    assert.strictEqual(ok.vehiclesRefused, 0);
+  });
+
+  await check('TELEMETRY OUTCOME ENUM covers every sanitized class the providers can produce', () => {
+    // DRIFT GUARD, not the security boundary: the runtime guarantee is that
+    // an unrecognized class maps to 'unclassified'. That is fail-closed but
+    // it is also silent, so a newly added provider reason would quietly stop
+    // being observable. This fails loudly instead.
+    const { OUTCOME_CLASSES } = quoteRideEndpoint.testSeam;
+    const fs = require('fs');
+    const path = require('path');
+    const known = new Set(OUTCOME_CLASSES);
+    for (const lib of ['place-identity.js', 'route-facts.js']) {
+      const src = fs.readFileSync(
+        path.join(__dirname, '..', 'backend', 'functions', 'lib', lib), 'utf8');
+      const reasons = [...src.matchAll(/reason:\s*'([a-z0-9_]+)'/g)].map((m) => m[1]);
+      assert.ok(reasons.length > 0, `${lib}: expected sanitized reason literals`);
+      for (const reason of reasons) {
+        assert.ok(known.has(reason),
+          `${lib} produces '${reason}' which is missing from OUTCOME_CLASSES — ` +
+          'it would be logged as unclassified and lose observability');
+      }
+    }
+    assert.ok(known.has('ok'), 'success is a class');
+    assert.ok(!known.has('unclassified'), 'the fallback literal is not itself a provider class');
+  });
+
+  await check('TRANSIENT CONTRACT INTACT: route facts and vehicle cents are still RETURNED, just not logged', async () => {
+    // The dark 2B2 contract depends on these being in the RESPONSE. Removing
+    // them from telemetry must not have removed them from the API.
+    const res = await post(goodIntent());
+    const q = JSON.parse(res.body).quote;
+    assert.ok(Number.isSafeInteger(q.route.milesTenths) && q.route.milesTenths > 0);
+    assert.ok(Number.isSafeInteger(q.route.minutes) && q.route.minutes > 0);
+    assert.strictEqual(typeof q.route.miles, 'number');
+    for (const key of ['tesla', 'escalade', 'sprinter']) {
+      assert.ok(Number.isSafeInteger(q.vehicles[key].finalCents) && q.vehicles[key].finalCents > 0,
+        `${key} still carries transient cents in the response`);
+    }
+  });
+
   // ---------- static shape ----------
   await check('netlify routes /api/quote-ride; engine and rate card are consumed, never modified', async () => {
     const fs = require('fs');
