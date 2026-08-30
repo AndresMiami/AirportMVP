@@ -49,8 +49,17 @@ const AIRPORTS = Object.freeze({
   PBI: Object.freeze({
     code: 'PBI',
     placeId: 'ChIJCboyqy3W2IgRdLKci4qxznw',
-    name: 'Palm Beach International Airport',
-    formattedAddress: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33406'
+    // Renamed 2026: the operator's own site (flydjt.org) now publishes the
+    // airport as President Donald J. Trump International Airport, and pbia.org
+    // 301-redirects there. Google currently labels the place "Palm Beach
+    // International Airport (DJT)". The IATA code in LinkMia is still PBI —
+    // changing it is a separate decision because migration 017 hard-codes
+    // ('MIA','FLL','PBI') in bookings_route_identity_check and pricing.js keys
+    // routes as FLL-PBI / PBI-FLL.
+    // Name and address below are sourced from the airport's OWN site, not from
+    // a Google response, so this registry carries no provider content.
+    name: 'President Donald J. Trump International Airport',
+    formattedAddress: '1000 James L. Turnage Blvd, West Palm Beach, FL 33406'
   })
 });
 
