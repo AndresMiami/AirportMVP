@@ -48,9 +48,17 @@ const EXPECTED_AIRPORTS = Object.freeze({
     placeId: 'ChIJhTflH4aq2YgR9m9hZLFOmoo',
     formattedAddress: 'Fort Lauderdale-Hollywood International Airport (FLL), 100 Terminal Dr, Fort Lauderdale, FL 33315'
   }),
+  // Renamed 2026: the airport's own site (flydjt.org, which pbia.org
+  // 301-redirects to) publishes it as President Donald J. Trump International
+  // Airport. Google currently labels the place "Palm Beach International
+  // Airport (DJT)". The PLACE ID is deliberately UNCHANGED and still resolves
+  // to 1000 James L Turnage Blvd, so routing is unaffected — this is a display
+  // rename, not a pin replacement. The address below is re-sourced from the
+  // airport's OWN site rather than a Google response, so the registry holds no
+  // provider content.
   PBI: Object.freeze({
     placeId: 'ChIJCboyqy3W2IgRdLKci4qxznw',
-    formattedAddress: 'Palm Beach International Airport (PBI), 1000 James L Turnage Blvd, West Palm Beach, FL 33406'
+    formattedAddress: '1000 James L. Turnage Blvd, West Palm Beach, FL 33406'
   })
 });
 const PREVIOUS_AIRPORT_PLACE_IDS = Object.freeze([
