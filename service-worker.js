@@ -11,9 +11,11 @@
 // quoting, the submission envelope, and the quiet Refresh-and-Book flow.
 // v1.3.22: Google policy readiness — refreshed landing/booking attribution
 // and autocomplete behavior. Legal pages remain network-first by design.
-// v1.3.23: the Maps JavaScript API loads directly from Google through the
-// shared maps-loader; autocomplete remains independent through Railway.
-const CACHE_NAME = 'linkmia-v1.3.23';
+// v1.3.24: Milestone A — indexMVP gains the edit-entry raw-capture
+// invalidation, and indexMVP is a precached asset, so the cache must turn
+// over (CLAUDE.md service-worker rule). autocomplete.js itself is
+// network-first and needed no bump on its own.
+const CACHE_NAME = 'linkmia-v1.3.24';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

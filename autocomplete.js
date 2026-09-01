@@ -41,6 +41,10 @@ export class CustomAutocomplete {
         this.requestSequence = 0;
         this.selectionSequence = 0;
         this.selectedPlace = null;
+        // The passenger's typed text as it stood at the moment of selection —
+        // captured before applySelection overwrites the input with Google's
+        // address. Page memory only: nothing reads or transmits it yet.
+        this.rawQuery = null;
         this.isValidated = false;
         this.selectedAttribution = this.input.closest?.('.input-wrapper')
             ?.querySelector?.('.selected-place-attribution') || null;
@@ -148,6 +152,8 @@ export class CustomAutocomplete {
         const value = e.target.value.trim();
         const requestSequence = ++this.requestSequence;
         ++this.selectionSequence;
+        // The text no longer describes a selected place.
+        this.rawQuery = null;
         
         if (this.isValidated) {
             this.clearValidation();
@@ -263,6 +269,17 @@ export class CustomAutocomplete {
 
         const selectionSequence = ++this.selectionSequence;
         const prediction = suggestion;
+        // Snapshot the typed text SYNCHRONOUSLY: after the Details await,
+        // applySelection will have replaced the input's value with Google's
+        // address, and the original is unrecoverable. The snapshot is bound
+        // to THIS selection and published only on its winning paths below —
+        // a selection that loses the sequence race, or fails without a
+        // usable prediction, never publishes its text.
+        const rawQueryAtSelection = this.input.value.trim();
+        // A new selection ends the previous snapshot's life immediately: if
+        // this selection fails completely, the OLD text must not survive
+        // attached to a context it never described.
+        this.rawQuery = null;
         try {
             // Ensure we have a session token for place details.
             if (!this.sessionToken) {
@@ -308,6 +325,7 @@ export class CustomAutocomplete {
                 },
                 attributions
             };
+            this.rawQuery = rawQueryAtSelection;
             this.applySelection(place);
         } catch (error) {
             if (selectionSequence !== this.selectionSequence) return;
@@ -326,6 +344,7 @@ export class CustomAutocomplete {
                 return;
             }
             console.error('Place details unavailable; using selected prediction');
+            this.rawQuery = rawQueryAtSelection;
             this.applySelection({
                 id: prediction.place_id,
                 formattedAddress: description,
@@ -537,7 +556,19 @@ export class CustomAutocomplete {
         this.showSuggestions();
     }
     
+    // Kill any in-flight selection and drop the published raw-query
+    // snapshot WITHOUT touching visible form state. Reset and same-page
+    // edit entry are hard boundaries for the snapshot even while a Details
+    // request is still racing: advancing the sequence makes the in-flight
+    // response lose its guard, so it can neither republish the snapshot nor
+    // restore the cancelled address.
+    invalidateRawCapture() {
+        ++this.selectionSequence;
+        this.rawQuery = null;
+    }
+
     clearValidation() {
+        this.invalidateRawCapture();
         this.isValidated = false;
         this.selectedPlace = null;
         this.setSelectedAttributionVisible(false);
