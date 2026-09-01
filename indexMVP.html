@@ -2171,10 +2171,6 @@
                 apiPayload.routeMilesTenths = contract.routeMilesTenths;
                 apiPayload.routeMinutes = contract.routeMinutes;
                 apiPayload.pricingVersion = contract.pricingVersion;
-                // This legacy duration comes from the browser/Railway cache.
-                // A verified write must use only the route minutes authenticated
-                // by the quote commitment, so do not send both truths.
-                delete apiPayload.durationMinutes;
                 return apiPayload;
             }
 
@@ -3022,19 +3018,51 @@
                 this.updateBookAvailability();
             }
 
-            // Durable pending envelope (plan v3.1 §1): bound to the signed-in
-            // account and its kind/booking context; cleared only by a definitive
-            // mapped response, explicit Discard, logout, or account mismatch.
-            // sessionStorage survives a same-tab reload — that is the honest,
-            // documented scope. bodyString is never displayed or logged.
+            // Durable pending envelope (plan v3.1 §1, narrowed by R1): bound to
+            // the signed-in account and its kind/booking context; cleared only
+            // by a definitive mapped response, explicit Discard, logout, or
+            // account mismatch. R1: what PERSISTS is identity metadata ONLY —
+            // operationId, kind, owner, edit bookingId, creation time. The
+            // exact request bytes (addresses, route facts, the quote token)
+            // live in PAGE MEMORY for same-page retry; after a reload,
+            // recovery is the read-only /api/operation-status lookup, never a
+            // reconstructed POST.
             storePendingEnvelope(envelope) {
-                try { sessionStorage.setItem('lm_pending_envelope', JSON.stringify(envelope)); } catch (_) {}
+                const stored = {
+                    operationId: envelope.operationId,
+                    kind: envelope.kind,
+                    bookingId: envelope.bookingId,
+                    authSubject: envelope.authSubject,
+                    createdAt: envelope.createdAt
+                };
+                // LOAD-BEARING (R1 review): the persisted slot is the ONLY
+                // recovery handle a reload has, and for an ambassador (exempt
+                // from the active-slot rule) it is the only duplicate-booking
+                // defence. A writer call may not proceed unless this write
+                // VERIFIABLY landed — so write, read back, and report.
+                try {
+                    sessionStorage.setItem('lm_pending_envelope', JSON.stringify(stored));
+                    const back = sessionStorage.getItem('lm_pending_envelope');
+                    if (!back || JSON.parse(back)?.operationId !== envelope.operationId) return false;
+                } catch (_) { return false; }
+                // Live bytes exist ONLY once their recovery handle verifiably
+                // does (round-2 P1): a refused write leaves no addresses,
+                // route facts or token in memory. A failed RE-store of the
+                // SAME operation keeps the earlier live bytes — deliberate
+                // same-page retention of an unresolved attempt.
+                this._liveEnvelope = envelope;
+                return true;
             }
             clearPendingEnvelope(operationId = null) {
                 // With an operationId, clear ONLY that operation's envelope —
                 // a settling chain must never delete a different operation's
                 // stored recovery. Without one (Discard, logout), clear
-                // whatever the slot holds.
+                // whatever the slot holds. The in-memory bytes (addresses,
+                // route facts, the quote token) are cleared under the SAME
+                // scoped semantics: they must not outlive their operation.
+                if (!operationId || this._liveEnvelope?.operationId === operationId) {
+                    this._liveEnvelope = null;
+                }
                 try {
                     if (operationId) {
                         const raw = sessionStorage.getItem('lm_pending_envelope');
@@ -3053,7 +3081,66 @@
                         sessionStorage.removeItem('lm_pending_envelope');
                         return null;
                     }
-                    return env;
+                    // READ-ONLY AFTER RELOAD is the controlling contract, and
+                    // canonicality is EXACT, not merely "no unknown key"
+                    // (round-3 correction): the five fields are validated by
+                    // TYPE and kind-specific shape, the stored slot must equal
+                    // the canonical five-field object precisely, and any
+                    // difference — extra key, missing key, wrong value — is
+                    // rewritten and verified. A slot that cannot be validated
+                    // or verifiably rewritten is REMOVED: fail closed, never
+                    // return metadata over unknown persisted bytes.
+                    const META_KEYS = ['operationId', 'kind', 'bookingId', 'authSubject', 'createdAt'];
+                    const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                    const valid =
+                        typeof env.operationId === 'string' && ID_RE.test(env.operationId) &&
+                        (env.kind === 'create' || env.kind === 'edit') &&
+                        typeof env.authSubject === 'string' && env.authSubject.length > 0 &&
+                        Number.isFinite(env.createdAt) &&
+                        (env.kind === 'edit'
+                            ? (typeof env.bookingId === 'string' && ID_RE.test(env.bookingId))
+                            : (env.bookingId == null));
+                    if (!valid) {
+                        try { sessionStorage.removeItem('lm_pending_envelope'); } catch (_) {}
+                        return null;
+                    }
+                    const meta = {
+                        operationId: env.operationId,
+                        kind: env.kind,
+                        bookingId: env.kind === 'edit' ? env.bookingId : null,
+                        authSubject: env.authSubject,
+                        createdAt: env.createdAt
+                    };
+                    const storedKeys = Object.keys(env);
+                    const canonicalAlready =
+                        storedKeys.length === META_KEYS.length &&
+                        META_KEYS.every((k) => storedKeys.includes(k) && env[k] === meta[k]);
+                    if (!canonicalAlready) {
+                        let verified = false;
+                        try {
+                            sessionStorage.setItem('lm_pending_envelope', JSON.stringify(meta));
+                            const back = JSON.parse(sessionStorage.getItem('lm_pending_envelope') || 'null');
+                            // Field-for-field: the read-back must equal the
+                            // canonical object EXACTLY — a shim that persists
+                            // five keys with the right operationId but corrupt
+                            // values elsewhere is a failed rewrite.
+                            verified = !!back && Object.keys(back).length === META_KEYS.length &&
+                                META_KEYS.every((k) =>
+                                    Object.prototype.hasOwnProperty.call(back, k) &&
+                                    back[k] === meta[k]);
+                        } catch (_) { verified = false; }
+                        if (!verified) {
+                            try { sessionStorage.removeItem('lm_pending_envelope'); } catch (_) {}
+                            return null;
+                        }
+                    }
+                    // Same-page: the exact bytes are still in MEMORY, so the
+                    // idempotent exact-byte retry stays available. After a
+                    // reload this attaches nothing and recovery is read-only.
+                    if (this._liveEnvelope?.operationId === meta.operationId) {
+                        meta.bodyString = this._liveEnvelope.bodyString;
+                    }
+                    return meta;
                 } catch (_) { return null; }
             }
 
@@ -3144,10 +3231,57 @@
                             span.textContent = 'Please sign in with the same account to check this.';
                             return;
                         }
-                        const url = env.kind === 'edit'
-                            ? '/api/update-pending-booking'
-                            : '/api/create-booking';
-                        const out = await this.submitEnvelope(url, env.bodyString, session.access_token, env.kind);
+                        let out;
+                        if (env.bodyString) {
+                            // Same-page attempt: the exact bytes exist in
+                            // memory, so the receipt-idempotent re-POST
+                            // remains the strongest recovery. Re-anchor the
+                            // writer-completion window to THIS attempt: a
+                            // reload right after this re-POST must not treat
+                            // an in-flight write as already-expired.
+                            env.createdAt = Date.now();
+                            if (!this.storePendingEnvelope(env)) {
+                                span.textContent = 'Your browser is blocking session storage — please allow site data and try again.';
+                                return;
+                            }
+                            const url = env.kind === 'edit'
+                                ? '/api/update-pending-booking'
+                                : '/api/create-booking';
+                            out = await this.submitEnvelope(url, env.bodyString, session.access_token, env.kind);
+                        } else {
+                            // R1 post-reload recovery: READ-ONLY lookup. It
+                            // never submits a partial body — an unsettled
+                            // result is reported, not retried into a writer.
+                            const st = await this.checkOperationStatus(env, session.access_token);
+                            if (!slotIsOurs()) { yieldToCurrent(); return; }
+                            if (!st.settled) {
+                                if (st.error) {
+                                    span.textContent = "Still couldn't check — please verify your connection and try again.";
+                                } else if (Date.now() - (env.createdAt || 0) < 120000) {
+                                    // Bounded writer-completion window: the
+                                    // envelope POST is 15s-bound and Netlify
+                                    // sync functions cap well under 60s, so
+                                    // 120s comfortably covers any write that
+                                    // could still be settling. Until it has
+                                    // elapsed, a miss stays UNRESOLVED —
+                                    // it is not permission to rebook.
+                                    span.textContent = 'Still processing — please use Check again in a moment.';
+                                } else {
+                                    span.textContent = env.kind === 'edit'
+                                        ? "We couldn't find a completed change for this attempt. Your original ride is unchanged — Discard this notice and make the change again if you still need it."
+                                        : "We couldn't find a completed booking for this attempt. If you still need the ride, Discard this notice and book it again.";
+                                }
+                                return;
+                            }
+                            out = {
+                                definitive: true,
+                                response: { ok: true, status: 200 },
+                                result: {
+                                    success: true, bookingId: st.bookingId,
+                                    tripId: st.tripId, detailsVersion: st.detailsVersion
+                                }
+                            };
+                        }
                         // The slot moved on while this check awaited: this
                         // card is stale — never re-enable its controls; hand
                         // the stage to the current operation's fresh card.
@@ -3231,6 +3365,47 @@
             // non-JSON, or contract-invalid responses — retain the envelope
             // and retry ONCE with the identical bytes; only a recognized
             // registry-shaped response is definitive.
+            // R1: read-only settled-result lookup for a reloaded envelope.
+            // Returns {settled:true, bookingId, tripId, detailsVersion?} or
+            // {settled:false[, error:true]}. Never causes a write.
+            async checkOperationStatus(env, accessToken) {
+                try {
+                    const body = { operationId: env.operationId, kind: env.kind };
+                    if (env.kind === 'edit') body.bookingId = env.bookingId;
+                    const controller = new AbortController();
+                    const t = setTimeout(() => controller.abort(), 15000);
+                    let response, result;
+                    try {
+                        response = await fetch('/api/operation-status', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${accessToken}`
+                            },
+                            body: JSON.stringify(body),
+                            signal: controller.signal
+                        });
+                        // The deadline must cover the BODY too: a response
+                        // whose headers arrive but whose body stalls would
+                        // otherwise hang this card forever.
+                        result = await response.json().catch(() => null);
+                    } finally {
+                        clearTimeout(t);
+                    }
+                    if (response.ok && result && result.settled === true &&
+                        typeof result.bookingId === 'string' && result.bookingId.length > 0 &&
+                        (env.kind !== 'edit' || Number.isInteger(result.detailsVersion))) {
+                        return result;
+                    }
+                    if (response.ok && result && result.settled === false) {
+                        return { settled: false };
+                    }
+                    return { settled: false, error: true };
+                } catch (_) {
+                    return { settled: false, error: true };
+                }
+            }
+
             async submitEnvelope(url, bodyString, accessToken, kind) {
                 const attempt = async () => {
                     const controller = new AbortController();
@@ -3494,7 +3669,6 @@
                             pickupSign: bookingData.passenger?.notes?.pickupSign || null,
                             promoCode: bookingData.payment?.promo || null,
                             flightNumber: bookingData.passenger?.notes?.referenceCode || null,
-                            durationMinutes: submitState.routeDuration,
                             refCode: getStoredRefCode()
                         };
 
@@ -3540,7 +3714,25 @@
                             authSubject: submitSession.user?.id || null,
                             createdAt: Date.now()
                         };
-                        this.storePendingEnvelope(envelope);
+                        if (!this.storePendingEnvelope(envelope)) {
+                            // No verified recovery handle -> no writer call —
+                            // and a CLEAN refusal (round-2 P1): the
+                            // provisional trip_ record written above holds
+                            // the very route data R1 stops retaining, for a
+                            // booking that never happened. Remove it, and
+                            // drop this operation's live bytes if any were
+                            // kept.
+                            if (!isEditing) {
+                                try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {}
+                            }
+                            if (this._liveEnvelope?.operationId === envelope.operationId) {
+                                this._liveEnvelope = null;
+                            }
+                            bookBtn.innerHTML = originalText;
+                            bookBtn.disabled = false;
+                            alert('Your browser is blocking session storage, which we need to protect this booking from being duplicated. Please allow site data (or leave private mode) and try again.');
+                            return;
+                        }
                         const out = await this.submitEnvelope(
                             submitUrl, envelope.bodyString, submitSession.access_token,
                             envelope.kind);

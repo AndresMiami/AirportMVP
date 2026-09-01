@@ -52,8 +52,9 @@ verified checkpoint locations all live in the web app backed by Supabase.
   opens the live trip sheet (iframe of `/trip?embed=1`). "Book for someone
   else" remains: a signed-in booker arranging a ride for another
   passenger is not guest checkout.
-- `trip.html` — passenger status page: stepper, vehicle hero, booking-time
-  ETA, static verified-checkpoint map marker (honest labels, Miami-time
+- `trip.html` — passenger status page: stepper, vehicle hero (the
+  booking-time ETA was REMOVED by R1 — Google grants stored duration no
+  retention exception), static verified-checkpoint map marker (honest labels, Miami-time
   stamps, never a moving dot), WhatsApp button, Edit ride/Cancel. Pending
   edits reuse the existing booking form and update the same booking row in
   place (`/api/update-pending-booking`, signed-in owner only): UUID, trip
@@ -508,13 +509,17 @@ the old published deploy online but freezes every subsequent production build.
     2C-B must recompute the commitment from the client-echoed intent under the
     `kid`-selected signing key before calling SQL; that verification does not
     make another provider call.
-    Distance is never persisted; the existing whole-minute
-    `duration_minutes` estimate MUST remain populated on verified creates and
-    edits. SQL validates only that it is a whole minute from 1 through 1440;
-    2C-B MUST map the commitment-verified `routeMinutes` into that field and
-    refuse a zero-minute route rather than inventing one. This temporary
-    mapping keeps the trip ETA and operator notices from silently disappearing
-    before the Google Routes storage-policy review settles long-term retention.
+    Distance is never persisted. HISTORICAL NOTE — the original 2C-A
+    contract required the whole-minute `duration_minutes` estimate to remain
+    populated on verified creates and edits as a TEMPORARY mapping pending
+    the Google storage review; that review answered NO (case 74801827), and
+    R1 (migration 018, authored 2026-09-01) REVERSES it: duration is never
+    persisted in any mode, verified writes no longer require it, and edits
+    actively clear legacy values. The 1..1440 band survives as input
+    validation and the token contract's own floor. The dependent displays are
+    REMOVED outright (doorbell eta line, completion-receipt duration, trip
+    ETA block — legacy rows included), and trip-page Google attribution is
+    decoupled from duration, staying visible with the route text.
     An authentic expired or not-yet-valid token cannot authorize a new write in
     ANY mode, although an exact-token retry may recover a result that already
     committed. This is the sole exception to "observe never rejects": 2C-B
@@ -533,7 +538,9 @@ the old published deploy online but freezes every subsequent production build.
     validating the reviewed historical actor manifest, so run it only in a
     brief maintenance window; a lock held at that instant aborts the whole
     transaction and requires a clean retry. See
-    `docs/3C-2C-PLAN-V5-ADDENDUM.md` for the four ratified corrections and
+    `docs/3C-2C-PLAN-V5-ADDENDUM.md` for the four ratified corrections
+    (NOTE: its duration-retention mandate is SUPERSEDED by R1/migration 018 —
+    the HISTORICAL NOTE above is controlling) and
     `docs/MIGRATION-017-RUNBOOK.md` for the preflight, quiet-window, live-smoke,
     and destructive emergency-rollback procedure.
   * Migration 017 — RUN IN PRODUCTION (2026-08-23, checksum-matched

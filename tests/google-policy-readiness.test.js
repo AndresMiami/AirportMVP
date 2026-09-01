@@ -195,7 +195,7 @@ async function check(name, fn) {
     assert.ok(!/https?:\/\/[^"']+\.(?:css|js)/i.test(`${terms}\n${privacy}`));
     const cacheList = serviceWorker.slice(serviceWorker.indexOf('STATIC_CACHE_URLS'), serviceWorker.indexOf('];', serviceWorker.indexOf('STATIC_CACHE_URLS')));
     assert.ok(!/terms|privacy|legal\.css/.test(cacheList));
-    assert.match(serviceWorker, /linkmia-v1\.3\.24/);
+    assert.match(serviceWorker, /linkmia-v1\.3\.25/);
   });
 
   await check('autocomplete constructor wires its real input, keyboard and blur boundaries', () => {
@@ -624,8 +624,12 @@ async function check(name, fn) {
     assert.match(indexSource, /routeAttribution\.classList\.add\('visible'\)/);
     assert.match(indexSource, /routeAttribution\.classList\.remove\('visible'\)/);
     assert.match(tripSource, /id="routeAttribution" translate="no">Google Maps/);
+    // R1: attribution is DECOUPLED from the removed duration display — it is
+    // shown unconditionally with the route text (which stays Google-derived
+    // until B1-G) and never re-hidden.
     assert.match(tripSource, /routeAttribution'\)\.classList\.remove\('hidden'\)/);
-    assert.match(tripSource, /routeAttribution'\)\.classList\.add\('hidden'\)/);
+    assert.ok(!/routeAttribution'\)\.classList\.add\('hidden'\)/.test(tripSource),
+      'nothing may hide the trip-page attribution while Google route text renders');
   });
 
   await check('official-logo dimensions and compact text attribution meet Google presentation rules', () => {

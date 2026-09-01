@@ -1,5 +1,12 @@
 # 3C-2C plan v5 — correction addendum
 
+> **SUPERSEDED IN PART (2026-09-01):** every statement in this addendum that
+> mandates retaining `duration_minutes` (the temporary duration mapping) is
+> superseded by R1 / migration 018 — provider route duration is never
+> persisted in any pricing mode, verified writes no longer require it, and
+> the dependent displays were removed. The rest of the addendum stands.
+
+
 Status: design record for PR #75's migration-017 correction. It does not
 authorize running SQL, enabling the quote service, changing Netlify, or changing
 production.

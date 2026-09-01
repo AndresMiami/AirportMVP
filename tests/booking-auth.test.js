@@ -67,6 +67,7 @@ let activeBooking = null;        // inject (bare-legacy pre-check)
 let activeBookingLookupError = null; // inject
 let getUserErrorResult = null;   // inject: RETURNED auth error object
 let getUserThrows = false;       // inject: THROWN auth failure
+let doorbellDuration = null;     // inject (R1 doorbell pin)
 let rpcError = null;             // inject
 let rpcForcedResult = null;      // inject
 let receiptRow = null;           // inject: operation_receipts row
@@ -97,7 +98,12 @@ function simulateCreateRpc(a) {
     status: 'pending',
     price: a.p_client_price,
     details_version: 1,
-    ...a.p_booking
+    ...a.p_booking,
+    // Mirrors migration 018 (R1): the writer persists NULL duration in every
+    // mode, whatever the endpoint sends. doorbellDuration lets ONE check
+    // simulate a row that somehow carries a duration, proving the doorbell
+    // renders no ETA text regardless of the stored value.
+    duration_minutes: doorbellDuration
   };
   return { outcome: 'created', booking_id: NEW_BOOKING_ID, authority: 'client_legacy' };
 }
@@ -591,12 +597,17 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
   process.env.QUOTE_SIGNING_CURRENT_ID = 'k1';
   process.env.QUOTE_SIGNING_CURRENT_SECRET = 'auth-test-secret-0123456789abcdef0123456789abcd';
   r = await post(mkPayload({ ...quoteFields, quoteToken: 'garbage.token' }), 'tok-pat');
-  check('verify_failed with a valid contract keeps the validated routeMinutes as duration', () => {
+  check('R1: no verdict forwards a duration — route content is never retained', () => {
+    // Inverted from the pre-R1 pin (which asserted routeMinutes was kept):
+    // Google case 74801827 grants duration no retention exception, so the
+    // endpoint stopped forwarding it in every mode and migration 018's
+    // writer persists NULL regardless.
     assert.strictEqual(r.statusCode, 200);
     assert.strictEqual(capturedRpc.p_verdict, 'verify_failed');
     assert.ok(/^[0-9a-f]{64}$/.test(capturedRpc.p_token_digest));
     assert.strictEqual(capturedRpc.p_payload, null);
-    assert.strictEqual(capturedRpc.p_booking.duration_minutes, 25);
+    assert.ok(!('duration_minutes' in capturedRpc.p_booking),
+      'p_booking must not carry duration_minutes at all');
   });
   delete process.env.QUOTE_SIGNING_CURRENT_ID;
   delete process.env.QUOTE_SIGNING_CURRENT_SECRET;
@@ -615,6 +626,37 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(JSON.parse(r.body).requote, true);
     assert.strictEqual(capturedRpc, null);
   });
+
+  // ---- R1: the doorbell carries NO ETA text, whatever the row holds ----
+  resetCaptures();
+  doorbellDuration = 42;
+  process.env.TELEGRAM_BOT_TOKEN = 'test-bot';
+  process.env.ADMIN_TELEGRAM_CHAT_ID = '123';
+  const realFetch = global.fetch;
+  const telegramBodies = [];
+  global.fetch = async (url, opts) => {
+    if (String(url).includes('api.telegram.org')) {
+      telegramBodies.push(JSON.parse(opts.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  try {
+    r = await post(mkPayload(), 'tok-pat');
+    check('R1: the create doorbell renders NO eta/duration text even from a duration-bearing row', () => {
+      assert.strictEqual(r.statusCode, 200);
+      assert.strictEqual(telegramBodies.length, 1, 'exactly one doorbell');
+      const text = telegramBodies[0].text;
+      assert.match(text, /New ride/);
+      assert.ok(!/⏱|est\. arrival|min ·|~42/.test(text),
+        'the eta line is REMOVED, not conditional: ' + text);
+    });
+  } finally {
+    global.fetch = realFetch;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.ADMIN_TELEGRAM_CHAT_ID;
+    doorbellDuration = null;
+  }
 
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => { console.error('FAIL:', e.message); process.exit(1); });

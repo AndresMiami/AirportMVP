@@ -80,14 +80,13 @@ async function sendDoorbell(row, { ambassadorName }) {
 
   const CAPACITY = { sedan: [4, 4], suv: [7, 8], escalade: [7, 8], sprinter: [12, 15] };
   const [capPax, capBags] = CAPACITY[row.vehicle_type] || CAPACITY.sedan;
-  const etaLine = row.duration_minutes
-    ? `⏱ ~${row.duration_minutes} min · est. arrival ${fmtTime(new Date(tripDate.getTime() + row.duration_minutes * 60000))}\n`
-    : '';
+  // R1: the stored-ETA line is REMOVED, not merely blanked — Google's
+  // route duration is no longer retained anywhere a doorbell could read.
   const ambassadorLine = ambassadorName ? `\n★ via Ambassador ${ambassadorName}` : '';
   const siteUrl = process.env.URL || 'https://i-love-miami.netlify.app';
   const doorbell = `🆕 New ride ${row.trip_id || row.id.slice(0, 8)} — ${isToday ? 'TODAY' : formattedDate} at ${fmtTime(tripDate)}${isUrgent ? ' (URGENT <2h)' : ''}
 ${row.pickup_location} → ${row.dropoff_location}
-${etaLine}🚘 ${row.vehicle_name || row.vehicle_type} · 👥 ${row.passengers || 1} of ${capPax} · 🧳 ${row.bags || 0} of ${capBags}
+🚘 ${row.vehicle_name || row.vehicle_type} · 👥 ${row.passengers || 1} of ${capPax} · 🧳 ${row.bags || 0} of ${capBags}
 💵 $${row.price} · pay driver (cash/Zelle)${ambassadorLine}
 Open driver page: ${siteUrl}/driver`;
 
@@ -253,11 +252,13 @@ exports.handler = async (event, context) => {
 
     const bookingMode = booking.mode === 'pickup' ? 'pickup' : 'dropoff';
 
-    // Legacy duration stays lenient (stored only on the no-token path);
-    // the verified path uses commitment-verified routeMinutes instead.
-    const legacyDuration = Number.parseInt(booking.durationMinutes, 10);
-    const durationMinutes = Number.isInteger(legacyDuration) &&
-      legacyDuration >= 1 && legacyDuration <= 1440 ? legacyDuration : null;
+    // R1 (address plan v3): provider route duration is never forwarded or
+    // persisted, in any pricing mode — Google case 74801827 grants distance
+    // and duration no retention exception. A submitted durationMinutes from
+    // any client is simply ignored; the SQL writer independently persists
+    // NULL regardless (migration 018), so neither side alone is load-bearing.
+    // The doorbell's eta line and the trip page's ETA block already render
+    // nothing when the stored value is NULL.
 
     // Envelope identity: operationId travels INSIDE the serialized body;
     // request_digest binds these exact bytes to the operation receipt.
@@ -590,10 +591,9 @@ exports.handler = async (event, context) => {
       pickup_sign: text(booking.pickupSign, 160),
       promo_code: text(booking.promoCode, 80),
       referred_by_host: referredByHost,
-      // Any surviving quote contract carries a validated 1..1440
-      // routeMinutes — as client-trusted as the legacy durationMinutes, so
-      // verify_failed keeps the ETA too. Bare legacy keeps its own field.
-      duration_minutes: quoteToken ? routeMinutes : durationMinutes,
+      // R1: no duration field at all — the writer persists NULL in every
+      // mode (migration 018), and this endpoint stopped forwarding it.
+
       source: 'website'
     };
 

@@ -386,7 +386,6 @@ ${b.pickup_location} → ${b.dropoff_location}
     text = `🏁 Trip ${b.trip_id || b.id.slice(0, 8)} completed — receipt
 ${b.pickup_location} → ${b.dropoff_location}
 👤 ${b.customer_name}
-⏱ ${b.duration_minutes ? `~${b.duration_minutes} min ride` : 'duration n/a'}
 💵 $${b.price} · ${b.payment_status === 'unpaid' ? 'NOT yet collected' : 'collected'}${commission}`;
   }
   if (!text) return;

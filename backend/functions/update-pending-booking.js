@@ -125,8 +125,10 @@ function parseEdit(body) {
       bags,
       vehicle_type: vehicleType,
       vehicle_name: vehicleName,
-      booking_mode: body.mode === 'pickup' ? 'pickup' : 'dropoff',
-      duration_minutes: duration
+      booking_mode: body.mode === 'pickup' ? 'pickup' : 'dropoff'
+      // R1: duration is validated above for input strictness but never
+      // forwarded — migration 018's writer persists NULL in every mode and
+      // actively clears any legacy stored value on the row it touches.
     },
     // Optional personal details: omitted keys mean "not submitted/blank" —
     // the RPC preserves the stored value in that case (a restored session
@@ -367,16 +369,12 @@ exports.handler = async (event) => {
     // stored ratio and the authoritative fare.
     // ============================================
     const pEdit = { ...edit.values };
-    if (verdict === 'verified' || verdict === 'verify_failed') {
-      // Every validated modern quote contract carries routeMinutes. Even
-      // when the signature fails in off/observe, preserve that internally
-      // coherent route snapshot; only a genuinely token-less legacy edit
-      // may reuse/preserve legacy duration.
-      pEdit.duration_minutes = routeMinutes;
-    } else if (pEdit.duration_minutes === null) {
-      // Omitted key preserves the stored value (RPC COALESCE rule).
-      delete pEdit.duration_minutes;
-    }
+    // R1: no duration key in any verdict — the writer sets the column NULL
+    // unconditionally (migration 018), so forwarding routeMinutes or legacy
+    // duration would only create a value for the RPC to discard. The key
+    // stays in the RPC's p_edit allowlist so stale cached clients that still
+    // send it are tolerated, not refused.
+    delete pEdit.duration_minutes;
     for (const [col, submitted] of Object.entries(edit.optional)) {
       if (submitted !== null) pEdit[col] = submitted;
     }
