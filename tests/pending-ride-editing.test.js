@@ -105,6 +105,9 @@ function simulateEditRpc(a) {
   for (const col of replace) {
     if (Object.prototype.hasOwnProperty.call(e, col)) next[col] = e[col];
   }
+  // Mirrors migration 018 (R1): an edit is a new write, and the writer sets
+  // duration_minutes NULL unconditionally — clearing legacy values too.
+  next.duration_minutes = null;
   // Optional preservation: omitted/blank keys keep the stored value.
   for (const col of ['customer_email', 'flight_number', 'notes', 'pickup_sign', 'promo_code']) {
     if (Object.prototype.hasOwnProperty.call(e, col) && e[col]) next[col] = e[col];
@@ -292,7 +295,10 @@ function check(name, fn2) { fn2(); passed++; console.log('✓ ' + name); }
     assert.strictEqual(booking.passengers, 4);
     assert.strictEqual(booking.bags, 3);
     assert.strictEqual(booking.price, 165);
-    assert.strictEqual(booking.duration_minutes, 42);
+    assert.ok(!('duration_minutes' in capturedRpc.p_edit),
+      'R1: the endpoint must not forward duration');
+    assert.strictEqual(booking.duration_minutes, null,
+      'R1: the writer persists NULL duration on every edit');
   });
 
   check('immutable fields never appear in p_edit', () => {
@@ -474,15 +480,18 @@ function check(name, fn2) { fn2(); passed++; console.log('✓ ' + name); }
     delete process.env.QUOTE_SIGNING_CURRENT_ID;
     delete process.env.QUOTE_SIGNING_CURRENT_SECRET;
   }
-  check('bad-signature modern edit stores echoed routeMinutes, never stale legacy duration', () => {
+  check('R1: a bad-signature modern edit forwards NO duration and CLEARS the stale legacy value', () => {
+    // Inverted from the pre-R1 pin (which stored echoed routeMinutes): the
+    // edit writer now sets duration_minutes NULL unconditionally, so the
+    // legacy 30 on the stored row is actively cleared by this edit.
     assert.strictEqual(r.statusCode, 200);
     assert.strictEqual(capturedRpc.p_verdict, 'verify_failed');
     assert.ok(/^[0-9a-f]{64}$/.test(capturedRpc.p_token_digest));
     assert.strictEqual(capturedRpc.p_payload, null);
-    assert.strictEqual(capturedRpc.p_edit.duration_minutes, 25);
-    assert.strictEqual(booking.duration_minutes, 25);
+    assert.ok(!('duration_minutes' in capturedRpc.p_edit),
+      'p_edit must not carry duration_minutes at all');
+    assert.strictEqual(booking.duration_minutes, null);
     assert.strictEqual(booking.pickup_location, 'Quoted new pickup');
-    assert.notStrictEqual(booking.duration_minutes, 30);
   });
 
   resetBooking();

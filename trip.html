@@ -702,18 +702,15 @@
             $('routeFrom').textContent = b.pickup_location || '—';
             $('routeTo').textContent = b.dropoff_location || '—';
 
-            if (b.duration_minutes && b.pickup_datetime) {
-                const eta = new Date(new Date(b.pickup_datetime).getTime() + b.duration_minutes * 60000);
-                $('rideDuration').textContent = `⏱ ~${b.duration_minutes} min ride`;
-                $('rideDuration').classList.remove('hidden');
-                $('routeAttribution').classList.remove('hidden');
-                $('etaTime').innerHTML = `~${fmtTime(eta)} <span class="eta-badge">EST. ARRIVAL</span>`;
-                $('etaTime').classList.remove('hidden');
-            } else {
-                $('rideDuration').classList.add('hidden');
-                $('routeAttribution').classList.add('hidden');
-                $('etaTime').classList.add('hidden');
-            }
+            // R1: the stored route duration and booking-time ETA are REMOVED
+            // for every row, legacy included — Google's answer (case 74801827)
+            // gives duration no retention exception, so nothing may render it.
+            $('rideDuration').classList.add('hidden');
+            $('etaTime').classList.add('hidden');
+            // Attribution is DELIBERATELY decoupled from duration: the
+            // pickup/dropoff strings above remain Google-derived until B1-G,
+            // so the Google Maps attribution stays visible with them.
+            $('routeAttribution').classList.remove('hidden');
 
             // Live tracking map (appears once the driver heads out)
             updateLiveMap(b);

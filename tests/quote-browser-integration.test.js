@@ -747,8 +747,11 @@ check('STATIC: the payload helper carries every canonical commitment input', () 
     'routeMilesTenths', 'routeMinutes', 'pricingVersion']) {
     assert.ok(new RegExp(`apiPayload\\.${field} =`).test(appBlock), `${field} must be submitted`);
   }
-  assert.ok(/delete apiPayload\.durationMinutes/.test(appBlock),
-    'a verified request must not carry the browser route cache as a second duration truth');
+  // R1: durationMinutes left the BASE payload entirely, so the old
+  // verified-branch delete became dead code and was removed with it. The
+  // stronger invariant is that no payload construction mentions it at all.
+  assert.ok(!/durationMinutes/.test(appBlock),
+    'R1: no payload path may carry a browser route duration in any mode');
 });
 
 check('CONTRACT: the real browser payload verifies against a real v2 token', async () => {
@@ -788,7 +791,6 @@ check('CONTRACT: the real browser payload verifies against a real v2 token', asy
     dateTime: app.state.dateTime.time,
     passengers: app.state.passengers,
     vehicle: app.state.vehicle.name,
-    durationMinutes: app.state.route.duration,
   }, contract);
   assert.strictEqual(payload.quoteToken, token);
   assert.strictEqual(payload.placeId, intent.placeId);
@@ -797,7 +799,7 @@ check('CONTRACT: the real browser payload verifies against a real v2 token', asy
   assert.strictEqual(payload.routeMilesTenths, 100);
   assert.strictEqual(payload.routeMinutes, 20);
   assert.ok(!Object.hasOwn(payload, 'durationMinutes'),
-    'legacy browser duration must not accompany a verified quote');
+    'R1: no payload carries a browser duration in any mode — the base build stopped adding it');
 
   const expectedIntent = {
     mode: payload.mode,
@@ -1022,7 +1024,7 @@ check('SCOPE: an edit quote is edit-scoped — key, request body, and Save gatin
 
   // …then a pending edit begins. PR-2: edits DO quote, in their own scope,
   // so a create-scoped quote can never impersonate an edit quote.
-  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
   app.editMarkers = {
     routeDirection: false, routeAddress: false,
     pickupAt: false, vehicle: false, traveler: false
@@ -1032,14 +1034,14 @@ check('SCOPE: an edit quote is edit-scoped — key, request body, and Save gatin
   const editKey = app.quoteKey(app.quoteIntent());
   assert.notStrictEqual(editKey, createKey,
     'the same trip facts must key differently under an edit');
-  assert.match(editKey, /\|edit\|b-1\|3$/,
+  assert.match(editKey, /\|edit\|0b000000-0000-4000-8000-0000000000b1\|3$/,
     'the edit scope names the booking and its captured version');
 
   await app.requestServerQuote();
   assert.strictEqual(f.calls.length, 2,
     'the cached create-scoped quote must not answer an edit');
   const sentBody = JSON.parse(f.calls[1].opts.body);
-  assert.strictEqual(sentBody.bookingId, 'b-1',
+  assert.strictEqual(sentBody.bookingId, '0b000000-0000-4000-8000-0000000000b1',
     'edit quotes carry the booking identity');
   assert.strictEqual(sentBody.expectedDetailsVersion, 3,
     'edit quotes carry the captured CAS version');
@@ -1313,7 +1315,7 @@ check('EDIT RACE: a quote timer queued before an edit begins does not fire insid
   assert.match(appBlock,
     /this\.invalidateQuote\('pending edit started — create-scoped quotes do not apply'\)/,
     'beginPendingEdit must CALL invalidateQuote at edit start (a comment cannot satisfy this)');
-  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 2 };
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 2 };
   app.invalidateQuote('pending edit started — create-scoped quotes do not apply');
   runTimers();
   await new Promise((r) => setTimeout(r, 0));
@@ -1439,8 +1441,15 @@ check('ENVELOPE: one tap serializes once — operationId inside the exact stored
   assert.strictEqual(posts[0].opts.headers.Authorization, 'Bearer jwt-abc');
   assert.strictEqual(storedEnvelopes.length, 1, 'the envelope is stored before the POST');
   const env = JSON.parse(storedEnvelopes[0]);
-  assert.strictEqual(posts[0].opts.body, env.bodyString,
-    'the POST sends the exact stored envelope bytes');
+  // R1: the PERSISTED slot is identity metadata ONLY — the exact bytes
+  // (addresses, route facts, the quote token) never reach sessionStorage.
+  assert.deepStrictEqual(Object.keys(env).sort(),
+    ['authSubject', 'bookingId', 'createdAt', 'kind', 'operationId'],
+    'the stored envelope carries exactly the five metadata fields');
+  for (const leak of ['pickup', 'dropoff', 'routeMilesTenths', 'routeMinutes', 'quoteToken', 'Brickell']) {
+    assert.ok(!storedEnvelopes[0].includes(leak),
+      `persisted envelope must not carry ${leak}`);
+  }
   assert.strictEqual(env.kind, 'create');
   assert.strictEqual(env.authSubject, 'auth-user-1');
 
@@ -1620,7 +1629,7 @@ check('UNKNOWN result: exact-byte retry once, then the recovery card — and Che
 check('RECOVERY OFFER: bound to the account — another subject\'s envelope is dropped, never shown', async () => {
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
   ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
-    operationId: 'op-1', bodyString: '{}', kind: 'create',
+    operationId: '0a000000-0000-4000-8000-000000000001', bodyString: '{}', kind: 'create',
     bookingId: null, authSubject: 'someone-else', createdAt: 1,
   }));
   app.offerPendingEnvelope('auth-user-1');
@@ -1629,32 +1638,380 @@ check('RECOVERY OFFER: bound to the account — another subject\'s envelope is d
   assert.ok(!ctx.document.body.children.some((c) => c.id === 'pendingEnvelopeCard'),
     'and never offered');
 
+  // R1 INVERSION (Codex round-1 blocker): a bodyString found in STORAGE —
+  // whatever page version wrote it — must never reach a writer again. On
+  // read the slot is rewritten to the five-field metadata allowlist, and
+  // recovery goes through the read-only lookup ONLY.
   ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
-    operationId: 'op-2', bodyString: '{}', kind: 'edit',
-    bookingId: 'b-1', authSubject: 'auth-user-1', createdAt: 1,
+    operationId: '0a000000-0000-4000-8000-000000000002', bodyString: '{"pickup":"LEGACY BYTES"}', kind: 'edit',
+    bookingId: '0b000000-0000-4000-8000-0000000000b1', authSubject: 'auth-user-1', createdAt: Date.now(),
   }));
   app.offerPendingEnvelope('auth-user-1');
   const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
   assert.ok(card, 'the same account gets the offer');
   assert.match(card.children[0].textContent, /couldn't confirm your last ride change/,
     'an edit envelope says change, not booking');
+  assert.ok(!ctx.sessionStorage.getItem('lm_pending_envelope').includes('LEGACY BYTES'),
+    'reading the slot strips persisted bytes immediately');
 
-  // "Check again" on the edit envelope: a recovered edit is a COMMITTED
-  // edit — the edit session closes and the server's version is adopted,
-  // exactly like the direct save path.
   const sheets = [];
   app.showTripSheet = (id) => sheets.push(id);
-  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
-  ctx.fetch = routedFetch({
-    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: 'b-1', tripId: 'LM-1', detailsVersion: 9 } },
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
+  const fRec = routedFetch({
+    '/api/operation-status': { status: 200, body: { settled: true, bookingId: '0b000000-0000-4000-8000-0000000000b1', tripId: 'LM-1', detailsVersion: 9 } },
   });
+  ctx.fetch = fRec;
   await card.children[1].listeners.click[0]();
-  assert.deepStrictEqual(sheets, ['b-1']);
+  assert.strictEqual(fRec.to('/api/update-pending-booking').length, 0,
+    'persisted legacy bytes NEVER reach a writer after reload');
+  assert.strictEqual(fRec.to('/api/operation-status').length, 1,
+    'recovery is the read-only lookup');
+  assert.deepStrictEqual(sheets, ['0b000000-0000-4000-8000-0000000000b1']);
   assert.strictEqual(app.pendingEdit, null, 'the recovered edit closes the edit session');
   assert.strictEqual(ctx.currentActiveBooking?.details_version, 9,
     'the committed version is adopted for the next edit');
   assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null);
   assert.strictEqual(card.removed, true);
+});
+
+check('R1 GATE: a blocked sessionStorage refuses the writer call — no booking without a recovery handle', async () => {
+  // Ambassadors are exempt from the active-slot rule, so the persisted
+  // receipt handle is their only duplicate defence. If it cannot be
+  // verifiably written, the writer must not run.
+  const f = routedFetch({
+    '/api/quote-ride': { body: quoteWithTtl(15) },
+    '/api/create-booking': CREATED,
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  // Record REAL localStorage traffic: the harness Map is closed over, so a
+  // dump does not exist — the operations themselves are the observable.
+  const lsOps = [];
+  const rawLS = ctx.localStorage;
+  ctx.localStorage = {
+    getItem: (k) => rawLS.getItem(k),
+    setItem: (k, v) => { lsOps.push(['set', k]); return rawLS.setItem(k, v); },
+    removeItem: (k) => { lsOps.push(['remove', k]); return rawLS.removeItem(k); }
+  };
+  ctx.sessionStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.strictEqual(f.to('/api/create-booking').length, 0,
+    'no verified recovery handle -> zero writer calls');
+  // Round-2 P1 / round-3 correction: the refusal must be CLEAN, and the
+  // assertion must be REAL — the first version enumerated a nonexistent
+  // Map dump and was vacuously green (Codex proved deleting the cleanup
+  // still passed). The instrumentation below records the actual set/remove
+  // calls, so the provisional record must be observed CREATED and then
+  // observed REMOVED, and reading it back must find nothing.
+  const tripSets = lsOps.filter(([op, k]) => op === 'set' && k.startsWith('trip_'));
+  const tripRemoves = lsOps.filter(([op, k]) => op === 'remove' && k.startsWith('trip_'));
+  assert.strictEqual(tripSets.length, 1, 'the provisional trip_ record IS written before the refusal');
+  assert.strictEqual(tripRemoves.length, 1, 'the refusal must remove it');
+  assert.strictEqual(tripSets[0][1], tripRemoves[0][1], 'the SAME key is removed');
+  assert.strictEqual(ctx.localStorage.getItem(tripSets[0][1]), null,
+    'no provisional trip_ record may survive the refusal');
+  assert.strictEqual(app._liveEnvelope ?? null, null,
+    'no address/route/token bytes may remain in memory after a refused write');
+});
+
+check('R1 GATE: a storage failure during the exact-byte RE-POST also refuses without a writer call', async () => {
+  // Round-2 §5.1: removing the re-POST persistence guard passed all checks.
+  // This executes it: a live same-page envelope, Check again, storage now
+  // failing — the re-anchor store fails, so NO writer call happens.
+  const f = routedFetch({
+    '/api/create-booking': CREATED,
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  app._liveEnvelope = {
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0007',
+    bodyString: '{"pickup":"X"}', kind: 'create', bookingId: null,
+    authSubject: 'auth-user-1', createdAt: Date.now(),
+  };
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0007', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: Date.now(),
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  ctx.sessionStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+  await card.children[1].listeners.click[0]();
+  assert.strictEqual(f.to('/api/create-booking').length, 0,
+    'a re-POST without a re-anchored handle must not run');
+  assert.match(card.children[0].textContent, /blocking session storage/);
+});
+
+check('R1 DEADLINE: a stalled response BODY aborts within the bound — the card never hangs', async () => {
+  // Round-2 §5.2: clearing the timer before json() passed every check. This
+  // executes the stall against the harness's MANUAL timer queue: headers
+  // arrive, the body never resolves except on abort; firing the queued
+  // deadline while the click is pending must produce the failure copy — a
+  // deadline cleared before json() would leave the promise hung forever.
+  const { app, ctx, timers, runTimers } = makeContext({ enabled: true, fetchImpl: routedFetch({}) });
+  ctx.fetch = async (url, opts) => ({
+    ok: true,
+    json: () => new Promise((resolve, reject) => {
+      opts.signal.addEventListener('abort', () => reject(new Error('AbortError')));
+    }),
+  });
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0008', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: Date.now(),
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  const clickP = card.children[1].listeners.click[0]();
+  // let the fetch resolve and json() park on the abort signal
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+  assert.ok(timers.some((t) => t.at >= 15000),
+    'the 15s deadline must still be QUEUED while the body is being read');
+  runTimers();                                    // the deadline fires -> abort
+  await clickP;
+  assert.match(card.children[0].textContent, /couldn't check/,
+    'the deadline must cover body parsing, not just headers');
+  assert.strictEqual(card.children[1].disabled, false, 'the card recovers for another try');
+});
+
+check('R1 CANONICALIZE: every non-canonical stored slot is rewritten — or removed when rewrite fails', async () => {
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  // extra field of ANY name is stripped on read
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: '0a000000-0000-4000-8000-0000000000aa', kind: 'create', bookingId: null,
+    authSubject: 'auth-user-1', createdAt: 1, legacyExtra: 'ROUTE FACTS',
+  }));
+  const env = app.readPendingEnvelope('auth-user-1');
+  assert.ok(env && !('legacyExtra' in env));
+  assert.ok(!ctx.sessionStorage.getItem('lm_pending_envelope').includes('ROUTE FACTS'),
+    'the slot itself is canonicalized, not just the returned object');
+  // when the slot cannot be verifiably rewritten, it is REMOVED (fail closed)
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: '0a000000-0000-4000-8000-0000000000ab', kind: 'create', bookingId: null,
+    authSubject: 'auth-user-1', createdAt: 1, bodyString: '{"pickup":"LEGACY"}',
+  }));
+  const realGet = ctx.sessionStorage.getItem.bind(ctx.sessionStorage);
+  const realSet = ctx.sessionStorage.setItem.bind(ctx.sessionStorage);
+  const realRemove = ctx.sessionStorage.removeItem.bind(ctx.sessionStorage);
+  let removed = false;
+  ctx.sessionStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+  ctx.sessionStorage.removeItem = (k) => { removed = true; return realRemove(k); };
+  const env2 = app.readPendingEnvelope('auth-user-1');
+  assert.strictEqual(env2, null, 'unverifiable rewrite must not return metadata over persisted bytes');
+  assert.ok(removed, 'the slot is removed, never left holding legacy bytes');
+  ctx.sessionStorage.getItem = realGet;
+  ctx.sessionStorage.setItem = (k, v) => realSet(k, v);
+  ctx.sessionStorage.removeItem = realRemove;
+
+  // ROUND-3 EXACTNESS: canonical means EXACTLY five validated fields, not
+  // merely "no unknown key".
+  // (a) a four-field slot (missing bookingId) is rewritten to five
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: '0a000000-0000-4000-8000-0000000000ac', kind: 'create',
+    authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  const env3 = app.readPendingEnvelope('auth-user-1');
+  assert.ok(env3 && env3.bookingId === null, 'the missing field is materialized as null');
+  const stored3 = JSON.parse(ctx.sessionStorage.getItem('lm_pending_envelope'));
+  assert.deepStrictEqual(Object.keys(stored3).sort(),
+    ['authSubject', 'bookingId', 'createdAt', 'kind', 'operationId'],
+    'the persisted slot is rewritten to exactly the five fields');
+  // (b) a wrong VALUE TYPE fails validation: the slot is removed
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: '0a000000-0000-4000-8000-0000000000ad', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 'not-a-number',
+  }));
+  assert.strictEqual(app.readPendingEnvelope('auth-user-1'), null,
+    'a mistyped field is invalid, not tolerated');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the invalid slot is removed');
+  // (b2) CORRUPT READ-BACK (round-4 probe): a shim persists five keys with
+  // the same operationId but corrupt values — the rewrite is NOT verified,
+  // the slot is removed, null returned.
+  ctx.sessionStorage.setItem = (k, v) => {
+    const o = JSON.parse(v);
+    o.authSubject = 'CORRUPTED-BY-SHIM';
+    return realSet(k, JSON.stringify(o));
+  };
+  realSet('lm_pending_envelope', JSON.stringify({
+    operationId: '0a000000-0000-4000-8000-0000000000af', kind: 'create',
+    authSubject: 'auth-user-1', createdAt: 3,   // four fields -> rewrite path
+  }));
+  assert.strictEqual(app.readPendingEnvelope('auth-user-1'), null,
+    'a corrupt read-back must not be accepted as a verified rewrite');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'the corrupt persistence is removed, never left behind');
+  ctx.sessionStorage.setItem = (k, v) => realSet(k, v);
+
+  // (c) a valid EXACT slot is returned without any rewrite
+  const exact = {
+    operationId: '0a000000-0000-4000-8000-0000000000ae', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 5,
+  };
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify(exact));
+  let writes = 0;
+  ctx.sessionStorage.setItem = (k, v) => { writes++; return realSet(k, v); };
+  const env4 = app.readPendingEnvelope('auth-user-1');
+  assert.ok(env4 && env4.operationId === exact.operationId);
+  assert.strictEqual(writes, 0, 'an already-canonical slot is not rewritten');
+});
+
+check('R1 MEMORY HYGIENE: settling or discarding an operation clears its in-memory bytes', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': { body: quoteWithTtl(15) },
+    '/api/create-booking': CREATED,
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.ok(sheets.length, 'the booking settled');
+  assert.strictEqual(app._liveEnvelope, null,
+    'a definitive settle clears the in-memory bytes (addresses, token)');
+  // Scoped semantics: a clear for a DIFFERENT operation leaves live bytes.
+  app._liveEnvelope = { operationId: 'op-live', bodyString: '{"x":1}' };
+  app.clearPendingEnvelope('op-other');
+  assert.ok(app._liveEnvelope, 'a foreign-operation clear must not touch these bytes');
+  app.clearPendingEnvelope('op-live');
+  assert.strictEqual(app._liveEnvelope, null, 'the matching clear drops them');
+  app._liveEnvelope = { operationId: 'op-live2', bodyString: '{"x":2}' };
+  app.clearPendingEnvelope();
+  assert.strictEqual(app._liveEnvelope, null, 'an unscoped clear (Discard/logout) always drops them');
+});
+
+check('R1 RECOVERY: a reloaded (metadata-only) envelope checks the READ-ONLY endpoint, never a writer', async () => {
+  // After a reload the stored slot has no bodyString, so Check again must
+  // call /api/operation-status and must not touch either writer endpoint.
+  const f = routedFetch({
+    '/api/operation-status': { status: 200, body: { settled: true, bookingId: 'db-9', tripId: 'LM-9' } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0001', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  assert.ok(card, 'the metadata-only envelope is still offered');
+  await card.children[1].listeners.click[0]();
+  assert.strictEqual(f.to('/api/create-booking').length, 0, 'no writer POST');
+  assert.strictEqual(f.to('/api/update-pending-booking').length, 0, 'no writer POST');
+  const looks = f.to('/api/operation-status');
+  assert.strictEqual(looks.length, 1, 'exactly one read-only lookup');
+  const sent = JSON.parse(looks[0].opts.body);
+  assert.deepStrictEqual(Object.keys(sent).sort(), ['kind', 'operationId'],
+    'a create lookup sends exactly operationId and kind');
+  assert.deepStrictEqual(sheets, ['db-9'], 'a settled create opens the trip sheet');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
+    'a settled recovery clears the envelope');
+  assert.strictEqual(card.removed, true);
+});
+
+check('R1 RECOVERY: a settled EDIT adopts the server version and closes the edit session', async () => {
+  const f = routedFetch({
+    '/api/operation-status': { status: 200, body: { settled: true, bookingId: '0b000000-0000-4000-8000-0000000000b1', tripId: 'LM-1', detailsVersion: 12 } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0002', kind: 'edit',
+    bookingId: '0b000000-0000-4000-8000-0000000000b1', authSubject: 'auth-user-1', createdAt: 1,
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  await card.children[1].listeners.click[0]();
+  const sent = JSON.parse(f.to('/api/operation-status')[0].opts.body);
+  assert.deepStrictEqual(Object.keys(sent).sort(), ['bookingId', 'kind', 'operationId'],
+    'an edit lookup carries the retained booking id');
+  assert.deepStrictEqual(sheets, ['0b000000-0000-4000-8000-0000000000b1']);
+  assert.strictEqual(app.pendingEdit, null, 'the recovered edit closes the edit session');
+  assert.strictEqual(ctx.currentActiveBooking?.details_version, 12,
+    'the committed version is adopted');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null);
+});
+
+check('R1 RECOVERY: a miss stays UNRESOLVED inside the writer window, and invites rebooking only after it', async () => {
+  const f = routedFetch({
+    '/api/operation-status': { status: 200, body: { settled: false } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  // Fresh envelope: within the 120s window.
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0003', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: Date.now(),
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  let card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  await card.children[1].listeners.click[0]();
+  assert.match(card.children[0].textContent, /Still processing/,
+    'inside the window a miss is unresolved, never permission to rebook');
+  assert.ok(ctx.sessionStorage.getItem('lm_pending_envelope'),
+    'the envelope survives an in-window miss');
+
+  // Aged envelope: past the window — kind-split copy, envelope kept for a
+  // DELIBERATE Discard (never auto-cleared). Fresh context: the harness's
+  // fake DOM appends card children on re-offer rather than replacing them.
+  const f2 = routedFetch({
+    '/api/operation-status': { status: 200, body: { settled: false } },
+  });
+  const second = makeContext({ enabled: true, fetchImpl: f2 });
+  second.ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0004', kind: 'edit',
+    bookingId: '0b000000-0000-4000-8000-0000000000b1', authSubject: 'auth-user-1', createdAt: Date.now() - 200000,
+  }));
+  second.app.offerPendingEnvelope('auth-user-1');
+  card = second.ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  await card.children[1].listeners.click[0]();
+  assert.match(card.children[0].textContent, /completed change[\s\S]*original ride is unchanged/,
+    'past the window an EDIT miss speaks edit language');
+  assert.ok(second.ctx.sessionStorage.getItem('lm_pending_envelope'),
+    'even past the window, only Discard clears — the check never does');
+});
+
+check('R1 RECOVERY: a settled EDIT without a details version is REFUSED, not adopted', async () => {
+  // The fabricated settle bypasses the definitive registry, so the lookup
+  // itself must enforce the edit shape: adopting an edit without the
+  // server's version would poison the next CAS. A malformed settle reads
+  // as a failed check and the envelope survives.
+  const f = routedFetch({
+    '/api/operation-status': { status: 200, body: { settled: true, bookingId: '0b000000-0000-4000-8000-0000000000b1', tripId: 'LM-1' } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = [];
+  app.showTripSheet = (id) => sheets.push(id);
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0006', kind: 'edit',
+    bookingId: '0b000000-0000-4000-8000-0000000000b1', authSubject: 'auth-user-1', createdAt: Date.now(),
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  await card.children[1].listeners.click[0]();
+  assert.deepStrictEqual(sheets, [], 'a version-less edit settle must not open anything');
+  assert.ok(app.pendingEdit, 'the edit session must not close on a malformed settle');
+  assert.ok(ctx.sessionStorage.getItem('lm_pending_envelope'), 'the envelope survives');
+  assert.match(card.children[0].textContent, /couldn't check/);
+});
+
+check('R1 RECOVERY: a lookup failure reads as a connection problem, and the envelope survives', async () => {
+  const f = routedFetch({
+    '/api/operation-status': { status: 503, body: { error: 'upstream' } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
+    operationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0005', kind: 'create',
+    bookingId: null, authSubject: 'auth-user-1', createdAt: Date.now(),
+  }));
+  app.offerPendingEnvelope('auth-user-1');
+  const card = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard');
+  await card.children[1].listeners.click[0]();
+  assert.match(card.children[0].textContent, /couldn't check/,
+    'a failed lookup is reported as such');
+  assert.ok(ctx.sessionStorage.getItem('lm_pending_envelope'));
 });
 
 check('IN-FLIGHT: nothing re-enables the button mid-POST, and a second tap is inert', async () => {
@@ -1703,7 +2060,7 @@ check('IN-FLIGHT: nothing re-enables the button mid-POST, and a second tap is in
 check('MARKERS: carousel auto-select (userInitiated:false) never grants the vehicle marker', async () => {
   const f = okFetch(quoteWithTtl(15));
   const { app } = makeContext({ enabled: true, fetchImpl: f });
-  app.pendingEdit = { bookingId: 'b-1', tripCode: 'LM-1', detailsVersion: 3 };
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
   app.editMarkers = {
     routeDirection: true, routeAddress: true, pickupAt: true,
     vehicle: false, traveler: false
@@ -1808,8 +2165,8 @@ check('DEFINITIVE means REGISTRY-SHAPED: 200 {} and a generic JSON 503 stay unkn
 
 check('DEFINITIVE: an edit success without its version is unknown; with it, definitive', async () => {
   for (const [body, wantPosts, wantEnvelope] of [
-    [{ success: true, bookingId: 'b-9', tripId: 'LM-9' }, 2, true],                    // missing detailsVersion
-    [{ success: true, bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 }, 1, false],
+    [{ success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9' }, 2, true],                    // missing detailsVersion
+    [{ success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9', detailsVersion: 8 }, 1, false],
   ]) {
     const f = routedFetch({
       '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
@@ -1817,7 +2174,7 @@ check('DEFINITIVE: an edit success without its version is unknown; with it, defi
     });
     const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
     app.showTripSheet = () => {};
-    app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 7 };
+    app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 7 };
     app.editMarkers = {
       routeDirection: true, routeAddress: true, pickupAt: true,
       vehicle: false, traveler: false
@@ -1858,14 +2215,16 @@ check('STATIC: the blocked registry copy is pinned identically in writer and bro
 check('RECOVERY OVERLAP: an older completion cannot clear or act on a newer operation', async () => {
   let releaseCheck;
   const checkGate = new Promise((r) => { releaseCheck = r; });
+  // R1: after a reload the check rides the READ-ONLY lookup, so the overlap
+  // discipline is exercised against that transport now.
   const f = routedFetch({
-    '/api/create-booking': async () => { await checkGate; return CREATED; },
+    '/api/operation-status': async () => { await checkGate; return { status: 200, body: { settled: true, bookingId: 'db-1', tripId: 'LM-1' } }; },
   });
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
   const sheets = [];
   app.showTripSheet = (id) => sheets.push(id);
   ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
-    operationId: 'op-OLD', bodyString: '{}', kind: 'create',
+    operationId: '0a000000-0000-4000-8000-00000000001d', kind: 'create',
     bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
   }));
   app.offerPendingEnvelope('auth-user-1');
@@ -1877,13 +2236,13 @@ check('RECOVERY OVERLAP: an older completion cannot clear or act on a newer oper
 
   // While the old check awaits, the slot is repointed to a newer operation.
   const newer = JSON.stringify({
-    operationId: 'op-NEW', bodyString: '{}', kind: 'create',
+    operationId: '0a000000-0000-4000-8000-00000000002e', kind: 'create',
     bookingId: null, authSubject: 'auth-user-1', createdAt: 2,
   });
   ctx.sessionStorage.setItem('lm_pending_envelope', newer);
   releaseCheck();
   await oldCheck;
-  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+  assert.strictEqual(JSON.parse(ctx.sessionStorage.getItem('lm_pending_envelope')).operationId, '0a000000-0000-4000-8000-00000000002e',
     'the newer operation survives the older completion');
   assert.deepStrictEqual(sheets, [], 'the older result is not displayed as current');
   // Round 2: the stale card must NOT be re-enabled — it yields: removes
@@ -1895,21 +2254,21 @@ check('RECOVERY OVERLAP: an older completion cannot clear or act on a newer oper
   // …and even a ghost click on the detached stale Discard cannot delete
   // the newer operation (Discard is scoped to its own card's operation).
   await card.children[2].listeners.click[0]();
-  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), newer,
+  assert.strictEqual(JSON.parse(ctx.sessionStorage.getItem('lm_pending_envelope')).operationId, '0a000000-0000-4000-8000-00000000002e',
     'a stale Discard can never delete the newer envelope');
 });
 
 check('DISCARD SCOPE: a stale card\'s Discard removes only itself — the newer operation survives', async () => {
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
   ctx.sessionStorage.setItem('lm_pending_envelope', JSON.stringify({
-    operationId: 'op-OLD', bodyString: '{}', kind: 'create',
+    operationId: '0a000000-0000-4000-8000-00000000001d', kind: 'create',
     bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
   }));
   app.offerPendingEnvelope('auth-user-1');
   const oldCard = ctx.document.body.children.find((c) => c.id === 'pendingEnvelopeCard' && !c.removed);
   // The slot moves on to a newer operation while the old card is on screen.
   const newer = JSON.stringify({
-    operationId: 'op-NEW', bodyString: '{}', kind: 'create',
+    operationId: '0a000000-0000-4000-8000-00000000002e', kind: 'create',
     bookingId: null, authSubject: 'auth-user-1', createdAt: 2,
   });
   ctx.sessionStorage.setItem('lm_pending_envelope', newer);
@@ -1989,14 +2348,14 @@ check('CHANNEL: outbound messages pin the same-origin target — never *', async
 check('SCOPED CLEAR: clearPendingEnvelope touches only its own operation — and callers are pinned', () => {
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
   const env = JSON.stringify({
-    operationId: 'op-A', bodyString: '{}', kind: 'create',
+    operationId: '0a000000-0000-4000-8000-00000000000a', bodyString: '{}', kind: 'create',
     bookingId: null, authSubject: 'auth-user-1', createdAt: 1,
   });
   ctx.sessionStorage.setItem('lm_pending_envelope', env);
   app.clearPendingEnvelope('op-B');
   assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), env,
     'another operation cannot clear the slot');
-  app.clearPendingEnvelope('op-A');
+  app.clearPendingEnvelope('0a000000-0000-4000-8000-00000000000a');
   assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null,
     'the owning operation clears it');
   ctx.sessionStorage.setItem('lm_pending_envelope', env);
@@ -2113,12 +2472,12 @@ check('428 reload:true — the outdated bundle reloads instead of arguing', asyn
 check('EDIT: a full edit submission — edit envelope, forced traveler review, CAS carried', async () => {
   const f = routedFetch({
     '/api/quote-ride': { body: quoteWithTtl(15) },
-    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: 'b-9', tripId: 'LM-9', detailsVersion: 8 } },
+    '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9', detailsVersion: 8 } },
   });
   const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
   const sheets = [];
   app.showTripSheet = (id) => sheets.push(id);
-  app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 7 };
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 7 };
   app.editMarkers = {
     routeDirection: true, routeAddress: true, pickupAt: true,
     vehicle: false, traveler: false
@@ -2126,7 +2485,7 @@ check('EDIT: a full edit submission — edit envelope, forced traveler review, C
 
   await app.requestServerQuote();
   const quoteBody = JSON.parse(f.to('/api/quote-ride')[0].opts.body);
-  assert.strictEqual(quoteBody.bookingId, 'b-9');
+  assert.strictEqual(quoteBody.bookingId, '0b000000-0000-4000-8000-0000000000b9');
   assert.strictEqual(quoteBody.expectedDetailsVersion, 7);
 
   app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
@@ -2138,14 +2497,14 @@ check('EDIT: a full edit submission — edit envelope, forced traveler review, C
   const posts = f.to('/api/update-pending-booking');
   assert.strictEqual(posts.length, 1, 'edits write through the edit lane');
   const sent = JSON.parse(posts[0].opts.body);
-  assert.strictEqual(sent.bookingId, 'b-9');
+  assert.strictEqual(sent.bookingId, '0b000000-0000-4000-8000-0000000000b9');
   assert.strictEqual(sent.expectedDetailsVersion, 7,
     'the CAPTURED version is the CAS — a server echo never replaces it');
   assert.match(sent.operationId, /^[0-9a-f-]{36}$/i);
   assert.strictEqual(sent.quoteToken, 'tok.tesla');
   assert.ok(!('paymentMethod' in sent),
     'plan v3.1: the edit contract carries NO payment method — stored values survive');
-  assert.deepStrictEqual(sheets, ['b-9']);
+  assert.deepStrictEqual(sheets, ['0b000000-0000-4000-8000-0000000000b9']);
   assert.strictEqual(app.pendingEdit, null, 'a saved edit closes the edit session');
 });
 
@@ -2154,7 +2513,7 @@ check('EDIT_STALE: a stale edit quote fails closed with honest reopen copy', asy
     '/api/quote-ride': { status: 409, body: { error: 'edit_stale', reason: 'version', currentDetailsVersion: 5 } },
   });
   const { app, carousel } = makeContext({ enabled: true, fetchImpl: f });
-  app.pendingEdit = { bookingId: 'b-9', tripCode: 'LM-9', detailsVersion: 3 };
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 3 };
   app.editMarkers = {
     routeDirection: true, routeAddress: true, pickupAt: true,
     vehicle: true, traveler: false

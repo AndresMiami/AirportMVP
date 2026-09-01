@@ -556,6 +556,41 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
     assert.ok(!('driver' in body) || body.driver === undefined);
   });
 
+  // ---- R1: the completion receipt renders NO duration line — legacy rows
+  // with a stored duration included (they exist until R2 cleans them) ----
+  updateResult = { data: [{
+    id: BID, trip_id: 'LM-R1', status: 'completed',
+    pickup_location: 'A', dropoff_location: 'B', customer_name: 'Pat',
+    price: 165, payment_status: 'unpaid', host_commission: null,
+    duration_minutes: 42
+  }], error: null };
+  process.env.TELEGRAM_BOT_TOKEN = 'test-bot';
+  process.env.ADMIN_TELEGRAM_CHAT_ID = '123';
+  const realFetch = global.fetch;
+  const receiptBodies = [];
+  global.fetch = async (url, opts) => {
+    if (String(url).includes('api.telegram.org')) {
+      receiptBodies.push(JSON.parse(opts.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  try {
+    r = await post({ bookingId: BID, action: 'complete' }, 'tok-andres');
+    check('R1: the completion receipt has NO duration line even for a legacy duration-bearing row', () => {
+      assert.strictEqual(r.statusCode, 200);
+      assert.strictEqual(receiptBodies.length, 1, 'exactly one receipt');
+      const text = receiptBodies[0].text;
+      assert.match(text, /completed — receipt/);
+      assert.ok(!/⏱|min ride|duration/.test(text),
+        'the duration line is REMOVED, not conditional: ' + text);
+    });
+  } finally {
+    global.fetch = realFetch;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.ADMIN_TELEGRAM_CHAT_ID;
+  }
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((e) => {
   console.error('\nFAIL:', e.message);

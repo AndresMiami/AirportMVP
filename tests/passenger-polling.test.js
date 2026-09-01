@@ -258,15 +258,20 @@ function check(name, fn) {
     response(200, { booking: { ...pendingBooking, duration_minutes: null }, driver: null })
   ]);
   await routeFacts.settle();
-  check('a displayed Google route duration carries visible attribution', () => {
-    assert.strictEqual(routeFacts.element('rideDuration').textContent, '⏱ ~27 min ride');
-    assert.ok(!routeFacts.element('rideDuration').classList.contains('hidden'));
-    assert.ok(!routeFacts.element('routeAttribution').classList.contains('hidden'));
+  check('R1: a stored route duration is NEVER rendered — legacy rows included', () => {
+    // Inverted from the pre-R1 pin: Google's case-74801827 answer gives
+    // duration no retention exception, so even a legacy row that still
+    // carries one renders nothing.
+    assert.ok(routeFacts.element('rideDuration').classList.contains('hidden'));
+    assert.strictEqual(routeFacts.element('rideDuration').textContent, '');
+    assert.ok(routeFacts.element('etaTime').classList.contains('hidden'));
+    assert.ok(!routeFacts.element('routeAttribution').classList.contains('hidden'),
+      'attribution is DECOUPLED: the route strings are Google-derived until B1-G');
   });
   await routeFacts.runNextTimer();
-  check('a later payload without route duration removes both fact and attribution', () => {
+  check('R1: attribution stays visible when duration is null — it belongs to the route text', () => {
     assert.ok(routeFacts.element('rideDuration').classList.contains('hidden'));
-    assert.ok(routeFacts.element('routeAttribution').classList.contains('hidden'));
+    assert.ok(!routeFacts.element('routeAttribution').classList.contains('hidden'));
   });
 
   const farFuture = {

@@ -46,3 +46,6 @@ config.js
 js/stripe-config-fix.js
 js/payment-data-fix.js
 js/payment-system-test.js
+
+# Claude Code session scaffolding (worktrees, local settings) — never committed
+.claude/
