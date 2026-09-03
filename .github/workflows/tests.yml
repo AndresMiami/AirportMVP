@@ -91,8 +91,8 @@ jobs:
           # Guard against a suite being deleted or renamed out of discovery:
           # a green run over 3 suites is not the same assurance as 16.
           # Raise this floor when suites are added, never lower it to pass.
-          if [ "$suites" -lt 29 ]; then
-            echo "::error::only $suites suites discovered, expected at least 29 — was one deleted or renamed?"
+          if [ "$suites" -lt 30 ]; then
+            echo "::error::only $suites suites discovered, expected at least 30 — was one deleted or renamed?"
             exit 1
           fi
 
