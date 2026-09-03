@@ -25,7 +25,6 @@
     "helmet": "^7.0.0",
     "morgan": "^1.10.0",
     "node-telegram-bot-api": "^0.66.0",
-    "stripe": "^18.4.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

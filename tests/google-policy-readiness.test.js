@@ -195,7 +195,7 @@ async function check(name, fn) {
     assert.ok(!/https?:\/\/[^"']+\.(?:css|js)/i.test(`${terms}\n${privacy}`));
     const cacheList = serviceWorker.slice(serviceWorker.indexOf('STATIC_CACHE_URLS'), serviceWorker.indexOf('];', serviceWorker.indexOf('STATIC_CACHE_URLS')));
     assert.ok(!/terms|privacy|legal\.css/.test(cacheList));
-    assert.match(serviceWorker, /linkmia-v1\.3\.25/);
+    assert.match(serviceWorker, /linkmia-v1\.3\.26/);
   });
 
   await check('autocomplete constructor wires its real input, keyboard and blur boundaries', () => {

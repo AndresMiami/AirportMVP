@@ -14,7 +14,7 @@
 // v1.3.25: R1 — the pending envelope persists identity metadata only and
 // post-reload recovery moved to the read-only /api/operation-status lookup;
 // indexMVP is precached, so the cache turns over (CLAUDE.md rule).
-const CACHE_NAME = 'linkmia-v1.3.25';
+const CACHE_NAME = 'linkmia-v1.3.26';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers.
 const RUNTIME_CACHE = 'linkmia-runtime-v3';

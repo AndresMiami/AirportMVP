@@ -243,8 +243,9 @@ captures nothing.
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY` (secret),
 `TELEGRAM_BOT_TOKEN` (secret), `ADMIN_TELEGRAM_CHAT_ID`,
 `GOOGLE_MAPS_BROWSER_API_KEY` (Builds scope; PUBLIC after generation; separate
-Production/Deploy Preview values, plus Branch Deploy if enabled), Stripe keys (Stripe currently disabled,
-`REQUIRE_PAYMENT=false` in indexMVP; payment = cash/Zelle to driver).
+Production/Deploy Preview values, plus Branch Deploy if enabled), payment = cash/Zelle to
+driver (legacy Stripe path archived in dev/archive/legacy-stripe/ per
+guardrails INV-3 — never re-enable; future = Stripe Connect Standard).
 Railway env: private `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost
 allowed). Never reuse the Railway key for the browser loader.
 The browser-key rollout requires project/API quota caps + quota alerts for Maps

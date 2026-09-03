@@ -9,7 +9,6 @@ A professional airport transfer booking platform with real-time pricing, Google 
 - npm or yarn
 - Two dedicated Google Maps keys: private Railway REST + public browser Maps JS
 - Supabase account (for database)
-- Stripe account (for payments)
 
 ### Local Development
 
@@ -57,7 +56,6 @@ AirportMVP/
 │   │   └── server.js     # Express server for API key protection
 │   └── functions/        # Netlify serverless functions
 │       ├── create-booking.js
-│       └── create-payment.js
 │
 ├── JavaScript Modules (root)
 │   ├── autocomplete.js   # Google Maps integration
@@ -113,7 +111,6 @@ not take the current site offline, but it blocks every later production deploy.
 ```env
 SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_key
-STRIPE_SECRET_KEY=your_stripe_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 ADMIN_TELEGRAM_CHAT_ID=your_admin_chat_id
 ```
@@ -185,7 +182,6 @@ Before pushing changes, verify:
 - **Real-time address autocomplete** via Google Maps
 - **Dynamic pricing** based on distance and vehicle type
 - **Mobile-optimized** responsive design
-- **Secure payments** via Stripe
 - **Telegram notifications** via Telegram Bot API
 - **Database storage** via Supabase
 - **Three vehicle types**: Luxury Sedan, Premium SUV, VIP Sprinter
@@ -199,7 +195,6 @@ Before pushing changes, verify:
 
 ### Netlify Functions
 - `POST /api/create-booking` - Create new booking
-- `POST /api/create-payment` - Process payment
 
 ## 🔒 Security
 
@@ -207,13 +202,12 @@ Before pushing changes, verify:
 - All sensitive keys in environment variables
 - CORS configured for allowed origins only
 - Rate limiting on API proxy (100 req/15min)
-- Secure payment processing via Stripe
+- Payment: cash/Zelle collected by the driver (legacy in-app card path archived per internal decision INV-3)
 
 ## 📦 Dependencies
 
 ### Production
 - `express: ^4.21.2` - API proxy server
-- `stripe: ^18.4.0` - Payment processing
 - `node-telegram-bot-api: ^0.66.0` - Telegram notifications
 
 ### Frontend (No build required)
