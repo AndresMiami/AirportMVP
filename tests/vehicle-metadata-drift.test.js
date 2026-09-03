@@ -94,8 +94,8 @@ const EXPECTED = {
 };
 const EXPECTED_KEYS = Object.keys(EXPECTED);
 // Category-keyed capacity, including the legacy 'escalade' CATEGORY alias
-// old booking rows still carry (CLAUDE.md: "Legacy status/category kept
-// for old rows") — present in trip.html and create-booking's CAPACITY.
+// old booking rows still carry — present in trip.html and create-booking's
+// CAPACITY.
 const EXPECTED_CATEGORY = {
   sedan: { label: 'Tesla Model Y', passengers: 4, bags: 4 },
   suv: { label: 'Cadillac Escalade', passengers: 7, bags: 8 },
