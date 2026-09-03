@@ -29,8 +29,8 @@ export const API_CONFIG = {
     booking: {
       // calculate-price retired (PR 3C-2C-B PR-1) — both URLs are 404s.
       createBooking: '/api/create-booking',
-      createPaymentIntent: '/api/create-payment-intent',
-      confirmPayment: '/api/confirm-payment',
+      // Legacy Stripe endpoints removed per internal architecture decision
+      // INV-3 — see dev/archive/legacy-stripe/README.md.
       trackFlight: '/api/track-flight'
     }
   },

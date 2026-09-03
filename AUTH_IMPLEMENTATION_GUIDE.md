@@ -1,3 +1,10 @@
+> **Historical planning document (superseded).** Written before
+> authentication shipped. The production system differs from this plan:
+> passengers use self-service email+password accounts and new bookings are
+> account-required; driver accounts are admin-provisioned only; the anon key
+> is auth-only under the RLS lockdown. Kept for history — do not implement
+> from this document.
+
 # 🔐 Authentication Implementation Guide - AirportMVP
 
 ## Executive Summary

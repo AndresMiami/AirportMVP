@@ -723,18 +723,12 @@
     <script src="/maps-browser-config.js"></script>
     <script src="/maps-loader.js"></script>
     
-    <!-- Stripe SDK - Load before payment modules -->
-    <script src="https://js.stripe.com/v3/"></script>
-    
     <!-- Modal Controllers -->
     <script src="./js/passenger-modal.js?v=3"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=1"></script>
     <script src="./js/payment-modal.js?v=1"></script>
-    
-    <!-- Stripe Payment Integration -->
-    <script src="./js/stripe-payment.js?v=2"></script>
-    
+
     <!-- Main Application Scripts -->
     <!-- Autocomplete will be loaded lazily when needed -->
     <script>
@@ -766,7 +760,8 @@
         //   5. Remove QUOTE_SERVICE_DISABLED and smoke-test the endpoint
         //      directly, while this browser flag is still false.
         //   6. Only then flip this flag to true.
-        // Precedent for a client-side rollout constant: REQUIRE_PAYMENT.
+        // Follows the client-side rollout-constant pattern (a build-time
+        // boolean flipped only by a reviewed deploy).
         const SERVER_QUOTE_ENABLED = false;
 
         // A quote is priced for one exact intent. Anything that changes the
@@ -3488,11 +3483,13 @@
                     }
                 }
 
-                // ========== PAYMENT CONFIGURATION ==========
-                // Set to false to skip Stripe payment (driver collects cash/Zelle)
-                // Set to true when ready to enable Stripe payments
-                const REQUIRE_PAYMENT = false;
-                // ============================================
+                // ========== PAYMENT ==========
+                // Payment is collected by the driver (cash/Zelle). The legacy
+                // in-app card path was removed per internal architecture
+                // decision INV-3; the future design is Stripe Connect Standard
+                // with direct charges on the operator's account. See
+                // dev/archive/legacy-stripe/README.md.
+                // =============================
 
                 const editContext = this.pendingEdit ? { ...this.pendingEdit } : null;
                 const isEditing = !!editContext;
@@ -3596,38 +3593,11 @@
                     }
                     currentSession = submitSession;
 
-                    if (REQUIRE_PAYMENT) {
-                        // ===== STRIPE PAYMENT FLOW =====
-                        // Get payment controller
-                        const paymentController = PaymentModal.getInstance();
-                        const selectedPayment = paymentController.getSelectedPayment();
-
-                        if (!selectedPayment) {
-                            alert('Please select a payment method first');
-                            bookBtn.innerHTML = originalText;
-                            bookBtn.disabled = false;
-                            return;
-                        }
-
-                        // Process payment with Stripe
-                        const paymentResult = await window.StripePayment.processPayment(
-                            bookingData,
-                            selectedPayment
-                        );
-
-                        if (!paymentResult.success) {
-                            throw new Error(paymentResult.error || 'Payment failed');
-                        }
-
-                        // Payment successful
-                        bookingData.status = 'confirmed';
-                        bookingData.payment.transactionId = paymentResult.paymentIntentId;
-                    } else {
-                        // ===== SKIP PAYMENT - Collected by driver =====
-                        bookingData.status = 'payment_pending';
-                        bookingData.payment.method = 'cash';
-                        bookingData.payment.note = 'Pay your driver by cash or Zelle';
-                    }
+                    // ===== PAYMENT COLLECTED BY DRIVER (cash/Zelle) =====
+                    // The only payment flow (see dev/archive/legacy-stripe/).
+                    bookingData.status = 'payment_pending';
+                    bookingData.payment.method = 'cash';
+                    bookingData.payment.note = 'Pay your driver by cash or Zelle';
 
                     // A new ride may use a provisional local record. An edit
                     // never overwrites local truth before the server commits:

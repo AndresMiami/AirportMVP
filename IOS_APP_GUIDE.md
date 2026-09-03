@@ -1,3 +1,11 @@
+> **Historical planning document (superseded).** Written August 2025 for
+> the pre-LinkMia app. The shipped mobile strategy is the installed PWA (the
+> driver app ships as a PWA with web push). Several assumptions here no
+> longer hold: in-app card payment was removed (internal decision INV-3),
+> and continuous background location contradicts the checkpoint location
+> model. If a native shell is ever pursued, re-plan from the current
+> architecture. Kept for history — do not implement from this document.
+
 # iOS App Implementation Guide - LuxeRide Airport Transfer
 
 ## 📱 Project Overview

@@ -580,7 +580,7 @@ function makeRealm({ key = VALID_KEY } = {}) {
   });
 
   await check('service worker refreshes loader code but never caches generated key config', () => {
-    assert.match(serviceWorker, /CACHE_NAME = 'linkmia-v1\.3\.25'/);
+    assert.match(serviceWorker, /CACHE_NAME = 'linkmia-v1\.3\.26'/);
     assert.match(serviceWorker, /'\/maps-loader\.js'/);
     assert.match(serviceWorker, /url\.pathname === '\/maps-browser-config\.js'/);
     const staticList = serviceWorker.slice(

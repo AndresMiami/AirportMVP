@@ -1,5 +1,11 @@
 # LinkMia Database Setup
 
+> **Note (Sep 2026):** this guide covers the initial schema only. After
+> running `linkmia-schema.sql`, apply every script in `database/migrations/`
+> in numbered order. The driver INSERT example below predates driver
+> authentication — production drivers are admin-provisioned with linked auth
+> accounts (see migration 009).
+
 ## Quick Start (15 minutes)
 
 ### Step 1: Run the Database Schema

@@ -6,12 +6,15 @@
 - **Google Maps REST key**: Private in Railway and never sent to browsers
 - **Google Maps browser key**: Public by design, isolated from the REST key,
   and protected by GCP Website + API restrictions
-- **Stripe Secret Key**: Only on backend (Netlify Functions)
 - **Telegram Bot Token**: Only on backend (Netlify Functions)
 
-### ⚠️ Needs Configuration
-- **Supabase Credentials**: Currently using placeholders in `supabase.js`
-- **Stripe Publishable Key**: Not yet configured for frontend
+### 📌 Notes
+- **Supabase anon key**: public by design and auth-only — since the RLS
+  lockdown every table is default-deny with zero client-role grants, so the
+  anon key cannot read or write data; all data access goes through Netlify
+  functions holding `SUPABASE_SERVICE_KEY`
+- **Payments**: cash/Zelle collected by the driver; no payment keys exist
+  (legacy in-app card path archived under `dev/archive/legacy-stripe/`)
 
 ## 🛡️ Security Architecture
 
@@ -23,7 +26,6 @@ indexMVP.html              Railway Proxy
 ├─ Google JS direct       └─ Rate limiting
 └─ REST calls via proxy
                           Netlify Functions
-                          ├─ STRIPE_SECRET_KEY
                           ├─ TELEGRAM_BOT_TOKEN
                           └─ SUPABASE_SERVICE_KEY
 ```
@@ -104,19 +106,9 @@ nano .env
 
 ### 4. Frontend Configuration
 
-For Supabase in frontend, inject via script tag:
-```html
-<!-- Add before other scripts in indexMVP.html -->
-<script>
-  window.ENV = {
-    SUPABASE_URL: 'your-url',
-    SUPABASE_ANON_KEY: 'your-anon-key',
-    STRIPE_PUBLISHABLE_KEY: 'pk_live_...'
-  };
-</script>
-```
-
-Or use Netlify environment variables with build plugin.
+The frontend ships its Supabase URL and anon key in `supabase.js` on purpose:
+the anon key is public and auth-only under the RLS lockdown. No other
+credential belongs in frontend code.
 
 ## 🚨 Security Checklist
 
@@ -151,11 +143,8 @@ git log -S "API_KEY" --oneline
 - `GOOGLE_MAPS_API_KEY` (Railway)
 - `GOOGLE_MAPS_BROWSER_API_KEY` (Netlify Builds; public, restricted)
 - `SUPABASE_URL` (Frontend/Backend)
-- `SUPABASE_ANON_KEY` (Frontend/Backend)
-
-### Required for Payments
-- `STRIPE_SECRET_KEY` (Backend)
-- `STRIPE_PUBLISHABLE_KEY` (Frontend)
+- `SUPABASE_ANON_KEY` (Frontend/Backend; public, auth-only)
+- `SUPABASE_SERVICE_KEY` (Backend only; secret)
 
 ### Required for Notifications
 - `TELEGRAM_BOT_TOKEN` (Backend)
@@ -172,6 +161,5 @@ git log -S "API_KEY" --oneline
 ## 📚 Resources
 
 - [Google Maps API Security](https://developers.google.com/maps/api-security-best-practices)
-- [Stripe Security](https://stripe.com/docs/security)
 - [Supabase Security](https://supabase.com/docs/guides/auth/security)
 - [OWASP Security Guidelines](https://owasp.org/www-project-top-ten/)

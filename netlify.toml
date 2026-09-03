@@ -43,16 +43,6 @@
   status = 200
 
 [[redirects]]
-  from = "/api/create-payment-intent"
-  to = "/.netlify/functions/create-payment-intent"
-  status = 200
-
-[[redirects]]
-  from = "/api/confirm-payment"
-  to = "/.netlify/functions/confirm-payment"
-  status = 200
-
-[[redirects]]
   from = "/api/track-flight"
   to = "/.netlify/functions/track-flight"
   status = 200
@@ -232,6 +222,18 @@
 
 [[redirects]]
   from = "/docs/*"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/dev/archive/legacy-stripe/README.md"
+  to = "/admin-retired.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/dev/*"
   to = "/admin-retired.html"
   status = 404
   force = true

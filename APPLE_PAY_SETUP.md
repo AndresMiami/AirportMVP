@@ -1,3 +1,10 @@
+> **SUPERSEDED (September 3, 2026).** This document describes the legacy
+> Stripe integration, which has been removed per an internal governing
+> architecture decision (INV-3). The code it documents is archived in
+> `dev/archive/legacy-stripe/` and must never be re-enabled. The sanctioned
+> future design is Stripe Connect Standard with direct charges on the
+> operator's account. Kept for historical reference only.
+
 # Apple Pay Integration Guide
 
 ## How It Works
