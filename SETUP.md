@@ -15,8 +15,8 @@ PORT=3001
 ### 2. Local Development
 ```bash
 npm install
-npm start  # Starts proxy server on :3001
-# Open indexMVP.html in Live Server
+netlify dev   # site + functions on :3001 (see LOCAL_DEVELOPMENT.md)
+# Proxy-only alternative: npm start, then open indexMVP.html in Live Server
 ```
 
 ## 📦 Deployment
@@ -28,9 +28,9 @@ npm start  # Starts proxy server on :3001
      Deploy Preview values; Branch Deploy too if enabled)
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
-   - `STRIPE_SECRET_KEY`
-   - `TWILIO_ACCOUNT_SID`
-   - `TWILIO_AUTH_TOKEN`
+   - `SUPABASE_SERVICE_KEY` (secret)
+   - `TELEGRAM_BOT_TOKEN` (secret)
+   - `ADMIN_TELEGRAM_CHAT_ID`
 3. Auto-deploys on push to main
 
 ### Railway (API Proxy)
