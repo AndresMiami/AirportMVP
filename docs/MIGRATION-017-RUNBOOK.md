@@ -1,8 +1,15 @@
 # Migration 017 rollout and emergency runbook
 
-This document is procedure, not authorization. Migration 017 remains unrun
-until Andres explicitly approves the checksum-matched, manifest-filled SQL
-artifact produced from the reviewed correction commit.
+STATUS: migration 017 was INSTALLED in production on 2026-08-23
+(checksum-matched, manifest-filled artifact; preflight all-pass;
+post-install grid + rollback-contained smoke verified; watchdog resumed).
+The install sections below are the HISTORICAL procedure of that completed
+window; the EMERGENCY ROLLBACK section remains operationally live.
+
+This document is procedure, not authorization. At authoring time migration
+017 remained unrun until Andres explicitly approved the artifact produced
+from the reviewed correction commit — that approval was given and executed
+as recorded above.
 
 ## Before the maintenance window
 
@@ -310,7 +317,11 @@ SELECT
    verify the first watchdog tick before ending the window.
 
 Installing 017 does not enable server pricing. The state begins at `off`, the
-quote endpoint remains kill-switched and the browser flag remains false.
+quote endpoint kill-switched and the browser flag false. (HISTORICAL — that
+was the state at install time, 2026-08-23. Since 2026-09-03 the endpoint is
+enabled and `pricing_state` is `observe`; the browser-flag activation
+release is prepared under review — its passenger-visible effect is
+CONDITIONAL on that release deploying — per docs/BROWSER-FLAG-ACTIVATION.md.)
 
 ## Emergency rollback
 

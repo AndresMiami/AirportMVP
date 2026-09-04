@@ -9,10 +9,12 @@
 //
 // Two layers, following tests/booking-gate-frontend.test.js:
 //   1. BEHAVIOR — the app block runs for real under `vm` with a fake DOM.
-//      Because SERVER_QUOTE_ENABLED is a block-scoped const that ships
-//      false, the enabled path is exercised by compiling the SAME source
-//      with the flag flipped to true. The committed default is asserted
-//      separately, and the disabled path is compiled and exercised too.
+//      SERVER_QUOTE_ENABLED is a block-scoped const (the committed
+//      candidate default is TRUE — server quoting ONCE this release is
+//      deployed); each context compiles the SAME source with the flag
+//      NORMALIZED to the requested mode, so both paths stay genuinely
+//      exercised whatever the committed default. The default itself is
+//      asserted separately (the ship-state check).
 //   2. STATIC — source-shape assertions for the parts that sit inside
 //      confirmBooking's modal/session chain, which is too entangled to
 //      drive end to end here. Those are labelled STATIC honestly rather
@@ -197,12 +199,20 @@ function makeEl(tag) {
 
 let uuidCounter = 0;
 function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselReady = true, sessionGate = null }) {
+  // Normalize the flag to the REQUESTED mode regardless of the shipped
+  // default. The old one-way replace exercised both modes only while the
+  // committed default was false — after activation every "disabled"
+  // context would actually run enabled: checks asserting absence would
+  // fail loudly, but any legacy assertion that also holds in enabled mode
+  // would silently stop covering the OFF path (Codex, activation review).
+  // The normalization and its assertion hold for either shipped default,
+  // which is also what makes the forward-rollback commit test-neutral.
   const source = enabled
     ? appBlock.replace('const SERVER_QUOTE_ENABLED = false;', 'const SERVER_QUOTE_ENABLED = true;')
-    : appBlock;
+    : appBlock.replace('const SERVER_QUOTE_ENABLED = true;', 'const SERVER_QUOTE_ENABLED = false;');
   assert.ok(
-    !enabled || source.includes('const SERVER_QUOTE_ENABLED = true;'),
-    'flag flip failed — the const declaration changed shape'
+    source.includes(`const SERVER_QUOTE_ENABLED = ${enabled === true};`),
+    'flag normalization failed — the const declaration changed shape'
   );
 
   const byId = {};
@@ -381,9 +391,9 @@ const okFetch = (body, status = 200) => {
 console.log('\nPR 3C-2B2 — server quote browser integration\n');
 
 // ============ the rollout flag ============
-check('STATIC: the committed default is OFF, so merging changes nothing', () => {
-  assert.ok(/const SERVER_QUOTE_ENABLED = false;/.test(appBlock),
-    'SERVER_QUOTE_ENABLED must ship false');
+check('STATIC: the committed candidate default is ON — server quoting ONCE this release deploys', () => {
+  assert.ok(/const SERVER_QUOTE_ENABLED = true;/.test(appBlock),
+    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + SW v1.3.28 + runtime v5)');
 });
 
 check('DISABLED: no quote request is made and pricing.js still drives the carousel', async () => {
@@ -406,6 +416,120 @@ check('DISABLED: updateVehiclePrices keeps its legacy early-return, not the new 
   app.state.route = { distance: null, duration: null, price: null };
   app.updateVehiclePrices();          // legacy guard: no route data -> returns
   assert.strictEqual(app.state.quote.status, 'idle');
+});
+
+// The three ROLLBACK checks below are the forward-rollback safety net: with
+// the flag off, pricing.js must still CALCULATE the fare, DISPLAY it, and
+// SUBMIT it (activation review seq:113 — absence-only assertions let a
+// broken legacy path ship silently under a shipped-true default).
+check('ROLLBACK/DISABLED: pricing.js computes and posts the legacy carousel prices', () => {
+  const f = okFetch(SERVER_QUOTE);
+  const { app, posted } = makeContext({ enabled: false, fetchImpl: f });
+  // Distinct non-default numbers so a pass proves the values came from the
+  // pricing.js computation, not from any carousel default or quote fixture.
+  const FARE = { tesla: 42.5, escalade: 61, sprinter: 88 };
+  app.pricingService = {
+    getAllVehicles: () => ['tesla', 'escalade', 'sprinter'],
+    getVehicleConfig: () => ({ name: 'x', capacity: { passengers: 4, bags: 4 } }),
+    calculateVehiclePrice: (type) => ({ finalPrice: FARE[type], breakdown: { appliedSurcharges: [] } }),
+    checkSurgePeriod: () => ({ hasSurge: false }),
+  };
+  app.state.route = { distance: 12.3, duration: 28, price: null };
+  app.updateVehiclePrices();
+  const priceMsgs = posted.filter((m) => m.type === 'updatePrices');
+  assert.strictEqual(priceMsgs.length, 1, 'the legacy path must post computed prices to the carousel');
+  // Spread re-realms the vm-context objects (deepStrictEqual compares
+  // prototypes — the P0 suite hit the same trap).
+  assert.deepStrictEqual({ ...priceMsgs[0].data }, FARE,
+    'the carousel must receive exactly the pricing.js fares');
+  assert.deepStrictEqual({ ...app.vehiclePrices }, FARE, 'legacy prices must be stored for submission');
+  assert.strictEqual(f.calls.length, 0, 'still zero quote traffic');
+});
+
+check('ROLLBACK/DISABLED: one tap submits the pricing.js fare — a plain legacy POST, no token fields', async () => {
+  // /api/quote-ride is deliberately UNROUTED: any quote call throws and
+  // fails the check, so this also re-proves zero paid traffic end to end.
+  const f = routedFetch({ '/api/create-booking': CREATED });
+  const { app } = makeContext({ enabled: false, fetchImpl: f });
+  app.showTripSheet = () => {};
+  const FARE = { tesla: 42.5, escalade: 61, sprinter: 88 };
+  app.pricingService = {
+    getAllVehicles: () => ['tesla', 'escalade', 'sprinter'],
+    getVehicleConfig: () => ({ name: 'x', capacity: { passengers: 4, bags: 4 } }),
+    calculateVehiclePrice: (type) => ({ finalPrice: FARE[type], breakdown: { appliedSurcharges: [] } }),
+    checkSurgePeriod: () => ({ hasSurge: false }),
+  };
+  // selectVehicle carries the carousel's own number (39) — the submitted
+  // total must instead be the pricing.js computation for the selection.
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  app.state.route = { distance: 12.3, duration: 28, price: null };
+  app.updateVehiclePrices();
+  await tap(app);
+  const posts = f.to('/api/create-booking');
+  assert.strictEqual(posts.length, 1, 'the legacy tap must POST the booking');
+  const sent = JSON.parse(posts[0].opts.body);
+  assert.strictEqual(sent.price, FARE.tesla,
+    'the submitted fare must be the pricing.js computation for the selected vehicle');
+  for (const field of ['quoteToken', 'vehicleKey', 'routeMilesTenths', 'routeMinutes', 'operationId']) {
+    assert.ok(!(field in sent), `legacy POST must not carry ${field}`);
+  }
+  assert.strictEqual(posts[0].opts.headers.Authorization, 'Bearer jwt-abc',
+    'the legacy POST still carries the session');
+  // An ACTUAL HTTP POST with a JSON body — not merely "some fetch call"
+  // (activation review round 2: a mutation flipping the method or body
+  // encoding must not survive).
+  assert.strictEqual(posts[0].opts.method, 'POST', 'the legacy write is an HTTP POST');
+  assert.match(posts[0].opts.headers['Content-Type'] || '', /application\/json/,
+    'the legacy POST body is JSON');
+});
+
+check('ROLLBACK/DISABLED: a route change re-prices through pricing.js AND the writer receives the new fare', async () => {
+  // /api/quote-ride deliberately UNROUTED (any quote call throws); only the
+  // writer is served, so the chain below is the real legacy tap -> POST.
+  const f = routedFetch({ '/api/create-booking': CREATED });
+  const { app, posted } = makeContext({ enabled: false, fetchImpl: f });
+  app.showTripSheet = () => {};
+  let rate = 3;    // $/mile stand-in so each route yields distinct fares
+  app.pricingService = {
+    getAllVehicles: () => ['tesla', 'escalade', 'sprinter'],
+    getVehicleConfig: () => ({ name: 'x', capacity: { passengers: 4, bags: 4 } }),
+    calculateVehiclePrice: (type, distance) => ({
+      finalPrice: distance * rate * ({ tesla: 1, escalade: 1.5, sprinter: 2 }[type]),
+      breakdown: { appliedSurcharges: [] },
+    }),
+    checkSurgePeriod: () => ({ hasSurge: false }),
+  };
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  app.state.route = { distance: 10, duration: 20, price: null };
+  app.updateVehiclePrices();
+  // The passenger picks a different address: new route facts arrive and the
+  // legacy path must RE-price — displayed carousel numbers, the stored
+  // table, and the selected vehicle's submittable fare all move together.
+  app.state.route = { distance: 30, duration: 55, price: null };
+  app.updateVehiclePrices();
+  const priceMsgs = posted.filter((m) => m.type === 'updatePrices');
+  assert.strictEqual(priceMsgs.length, 2, 'each route change must re-post prices');
+  assert.strictEqual(priceMsgs[0].data.tesla, 30, 'first route priced from its own distance');
+  assert.strictEqual(priceMsgs[1].data.tesla, 90, 'the new route must be re-priced, not re-served');
+  assert.strictEqual(app.vehiclePrices.tesla, 90, 'the stored fare follows the newest route');
+  assert.strictEqual(app.state.vehicle.pricing.finalPrice, 90,
+    'the selected vehicle submittable fare follows the newest route');
+  assert.strictEqual(app.state.route.price, 90, 'route.price follows the newest computation');
+  assert.strictEqual(f.calls.length, 0, 'zero network traffic before the tap');
+  // THE WRITER (seq:117 P1): in-memory state following the route is not
+  // enough — a submission path that snapshots an earlier fare (e.g. the
+  // carousel's own state.vehicle.price) would send stale $30 while every
+  // assertion above stays green. Carry the same scenario through the real
+  // tap into the booking POST.
+  await tap(app);
+  const posts = f.to('/api/create-booking');
+  assert.strictEqual(posts.length, 1, 'the legacy tap must POST exactly once');
+  assert.strictEqual(f.calls.length, 1, 'the writer POST is the only network call');
+  const sent = JSON.parse(posts[0].opts.body);
+  assert.strictEqual(sent.price, 90,
+    'the writer must receive the route-changed fare, never a stale earlier one');
+  assert.strictEqual(posts[0].opts.method, 'POST');
+  assert.ok(!('quoteToken' in sent) && !('operationId' in sent), 'plain legacy POST');
 });
 
 check('ROUTE: clearing an address clears old route facts and their attribution', () => {
@@ -1439,6 +1563,10 @@ check('ENVELOPE: one tap serializes once — operationId inside the exact stored
   const posts = f.to('/api/create-booking');
   assert.strictEqual(posts.length, 1);
   assert.strictEqual(posts[0].opts.headers.Authorization, 'Bearer jwt-abc');
+  // An actual HTTP POST with a JSON body — the envelope path's method was
+  // unpinned until a method-flip mutation survived (activation round 2).
+  assert.strictEqual(posts[0].opts.method, 'POST', 'the envelope write is an HTTP POST');
+  assert.match(posts[0].opts.headers['Content-Type'] || '', /application\/json/);
   assert.strictEqual(storedEnvelopes.length, 1, 'the envelope is stored before the POST');
   const env = JSON.parse(storedEnvelopes[0]);
   // R1: the PERSISTED slot is identity metadata ONLY — the exact bytes

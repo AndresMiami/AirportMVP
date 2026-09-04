@@ -14,10 +14,18 @@
 // v1.3.25: R1 — the pending envelope persists identity metadata only and
 // post-reload recovery moved to the read-only /api/operation-status lookup;
 // indexMVP is precached, so the cache turns over (CLAUDE.md rule).
-const CACHE_NAME = 'linkmia-v1.3.26';
+// v1.3.26: legacy Stripe removal (INV-3) refreshed the precached booking
+// page and dropped stripe-payment.js.
+// v1.3.27: browser-flag activation — SERVER_QUOTE_ENABLED true in the
+// precached indexMVP; the runtime cache bumps WITH it (to v4) because it
+// can retain booking HTML, and a static-only bump is not a dependable
+// rollback. Reviewed forward rollback: flag false + v1.3.28 + runtime v5;
+// the emergency R1 revert ladder continues at v1.3.29 + runtime v6.
+const CACHE_NAME = 'linkmia-v1.3.27';
 // Versioned so activation provably deletes older runtime caches — including
-// any API responses stored by pre-lockdown service workers.
-const RUNTIME_CACHE = 'linkmia-runtime-v3';
+// any API responses stored by pre-lockdown service workers. Bump this
+// TOGETHER with CACHE_NAME whenever precached page behavior changes.
+const RUNTIME_CACHE = 'linkmia-runtime-v4';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [

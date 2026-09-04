@@ -25,9 +25,12 @@ verified checkpoint locations all live in the web app backed by Supabase.
   The retirement instrument is `/api/usage-stats`'s `mapsScript` counters plus
   Railway access logs; a single zero snapshot is not sufficient because the
   in-memory counters reset daily and on restart.
-  Direct-loader activation changes map delivery but not pricing authority;
-  durable route-fact/Google-content retention remains a separately blocking
-  pre-activation decision.
+  Direct-loader activation changes map delivery but not pricing authority.
+  HISTORICAL (superseded 2026-09-03): durable route-fact/Google-content
+  retention was once a separately blocking pre-activation decision. R1
+  removed duration retention, and Andres's sequencing decision placed the
+  remaining address question BEHIND pricing activation (order only — see
+  the roadmap's SEQUENCING DECISION entry; the question itself stays open).
 - **Telegram**: send-only "bookkeeper" — new-request doorbell, trip-started
   ping, completion receipt. No webhook, no buttons, no state. Never rebuild
   dispatch inside a chat app (tried once; removed deliberately).
@@ -377,14 +380,19 @@ the old published deploy online but freezes every subsequent production build.
     calculation machinery; integer cents; America/New_York pinned;
     cent-exact golden parity with pricing.js (quirks preserved and
     recorded, never silently fixed — see docs/PRICING_STRUCTURE.md).
-    DARK by design: **pricing.js remains the live booking authority**
-    until the later coordinated enforcement — the server engine is NOT
-    authoritative in production yet. Future Supabase pricing profiles /
+    HISTORICAL (2C-2A era, superseded by the ACTIVATION STATE bullet
+    below): the engine shipped DARK with pricing.js as the live booking
+    authority. The browser-flag activation release makes the server quote
+    passenger-visible in observe mode ONCE DEPLOYED; server authority
+    proper (enforce) still requires graduation evidence. Future Supabase pricing profiles /
     ambassador dashboard / markups and the time-dominant rate card are
     architecturally supported and explicitly deferred.
   * PR 3C-2B1 server quote service — SHIPPED (merge 41a2639; real-Google
-    provider rollout and airport-identity correction closed by a2e9e92): DARK
-    `/api/quote-ride` (nothing calls it). Trusted-INTENT boundary
+    provider rollout and airport-identity correction closed by a2e9e92):
+    launched DARK — `/api/quote-ride` had no callers (HISTORICAL 2B1 launch
+    state, superseded by the ACTIVATION STATE record: the endpoint is now
+    enabled, and the booking page calls it once the browser-flag release
+    deploys). Trusted-INTENT boundary
     (strict field allowlist; airportCode + Google place_id resolved
     SERVER-side to one identity for routing and the future stored
     address; client route facts/coordinates/bags rejected by name);
@@ -492,13 +500,16 @@ the old published deploy online but freezes every subsequent production build.
     synchronous limit is 60s and not configurable).
   * PR 3C-2B2 browser integration — SHIPPED DARK (merge 3d81073): the
     new-booking browser can display server quotes and carry their
-    canonical place identity/token, but `SERVER_QUOTE_ENABLED` remains
-    false, `/api/quote-ride` remains kill-switched, and `pricing.js`
-    remains the live production pricing authority. Pending edits remain
-    deliberately on the legacy flow until edit-purpose quoting lands.
+    canonical place identity/token. HISTORICAL: at 2B2 time
+    `SERVER_QUOTE_ENABLED` was false, `/api/quote-ride` kill-switched, and
+    `pricing.js` the live pricing authority — all three SUPERSEDED by the
+    2026-09-03 activation (see the activation-state bullet below). Pending
+    edits remained on the legacy flow until edit-purpose quoting landed.
   * PR 3C-2C-A pricing-enforcement foundation — SHIPPED DARK (merge
     77fb91a): token v2 and migration 017's database/RPC foundation are
-    on main, but migration 017 has NOT been run in production. The
+    on main. HISTORICAL: at 2C-A time migration 017 had NOT been run in
+    production (it was installed 2026-08-23 — see the Migration 017 bullet
+    below). At that time the
     correction/preflight pass must be reviewed and its historical ambassador
     decisions completed before rollout; the SQL file being deployed is not
     evidence that the schema exists. The corrected v2 contract carries
@@ -525,10 +536,10 @@ the old published deploy online but freezes every subsequent production build.
     ANY mode, although an exact-token retry may recover a result that already
     committed. This is the sole exception to "observe never rejects": 2C-B
     submits the authentic stale projection as verified, then silently re-quotes
-    on `quote_expired`/`quote_not_yet_valid`. Future 2C-B replaces 2B2's current
-    **Expired** card placeholder, manual **Refresh prices** banner, and Book-time
-    alert with silent **Updating price…** behavior and no passenger-facing
-    "refused" wording. A verified token is consumed in
+    on `quote_expired`/`quote_not_yet_valid`. 2C-B (since SHIPPED — merges
+    #76/#77) replaced 2B2's original **Expired** card placeholder, manual
+    **Refresh prices** banner, and Book-time alert with silent **Updating
+    price…** behavior and no passenger-facing "refused" wording. A verified token is consumed in
     off, observe, and enforce (off still stores client money with
     `client_legacy` authority), so one quote cannot multiply bookings; for an
     ambassador exempt from the active-slot rule, that receipt is the one-quote /
@@ -547,9 +558,32 @@ the old published deploy online but freezes every subsequent production build.
   * Migration 017 — RUN IN PRODUCTION (2026-08-23, checksum-matched
     rollout artifact, Andres-authorized; preflight all-pass, post-install
     grid + rollback-contained smoke verified, watchdog resumed).
-    pricing_state mode is `off`; the quote ledgers are empty.
-  * PR 3C-2C-B — plan v3.1 ratified (Codex GO, sign-off on file): TWO dark
-    PRs. **PR-1 (this branch) — the WRITER SWAP, dark:** create-booking and
+  * ACTIVATION STATE (2026-09-03; every COMPLETED rung below was
+    separately Andres-authorized — nothing here pre-authorizes a future
+    rung): kill
+    switch OFF (`QUOTE_SERVICE_DISABLED=0`, variable KEPT as the one-edit
+    emergency stop; unauthenticated probe answers 401, proving the secret
+    config); paid MIA/FLL/PBI smoke ALL GREEN (traffic_aware, 9/9 vehicle
+    tokens, no place-id substitution); `pricing_state` = **observe**
+    (`set_pricing_mode('observe','andres')`, audit id 1; reversible until
+    enforcement ever starts). quote_verifications carries expected
+    off-mode background (no_token/no_request_id rows since the PR #76
+    writer swap — the graduation instrument working, not a leak). P0
+    vehicle-metadata drift guard merged (PR #85). BROWSER FLAG RELEASE
+    (branch browser-flag-activation — local, under review, NOT merged or
+    deployed; only local authoring is authorized): `SERVER_QUOTE_ENABLED=true`
+    with SW v1.3.27 + runtime cache v4 (BOTH caches must bump together —
+    runtime can retain booking HTML). ONCE DEPLOYED: passengers see and
+    submit server prices, bookings stamp `price_authority='client_observe'`,
+    pricing.js is shadow-only. Until then production runs flag-false legacy
+    pricing under observe. Reviewed FORWARD rollback: flag false + SW
+    v1.3.28 + runtime v5 (cache names only ever move forward; the
+    emergency R1 revert ladder continues at v1.3.29 + runtime v6) — see
+    docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
+    Remaining after deploy: graduation evidence, then enforce.
+  * PR 3C-2C-B — plan v3.1 ratified (Codex GO, sign-off on file): TWO PRs,
+    both SHIPPED dark and since activated — the descriptions that follow
+    are HISTORICAL. **PR-1 (merged as #76) — the WRITER SWAP:** create-booking and
     update-pending-booking write through accept_quote_create /
     accept_quote_edit (ride-quote.js calculates; signed tokens carry its
     result; the RPCs verify, consume, and store — they are not a second
@@ -581,7 +615,7 @@ the old published deploy online but freezes every subsequent production build.
     host_commission feeds only the admin receipt). quote-ride's issuance
     floor refuses routes outside 1..1440 whole minutes (the SQL-consumable
     band); the pricing ENGINE's wider bound is untouched (golden parity).
-    **PR-2 (this branch) — EDIT QUOTING + THE ENVELOPE, dark:**
+    **PR-2 (merged as #77) — EDIT QUOTING + THE ENVELOPE (shipped dark; HISTORICAL):**
     quote-ride gains edit-purpose issuance: bookingId +
     expectedDetailsVersion travel together or 400; owner/editability/CAS
     gates run BEFORE any paid Google call (missing and foreign bookings
@@ -674,21 +708,30 @@ the old published deploy online but freezes every subsequent production build.
     edit_stale inside an edit session ends with honest reopen copy, no
     in-app shortcut; a card-recovered create leaves the original
     provisional trip_ localStorage record.
-    Then the plan-v3.1 activation ladder (secrets -> prove-503 rebuild ->
-    kill switch off -> airport smoke -> observe -> browser flag + SW bump
-    -> graduation evidence -> enforce, each rung Andres-authorized;
-    post-enforce emergency = mode `blocked` ONLY). Graduation blocks on
-    zero non-test no_request_id/no_token/verify_failed traffic; the Google
-    storage/policy review gate remains OPEN and is carried to activation.
+    Then the plan-v3.1 activation ladder — STATUS 2026-09-04: secrets,
+    prove-503, kill switch off, airport smoke, and observe are COMPLETED
+    (each was separately Andres-authorized; see ACTIVATION STATE); the
+    browser flag + SW bump is the release under review (local authoring
+    only — its merge/production release REQUIRES a separate Andres
+    authorization); graduation evidence and enforce REMAIN, and each
+    REQUIRES its own separate Andres authorization before it starts
+    (post-enforce emergency = mode `blocked` ONLY). Graduation blocks on zero non-test
+    no_request_id/no_token/verify_failed traffic. The Google storage/policy
+    question remains OPEN but, by the sequencing decision below, no longer
+    blocks activation ORDER.
     US billing means the non-EEA Maps terms apply. Public Terms/Privacy and
     custom-autocomplete/route attribution are live. Andres ratified Dale
     Miami Ventures LLC as LinkMia's
     contracting/privacy entity on 2026-08-25.
-    Activation remains blocked on the durable-Google-content decision.
-    Google Support explicitly declined to interpret or certify compliance
-    (support answers technical questions only), so closing that gate
-    requires qualified counsel review or conservative removal of durable
-    Google-derived content. The one technical answer on file: the Maps
+    SEQUENCING DECISION (Andres, 2026-09-03): pricing activation proceeds
+    AHEAD of the venue-directory/address program — this supersedes the
+    earlier "activation remains blocked on the durable-Google-content
+    decision" wording as a matter of ORDER ONLY. It is not a declaration
+    that the address-storage question is resolved: R1 already removed
+    duration retention, and the remaining durable-address question stays
+    open on its own track (venue directory B1 / counsel review or
+    conservative removal). Google Support explicitly declined to interpret
+    or certify compliance (support answers technical questions only). The one technical answer on file: the Maps
     JavaScript API script must load DIRECTLY from maps.googleapis.com —
     proxied/cached loading is unsupported and may fail. That mechanism is now
     corrected with a dedicated referrer-restricted browser key, but it does

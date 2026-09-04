@@ -8,7 +8,8 @@
 //   1. backend/functions/lib/ride-rate-card.js  — LINKMIA_RATE_CARD.vehicles
 //      (the server pricing authority; CANONICAL for this suite)
 //   2. pricing.js                               — PricingService vehicleConfig
-//      (the LIVE browser pricing authority until enforcement)
+//      (the shadow/rollback vehicle catalog — the browser pricing authority
+//      only while the server-quote flag is off)
 //   3. pricing.js                               — getFallbackVehicleConfig()
 //      ("Must match vehicleConfig capacity values above", per its own comment)
 //   4. indexMVP.html                            — the hardcoded ultimate
@@ -181,8 +182,8 @@ function check(name, f) {
       'CANONICAL_VEHICLES drifted from the expected key order');
   });
 
-  check('pricing.js LIVE vehicleConfig matches (the production pricing authority)', () => {
-    pinCopy('pricing.js live', Object.keys(service.vehicleConfig), (key) => {
+  check('pricing.js vehicleConfig matches (the shadow/rollback vehicle catalog)', () => {
+    pinCopy('pricing.js shadow', Object.keys(service.vehicleConfig), (key) => {
       const v = service.vehicleConfig[key];
       return { name: v.name, passengers: v.capacity.passengers, bags: v.capacity.bags };
     });
