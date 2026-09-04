@@ -90,6 +90,15 @@ const PAYMENT_ALLOWED_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_prog
 // generated and the driver is never nagged for a ride they just took.
 const RECENT_ACCEPT_MS = 180 * 60 * 1000;
 
+// DEPARTURE WINDOW (initial LinkMia operator policy, 2026-09-04): "On my
+// way" means the driver is actually leaving, so it opens TOGETHER with the
+// readiness window at T-180 and never earlier — one boundary in the
+// system, no second clock. Reliability is the product: a passenger must
+// never see "On the way" for a ride that is still days or hours away.
+// Later a dashboard-configurable dispatch setting; there is deliberately
+// NO late bound (a late driver must always be able to report the truth).
+const DEPARTURE_WINDOW_MS = RECENT_ACCEPT_MS;
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -130,7 +139,15 @@ exports.handler = async (event) => {
 
     let fromStatuses;
     let updates;
-    const nowIso = new Date().toISOString();
+    // ONE captured server instant drives every time decision in this
+    // request (departure cutoff, verdict, and the on_the_way_at stamp).
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    // Departure window cutoff, set only for on_my_way: the guarded UPDATE
+    // itself requires pickup_datetime <= now + window, so the time gate is
+    // ATOMIC with the transition (a reschedule between a read and the
+    // write can never let a far-future ride become on_the_way).
+    let departureCutoffIso = null;
 
     if (action === 'payment_collected') {
       fromStatuses = PAYMENT_ALLOWED_STATUSES;
@@ -217,6 +234,19 @@ exports.handler = async (event) => {
         }
       }
       if (action === 'on_my_way') {
+        // DEPARTURE WINDOW — enforced with SERVER time INSIDE the guarded
+        // UPDATE (see the pickup_datetime cutoff predicate below), so it is
+        // atomic with the status transition: no read-then-write gap, and a
+        // NULL/invalid pickup time can never match (fail closed). The
+        // driver UI's disabled button is convenience, not security — a
+        // stale open tab and a direct
+        // request hit the same predicate (/driver is deliberately uncached).
+        // A zero-row result is classified AFTER the verified-idempotency
+        // checks (an already-departed owned ride answers 200 regardless of
+        // its pickup time), then as a typed departure refusal for the
+        // OWNER only; a non-owner gets the ordinary conflict with no
+        // window information. Exactly T-180 is allowed; NO late bound.
+        departureCutoffIso = new Date(nowMs + DEPARTURE_WINDOW_MS).toISOString();
         // Durable anchor + at-risk clear. driver_ready_* is deliberately
         // NOT written here: the on_the_way status and on_the_way_at stamp
         // ARE the implicit readiness proof (the watchdog suppresses the
@@ -269,6 +299,12 @@ exports.handler = async (event) => {
     } else {
       query = query.eq('assigned_driver', driver.id);
     }
+    if (action === 'on_my_way') {
+      // The time gate lives in the SAME predicate as status + ownership:
+      // pickup within the window, evaluated by the database against the
+      // captured server instant. NULL pickup_datetime never satisfies it.
+      query = query.lte('pickup_datetime', departureCutoffIso);
+    }
     if (action === 'ready') {
       // First confirmation wins; a second tap matches 0 rows and is
       // recognized below as a verified idempotent duplicate.
@@ -319,11 +355,19 @@ exports.handler = async (event) => {
     }
 
     if (!data || data.length === 0) {
-      const { data: current } = await supabase
+      // Honest truth re-read: a genuine read failure is a real 500 (this
+      // endpoint's established rule for a failed re-read), never a guessed
+      // conflict the driver would silently reconcile. A MISSING row (no
+      // error) keeps the ordinary conflict answer below.
+      const { data: current, error: rereadError } = await supabase
         .from('bookings')
-        .select('status, assigned_driver, driver_ready_at, driver_ready_by, details_version')
+        .select('status, assigned_driver, driver_ready_at, driver_ready_by, details_version, pickup_datetime')
         .eq('id', bookingId)
-        .single();
+        .maybeSingle();
+      if (rereadError) {
+        console.error(`❌ ${action}: zero-row re-read failed:`, rereadError.message || rereadError);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Lookup failed' }) };
+      }
       // VERIFIED idempotent success — only the backend may declare it, and
       // only when the booking already sits at exactly this action's result
       // AND belongs to exactly this driver (a retried request whose first
@@ -343,6 +387,42 @@ exports.handler = async (event) => {
           current.driver_ready_at && current.driver_ready_by === driver.id) {
         console.log(`✅ Booking ${bookingId}: ready (idempotent duplicate)`);
         return { statusCode: 200, headers, body: JSON.stringify({ success: true, idempotent: true }) };
+      }
+      // Departure window classification — OWNER of a still-confirmed ride
+      // only, and only AFTER the idempotency checks above. The predicate
+      // matched zero rows: decide from the fresh re-read against the SAME
+      // captured instant whether the window is closed (typed, with the
+      // exact opening) or the pickup time cannot be verified (typed, fail
+      // closed). An open window with zero rows is some other conflict and
+      // falls through to the ordinary 409.
+      if (current && action === 'on_my_way' &&
+          current.status === 'confirmed' &&
+          current.assigned_driver === driver.id) {
+        const pickupMs = Date.parse(current.pickup_datetime);
+        if (!Number.isFinite(pickupMs)) {
+          return {
+            statusCode: 409,
+            headers,
+            body: JSON.stringify({
+              error: 'Booking has no valid pickup time — On my way unavailable',
+              code: 'departure_window_unverifiable',
+              currentStatus: current.status
+            })
+          };
+        }
+        const opensAtMs = pickupMs - DEPARTURE_WINDOW_MS;
+        if (nowMs < opensAtMs) {
+          return {
+            statusCode: 409,
+            headers,
+            body: JSON.stringify({
+              error: 'Too early — On my way opens 3 hours before pickup',
+              code: 'departure_window_closed',
+              opensAt: new Date(opensAtMs).toISOString(),
+              currentStatus: current.status
+            })
+          };
+        }
       }
       return {
         statusCode: 409,

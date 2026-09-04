@@ -93,6 +93,9 @@ const supabaseMock = {
             eq(col, val) { chain._f[col] = val; lastFilters = chain._f; return chain; },
             in(col, val) { chain._f[col] = val; lastFilters = chain._f; return chain; },
             is(col, val) { lastIsFilter = { col, val }; return chain; },
+            // Departure window (2026-09-04): on_my_way adds a pickup_datetime <= cutoff
+            // predicate to the same guarded update.
+            lte(col, val) { chain._f[col] = val; lastFilters = chain._f; return chain; },
             or() { throw new Error('update .or() must not be used post-corrections'); },
             select() { return Promise.resolve(updateResult); }
           };
@@ -243,6 +246,14 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   // ---------- ownership on later actions ----------
   lastUpdate = null; lastIsFilter = null; lastFilters = null;
   updateResult = { data: [{ id: BID, status: 'on_the_way' }], error: null };
+  // Departure window: On my way opens at T-180, enforced as a predicate of
+  // the guarded UPDATE (no pre-read). This mock ignores predicates, so the
+  // row only feeds the zero-row classification re-read; it carries an
+  // in-window pickup for realism — the stale-offer row above sat 4h out.
+  currentBookingResult = {
+    data: { status: 'confirmed', assigned_driver: 'drv-a', pickup_datetime: new Date(Date.now() + 60 * 60e3).toISOString() },
+    error: null
+  };
   r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
   check('checkpoint: EXACT ownership filter, atomic coords, NO re-stamp', () => {
     assert.strictEqual(r.statusCode, 200);
@@ -266,7 +277,10 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
   // ---------- idempotency: backend-verified, owner-only ----------
   updateResult = { data: [], error: null }; // 0 rows matched
-  currentBookingResult = { data: { status: 'on_the_way', assigned_driver: 'drv-a' }, error: null };
+  currentBookingResult = {
+    data: { status: 'on_the_way', assigned_driver: 'drv-a', pickup_datetime: new Date(Date.now() + 60 * 60e3).toISOString() },
+    error: null
+  };
   r = await post({ bookingId: BID, action: 'on_my_way', lat: 25.7, lng: -80.2 }, 'tok-andres');
   check('owner duplicate resend -> 200 idempotent', () => {
     assert.strictEqual(r.statusCode, 200);

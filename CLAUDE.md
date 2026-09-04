@@ -102,6 +102,40 @@ verified checkpoint locations all live in the web app backed by Supabase.
   with 5 structured reasons (note required for Other) posting
   `/api/release-booking` — see the lifecycle section for the full rules.
   Adaptive polling,
+  DEPARTURE WINDOW (2026-09-04, initial operator policy): **On my way
+  opens WITH the readiness window at T-180** — enforced ATOMICALLY in
+  update-booking-status.js: the guarded UPDATE's predicate requires
+  `pickup_datetime <= now + 3h` against ONE captured server instant (the
+  same instant stamps `on_the_way_at`), so a reschedule between a read and
+  the write can never let a far-future ride depart and a NULL/invalid
+  pickup never matches (fail closed). A zero-row result is classified
+  AFTER the verified-idempotency checks (an already-departed owned ride
+  answers 200 whatever its pickup time), then — for the OWNER of a
+  still-confirmed ride only — as a typed 409 `departure_window_closed` +
+  `opensAt` or `departure_window_unverifiable`; a non-owner gets the
+  ordinary conflict with no window information. NO late bound. The driver
+  card renders the button disabled (no data-action) with the opening as
+  weekday/date/time + EDT/EST BELOW the button row, locks on an
+  unverifiable pickup time before any GPS capture, guards `doAction`
+  before geolocation/POST, and surfaces the typed refusals instead of
+  silently reconciling them. Rationale: reliability is the product — a
+  passenger must never see "On the way" for a ride still hours or days
+  away (field finding LM-W634). Every scheduling surface on the driver
+  card (pickup header, readiness check, opening, refusal alerts) renders
+  through ONE Miami-dated/zoned formatter (`fmtMiami`, EDT/EST), never the
+  device clock; the locked button is `aria-describedby` its note (AA
+  contrast) with an honest `not-allowed` cursor. Accepted residuals (v1,
+  deliberate): an already-open passenger sheet may not reflect an
+  in-window departure until reload/tab return/T-30; the driver button's
+  mirror uses the PHONE clock — a fast clock shows the button early, and
+  that tap captures ONE ephemeral GPS fix (never stored) before the typed
+  refusal; a slow clock keeps it disabled after the server would allow
+  for exactly as long as the skew — a server-clock offset from the driver
+  feed is future work. A zero-row re-read failure on this endpoint is a
+  sanitized 500 (never a guessed conflict). INHERITED BACKLOG (recorded
+  2026-09-04, not this PR): the generic zero-row re-read still lets an
+  authenticated non-owner receive `currentStatus`/`currentDetailsVersion`
+  — endpoint hardening later; the departure fields never leak.
   CHECKPOINT capture — On my way / Arrived / Start trip each grab one fresh
   GPS fix (6s bound, maximumAge 0) inside the tap and send it WITH the
   status POST; no continuous tracking (a mobile browser can't broadcast
