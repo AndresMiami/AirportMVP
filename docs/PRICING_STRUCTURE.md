@@ -1,6 +1,6 @@
 # LinkMia Pricing Structure
 
-**Status:** Current production rates and dark authority path · updated for PR 3C-2C-B PR-1 (August 2026)
+**Status:** Current production rates and the pricing-authority path · updated 2026-09-04 for the browser-flag activation release (activation language below is CONDITIONAL on that release deploying; prior rungs are recorded as completed)
 
 ---
 
@@ -8,28 +8,38 @@
 
 | Layer | Where | Status |
 |---|---|---|
-| **Passenger-visible authority while mode is `off`** | `pricing.js` (browser, loaded by `indexMVP.html`) | Computes the fare passengers see and submit. The writer RPC records that amount explicitly as `client_legacy`; nothing is charged automatically — payment is cash/Zelle collected at ride time (Stripe disabled). |
-| **Canonical server engine** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` | Built in 3C-2A and wired to quote issuance plus dark writer verification. It is cent-exact with `pricing.js` in the canonical America/New_York case, but is not yet passenger-visible or enforceable while the quote service/browser flag remain off and pricing mode is `off`. |
+| **Passenger-visible authority ONCE the browser-flag release deploys** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` via `/api/quote-ride` | With `SERVER_QUOTE_ENABLED` true (this release — local, under review, not yet deployed) and `pricing_state` = `observe` (live since 2026-09-03), passengers see and submit the SERVER quote; the writer RPC verifies + consumes the signed token and records the amount as `client_observe`. Until that deploy, production runs the flag-false legacy path below under observe. Nothing is charged automatically — payment is cash/Zelle collected at ride time. |
+| **Shadow engine (rollback authority)** | `pricing.js` (browser, loaded by `indexMVP.html`) | Left unchanged for rollback safety (the P0 drift guard pins its vehicle metadata — keys, names, capacities — not every byte) and shadow-only while the flag is true; the tested forward rollback (docs/BROWSER-FLAG-ACTIVATION.md) makes it the passenger-visible authority again with `client_observe` stamps continuing in observe mode. Cent-exact with the server engine in the canonical America/New_York case. |
 | Legacy server endpoint | *(retired in PR 3C-2C-B PR-1)* | The drifted calculator was removed. An inert 404-only stub remains solely because Netlify reserves the direct function namespace; both former URLs return 404 and no pricing code is reachable. |
-| **Server quote service + token consumer** | `backend/functions/quote-ride.js`; `create-booking.js`; `update-pending-booking.js` | The service issues signed server quotes from trusted route facts. The writer endpoints consume and classify a signed token when one is presented, but the production quote service remains kill-switched and the browser flag is false, so current passengers do not use this path yet. |
+| **Server quote service + token consumer** | `backend/functions/quote-ride.js`; `create-booking.js`; `update-pending-booking.js` | LIVE (authenticated-only; `QUOTE_SERVICE_DISABLED` kept at 0 as the one-edit emergency stop). The service issues signed server quotes from trusted route facts; the writer endpoints verify, consume, and classify them in `quote_verifications`. |
 
-The dark writer swap does not change current passenger pricing. The server
-engine becomes enforceable only through the coordinated activation steps below.
+Observe mode records but never rejects on price. The server engine becomes
+ENFORCEABLE only after graduation evidence, through the remaining
+activation steps below.
 
-**Roadmap (deferred, in order):**
-1. **3C-2B** — server quote service and browser integration shipped dark;
-   production service/flag remain off.
-2. **3C-2C-A** — token v2 and migration 017 installed with pricing mode
-   `off`; **3C-2C-B PR-1** swaps both writers onto the atomic RPCs while
-   preserving today's client-priced behavior.
-3. **3C-2C-B PR-2** — edit quoting and the passenger refresh UX, followed
-   by controlled quote-service activation, observe evidence, then a
-   separately authorized one-way transition to enforce.
-4. Versioned **Supabase pricing profiles** + ambassador pricing
-   dashboard + configurable markups (the rate-card architecture already
-   supports supplying any validated card).
-5. Evaluation of a **time-dominant with distance-floor** rate card
-   against real ride data (deliberately not adopted yet).
+**Roadmap (status 2026-09-04):**
+1. **3C-2B** — COMPLETED: server quote service and browser integration
+   shipped dark (production service/flag were off at the time).
+2. **3C-2C-A / 2C-B PR-1** — COMPLETED: token v2 and migration 017
+   installed (2026-08-23) with pricing mode `off`; both writers swapped onto
+   the atomic RPCs while preserving client-priced behavior. Migration 018
+   (R1, installed 2026-09-01) then removed duration retention from the
+   writers.
+3. **3C-2C-B PR-2 + activation rungs** — COMPLETED through observe: edit
+   quoting and the passenger refresh UX shipped; quote service enabled
+   (kill-switch variable kept at 0), MIA/FLL/PBI paid smoke green,
+   `pricing_state` = `observe` (2026-09-03).
+4. **Browser-flag release** — UNDER REVIEW (local, uncommitted): flips
+   `SERVER_QUOTE_ENABLED` true with SW v1.3.27 / runtime-v4. Its
+   passenger-visible effect is conditional on merge + deploy.
+5. **Graduation evidence, then a separately authorized one-way transition
+   to enforce** — REMAINING.
+6. DEFERRED (no date): versioned **Supabase pricing profiles** +
+   ambassador pricing dashboard + configurable markups (the rate-card
+   architecture already supports supplying any validated card).
+7. DEFERRED (no date): evaluation of a **time-dominant with
+   distance-floor** rate card against real ride data (deliberately not
+   adopted yet).
 
 ---
 

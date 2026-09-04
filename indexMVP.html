@@ -739,30 +739,23 @@
         // true   = the server quote becomes the ONLY price that may be shown as
         //          final or submitted. A missing or expired quote blocks Book.
         //
-        // ROLLOUT ORDER — each step is its own authorized action, and the
-        // browser flag is LAST. Doing these out of order either blocks every
-        // booking or opens a paid Google endpoint before it has been smoked.
-        //   1. Leave QUOTE_SERVICE_DISABLED=1 ON. Nothing below changes that.
-        //   2. Restore the four provider/signing secrets on the PRODUCTION
-        //      context ONLY: GOOGLE_ROUTES_API_KEY,
-        //      GOOGLE_PLACES_SERVER_API_KEY, QUOTE_SIGNING_CURRENT_ID,
-        //      QUOTE_SIGNING_CURRENT_SECRET. They were deliberately removed
-        //      after 2B1 testing. Do NOT touch GOOGLE_MAPS_API_KEY — that is
-        //      the browser/Railway autocomplete key and is unrelated.
-        //   3. Set QUOTE_ACCESS_MODE=authenticated. Do NOT simply delete
-        //      QUOTE_SHADOW_ALLOWLIST: in the default 'allowlist' mode a
-        //      missing allowlist is a configuration error and answers 500.
-        //      Access is a NAMED mode so removing one variable can never
-        //      silently open a paid endpoint to everyone.
-        //   4. Deploy and VERIFY the endpoint still answers 503. Netlify
-        //      captures env at build time, so this proves the new config
-        //      shipped without exposing anything.
-        //   5. Remove QUOTE_SERVICE_DISABLED and smoke-test the endpoint
-        //      directly, while this browser flag is still false.
-        //   6. Only then flip this flag to true.
+        // ROLLOUT ORDER — each step was its own authorized action, and this
+        // browser flag came LAST. Completed 2026-09-03: production secrets +
+        // QUOTE_ACCESS_MODE=authenticated restored, prove-503 verified,
+        // QUOTE_SERVICE_DISABLED set to 0 (the variable is KEPT as the
+        // one-edit emergency stop), paid MIA/FLL/PBI smoke all green
+        // (traffic_aware, 9/9 vehicle tokens), pricing_state = observe
+        // (bookings stamp price_authority='client_observe'; pricing.js is
+        // shadow-only while this flag is true, and the server records both
+        // sides' cents in quote_verifications).
+        // FORWARD ROLLBACK (reviewed with this activation, never reverse):
+        // set this flag false + bump CACHE_NAME to v1.3.28 AND
+        // RUNTIME_CACHE to v5 in the same commit — the runtime cache can
+        // retain booking HTML, so a static-only bump is not a dependable
+        // rollback. See docs/BROWSER-FLAG-ACTIVATION.md.
         // Follows the client-side rollout-constant pattern (a build-time
         // boolean flipped only by a reviewed deploy).
-        const SERVER_QUOTE_ENABLED = false;
+        const SERVER_QUOTE_ENABLED = true;
 
         // A quote is priced for one exact intent. Anything that changes the
         // intent must throw the old quote away rather than reprice silently.
@@ -1979,8 +1972,8 @@
             // quotes carry the booking identity to /api/quote-ride, which
             // gates owner/status/version BEFORE any paid provider call and
             // mints purpose-'edit' tokens bound to the booking and its
-            // driver era. While SERVER_QUOTE_ENABLED is false everything
-            // here is inert and edits keep today's legacy path.
+            // driver era. When SERVER_QUOTE_ENABLED is false everything
+            // here is inert and edits keep the legacy path.
             quoteFlowActive() {
                 return SERVER_QUOTE_ENABLED;
             }

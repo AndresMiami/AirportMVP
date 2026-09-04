@@ -1,10 +1,20 @@
 # Migration 018 (R1) rollout and emergency runbook
 
-This document is procedure, not authorization. Migration 018 remains unrun
-until Andres explicitly approves executing the checksum-matched SQL artifact,
-separately from having approved its authoring. Address plan v3's ordered
-prerequisite R1 is the governing contract; Codex review is required before
-either approval.
+STATUS (2026-09-03): migration 018 is INSTALLED in production (executed
+2026-09-01, checksum-matched, post-install grid + live smoke verified).
+`/api/quote-ride` is ENABLED (`QUOTE_SERVICE_DISABLED=0`; the variable is
+kept as the one-edit emergency stop), `pricing_state` is `observe`, and the
+browser-flag activation release is prepared under review (its effect is
+CONDITIONAL on deployment) per docs/BROWSER-FLAG-ACTIVATION.md. The
+address-storage question is POSTPONED behind pricing activation by Andres's
+sequencing decision — postponed, not resolved. The preflight and window
+sections below are the historical procedure of the completed install; only
+the EMERGENCY ROLLBACK section remains operationally live, with its
+post-activation amendments.
+
+This document is procedure, not authorization. Address plan v3's ordered
+prerequisite R1 is the governing contract; Codex review was required before
+each approval.
 
 ## What 018 changes, in one paragraph
 
@@ -132,14 +142,32 @@ request could therefore 500 against restored SQL even in mode `off`. The
 rollback is a SEQUENCE, each step separately and explicitly authorized by
 Andres in Claude's chat:
 
-1. HOLD DARK: confirm `QUOTE_SERVICE_DISABLED=1` and
-   `SERVER_QUOTE_ENABLED` false (they should already be — this step is
-   verification, not change), so no new tokens can be issued while rolling
-   back.
+1. HOLD DARK: get `QUOTE_SERVICE_DISABLED=1` and `SERVER_QUOTE_ENABLED`
+   false, so no new tokens can be issued while rolling back. NOTE
+   (post-activation, 2026-09-03): these are no longer the standing state —
+   this step is now a real CHANGE: flip `QUOTE_SERVICE_DISABLED` back to 1
+   (+ redeploy) and apply the browser-flag FORWARD rollback (flag false +
+   SW v1.3.28 + runtime cache v5, per docs/BROWSER-FLAG-ACTIVATION.md)
+   BEFORE the code revert below.
 2. CODE FIRST: deploy the pre-R1 code (revert the R1 PR on main → Netlify
    deploy). This restores endpoints that forward duration and a browser that
-   sends it. Verify the deploy is live and drain in-flight requests
-   (Netlify functions are short-lived; minutes suffice).
+   sends it. CACHE NAMES NEVER GO BACKWARD: the reverted tree carries old
+   service-worker names that production clients have already used and
+   moved past — redeploying them would leave returning browsers serving
+   stale caches under "current" names. Before deploying the revert, in the
+   SAME revert commit: set both service-worker constants to FRESH,
+   never-used versions — static `linkmia-v1.3.29` + `linkmia-runtime-v6`
+   (the next rungs after the browser rollback's v1.3.28/v5; if the ladder
+   has moved on by then, take the next unclaimed numbers) — AND update all
+   four cache pins to match (the static pins in quote-ride,
+   google-policy-readiness and maps-direct-loader, and the runtime pin in
+   quote-ride), then run the full three-timezone matrix green before
+   merging. After the deploy: VERIFY IT IS LIVE (pages 200; the served
+   service-worker.js carries the fresh names; served indexMVP hashes match
+   the revert tree) and DRAIN IN-FLIGHT REQUESTS (Netlify functions are
+   short-lived; wait minutes, then confirm no R1-era writer invocation is
+   still running) BEFORE touching SQL in step 3 — that ordering is the
+   entire point of this procedure.
 3. SQL SECOND: paste the checksum-matched `018_r1_rollback.sql` (byte-exact
    017 bodies, test-asserted; ends with its own verification DO block that
    RAISEs unless the duration requirement provably returned, SECURITY
