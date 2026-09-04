@@ -118,7 +118,7 @@
             transition: transform 0.1s ease;
         }
         button:active { transform: scale(0.98); }
-        button:disabled { opacity: 0.5; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-accept { background: #28A745; color: white; }
         .btn-next { background: #1a1a2e; color: white; }
         /* Secondary message action — visually subordinate to status buttons */
@@ -256,7 +256,9 @@
         /* Readiness confirmation (PR 1) — internal operational state on
            confirmed rides; never a passenger-facing status */
         .ready-note {
-            font-size: 13px; font-weight: 600; color: #cc7000; margin-top: 10px;
+            /* #9a5000: 5.96:1 on the white card, 5.52:1 on the #f5f6f8 page
+               (WCAG AA normal text needs 4.5:1; the former #cc7000 was 3.57). */
+            font-size: 13px; font-weight: 600; color: #9a5000; margin-top: 10px;
         }
         .ready-chip {
             display: inline-block; background: #e6f7ec; color: #1eaa5c;
@@ -447,11 +449,14 @@
         };
         const ACTIVE_STATUSES = ['confirmed', 'on_the_way', 'arrived', 'in_progress'];
 
+        // ONE time language on the driver card: every scheduling surface
+        // (pickup header, readiness check, departure opening, refusal
+        // alerts) renders through fmtMiami — Miami-dated and zoned
+        // (EDT/EST) — never the device clock, so an edited pickup and its
+        // opening can never appear hours apart in different clocks.
         function fmtWhen(iso) {
             if (!iso) return 'ASAP';
-            const d = new Date(iso);
-            return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-                + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            return fmtMiami(iso);
         }
 
         function isUrgent(iso) {
@@ -467,13 +472,9 @@
         // — serverless/functions convention carried into the driver UI.
         const READY_BUTTON_MS = 180 * 60 * 1000; // Confirm available from T-180
         const READY_CHECK_MS  = 150 * 60 * 1000; // readiness check begins at T-150
-
-        function fmtTimeET(iso) {
-            return new Date(iso).toLocaleTimeString('en-US', {
-                hour: 'numeric', minute: '2-digit', hour12: true,
-                timeZone: 'America/New_York'
-            });
-        }
+        // On my way opens WITH the readiness window (initial LinkMia operator
+        // policy) — the SERVER enforces this with its own clock.
+        const DEPARTURE_WINDOW_MS = READY_BUTTON_MS;
 
         function readinessBlock(b) {
             if (b.status !== 'confirmed') return '';
@@ -487,11 +488,78 @@
             if (!Number.isFinite(pickupMs)) return '';
             if (pickupMs - Date.now() > READY_BUTTON_MS) {
                 const checkAt = new Date(pickupMs - READY_CHECK_MS).toISOString();
-                return `<div class="ready-note">⏰ Readiness check begins at ${fmtTimeET(checkAt)}</div>`;
+                return `<div class="ready-note">⏰ Readiness check begins at ${fmtMiami(checkAt)}</div>`;
             }
             return `
                 <div class="ready-note">⏰ Readiness confirmation required</div>
                 <button class="btn-ready" data-action="ready" data-id="${b.id}">✅ Confirm I'm ready</button>`;
+        }
+
+        // ---- Departure window ----
+        // "On my way" means the driver is actually leaving. It opens with
+        // the readiness window (T-180); the SERVER enforces this atomically
+        // inside the status update, so this gate only mirrors that boundary
+        // to keep the button honest. It FAILS CLOSED like the server: a
+        // missing/unparseable pickup time locks the button (reason
+        // 'unverifiable') so no location is captured for a request the
+        // server would refuse. An unknown ride (not in the feed) is left to
+        // the server. KNOWN RESIDUAL (v1, deliberate): this mirror uses the
+        // PHONE clock. A fast clock can show the button before the server
+        // opens the window — that tap captures ONE ephemeral GPS fix (never
+        // stored: the request is refused before any write) and gets the
+        // typed refusal below. A slow clock keeps the button disabled after
+        // the server would already allow it, for exactly as long as the
+        // skew — not inherently briefly. Each poll re-renders from the same
+        // phone clock, so skew is NOT reconciled until a server-clock
+        // offset is derived from the driver feed (future).
+        function departureGate(b, nowMs = Date.now()) {
+            if (!b || b.status !== 'confirmed') return { locked: false, reason: null, opensAt: null };
+            const pickupMs = Date.parse(b.pickup_datetime);
+            if (!Number.isFinite(pickupMs)) return { locked: true, reason: 'unverifiable', opensAt: null };
+            const opensAtMs = pickupMs - DEPARTURE_WINDOW_MS;
+            const opensAt = new Date(opensAtMs).toISOString();
+            return nowMs < opensAtMs
+                ? { locked: true, reason: 'closed', opensAt }
+                : { locked: false, reason: null, opensAt };
+        }
+
+        // The shared Miami formatter: weekday/date, time, and the zone
+        // abbreviation (EDT/EST), so a window that opens the previous
+        // evening or around midnight is never misread as "today", and no
+        // scheduling surface ever shows the device's own clock.
+        function fmtMiami(iso) {
+            return new Date(iso).toLocaleString('en-US', {
+                weekday: 'short', month: 'short', day: 'numeric',
+                hour: 'numeric', minute: '2-digit', hour12: true,
+                timeZone: 'America/New_York', timeZoneName: 'short'
+            });
+        }
+
+        const UNVERIFIABLE_NOTE = '⚠️ This ride has no valid pickup time, so On my way is unavailable — contact LinkMia before departing.';
+
+        // The primary status control for an active card. A LOCKED button is
+        // disabled AND carries no data-action (the delegated click handler
+        // only dispatches button[data-action]); the explanatory note is
+        // returned SEPARATELY so it renders after the flex button row, never
+        // as a third row item squeezing the controls on mobile. The note has
+        // a stable id and the disabled button points at it with
+        // aria-describedby, so assistive technology reads the reason.
+        function renderNextControl(b, next) {
+            const gate = departureGate(b);
+            if (!gate.locked) {
+                return {
+                    button: `<button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>`,
+                    note: ''
+                };
+            }
+            const noteId = `departure-note-${esc(b.id)}`;
+            const note = gate.reason === 'unverifiable'
+                ? `<div class="ready-note" id="${noteId}">${UNVERIFIABLE_NOTE}</div>`
+                : `<div class="ready-note" id="${noteId}">🚗 On my way opens at ${fmtMiami(gate.opensAt)}</div>`;
+            return {
+                button: `<button class="btn-next" disabled aria-describedby="${noteId}" data-locked-action="${next.action}" data-id="${b.id}">${next.label}</button>`,
+                note
+            };
         }
 
         // ---- WhatsApp quick messages ----
@@ -1134,11 +1202,16 @@
                     const releaseBtn = b.status === 'confirmed'
                         ? `<button class="btn-release" data-release-id="${esc(b.id)}">↩️ Release ride</button>`
                         : '';
+                    // Departure window (renderNextControl): before T-180 the
+                    // On my way button is disabled with no data-action and
+                    // the opening is shown BELOW the button row. The card
+                    // re-renders on every poll, so it unlocks by itself.
+                    const { button: nextBtn, note: departureNote } = renderNextControl(b, next);
                     return rideCard(b, `
                         <div class="btn-row">
                             ${payBtn}
-                            <button class="btn-next" data-action="${next.action}" data-id="${b.id}">${next.label}</button>
-                        </div>${readinessBlock(b)}${msgBtn}${releaseBtn}${geoNote}`,
+                            ${nextBtn}
+                        </div>${departureNote}${readinessBlock(b)}${msgBtn}${releaseBtn}${geoNote}`,
                         `<span class="status-badge status-${b.status}">${STATUS_LABEL[b.status]}</span>`
                     );
                 }).join('')
@@ -1322,6 +1395,20 @@
         }
 
         async function doAction(action, bookingId) {
+            // Departure window, checked BEFORE any location capture or POST:
+            // a locked ride (window closed, or pickup time unverifiable)
+            // gets the explanation here and nothing else happens — no GPS
+            // prompt, no request the server would refuse anyway.
+            if (action === 'on_my_way') {
+                const gate = departureGate(lastBookings.find((b) => b.id === bookingId));
+                if (gate.locked) {
+                    alert(gate.reason === 'unverifiable'
+                        ? 'This ride has no valid pickup time, so On my way is unavailable. Please contact LinkMia.'
+                        : `On my way opens at ${fmtMiami(gate.opensAt)} (3 hours before pickup).`);
+                    await refresh();
+                    return;
+                }
+            }
             let paymentMethod;
             if (action === 'payment_collected') {
                 paymentMethod = confirm('Paid by Zelle? (Cancel = cash)') ? 'zelle' : 'cash';
@@ -1358,9 +1445,19 @@
                 alert('Network error. Please try again.');
             } else if (result.ok) {
                 success = true;
+            } else if (result.status === 409 && result.data?.code === 'departure_window_closed') {
+                // Typed, VISIBLE refusal: a stale open tab (or a fast phone
+                // clock) tapped early. The server's clock decides. The refresh
+                // updates live booking data; with a fast phone clock the card
+                // may stay ENABLED, and the server simply keeps refusing until
+                // the real boundary.
+                const opens = result.data.opensAt ? fmtMiami(result.data.opensAt) : 'later';
+                alert(`On my way opens at ${opens} (3 hours before pickup).`);
+            } else if (result.status === 409 && result.data?.code === 'departure_window_unverifiable') {
+                alert('This ride has no valid pickup time, so On my way is unavailable. Please contact LinkMia.');
             } else if (result.status !== 409) {
                 alert('Action failed. Please try again.');
-            } // 409: booking moved on or isn't ours — silent refresh reconciles
+            } // other 409: booking moved on or isn't ours — silent refresh reconciles
 
             if (!success) {
                 await refresh();
