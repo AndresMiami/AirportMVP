@@ -1,0 +1,781 @@
+<!-- LinkMia booking flow v6 - BOUNDED scope (design exploration only, NOT production code).
+     A rearrangement of controls that already exist in production. No new products.
+     Vehicle photos and the Google attribution logo are inline SVG placeholders so the
+     file stays readable; everything else is byte-identical to the reviewed version. -->
+<title>Bounded Three-Step Flow</title>
+<style>
+/* ---------- page chrome ---------- */
+:root{--pg-bg:#F4F4F6;--pg-text:#1C1C1E;--pg-muted:#6E6E73;--pg-card:#FFFFFF;--pg-border:#E3E3E8;--pg-accent:#FF5733}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--pg-bg:#0F0F11;--pg-text:#F2F2F7;--pg-muted:#9A9AA2;--pg-card:#1A1A1D;--pg-border:#2A2A2F}}
+:root[data-theme="dark"]{--pg-bg:#0F0F11;--pg-text:#F2F2F7;--pg-muted:#9A9AA2;--pg-card:#1A1A1D;--pg-border:#2A2A2F}
+*{box-sizing:border-box}
+body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 16px 56px}
+.wrap h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+.wrap .sub{color:var(--pg-muted);font-size:14px;line-height:1.55;margin:0 0 18px;max-width:680px}
+.scope{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 22px}
+.scope div{background:var(--pg-card);border:1px solid var(--pg-border);border-radius:12px;padding:13px 15px}
+.scope h4{margin:0 0 7px;font-size:13px}
+.scope ul{margin:0;padding-left:17px;font-size:12.5px;line-height:1.55;color:var(--pg-muted)}
+.scope .in h4{color:#1a7f4b}.scope .out h4{color:#a33}
+@media (max-width:720px){.scope{grid-template-columns:1fr}}
+.stage{display:flex;justify-content:center;padding:8px 0 20px}
+.restart{display:block;text-align:center;font-size:12px;color:var(--pg-muted);margin:-6px 0 26px}
+.restart a{color:var(--pg-accent)}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px}
+.note{background:var(--pg-card);border:1px solid var(--pg-border);border-radius:14px;padding:16px 18px}
+.note h3{margin:0 0 8px;font-size:14px}
+.note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--pg-muted)}
+.note li b{color:var(--pg-text);font-weight:600}
+[hidden]{display:none!important}
+
+/* ---------- the phone: 393 x 852 pt, real LinkMia tokens ---------- */
+.phone{--primary:#FF9500;--primary-dark:#FF5733;--grad-a:#FF9933;--grad-b:#FF5733;--success:#32D74B;--error:#FF453A;
+  --text-primary:#FFFFFF;--text-secondary:#8E8E93;--text-light:#636366;--panel-bg:#2C2C2E;--background:#1C1C1E;--surface:#3A3A3C;--border:#48484A;
+  width:393px;height:852px;flex:0 0 393px;border-radius:44px;background:var(--background);color:var(--text-primary);
+  position:relative;overflow:hidden;box-sizing:content-box;border:10px solid #0B0B0C;box-shadow:0 30px 60px rgba(0,0,0,.35),0 0 0 1px rgba(255,255,255,.06);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:16px;line-height:normal}
+.phone :where(button){font-family:inherit;color:inherit;cursor:pointer;border:none;background:none;padding:0;margin:0;-webkit-tap-highlight-color:transparent}
+.phone :where(input,textarea){font-family:inherit;color:var(--text-primary);outline:none}
+.viewport{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+.viewport::-webkit-scrollbar{display:none}
+.app-container{padding:16px;min-height:100%;display:flex;flex-direction:column}
+.booking-container{max-width:576px;margin:0 auto;width:100%;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,var(--panel-bg) 0%,#262628 100%);box-shadow:0 10px 15px -3px rgba(0,0,0,.3)}
+
+/* summary bar */
+.summary-bar{display:none;padding:6px 12px;background:var(--background);border-bottom:1px solid var(--border)}
+.summary-bar.visible{display:block}
+.summary-content{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.summary-bar .back-btn,.edit-btn{height:30px;padding:6px 12px;min-width:50px;display:flex;align-items:center;justify-content:center;background:var(--surface);border-radius:9999px;font-size:14px;font-weight:500;color:var(--text-secondary);flex-shrink:0}
+.summary-value{font-weight:500;color:var(--text-primary);text-align:center;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+.panel-title{font-size:26px;font-weight:700;letter-spacing:-.3px;line-height:1.15}
+.panel-content .panel-title{margin:2px 0 14px}
+.content-section .panel-title{padding:6px 4px 0}
+
+.panel{display:none;width:100%;flex-direction:column;position:relative}
+.panel.active{display:flex}
+.panel-content{padding:16px 24px 0}
+
+/* PRODUCTION DIRECTION CONTROL - kept as-is, quieted */
+.mode-selector{display:flex;gap:4px;background:rgba(255,255,255,.06);padding:4px;border-radius:12px;margin-bottom:14px}
+.mode-btn{flex:1;padding:8px 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;color:var(--text-secondary);font-size:14px;transition:all .2s}
+.mode-btn.active{background:#FFFFFF;color:#1C1C1E}
+.mode-icon{font-size:20px}
+
+/* address + Railway autocomplete (real white Google card) */
+.input-wrapper{position:relative}
+.address-input{width:100%;padding:16px 44px 16px 16px;background:rgba(255,255,255,.03);border:2px solid rgba(255,255,255,.1);border-radius:8px;font-size:16px;color:var(--text-primary);min-height:54px;transition:all .2s}
+.address-input::placeholder{color:var(--text-secondary);opacity:.8}
+.address-input:focus{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.05)}
+.input-check{position:absolute;right:16px;top:27px;transform:translateY(-50%);display:none;color:var(--text-primary);font-size:16px;font-weight:700}
+.address-input.validated + .input-check{display:block}
+.autocomplete-dropdown{display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:#FFFFFF;border:1px solid #E5E5E7;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);max-height:300px;overflow-y:auto;z-index:50}
+.autocomplete-dropdown.visible{display:block;animation:ddIn .2s ease}
+@keyframes ddIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.suggestion-item{display:flex;align-items:center;gap:16px;padding:16px;cursor:pointer;border-bottom:1px solid #F2F2F7}
+.suggestion-item:last-of-type{border-bottom:none}
+.suggestion-item:hover{background:#F2F2F7}
+.suggestion-icon{font-size:16px;color:#FF9500}
+.suggestion-text{flex:1;min-width:0}
+.suggestion-main{font-weight:500;color:#1C1C1E;font-size:14px}
+.suggestion-secondary{font-size:12px;color:#8E8E93;margin-top:2px}
+.google-maps-attribution{position:sticky;bottom:0;padding:10px 10px 5px;background:#FFFFFF;border-top:1px solid #E5E5E7;text-align:right}
+.google-maps-attribution img{display:inline-block;width:98px;height:18px;vertical-align:middle}
+.selected-place-attribution{display:none;margin-top:5px;color:#FFFFFF;font-family:Roboto,Arial,sans-serif;font-size:12px;line-height:1;text-align:right;white-space:nowrap}
+.selected-place-attribution.visible{display:block}
+
+.flow-connector{display:flex;align-items:center;justify-content:center;padding:2px 0;opacity:.3;position:relative;transition:opacity .3s}
+.flow-connector.active{opacity:1}
+.connector-line{width:2px;height:22px;background:var(--border)}
+.flow-connector.active .connector-line{background:var(--primary)}
+.connector-icon{position:absolute;color:var(--primary);font-size:16px}
+
+.section-label{font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)}
+.airport-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.airport-option{padding:10px 6px;border-radius:12px;text-align:center;background:var(--surface);transition:all .2s}
+.airport-option.selected{background:#FFFFFF}
+.airport-code{font-size:20px;font-weight:700;color:var(--text-primary);margin-bottom:3px}
+.airport-name{font-size:13px;color:var(--text-secondary);line-height:1.2}
+.airport-option.selected .airport-code{color:#1C1C1E}
+.airport-option.selected .airport-name{color:#48484A}
+
+.when-block{margin-top:14px}
+.date-selection{display:flex;gap:6px;margin-bottom:6px}
+.date-btn{flex:1;padding:10px 8px;border-radius:12px;background:var(--surface);text-align:center;font-size:14px;font-weight:500;color:var(--text-primary);transition:all .2s}
+.date-btn.active{background:#FFFFFF;color:#1C1C1E}
+.date-btn .date-label{display:block;font-size:12px;opacity:.75;margin-bottom:2px}
+.date-btn .date-value{display:block;font-size:14px;font-weight:600;white-space:nowrap}
+.other-strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
+.other-strip::-webkit-scrollbar{display:none}
+.pill-btn{height:30px;padding:6px 12px;background:var(--surface);border-radius:9999px;font-size:13px;font-weight:500;color:var(--text-secondary);white-space:nowrap;flex-shrink:0}
+.pill-btn.on{background:#FFFFFF;color:#1C1C1E}
+.time-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;background:var(--surface);border-radius:12px;font-size:16px;font-weight:600;color:var(--text-secondary);min-height:56px;text-align:left;transition:all .2s}
+.time-row.set{color:var(--text-primary)}
+.time-row .act{color:var(--text-primary);font-size:15px;font-weight:600;white-space:nowrap}
+.time-row:not(.set) .act{color:var(--text-secondary)}
+.opt-flight{margin-top:8px}
+.opt-flight .control-button{width:100%}
+
+/* the ONE map */
+.map-slot{margin:10px 0 0}
+.map-slot-2{margin:0}
+.map-section{height:200px;position:relative;overflow:hidden;background:#F1EFE9}
+.map-svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.map-time-badge{position:absolute;background:var(--surface);padding:8px 14px;border-radius:24px;font-weight:600;font-size:14px;color:var(--text-primary);box-shadow:0 2px 10px rgba(0,0,0,.15);z-index:5}
+.pickup-time{bottom:40px;left:16px;background:#1a1a1a;color:#FFFFFF;font-size:18px;display:flex;align-items:baseline;gap:4px}
+.time-period{font-size:14px;opacity:.9}
+.dropoff-label{position:absolute;top:12px;right:16px;background:rgba(0,0,0,.7);color:#FFFFFF;padding:6px 12px;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.3);font-weight:500;font-size:12px;display:inline-flex;align-items:center;gap:4px;z-index:5}
+.map-google-logo{position:absolute;left:8px;bottom:8px;width:98px;height:18px;z-index:4}
+.map-data-attr{position:absolute;right:0;bottom:0;font:10px/1 Roboto,Arial,sans-serif;color:#444;background:rgba(255,255,255,.7);padding:3px 6px 2px;z-index:4}
+
+/* actions */
+.schedule-section{display:flex;gap:8px;width:100%;margin-top:12px;padding:12px 20px 20px;background:var(--panel-bg)}
+.continue-btn{flex:1;width:100%;padding:16px;background:linear-gradient(to right,var(--grad-a),var(--grad-b));color:#FFFFFF;border-radius:8px;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;transition:all .2s}
+.continue-btn:disabled{background:var(--border);color:var(--text-secondary);cursor:not-allowed}
+.continue-btn svg{width:16px;height:16px}
+.book-btn{flex:1;background:#DC2626;color:#FFFFFF;border-radius:8px;padding:12px;font-weight:600;min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:all .2s}
+.btn-main-text{font-size:16px;font-weight:600}
+.btn-sub-text{font-size:13px;opacity:.9}
+
+/* vehicle */
+.content-section{padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--panel-bg)}
+.carousel-frame{height:220px;flex-shrink:0;position:relative;margin-top:-4px}
+.carousel-scroll-wrapper{position:relative;height:220px;display:flex;align-items:center;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;padding:0 calc((100% - 229px)/2);scrollbar-width:none;touch-action:pan-x}
+.carousel-scroll-wrapper::-webkit-scrollbar{display:none}
+.carousel-vehicle-track{display:flex;gap:15px;align-items:stretch;height:200px}
+.vehicle-carousel-card{flex:0 0 229px;min-width:229px;scroll-snap-align:center;scroll-snap-stop:always;position:relative;border-radius:16px;overflow:hidden;transition:transform .3s ease,opacity .3s ease;user-select:none}
+.vehicle-carousel-card.active{transform:scale(1);opacity:1;box-shadow:0 4px 20px rgba(0,0,0,.1);z-index:10}
+.vehicle-carousel-card:not(.active){transform:scale(.95);opacity:.7}
+.vehicle-image-wrapper{position:relative;width:100%;height:100%;border-radius:16px;overflow:hidden;padding:10px;background:linear-gradient(135deg,#1a1a1a 0%,#2a2a2a 100%)}
+.vehicle-carousel-image{width:100%;height:100%;object-fit:contain;object-position:center;display:block;border-radius:16px;background:#1a1a1a;pointer-events:none;transition:transform .4s ease}
+.vehicle-carousel-card.active .vehicle-carousel-image{transform:scale(1.05)}
+.vehicle-price-tag{position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.8);color:#32D74B;padding:6px 14px;border-radius:20px;font-size:18px;font-weight:700;z-index:2;min-width:60px;text-align:center}
+.vehicle-popular-badge{position:absolute;top:12px;left:12px;background:#FF6B35;color:#FFFFFF;padding:6px 14px;border-radius:18px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;z-index:2}
+.product{padding:0 6px}
+.product-head{display:flex;align-items:baseline;gap:10px}
+.product-name{font-size:20px;font-weight:700}
+.product-seats{font-size:15px;color:var(--text-secondary);white-space:nowrap}
+.product-price{margin-left:auto;font-size:22px;font-weight:700}
+.product-when{font-size:15px;margin-top:4px}
+.product-desc{font-size:14px;color:var(--text-secondary);margin-top:4px;line-height:1.4}
+.card .product{padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,.06)}
+
+/* rows */
+.controls-row{display:flex;gap:8px;flex-shrink:0}
+.control-button{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--surface);border-radius:12px;font-size:15px;font-weight:500;color:var(--text-primary);min-height:56px;text-align:left;transition:all .2s}
+.control-button.on{background:rgba(255,255,255,.14)}
+.control-icon{font-size:16px}
+.control-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-tile{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.row-text{display:block;flex:1;min-width:0}
+.row-title{display:block;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-sub{display:block;font-size:13px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-chev{margin-left:auto;color:var(--text-secondary);font-size:20px;line-height:1}
+.disc{margin-top:-4px}
+.form-input{width:100%;padding:14px 16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:12px;font-size:16px;color:var(--text-primary);resize:none}
+.form-input::placeholder{color:var(--text-secondary)}
+.policy-line{font-size:13px;color:var(--text-secondary);padding:0 4px;line-height:1.45}
+
+/* trip.html language */
+.card{background:linear-gradient(135deg,var(--panel-bg) 0%,#262628 100%);border:1px solid rgba(255,255,255,.06);border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,.4);overflow:hidden}
+.route{padding:14px 16px 10px}
+.route-row{display:flex;gap:12px}
+.route-rail{display:flex;flex-direction:column;align-items:center}
+.route-marker{width:24px;height:24px;border-radius:50%;background:var(--text-primary);color:var(--background);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+.route-marker.b{background:var(--primary-dark);color:#FFFFFF}
+.route-rail-line{width:2px;flex:1;background:#48484A;margin:3px 0;min-height:18px}
+.route-info{padding-bottom:12px;flex:1;min-width:0}
+.route-time{font-size:14px;font-weight:700;color:var(--success)}
+.route-time.eta{color:var(--text-secondary)}
+.route-addr{font-size:13px;line-height:1.35;margin-top:2px;color:var(--text-primary)}
+.route-attribution{font-family:Roboto,Arial,sans-serif;font-size:12px;color:#FFFFFF;margin:-4px 0 4px 36px;white-space:nowrap}
+.ride-view{gap:12px;padding:4px 12px 12px}
+.status-strip{display:flex;align-items:center;justify-content:center;gap:8px;text-align:center;font-size:14px;font-weight:600;color:#FF9933;padding:12px 2px 6px}
+.status-strip.green{color:var(--success)}
+.pulse-dot{width:9px;height:9px;border-radius:50%;background:#FF9933;flex-shrink:0;animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+.status-sub{text-align:center;font-size:12px;color:var(--text-secondary);margin:-8px 0 0;padding:0 8px;line-height:1.5}
+.steps{display:flex;padding:12px 8px 10px;background:linear-gradient(135deg,var(--panel-bg) 0%,#262628 100%);border:1px solid rgba(255,255,255,.06);border-radius:14px}
+.tstep{flex:1;text-align:center;position:relative}
+.tstep-dot{width:12px;height:12px;border-radius:50%;background:#48484A;margin:0 auto 5px;position:relative;z-index:1}
+.tstep.done .tstep-dot{background:var(--success)}
+.tstep.current .tstep-dot{background:var(--primary-dark);box-shadow:0 0 0 4px rgba(255,87,51,.18)}
+.tstep-label{font-size:10px;color:var(--text-light)}
+.tstep.done .tstep-label,.tstep.current .tstep-label{color:var(--text-primary);font-weight:600}
+.tstep::before{content:'';position:absolute;top:5px;left:-50%;width:100%;height:2px;background:#48484A}
+.tstep:first-child::before{display:none}
+.tstep.done::before,.tstep.current::before{background:var(--success)}
+.vehicle-image-wrap{position:relative;aspect-ratio:16/8.5;min-height:170px;overflow:hidden;background:#262628}
+.vehicle-image-wrap img{width:100%;height:100%;object-fit:cover;object-position:50% 30%;display:block}
+.vehicle-image-wrap::after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(28,28,30,.85) 0%,transparent 45%)}
+.vehicle-overlay{position:absolute;bottom:10px;left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-end;z-index:1}
+.vehicle-name{font-size:17px;font-weight:700}
+.vehicle-capacity{font-size:12px;color:#d8d8dc;margin-top:2px}
+.vehicle-price{background:rgba(0,0,0,.6);padding:5px 13px;border-radius:10px;font-size:15px;font-weight:800;color:#FFFFFF;white-space:nowrap}
+.meta-line{padding:0 16px 12px;font-size:13px;color:var(--text-secondary);line-height:1.5}
+.pay-line{display:flex;align-items:flex-start;gap:8px;padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,.06);font-size:13px;color:var(--text-secondary);line-height:1.45}
+.pay-line b{color:var(--text-primary);font-weight:600}
+.actions{display:flex;flex-direction:column;gap:9px}
+.btn{width:100%;padding:15px;border-radius:13px;font-size:15px;font-weight:700;text-align:center;color:#FFFFFF;display:block}
+.btn-whatsapp{background:#25D366;box-shadow:0 4px 16px rgba(37,211,102,.35)}
+.btn-keep{background:#3A3A3C;padding:13px}
+.support{font-size:12px;color:var(--text-light);text-align:center;margin-top:2px;line-height:1.6}
+.cancel-link{color:var(--text-light);text-decoration:underline;text-underline-offset:2px}
+.demo-chip{align-self:center;margin-top:4px;font-size:11px;color:#8E8E93;border:1px dashed rgba(255,255,255,.25);border-radius:999px;padding:5px 10px}
+
+/* footer pills - in the flow */
+.app-footer{display:flex;justify-content:space-between;align-items:center;padding:14px 4px 4px;margin-top:auto}
+.app-legal-nav{display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(28,28,30,.92);color:#D1D1D6;font-size:12px;line-height:1}
+.app-legal-nav u{text-underline-offset:2px}
+.auth-pill{background:rgba(44,44,46,.9);color:#8E8E93;border:1px solid rgba(255,255,255,.15);padding:8px 14px;border-radius:20px;font-size:12px;font-weight:600}
+
+/* sheets */
+.sheet-back{position:absolute;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:none;justify-content:center;align-items:flex-end}
+.sheet-back.active{display:flex;animation:fadeIn .3s ease-out}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.sheet-panel{width:100%;max-width:576px;background:#2C2C2E;display:flex;flex-direction:column;border-radius:20px 20px 0 0;animation:slideUp .3s ease-out}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.sheet-header{display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid #3A3A3C;background:#2C2C2E;border-radius:20px 20px 0 0}
+.sheet-back-btn{width:40px;height:40px;font-size:24px;color:#FFFFFF;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.sheet-header h2{font-size:20px;font-weight:600;color:#FFFFFF;margin:0;flex:1;text-align:center}
+.sheet-body{padding:16px 20px 24px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.sheet-body.list{align-items:stretch;gap:10px}
+.sheet-date{font-size:14px;font-weight:600;color:var(--text-secondary)}
+.sheet-hint{font-size:12px;color:var(--text-light)}
+.sheet-label{font-size:13px;font-weight:600;color:var(--text-secondary);margin:2px 0 -4px}
+.sheet-action{width:100%;padding:16px;background:#FFFFFF;color:#1C1C1E;border-radius:12px;font-size:17px;font-weight:600;margin-top:4px}
+.opt-row{width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--surface);border-radius:12px;font-size:15px;font-weight:500;text-align:left;min-height:56px}
+.opt-row .tick{margin-left:auto;color:transparent;font-weight:700}
+.opt-row.on .tick{color:#FFFFFF}
+.opt-row.muted{opacity:.45}
+.opt-sub{display:block;font-size:12px;color:var(--text-secondary);font-weight:400;margin-top:2px}
+
+/* the watch */
+.watch{position:relative;width:240px;height:240px;margin:4px 0 2px}
+.watch-bezel{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 210deg,#3A3A3C,#9A9AA0 18%,#2C2C2E 40%,#7C7C82 62%,#3A3A3C 80%,#8E8E93);box-shadow:0 14px 34px rgba(0,0,0,.65),inset 0 0 0 2px rgba(255,255,255,.08)}
+.watch-ticks{position:absolute;inset:8px;border-radius:50%;background:repeating-conic-gradient(from -1deg,rgba(255,255,255,.5) 0deg 2deg,transparent 2deg 30deg);-webkit-mask:radial-gradient(circle,transparent 77%,#000 78%);mask:radial-gradient(circle,transparent 77%,#000 78%)}
+.watch-face{position:absolute;inset:16px;border-radius:50%;background:radial-gradient(circle at 50% 30%,#2E2E31,#131315 72%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 14px 30px rgba(0,0,0,.65);overflow:hidden;perspective:520px}
+.watch-brand{position:absolute;top:24px;left:0;right:0;text-align:center;font-size:10px;letter-spacing:2.5px;color:#8E8E93;text-transform:uppercase;font-weight:600}
+.drum{position:absolute;left:0;right:0;top:50%;height:132px;transform:translateY(-50%);overflow-y:auto;overflow-x:hidden;scroll-snap-type:y mandatory;scrollbar-width:none;-webkit-mask:linear-gradient(transparent,#000 28%,#000 72%,transparent);mask:linear-gradient(transparent,#000 28%,#000 72%,transparent)}
+.drum::-webkit-scrollbar{display:none}
+.drum-pad{height:44px}
+.slot{height:44px;display:flex;align-items:center;justify-content:center;scroll-snap-align:center;font-size:20px;font-weight:600;color:#FFFFFF;font-variant-numeric:tabular-nums;will-change:transform}
+.slot small{font-size:12px;margin-left:5px;color:#8E8E93;font-weight:500}
+.slot.on small{color:#FF9933}
+.drum-window{position:absolute;left:26px;right:26px;top:50%;height:44px;transform:translateY(-50%);border-top:1px solid rgba(255,153,51,.7);border-bottom:1px solid rgba(255,153,51,.7);pointer-events:none;background:linear-gradient(90deg,transparent,rgba(255,149,0,.09),transparent)}
+.lume{position:absolute;bottom:26px;left:0;right:0;text-align:center;font-size:9px;letter-spacing:1.5px;color:#7CF0B0;text-shadow:0 0 6px rgba(124,240,176,.9)}
+.crown{position:absolute;right:-13px;top:50%;width:15px;height:36px;transform:translateY(-50%);border-radius:4px;background:repeating-linear-gradient(0deg,#A6A6AC 0 2px,#4A4A4E 2px 4px);box-shadow:0 2px 6px rgba(0,0,0,.6);border:1px solid #6E6E73}
+.crown::before{content:'';position:absolute;left:-6px;top:10px;width:6px;height:16px;background:#5A5A5E;border-radius:2px 0 0 2px}
+</style>
+
+<div class="wrap">
+  <h1>Bounded three-step flow (v6)</h1>
+  <p class="sub">The scope Codex approved: <b>a rearrangement of the existing booking flow, not new products.</b> Every control here already exists in production &mdash; the direction selector, the Railway address search, the MIA/FLL/PBI grid, date and time, the vehicle carousel, the optional flight number. What changed is where they sit, how they are styled, and that the map now travels with the passenger. Passenger-selected pickup time stays authoritative; nothing derives it.</p>
+  <div class="scope">
+    <div class="in"><h4>In scope</h4><ul>
+      <li>Where &amp; When merged into one screen &mdash; direction selector, address search, airport grid, date, time, then the map</li>
+      <li>Choose a Ride &mdash; the existing carousel with the same map moved below it</li>
+      <li>Confirm &amp; Pay &rarr; Your Ride &mdash; summary, payment space, then status and edit tools</li>
+      <li>Optional flight number, shared with the driver only</li>
+      <li>Visual quieting: one accent per screen, larger borderless rows, price on the button</li>
+    </ul></div>
+    <div class="out"><h4>Deliberately out of scope</h4><ul>
+      <li>The entry/preset screen</li>
+      <li>Port of Miami and terminal-to-terminal routes</li>
+      <li>The Pickup/Destination route box and inferred direction</li>
+      <li>Saved places, Home, recents</li>
+      <li>Flight-derived pickup timing and international buffers</li>
+      <li>Anything needing a change to the quote contract</li>
+    </ul></div>
+  </div>
+
+  <div class="stage">
+  <div class="phone" id="phone">
+    <div class="viewport" id="viewport">
+      <div class="app-container">
+        <div class="booking-container">
+
+          <div class="summary-bar" id="summaryBar">
+            <div class="summary-content">
+              <button class="back-btn" onclick="goStep(st.step-1)">Back</button>
+              <div class="summary-value" id="summaryText"></div>
+              <button class="edit-btn" onclick="goStep(1)">Edit</button>
+            </div>
+          </div>
+
+          <!-- ============ STEP 1: WHERE & WHEN ============ -->
+          <section class="panel active" id="s1">
+            <div class="panel-content">
+              <div class="panel-title">Where &amp; when</div>
+
+              <div class="mode-selector">
+                <button class="mode-btn active" id="modeDrop" onclick="setDir('dropoff')"><span class="mode-icon">&#x1F6EB;</span><span>Going to Airport</span></button>
+                <button class="mode-btn" id="modePick" onclick="setDir('pickup')"><span class="mode-icon">&#x1F6EC;</span><span>Arriving at Airport</span></button>
+              </div>
+
+              <div class="input-wrapper">
+                <input type="text" id="addrIn" class="address-input" placeholder="Enter pickup address, hotel, or landmark..." autocomplete="off" oninput="onAddr()" onfocus="onAddr()">
+                <span class="input-check">&#x2713;</span>
+                <div class="autocomplete-dropdown" id="dd">
+                  <div class="suggestion-item sug" onclick="pickAddr('Brickell City Centre','701 S Miami Ave, Miami, FL 33131')"><span class="suggestion-icon">&#x1F4CD;</span><div class="suggestion-text"><div class="suggestion-main">Brickell City Centre</div><div class="suggestion-secondary">701 S Miami Ave, Miami, FL 33131</div></div></div>
+                  <div class="suggestion-item sug" onclick="pickAddr('Brickell Key Dr','Brickell Key Dr, Miami, FL 33131')"><span class="suggestion-icon">&#x1F4CD;</span><div class="suggestion-text"><div class="suggestion-main">Brickell Key Dr</div><div class="suggestion-secondary">Miami, FL 33131</div></div></div>
+                  <div class="suggestion-item sug" onclick="pickAddr('Brickell Heights','55 SW 9th St, Miami, FL 33130')"><span class="suggestion-icon">&#x1F4CD;</span><div class="suggestion-text"><div class="suggestion-main">Brickell Heights</div><div class="suggestion-secondary">55 SW 9th St, Miami, FL 33130</div></div></div>
+                  <div class="google-maps-attribution"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5OCAxOCI+PHRleHQgeD0iMCIgeT0iMTQiIGZvbnQtZmFtaWx5PSJSb2JvdG8sQXJpYWwsc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzFGMUYxRiI+R29vZ2xlIE1hcHM8L3RleHQ+PC9zdmc+" alt="Google Maps" width="98" height="18"></div>
+                </div>
+                <div class="selected-place-attribution" id="placeAttr" translate="no">Google Maps</div>
+              </div>
+
+              <div class="flow-connector" id="conn"><div class="connector-line"></div><div class="connector-icon">&darr;</div></div>
+
+              <div class="section-label" id="airportLabel">Select airport</div>
+              <div class="airport-grid">
+                <button class="airport-option" data-air="MIA" onclick="pickAir('MIA')"><div class="airport-code">MIA</div><div class="airport-name">Miami International</div></button>
+                <button class="airport-option" data-air="FLL" onclick="pickAir('FLL')"><div class="airport-code">FLL</div><div class="airport-name">Fort Lauderdale</div></button>
+                <button class="airport-option" data-air="PBI" onclick="pickAir('PBI')"><div class="airport-code">PBI</div><div class="airport-name">Palm Beach</div></button>
+              </div>
+
+              <div class="when-block">
+                <div class="section-label">Date</div>
+                <div class="date-selection">
+                  <button class="date-btn active" id="dToday" onclick="pickDate('today')"><span class="date-label">Today</span><span class="date-value">Sat, Sep 5</span></button>
+                  <button class="date-btn" id="dTomorrow" onclick="pickDate('tomorrow')"><span class="date-label">Tomorrow</span><span class="date-value">Sun, Sep 6</span></button>
+                  <button class="date-btn" id="dOther" onclick="toggleOther()"><span class="date-label">Other</span><span class="date-value" id="dOtherVal">Choose</span></button>
+                </div>
+                <div class="other-strip" id="otherStrip" hidden>
+                  <button class="pill-btn" onclick="pickOther('Mon, Sep 7','Monday, September 7')">Mon, Sep 7</button>
+                  <button class="pill-btn" onclick="pickOther('Tue, Sep 8','Tuesday, September 8')">Tue, Sep 8</button>
+                  <button class="pill-btn" onclick="pickOther('Wed, Sep 9','Wednesday, September 9')">Wed, Sep 9</button>
+                  <button class="pill-btn" onclick="pickOther('Thu, Sep 10','Thursday, September 10')">Thu, Sep 10</button>
+                  <button class="pill-btn" onclick="pickOther('Fri, Sep 11','Friday, September 11')">Fri, Sep 11</button>
+                  <button class="pill-btn" onclick="pickOther('Sat, Sep 12','Saturday, September 12')">Sat, Sep 12</button>
+                </div>
+                <div class="section-label" style="margin-top:6px">Pickup time</div>
+                <button class="time-row" id="timeRow" onclick="openSheet()"><span id="timeRowText">Choose a pickup time</span><span class="act" id="timeRowAct">Set &rsaquo;</span></button>
+
+                <div class="opt-flight">
+                  <button class="control-button" id="btnFlight" onclick="toggleDisc('flight')"><span class="control-icon">&#x2708;&#xFE0F;</span><span class="control-text" id="flightText">Add flight number (optional)</span></button>
+                  <div class="disc" id="discFlight" hidden style="margin-top:8px">
+                    <input class="form-input" id="flightIn" placeholder="Flight number, e.g. AA 1284" oninput="onFlight()">
+                    <div class="policy-line" style="margin-top:6px">We share it with your driver. Your pickup time stays exactly as you set it.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="map-slot" id="mapSlot1"></div>
+
+            <div class="schedule-section">
+              <button class="continue-btn" id="cta1" disabled onclick="goStep(2)"><span id="cta1Label">Add your address to continue</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>
+            </div>
+          </section>
+
+          <!-- ============ STEP 2: CHOOSE A RIDE ============ -->
+          <section class="panel" id="s2">
+            <div class="content-section">
+              <div class="panel-title">Choose a ride</div>
+              <div class="carousel-frame">
+                <div class="carousel-scroll-wrapper" id="carScroll" onscroll="onCarScroll()">
+                  <div class="carousel-vehicle-track">
+                    <div class="vehicle-carousel-card active" data-v="tesla" onclick="pickVehicle('tesla')">
+                      <div class="vehicle-image-wrapper"><img class="vehicle-carousel-image" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3MjAgNDgwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMyYjNhNjciLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4ZTVhOWIiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNzIwIiBoZWlnaHQ9IjQ4MCIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjM2MCIgeT0iMjQwIiBmb250LWZhbWlseT0iLWFwcGxlLXN5c3RlbSxTZWdvZSBVSSxSb2JvdG8sc2Fucy1zZXJpZiIgZm9udC1zaXplPSI0NiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+VGVzbGEgTW9kZWwgWTwvdGV4dD48dGV4dCB4PSIzNjAiIHk9IjI4OCIgZm9udC1mYW1pbHk9Ii1hcHBsZS1zeXN0ZW0sU2Vnb2UgVUksUm9ib3RvLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IiNmZmZmZmZjYyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+cGxhY2Vob2xkZXI8L3RleHQ+PC9zdmc+" alt="Tesla Model Y"><div class="vehicle-price-tag">$132</div></div>
+                    </div>
+                    <div class="vehicle-carousel-card" data-v="escalade" onclick="pickVehicle('escalade')">
+                      <div class="vehicle-image-wrapper"><img class="vehicle-carousel-image" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3MjAgNDgwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM1YTJiNGEiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOTY5NWEiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNzIwIiBoZWlnaHQ9IjQ4MCIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjM2MCIgeT0iMjQwIiBmb250LWZhbWlseT0iLWFwcGxlLXN5c3RlbSxTZWdvZSBVSSxSb2JvdG8sc2Fucy1zZXJpZiIgZm9udC1zaXplPSI0NiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q2FkaWxsYWMgRXNjYWxhZGU8L3RleHQ+PHRleHQgeD0iMzYwIiB5PSIyODgiIGZvbnQtZmFtaWx5PSItYXBwbGUtc3lzdGVtLFNlZ29lIFVJLFJvYm90byxzYW5zLXNlcmlmIiBmb250LXNpemU9IjI2IiBmaWxsPSIjZmZmZmZmY2MiIHRleHQtYW5jaG9yPSJtaWRkbGUiPnBsYWNlaG9sZGVyPC90ZXh0Pjwvc3ZnPg==" alt="Cadillac Escalade"><div class="vehicle-popular-badge">Most Popular</div><div class="vehicle-price-tag">$165</div></div>
+                    </div>
+                    <div class="vehicle-carousel-card" data-v="sprinter" onclick="pickVehicle('sprinter')">
+                      <div class="vehicle-image-wrapper"><img class="vehicle-carousel-image" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3MjAgNDgwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMxZTRhNGEiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOTZhM2EiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNzIwIiBoZWlnaHQ9IjQ4MCIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjM2MCIgeT0iMjQwIiBmb250LWZhbWlseT0iLWFwcGxlLXN5c3RlbSxTZWdvZSBVSSxSb2JvdG8sc2Fucy1zZXJpZiIgZm9udC1zaXplPSI0NiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TWVyY2VkZXMgU3ByaW50ZXI8L3RleHQ+PHRleHQgeD0iMzYwIiB5PSIyODgiIGZvbnQtZmFtaWx5PSItYXBwbGUtc3lzdGVtLFNlZ29lIFVJLFJvYm90byxzYW5zLXNlcmlmIiBmb250LXNpemU9IjI2IiBmaWxsPSIjZmZmZmZmY2MiIHRleHQtYW5jaG9yPSJtaWRkbGUiPnBsYWNlaG9sZGVyPC90ZXh0Pjwvc3ZnPg==" alt="Mercedes Sprinter"><div class="vehicle-price-tag">$220</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="product">
+                <div class="product-head"><span class="product-name">Tesla Model Y</span><span class="product-seats">&#x1F464; 4</span><span class="product-price">$132</span></div>
+                <div class="product-when"></div>
+                <div class="product-desc"></div>
+              </div>
+            </div>
+            <div class="map-slot map-slot-2" id="mapSlot2"></div>
+            <div class="schedule-section">
+              <button class="continue-btn" id="cta2" onclick="goStep(3)"><span id="cta2Label">Continue</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>
+            </div>
+          </section>
+
+          <!-- ============ STEP 3: CONFIRM & PAY -> YOUR RIDE ============ -->
+          <section class="panel" id="s3">
+            <div class="content-section" id="checkoutView">
+              <div class="panel-title">Confirm &amp; pay</div>
+              <div class="card">
+                <div class="route">
+                  <div class="route-row"><div class="route-rail"><div class="route-marker">A</div><div class="route-rail-line"></div></div><div class="route-info"><div class="route-time" id="ckWhen"></div><div class="route-addr" id="ckFrom"></div></div></div>
+                  <div class="route-row"><div class="route-rail"><div class="route-marker b">B</div></div><div class="route-info" style="padding-bottom:6px"><div class="route-time eta">Drop-off</div><div class="route-addr" id="ckTo"></div></div></div>
+                  <div class="route-attribution" translate="no">Google Maps</div>
+                </div>
+                <div class="meta-line ck-flight" hidden></div>
+                <div class="product">
+                  <div class="product-head"><span class="product-name">Tesla Model Y</span><span class="product-seats">&#x1F464; 4</span><span class="product-price">$132</span></div>
+                  <div class="product-desc"></div>
+                </div>
+              </div>
+
+              <button class="control-button" onclick="openWho()">
+                <span class="row-tile">&#x1F464;</span>
+                <span class="row-text"><span class="row-title who-title">Sof&iacute;a R.</span><span class="row-sub">Traveling &middot; tap to change</span></span>
+                <span class="row-chev">&rsaquo;</span>
+              </button>
+
+              <button class="control-button" onclick="openPay()">
+                <span class="row-tile">&#x1F4B5;</span>
+                <span class="row-text"><span class="row-title">Cash or Zelle</span><span class="row-sub">Pay your driver at pickup</span></span>
+                <span class="row-chev">&rsaquo;</span>
+              </button>
+
+              <div class="controls-row">
+                <button class="control-button" id="btnPromo" onclick="toggleDisc('promo')"><span class="control-icon">&#x1F39F;&#xFE0F;</span><span class="control-text" id="promoText">Add promotion</span></button>
+                <button class="control-button" id="btnNote" onclick="toggleDisc('note')"><span class="control-icon">&#x1F4DD;</span><span class="control-text" id="noteText">Add pickup notes</span></button>
+              </div>
+              <div class="disc" id="discPromo" hidden><input class="form-input" id="promoIn" placeholder="Promotion code" oninput="onPromo()"></div>
+              <div class="disc" id="discNote" hidden><textarea class="form-input" id="noteIn" rows="2" placeholder="Building entrance, gate code, help with luggage..." oninput="onNote()"></textarea></div>
+
+              <div class="policy-line">Free to cancel until a driver accepts your ride. Flat fare, tolls included &mdash; nothing is charged online.</div>
+            </div>
+            <div class="schedule-section" id="bookRow">
+              <button class="book-btn" id="cta3" onclick="confirmBooking()"><span class="btn-main-text" id="bookMain">Book</span><span class="btn-sub-text">Pay your driver at pickup &middot; Cash or Zelle</span></button>
+            </div>
+
+            <div class="content-section ride-view" id="rideView" hidden>
+              <div class="status-strip" id="rideStrip"><span class="pulse-dot" id="rideDot"></span><span id="rideStripText">Waiting for a driver</span></div>
+              <div class="status-sub" id="rideSub">We&rsquo;ve sent your request &mdash; this usually takes just a few minutes.</div>
+              <div class="steps">
+                <div class="tstep current" id="tsBooked"><div class="tstep-dot"></div><div class="tstep-label">Booked</div></div>
+                <div class="tstep" id="tsConfirmed"><div class="tstep-dot"></div><div class="tstep-label">Confirmed</div></div>
+                <div class="tstep"><div class="tstep-dot"></div><div class="tstep-label">En route</div></div>
+                <div class="tstep"><div class="tstep-dot"></div><div class="tstep-label">Arrived</div></div>
+                <div class="tstep"><div class="tstep-dot"></div><div class="tstep-label">Riding</div></div>
+                <div class="tstep"><div class="tstep-dot"></div><div class="tstep-label">Done</div></div>
+              </div>
+              <div class="card">
+                <div class="vehicle-image-wrap"><img id="rideImg" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3MjAgNDgwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMyYjNhNjciLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4ZTVhOWIiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNzIwIiBoZWlnaHQ9IjQ4MCIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjM2MCIgeT0iMjQwIiBmb250LWZhbWlseT0iLWFwcGxlLXN5c3RlbSxTZWdvZSBVSSxSb2JvdG8sc2Fucy1zZXJpZiIgZm9udC1zaXplPSI0NiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+VGVzbGEgTW9kZWwgWTwvdGV4dD48dGV4dCB4PSIzNjAiIHk9IjI4OCIgZm9udC1mYW1pbHk9Ii1hcHBsZS1zeXN0ZW0sU2Vnb2UgVUksUm9ib3RvLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IiNmZmZmZmZjYyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+cGxhY2Vob2xkZXI8L3RleHQ+PC9zdmc+" alt=""><div class="vehicle-overlay"><div><div class="vehicle-name" id="rideVeh"></div><div class="vehicle-capacity" id="rideCap"></div></div><div class="vehicle-price" id="ridePrice"></div></div></div>
+                <div class="route">
+                  <div class="route-row"><div class="route-rail"><div class="route-marker">A</div><div class="route-rail-line"></div></div><div class="route-info"><div class="route-time" id="rideWhen"></div><div class="route-addr" id="rideFrom"></div></div></div>
+                  <div class="route-row"><div class="route-rail"><div class="route-marker b">B</div></div><div class="route-info" style="padding-bottom:6px"><div class="route-time eta">Drop-off</div><div class="route-addr" id="rideTo"></div></div></div>
+                  <div class="route-attribution" translate="no">Google Maps</div>
+                </div>
+                <div class="meta-line ck-flight" hidden></div>
+                <div class="meta-line" id="rideNote" hidden></div>
+                <div class="pay-line"><span>&#x1F4B5;</span><div><b>Payment: pay your driver at pickup</b> &middot; Cash or Zelle &middot; your receipt arrives when the ride is completed.</div></div>
+              </div>
+              <div class="actions">
+                <button class="btn btn-whatsapp" id="btnWa" hidden>&#x1F4AC; Message Andres on WhatsApp</button>
+                <button class="btn btn-keep">Edit ride</button>
+              </div>
+              <div class="support">Trip LM-2481 &middot; Questions? Call or text us: +1 (786) 509-3955<br><a class="cancel-link" href="#" onclick="return false;">Cancel ride</a></div>
+              <button class="demo-chip" id="demoPair" onclick="demoPair()">Demo: a driver accepts &rarr;</button>
+            </div>
+          </section>
+
+        </div>
+
+        <div class="app-footer">
+          <nav class="app-legal-nav"><u>Terms</u> &middot; <u>Privacy</u></nav>
+          <button class="auth-pill">Sign out</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- pickup time -->
+    <div class="sheet-back" id="sheet" onclick="if(event.target===this)closeSheet()">
+      <div class="sheet-panel">
+        <div class="sheet-header"><button class="sheet-back-btn" onclick="closeSheet()">&lsaquo;</button><h2>Pickup time</h2><span style="width:40px"></span></div>
+        <div class="sheet-body">
+          <div class="sheet-date" id="sheetDate"></div>
+          <div class="watch">
+            <div class="watch-bezel"></div><div class="watch-ticks"></div>
+            <div class="watch-face"><div class="watch-brand">LinkMia</div><div class="drum" id="drum"></div><div class="drum-window"></div><div class="lume">MIAMI TIME</div></div>
+            <div class="crown" id="crown"></div>
+          </div>
+          <div class="sheet-hint">Turn the crown or swipe the dial &middot; 15-minute steps</div>
+          <button class="sheet-action" onclick="confirmTime()">Use this time</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- who's traveling -->
+    <div class="sheet-back" id="whoSheet" onclick="if(event.target===this)closeWho()">
+      <div class="sheet-panel">
+        <div class="sheet-header"><button class="sheet-back-btn" onclick="closeWho()">&lsaquo;</button><h2>Who&rsquo;s traveling</h2><span style="width:40px"></span></div>
+        <div class="sheet-body list">
+          <button class="opt-row on" id="whoSelf" onclick="setWho('self')"><span>&#x1F464;</span><span>For myself<span class="opt-sub">Sof&iacute;a R. &middot; +1 (305) 555-0142</span></span><span class="tick">&#x2713;</span></button>
+          <button class="opt-row" id="whoOther" onclick="setWho('other')"><span>&#x1F465;</span><span>Someone else<span class="opt-sub">Add their name and phone so the driver can reach them</span></span><span class="tick">&#x2713;</span></button>
+          <button class="sheet-action" onclick="closeWho()">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- payment (future space) -->
+    <div class="sheet-back" id="paySheet" onclick="if(event.target===this)closePay()">
+      <div class="sheet-panel">
+        <div class="sheet-header"><button class="sheet-back-btn" onclick="closePay()">&lsaquo;</button><h2>Payment</h2><span style="width:40px"></span></div>
+        <div class="sheet-body list">
+          <button class="opt-row on"><span>&#x1F4B5;</span><span>Cash or Zelle<span class="opt-sub">Pay your driver at pickup</span></span><span class="tick">&#x2713;</span></button>
+          <button class="opt-row muted"><span>&#x1F4B3;</span><span>Card<span class="opt-sub">Coming later</span></span><span class="tick"></span></button>
+          <button class="sheet-action" onclick="closePay()">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- the one map -->
+    <div id="mapHome" hidden>
+      <div class="map-section" id="liveMap">
+        <svg class="map-svg" viewBox="0 0 361 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="361" height="200" fill="#F1EFE9"/>
+          <rect x="6" y="14" width="118" height="78" rx="6" fill="#E7E5E0"/>
+          <path d="M18,32 L112,64 M22,74 L108,26 M14,52 L118,52" stroke="#D7D4CD" stroke-width="3" stroke-linecap="round"/>
+          <rect x="196" y="126" width="74" height="48" rx="8" fill="#C9E8C9"/>
+          <rect x="128" y="20" width="54" height="30" rx="8" fill="#C9E8C9"/>
+          <rect x="236" y="30" width="40" height="26" rx="8" fill="#C9E8C9"/>
+          <path d="M322,0 C306,60 334,120 316,200 L361,200 L361,0 Z" fill="#AADAFF"/>
+          <path d="M320,112 C262,98 204,116 146,92 S88,64 44,60" fill="none" stroke="#AADAFF" stroke-width="6" stroke-linecap="round"/>
+          <g stroke="#DDDAD3" stroke-width="5" fill="none"><path d="M100,0 V200 M160,0 V200 M220,0 V200 M280,0 V200 M0,60 H320 M0,110 H320 M0,160 H320"/></g>
+          <g stroke="#FFFFFF" stroke-width="3" fill="none"><path d="M100,0 V200 M160,0 V200 M220,0 V200 M280,0 V200 M0,60 H320 M0,110 H320 M0,160 H320"/></g>
+          <path d="M0,84 C90,82 150,84 220,100 S300,128 361,142" fill="none" stroke="#E6C067" stroke-width="8" stroke-linecap="round"/>
+          <path d="M0,84 C90,82 150,84 220,100 S300,128 361,142" fill="none" stroke="#FFE7A3" stroke-width="6" stroke-linecap="round"/>
+          <path d="M252,0 C250,70 254,130 248,200" fill="none" stroke="#E6C067" stroke-width="8" stroke-linecap="round"/>
+          <path d="M252,0 C250,70 254,130 248,200" fill="none" stroke="#FFE7A3" stroke-width="6" stroke-linecap="round"/>
+          <g id="routeG">
+            <path d="M296,146 C270,134 240,116 215,96 S150,78 100,70 S70,62 62,56" fill="none" stroke="#1A56B8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+            <path d="M296,146 C270,134 240,116 215,96 S150,78 100,70 S70,62 62,56" fill="none" stroke="#4285F4" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+          <g transform="translate(62,56)"><ellipse cx="0" cy="2" rx="7" ry="2.5" fill="rgba(0,0,0,.25)"/><path d="M0,0 C0,0 -12,-10 -12,-19 C-12,-25.6 -6.6,-31 0,-31 C6.6,-31 12,-25.6 12,-19 C12,-10 0,0 0,0 Z" fill="#EA4335" stroke="#B31412" stroke-width="1"/><text id="pinAirLetter" x="0" y="-15" text-anchor="middle" font-family="Roboto,Arial,sans-serif" font-size="11" font-weight="700" fill="#FFFFFF">B</text></g>
+          <g transform="translate(296,146)"><ellipse cx="0" cy="2" rx="7" ry="2.5" fill="rgba(0,0,0,.25)"/><path d="M0,0 C0,0 -12,-10 -12,-19 C-12,-25.6 -6.6,-31 0,-31 C6.6,-31 12,-25.6 12,-19 C12,-10 0,0 0,0 Z" fill="#EA4335" stroke="#B31412" stroke-width="1"/><text id="pinHomeLetter" x="0" y="-15" text-anchor="middle" font-family="Roboto,Arial,sans-serif" font-size="11" font-weight="700" fill="#FFFFFF">A</text></g>
+        </svg>
+        <div class="dropoff-label" id="mapAirport" hidden></div>
+        <div class="map-time-badge pickup-time" id="mapPickup" hidden></div>
+        <img class="map-google-logo" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5OCAxOCI+PHRleHQgeD0iMCIgeT0iMTQiIGZvbnQtZmFtaWx5PSJSb2JvdG8sQXJpYWwsc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzFGMUYxRiI+R29vZ2xlIE1hcHM8L3RleHQ+PC9zdmc+" alt="Google Maps" width="98" height="18">
+        <div class="map-data-attr">Map data &copy;2026 Google</div>
+      </div>
+    </div>
+  </div>
+  </div>
+  <p class="restart"><a href="#" onclick="location.reload();return false;">Restart the demo</a></p>
+
+  <div class="notes">
+    <div class="note"><h3>What actually moved</h3><ul>
+      <li><b>Two screens became one.</b> Direction, address, airport, date and time now sit together, with the map underneath. No control was added or removed.</li>
+      <li><b>The map travels.</b> One element, moved from under the time row to under the carousel &mdash; never rebuilt, so the route and zoom survive.</li>
+      <li><b>Confirm &amp; Pay is a real step.</b> Production books straight from the vehicle screen; here the summary, traveler, payment, promotion and notes get their own screen, and the same screen becomes Your Ride afterwards.</li>
+      <li><b>The price rides on the button</b> (&ldquo;Book Cadillac Escalade &middot; $165&rdquo;), so the separate total row is gone.</li>
+      <li><b>Flight number is optional and says so.</b> &ldquo;We share it with your driver. Your pickup time stays exactly as you set it.&rdquo;</li>
+    </ul></div>
+    <div class="note"><h3>Visual quieting</h3><ul>
+      <li>One accent colour per screen &mdash; the primary button. Selected direction, airport and date are white on gray instead of four different orange treatments.</li>
+      <li>Rows are 56 pt with 15 pt text and no 2 pt outlines; a validated address gets a checkmark rather than a green border.</li>
+      <li>Screen titles replace the progress dots; the summary bar still names where you are.</li>
+      <li>Terms/Privacy and Sign out sit below the card instead of floating over the button, which they do in production on a 393-pt phone.</li>
+      <li>Stepper labels shortened so they stop colliding; cancel demoted to a text link.</li>
+    </ul></div>
+    <div class="note"><h3>Held back for later, on purpose</h3><ul>
+      <li><b>Flight-derived pickup timing.</b> The passenger&rsquo;s chosen time stays authoritative. The buffer question is unresolved &mdash; the plan in the repo says 35&ndash;40 min plus 30 for customs in one place and 45 min in another &mdash; and it belongs with dispatch, not a form.</li>
+      <li><b>Port of Miami and terminal-to-terminal.</b> A quote is keyed to one airport code plus one place id, so these need a contract change before they can be a screen.</li>
+      <li><b>The entry/preset screen and saved places.</b> Worth revisiting once the bounded flow is shipped and there is more than one product to list.</li>
+      <li>All of the above is preserved as a separate exploration rather than deleted.</li>
+    </ul></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var V = {
+    tesla:    { name:'Tesla Model Y',     price:132, pax:4,  bags:4,  img:'sedan',    desc:'Newer electric sedan, quiet ride' },
+    escalade: { name:'Cadillac Escalade', price:165, pax:7,  bags:8,  img:'suv',      desc:'Full-size SUV, room for the whole family' },
+    sprinter: { name:'Mercedes Sprinter', price:220, pax:12, bags:15, img:'sprinter', desc:'Van for groups and lots of luggage' }
+  };
+  var AIR = { MIA:'Miami International', FLL:'Fort Lauderdale', PBI:'Palm Beach' };
+  var IMG = {};
+  (function(){ var c = document.querySelectorAll('.vehicle-carousel-card img'); IMG.sedan=c[0].src; IMG.suv=c[1].src; IMG.sprinter=c[2].src; })();
+
+  var st = window.st = {
+    step:1, dir:'dropoff', addr:null, airport:null,
+    dateKey:'today', dateShort:'Sat, Sep 5', dateLong:'Saturday, September 5', time:null,
+    flight:'', vehicle:'tesla', who:'self', promo:'', note:'', booked:false, paired:false
+  };
+
+  /* direction stays a passenger choice, exactly as production has it */
+  window.setDir = function(d){
+    st.dir = d;
+    $('modeDrop').classList.toggle('active', d==='dropoff');
+    $('modePick').classList.toggle('active', d==='pickup');
+    $('addrIn').placeholder = d==='dropoff' ? 'Enter pickup address, hotel, or landmark...' : 'Enter drop-off address, hotel, or landmark...';
+    $('airportLabel').textContent = d==='dropoff' ? 'Select airport' : 'Arriving at';
+    refresh();
+  };
+  window.onAddr = function(){ $('dd').classList.add('visible'); };
+  window.pickAddr = function(name, full){
+    st.addr = { name:name, full:full };
+    var i = $('addrIn'); i.value = full; i.classList.add('validated');
+    $('dd').classList.remove('visible');
+    $('placeAttr').classList.add('visible');
+    $('conn').classList.add('active');
+    refresh();
+  };
+  document.addEventListener('click', function(e){ if(!e.target.closest('.input-wrapper')) $('dd').classList.remove('visible'); });
+  window.pickAir = function(code){
+    st.airport = code;
+    document.querySelectorAll('.airport-option').forEach(function(b){ b.classList.toggle('selected', b.dataset.air===code); });
+    refresh();
+  };
+  window.pickDate = function(key){
+    st.dateKey = key;
+    if(key==='today'){ st.dateShort='Sat, Sep 5'; st.dateLong='Saturday, September 5'; }
+    if(key==='tomorrow'){ st.dateShort='Sun, Sep 6'; st.dateLong='Sunday, September 6'; }
+    $('dToday').classList.toggle('active', key==='today');
+    $('dTomorrow').classList.toggle('active', key==='tomorrow');
+    $('dOther').classList.toggle('active', key==='other');
+    if(key!=='other'){ $('otherStrip').hidden = true; $('dOtherVal').textContent = 'Choose'; }
+    if(st.time!=null && key==='today' && st.time < 17*60+15) st.time = null;
+    refresh();
+  };
+  window.toggleOther = function(){ var s=$('otherStrip'); s.hidden = !s.hidden; if(!s.hidden) s.scrollLeft = 0; };
+  window.pickOther = function(shortTxt, longTxt){
+    st.dateKey='other'; st.dateShort=shortTxt; st.dateLong=longTxt;
+    document.querySelectorAll('#otherStrip .pill-btn').forEach(function(p){ p.classList.toggle('on', p.textContent===shortTxt); });
+    $('dOtherVal').textContent = shortTxt; pickDate('other');
+  };
+
+  /* the watch - presentation of an existing decision, nothing derives it */
+  var drum = $('drum'), crown = $('crown');
+  function slots(){ var start = st.dateKey==='today' ? 17*60+15 : 6*60, o=[]; for(var m=start;m<24*60;m+=15) o.push(m); return o; }
+  function fmt(m){ var h=Math.floor(m/60), mm=m%60, h12=((h+11)%12)+1; return { t:h12+':'+(mm<10?'0':'')+mm, p:h<12?'AM':'PM' }; }
+  function buildWheel(){
+    var list = slots(), html = '<div class="drum-pad"></div>';
+    list.forEach(function(m){ var f=fmt(m); html += '<div class="slot" data-m="'+m+'">'+f.t+'<small>'+f.p+'</small></div>'; });
+    drum.innerHTML = html + '<div class="drum-pad"></div>';
+    var target = st.time!=null ? st.time : (st.dateKey==='today' ? 17*60+45 : 9*60);
+    var idx = list.indexOf(target); if(idx<0) idx=0;
+    drum.scrollTop = idx*44; paint(); requestAnimationFrame(paint);
+  }
+  function paint(){
+    var c = drum.scrollTop/44, els = drum.querySelectorAll('.slot');
+    for(var i=0;i<els.length;i++){
+      var d=i-c, a=Math.max(-1,Math.min(1,d/2.2));
+      els[i].style.transform = 'rotateX('+(-a*58)+'deg)';
+      els[i].style.opacity = String(Math.max(.12, 1-Math.abs(d)*.42));
+      els[i].classList.toggle('on', Math.abs(d)<.5);
+    }
+    crown.style.backgroundPositionY = (drum.scrollTop*.9)+'px';
+  }
+  drum.addEventListener('scroll', paint, { passive:true });
+  function settled(){ var e=drum.querySelectorAll('.slot'); var i=Math.max(0,Math.min(e.length-1,Math.round(drum.scrollTop/44))); return +e[i].dataset.m; }
+  window.openSheet = function(){ $('sheetDate').textContent = st.dateLong; $('sheet').classList.add('active'); buildWheel(); };
+  window.closeSheet = function(){ $('sheet').classList.remove('active'); };
+  window.confirmTime = function(){ st.time = settled(); closeSheet(); refresh(); };
+
+  window.openWho = function(){ $('whoSheet').classList.add('active'); };
+  window.closeWho = function(){ $('whoSheet').classList.remove('active'); };
+  window.setWho = function(w){ st.who=w; $('whoSelf').classList.toggle('on', w==='self'); $('whoOther').classList.toggle('on', w==='other'); refresh(); };
+  window.openPay = function(){ $('paySheet').classList.add('active'); };
+  window.closePay = function(){ $('paySheet').classList.remove('active'); };
+
+  var car = $('carScroll'), carT = null;
+  function centerCard(){
+    var cards = car.querySelectorAll('.vehicle-carousel-card'), mid = car.scrollLeft + car.clientWidth/2, best=null, bd=1e9;
+    for(var i=0;i<cards.length;i++){ var cc=cards[i].offsetLeft+cards[i].offsetWidth/2, d=Math.abs(cc-mid); if(d<bd){bd=d;best=cards[i];} }
+    return best;
+  }
+  window.onCarScroll = function(){ clearTimeout(carT); carT = setTimeout(function(){ var b=centerCard(); if(b && b.dataset.v!==st.vehicle) setVehicle(b.dataset.v); }, 90); };
+  function scrollToVehicle(v, smooth){
+    var c = car.querySelector('[data-v="'+v+'"]'); if(!c) return;
+    var left = c.offsetLeft + c.offsetWidth/2 - car.clientWidth/2;
+    if(smooth) car.scrollTo({ left:left, behavior:'smooth' }); else { car.style.scrollBehavior='auto'; car.scrollLeft=left; car.style.scrollBehavior=''; }
+  }
+  window.pickVehicle = function(v){ setVehicle(v); scrollToVehicle(v, true); };
+  function setVehicle(v){ st.vehicle=v; document.querySelectorAll('.vehicle-carousel-card').forEach(function(c){ c.classList.toggle('active', c.dataset.v===v); }); refresh(); }
+
+  window.toggleDisc = function(k){
+    var K=k.charAt(0).toUpperCase()+k.slice(1), box=$('disc'+K), btn=$('btn'+K);
+    box.hidden = !box.hidden; btn.classList.toggle('on', !box.hidden);
+    if(!box.hidden){ var f=box.querySelector('input,textarea'); if(f) f.focus(); }
+  };
+  window.onFlight = function(){ st.flight = $('flightIn').value.trim(); $('flightText').textContent = st.flight ? ('Flight '+st.flight.toUpperCase()) : 'Add flight number (optional)'; refresh(); };
+  window.onPromo = function(){ st.promo = $('promoIn').value.trim(); $('promoText').textContent = st.promo ? ('Promo '+st.promo.toUpperCase()) : 'Add promotion'; };
+  window.onNote = function(){ st.note = $('noteIn').value.trim(); $('noteText').textContent = st.note ? 'Notes added' : 'Add pickup notes'; refresh(); };
+  window.demoPair = function(){ st.paired = true; refresh(); };
+
+  var liveMap = $('liveMap');
+  window.goStep = function(n){
+    if(n<1) n=1; if(n>3) n=3;
+    st.step = n;
+    ['s1','s2','s3'].forEach(function(id,i){ $(id).classList.toggle('active', i+1===n); });
+    var slot = n===1 ? $('mapSlot1') : (n===2 ? $('mapSlot2') : $('mapHome'));
+    if(liveMap.parentNode!==slot) slot.appendChild(liveMap);
+    $('summaryBar').classList.toggle('visible', n>1 && !st.booked);
+    $('viewport').scrollTop = 0;
+    if(n===2) requestAnimationFrame(function(){ scrollToVehicle(st.vehicle, false); });
+    refresh();
+  };
+  window.confirmBooking = function(){
+    st.booked = true;
+    $('checkoutView').hidden = true; $('bookRow').hidden = true; $('rideView').hidden = false;
+    $('summaryBar').classList.remove('visible'); $('viewport').scrollTop = 0;
+    refresh();
+  };
+
+  function setAll(sel, txt){ document.querySelectorAll(sel).forEach(function(e){ e.textContent = txt; }); }
+  function refresh(){
+    var v = V[st.vehicle], f = st.time!=null ? fmt(st.time) : null;
+    var whenTxt = f ? (st.dateShort+' · '+f.t+' '+f.p) : '';
+    var airFull = st.airport ? (st.airport+' · '+AIR[st.airport]+' Airport') : '';
+
+    $('timeRowText').textContent = f ? whenTxt : 'Choose a pickup time';
+    $('timeRowAct').innerHTML = f ? 'Change' : 'Set &rsaquo;';
+    $('timeRow').classList.toggle('set', !!f);
+
+    $('mapAirport').hidden = !st.airport; if(st.airport) $('mapAirport').innerHTML = '📍 ' + st.airport;
+    $('mapPickup').hidden = !f; if(f) $('mapPickup').innerHTML = f.t+' <span class="time-period">'+f.p+'</span>';
+    var routed = !!(st.addr && st.airport);
+    $('routeG').style.display = routed ? '' : 'none';
+    /* A is always the pickup end, B the drop-off end */
+    $('pinHomeLetter').textContent = st.dir==='dropoff' ? 'A' : 'B';
+    $('pinAirLetter').textContent  = st.dir==='dropoff' ? 'B' : 'A';
+
+    var ready = !!(st.addr && st.airport && f);
+    $('cta1').disabled = !ready;
+    $('cta1Label').textContent = ready ? 'Continue'
+      : (!st.addr ? 'Add your address to continue'
+      : (!st.airport ? 'Select an airport to continue' : 'Choose a pickup time to continue'));
+
+    var place = st.addr ? st.addr.name : 'Pickup';
+    $('summaryText').textContent = st.dir==='dropoff' ? (place+' → '+(st.airport||'Airport')) : ((st.airport||'Airport')+' → '+place);
+
+    setAll('.product-name', v.name);
+    setAll('.product-seats', '👤 '+v.pax);
+    setAll('.product-price', '$'+v.price);
+    setAll('.product-when', f ? ('Pickup '+st.dateShort+' at '+f.t+' '+f.p) : '');
+    setAll('.product-desc', v.desc+' · Suggested luggage: about '+v.bags+' bags');
+    setAll('.who-title', st.who==='self' ? 'Sofía R.' : 'Someone else');
+    $('cta2Label').textContent = 'Continue · '+v.name+' $'+v.price;
+    $('bookMain').textContent = 'Book '+v.name+' · $'+v.price;
+
+    var from = st.dir==='dropoff' ? (st.addr?st.addr.full:'') : airFull;
+    var to   = st.dir==='dropoff' ? airFull : (st.addr?st.addr.full:'');
+    $('ckWhen').textContent = whenTxt; $('ckFrom').textContent = from; $('ckTo').textContent = to;
+
+    var fl = st.flight ? ('✈️ Flight '+st.flight.toUpperCase()+' · shared with your driver') : '';
+    document.querySelectorAll('.ck-flight').forEach(function(e){ e.hidden = !fl; e.textContent = fl; });
+
+    $('rideVeh').textContent = v.name; $('rideCap').textContent = 'Up to '+v.pax+' passengers'; $('ridePrice').textContent = '$'+v.price; $('rideImg').src = IMG[v.img];
+    $('rideWhen').textContent = whenTxt; $('rideFrom').textContent = from; $('rideTo').textContent = to;
+    $('rideNote').hidden = !st.note; $('rideNote').textContent = st.note ? ('📝 '+st.note) : '';
+    $('rideStrip').classList.toggle('green', st.paired);
+    $('rideDot').hidden = st.paired;
+    $('rideStripText').textContent = st.paired ? '🎉 You’ve been paired with your driver!' : 'Waiting for a driver';
+    $('rideSub').textContent = st.paired ? 'Andres will pick you up as scheduled — say hello on WhatsApp.' : 'We’ve sent your request — this usually takes just a few minutes.';
+    $('tsBooked').className = 'tstep '+(st.paired?'done':'current');
+    $('tsConfirmed').className = 'tstep '+(st.paired?'current':'');
+    $('btnWa').hidden = !st.paired;
+    $('demoPair').hidden = st.paired;
+  }
+  window.refresh = refresh;
+  goStep(1);
+})();
+</script>
