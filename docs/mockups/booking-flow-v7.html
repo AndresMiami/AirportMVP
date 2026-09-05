@@ -118,6 +118,7 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
 .rec-line{font-size:13px;color:var(--text-secondary);line-height:1.5;margin:8px 4px 0}
 .rec-line b{color:var(--text-primary);font-weight:600}
 .hint-link{display:block;width:100%;text-align:left;font-size:13px;color:var(--text-primary);font-weight:600;margin:8px 4px 0;text-decoration:underline;text-underline-offset:3px}
+.avail-note{font-size:13px;color:var(--text-secondary);line-height:1.45;margin:8px 4px 0}
 .blocked{background:rgba(255,69,58,.10);border:1px solid rgba(255,69,58,.30);border-radius:12px;padding:13px 14px;font-size:13px;color:#FF9F98;line-height:1.5;margin-top:14px}
 .blocked b{color:#FFFFFF;display:block;margin-bottom:3px;font-size:14px}
 .opt-flight{margin-top:8px}
@@ -253,7 +254,10 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
 .sheet-label{font-size:13px;font-weight:600;color:var(--text-secondary);margin:2px 0 -4px}
 .sheet-action{width:100%;padding:16px;background:#FFFFFF;color:#1C1C1E;border-radius:12px;font-size:17px;font-weight:600;margin-top:4px;flex-shrink:0}
 .sheet-action:disabled{background:var(--border);color:var(--text-secondary);cursor:not-allowed}
-.sheet-skip{width:100%;text-align:center;font-size:14px;font-weight:600;color:var(--text-secondary);padding:8px 0 0;text-decoration:underline;text-underline-offset:3px;flex-shrink:0}
+.sheet-skip{width:100%;text-align:center;font-size:15px;font-weight:600;color:#FFFFFF;padding:12px 0 0;text-decoration:underline;text-underline-offset:3px;flex-shrink:0}
+/* the escape never scrolls out of reach: it lives outside the scrolling body */
+.sheet-footer{padding:12px 20px 20px;flex-shrink:0;background:#2C2C2E;border-top:1px solid rgba(255,255,255,.07)}
+.sheet-footer .sheet-action{margin-top:0}
 .opt-row{width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--surface);border-radius:12px;font-size:15px;font-weight:500;text-align:left;min-height:56px}
 .opt-row .tick{margin-left:auto;color:transparent;font-weight:700}
 .opt-row.on .tick{color:#FFFFFF}
@@ -353,6 +357,7 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
                 <button class="rb-clear" id="rbClear" onclick="clearField(event)">&#x2715;</button>
                 <button class="rb-swap" onclick="swapEnds(event)" title="Swap">&#x21C5;</button>
               </div>
+              <div class="avail-note" id="availNote">Airport transfers currently available with MIA, FLL and PBI.</div>
 
               <div class="picker" id="picker" hidden>
                 <div class="results-card" id="results" hidden>
@@ -539,6 +544,8 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
           </div>
 
           <div class="calc" id="flCalc" hidden></div>
+        </div>
+        <div class="sheet-footer">
           <button class="sheet-action" id="flDone" onclick="confirmFlight()" disabled>Use this flight</button>
           <button class="sheet-skip" onclick="skipFlight()">Choose a pickup time instead</button>
         </div>
@@ -622,11 +629,12 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
     <div class="note"><h3>The route answers the question</h3><ul>
       <li><b>No preset screen, no direction tabs.</b> Put MIA in Pickup and it is an arrival; put it in Destination and it is a departure. The passenger is never asked.</li>
       <li><b>Airports are recognised by identity, not by string.</b> <code>AIRPORTS</code> is a map of verified codes and an endpoint is an airport only when <code>kind === 'airport'</code> and its code is in that map. Nothing searches an address for the word &ldquo;airport&rdquo;.</li>
-      <li><b>Exactly one airport, for now.</b> Zero airports and two airports are both refused with honest copy, because the quote contract takes one airport code plus one place id. The screen is already shaped for the day that changes &mdash; only <code>routeState()</code> has to loosen.</li>
-      <li><b>The browser still speaks today&rsquo;s contract:</b> airport in Pickup &rarr; <code>pickup</code>, airport in Destination &rarr; <code>dropoff</code>. Shown live under the route box.</li>
+      <li><b>Exactly one airport, for now.</b> The availability line sits under the fields <i>before</i> anyone is refused, and a refusal keeps everything the passenger typed &mdash; it explains, it never undoes.</li>
+      <li><b>The browser still speaks today&rsquo;s contract:</b> airport in Pickup &rarr; <code>pickup</code>, airport in Destination &rarr; <code>dropoff</code>.</li>
+      <li><b>What Route Intent v2 actually costs.</b> The passenger screen stays the same; the server contract, the signed token, the database route identity, the pricing rules and the tests all expand behind it. This mockup only shows that the interface would not need redesigning &mdash; it is not a claim that one function changes.</li>
     </ul></div>
     <div class="note"><h3>The flight finder is a tool, not a step</h3><ul>
-      <li><b>It appears only for arrivals</b> and opens itself once the route is complete &mdash; not over a half-filled form.</li>
+      <li><b>It appears only for arrivals</b> and opens itself once the route is complete &mdash; not over a half-filled form. <b>Choose a pickup time instead</b> sits outside the scrolling area, so the escape is on screen the moment the sheet opens, and closing the sheet never disturbs the route.</li>
       <li><b>Flight number</b> when they know it; <b>Route</b> (flying from + the arrival date already on screen) when they don&rsquo;t; <b>Choose a pickup time instead</b> when the lookup is no use.</li>
       <li><b>Domestic or international is never asked.</b> It is derived from the flight&rsquo;s origin &mdash; and San Juan is treated as a domestic arrival, because there is no immigration queue.</li>
       <li><b>&ldquo;Recommended&rdquo; is the load-bearing word.</b> The flight tells us when the aircraft lands; LinkMia owns the buffer, and the passenger can always override it.</li>
@@ -636,7 +644,8 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
       <li><b>The buffer numbers are placeholders.</b> <code>BUFFER</code> is one named constant with 30/45 minutes and a comment saying so. The plan in the repo says 35&ndash;40 plus 30 for customs in its body and 45 in its decision table; that contradiction is a dispatch decision, not a design one.</li>
       <li><b>Live status is displayed but not acted on.</b> A delayed flight shows its delay; nothing reschedules a committed driver yet, and no copy claims otherwise.</li>
       <li><b>Route lookup needs a schedules feed</b>, which costs more than a flight-number call. Shipping the flight-number tab first leaves the Route tab as a later upgrade to the same sheet.</li>
-      <li><b>Ports and general point-to-point</b> stay refused until Route Intent v2 &mdash; and then no passenger screen has to change.</li>
+      <li><b>Ports and general point-to-point</b> stay refused until Route Intent v2. That release expands the server contract, the signed token, the stored route identity, the pricing rules and the tests &mdash; the passenger screen is the one part that would not need redesigning.</li>
+      <li><b>None of this belongs in the production plan yet.</b> Pricing stabilisation and Manage Ride come first; this is a reference for the interface those releases eventually sit behind.</li>
     </ul></div>
   </div>
 </div>
@@ -1013,14 +1022,17 @@ body{background:var(--pg-bg);color:var(--pg-text);font-family:-apple-system,Blin
     $('timeRowAct').innerHTML = f ? 'Change' : 'Set &rsaquo;';
     $('timeRow').classList.toggle('set', !!f);
 
-    /* categories not enabled in v1 */
+    /* categories not enabled in v1. Nothing the passenger typed is ever cleared -
+       the refusal explains, it does not undo. */
     var blocked = (s.kind==='airport-transfer' || s.kind==='point-to-point');
     $('blockedNote').hidden = !blocked;
     if(blocked){
       $('blockedNote').innerHTML = s.reason==='two-airports'
-        ? '<b>Airport-to-airport isn’t available yet</b>Change one end to an address, or swap the trip around.'
-        : '<b>One end needs to be an airport</b>LinkMia currently books MIA, FLL and PBI transfers. Rides between two addresses are coming.';
+        ? '<b>Airport-to-airport isn’t available yet</b>We’ve kept both places. Change one end to an address, or swap the trip around.'
+        : '<b>Point-to-point rides aren’t available yet</b>We’ve kept both places. LinkMia currently books transfers to and from MIA, FLL and PBI — set one end to an airport to continue.';
     }
+    /* the expectation is set BEFORE they get refused, not after */
+    $('availNote').hidden = s.enabled;
 
     /* map */
     $('mapAirport').hidden = !a; if(a) $('mapAirport').innerHTML = '📍 ' + a.name;

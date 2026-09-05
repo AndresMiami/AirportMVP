@@ -36,13 +36,16 @@ Four rules hold this together:
   International Airport" arriving from address search is *not* an airport — this
   is asserted in the verification pass.
 - **Exactly one supported airport**, because a quote takes one airport code plus
-  one place id. Zero and two are both refused with honest copy. Only
-  `routeState()` has to loosen when Route Intent v2 lands; no passenger screen
-  changes.
+  one place id. An availability line sits under the fields *before* anyone is
+  refused, and a refusal keeps everything the passenger typed — it explains, it
+  never undoes.
 - **The flight finder is a contextual tool, not a step.** It appears only for
   arrivals and opens itself once the route is complete — never over a half-filled
   form. Three ways in: flight number, route (flying from + the arrival date
-  already on screen), or "choose a pickup time instead".
+  already on screen), or "choose a pickup time instead". That escape lives
+  outside the sheet's scrolling area, so it is on screen the moment the sheet
+  opens and stays there once the recommendation appears; closing the sheet by any
+  route leaves the pickup and destination untouched.
 - **"Recommended" is load-bearing.** The flight service says when the aircraft
   lands; `BUFFER` decides when the chauffeur should be at the curb, and the
   passenger can override it while keeping the flight attached. Domestic versus
@@ -53,6 +56,25 @@ Departures reveal an optional flight number only. A derived departure time needs
 drive time, airport lead time, traffic and an operational buffer, so the copy
 promises nothing: "We share it with your driver. Your pickup time stays exactly
 as you set it."
+
+### What Route Intent v2 actually costs
+
+An earlier draft of this file claimed that "only `routeState()` has to loosen".
+That was an overstatement and is corrected here. When Route Intent v2 lands, the
+**passenger screen stays the same**; the server contract, the signed token, the
+database route identity, the pricing rules and the tests all expand behind it.
+What this mockup demonstrates is that the interface would not need redesigning —
+not that the change is confined to one function.
+
+### Disposition
+
+v7 is the **future booking-interface reference**. It is not authorisation to
+expand the production route contract. Pricing stabilisation and Manage Ride come
+first; the small route adapter (airport in Pickup → `pickup`, airport in
+Destination → `dropoff`) belongs in the hydration plan, and Route Intent v2 is
+built behind this interface later. The 30/45-minute buffers, delayed-flight
+behaviour and route-based flight search stay marked as future operational
+decisions and should not enter the production plan yet.
 
 ## v6 — the bounded flow
 
