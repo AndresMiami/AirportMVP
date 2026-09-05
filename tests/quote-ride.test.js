@@ -154,7 +154,7 @@ const quoteRideEndpoint = require(path.join(repoRoot, 'backend/functions/quote-r
 const { quantizeMiles, quantizeMinutes, FIELD_MASK } = require(path.join(repoRoot, 'backend/functions/lib/route-facts.js'));
 const { computeCommitment, tokenDigest, newJti, verifyQuoteToken, signQuoteToken, resolveSigningKeys, QUOTE_TTL_MS } = require(path.join(repoRoot, 'backend/functions/lib/quote-token.js'));
 const { resolveRateCard } = require(path.join(repoRoot, 'backend/functions/lib/rate-card-resolver.js'));
-const { AIRPORTS, airportByCode, isValidPlaceId } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
+const { AIRPORTS, airportByCode, airportByPlaceId, isValidPlaceId } = require(path.join(repoRoot, 'backend/functions/lib/place-identity.js'));
 const { quoteRide: engineQuote } = require(path.join(repoRoot, 'backend/functions/lib/ride-quote.js'));
 
 const FUTURE_PICKUP = () => new Date(Date.now() + 24 * 3600e3).toISOString();
@@ -1066,6 +1066,50 @@ async function check(name, fn) {
     assert.strictEqual(googleCalls(), 0, 'a prototype-member code must spend ZERO Google quota');
     assert.strictEqual(airportByCode('constructor'), null);
     assert.ok(airportByCode('MIA'));
+  });
+
+  await check('airportByPlaceId recognises our own airports arriving as an ordinary placeId', async () => {
+    // An airport-to-airport trip is EXPRESSIBLE today: the contract's
+    // `placeId` means "any Google place", airports included. Only the
+    // `airportCode` end carried a name, so the other end displayed a raw
+    // street address. This reverse lookup is what lets a display layer
+    // recognise a place it already stored — from OUR registry, never a
+    // provider response.
+    for (const code of Object.keys(AIRPORTS)) {
+      const airport = airportByCode(code);
+      assert.strictEqual(airportByPlaceId(airport.placeId), airport,
+        `${code} must resolve back to its own registry entry`);
+      assert.strictEqual(airportByPlaceId(airport.placeId).code, code, 'round-trips with airportByCode');
+      assert.ok(airportByPlaceId(airport.placeId).name, `${code} carries a display name`);
+    }
+
+    // The pinned ids must stay distinct, or one airport would silently
+    // answer for another. Static-data invariant, cheap to assert here.
+    const ids = Object.values(AIRPORTS).map((a) => a.placeId);
+    assert.strictEqual(new Set(ids).size, ids.length, 'pinned airport place ids are unique');
+
+    // A place that is not one of ours is not an airport.
+    assert.strictEqual(airportByPlaceId(ADDRESS_PLACE_ID), null);
+    assert.strictEqual(airportByPlaceId('ChIJ_definitely_not_ours_0000'), null);
+
+    // EXACT match only: place ids are opaque and case-sensitive, so
+    // normalising the key could fold two distinct places into one.
+    const mia = airportByCode('MIA');
+    assert.strictEqual(airportByPlaceId(mia.placeId.toLowerCase()), null, 'lookup is case-sensitive');
+    assert.strictEqual(airportByPlaceId(' ' + mia.placeId), null, 'no trimming');
+
+    // The key reaches this function from stored rows and request bodies,
+    // so prototype members and non-strings must answer null rather than
+    // an object that later reads as an airport.
+    for (const key of ['constructor', 'toString', '__proto__', 'valueOf', 'hasOwnProperty']) {
+      assert.strictEqual(airportByPlaceId(key), null, `${key} is not an airport`);
+    }
+    for (const bad of [null, undefined, 42, {}, [], Object.create(null)]) {
+      assert.strictEqual(airportByPlaceId(bad), null, 'non-string input is not an airport');
+    }
+
+    // Read-only: the lookup must not hand out a mutable registry entry.
+    assert.ok(Object.isFrozen(airportByPlaceId(mia.placeId)), 'registry entries stay frozen');
   });
 
   await check('provider values are validated at the boundary: integer metres, protobuf duration, bounded', async () => {

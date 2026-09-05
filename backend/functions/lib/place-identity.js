@@ -98,6 +98,39 @@ function airportByCode(code) {
   return AIRPORTS[code];
 }
 
+// The reverse of airportByCode: a place_id back to the service airport it
+// identifies, or null.
+//
+// WHY IT EXISTS: a booking carries its airport in `airportCode`, but the
+// OTHER end travels as an ordinary `placeId` — and `placeId` means "any
+// Google place", airports included. So an airport-to-airport trip is
+// expressible today (MIA in airportCode, FLL as a place), and nothing
+// downstream could tell: driver cards and trip pages rendered the raw
+// street address for the second airport ("2100 NW 42nd Ave, Miami")
+// while the first showed a name. This lets a display layer recognise the
+// place it already stored.
+//
+// NO PROVIDER CONTENT: this reads LinkMia's OWN registry, whose names and
+// addresses are sourced from each airport's own site (see AIRPORTS). It
+// resolves nothing, calls nothing, and stores nothing — so it can never
+// turn a Google response into a stored or displayed provider name.
+//
+// A Map, not an object: the key is an opaque token that reaches this
+// function from stored rows and request bodies, and a plain object would
+// answer truthily for 'constructor', '__proto__' and every other
+// prototype member — the same hazard airportByCode guards against, here
+// removed structurally instead. Lookup is EXACT: place ids are
+// case-sensitive, so normalising the key could fold two distinct places
+// onto one identity.
+const AIRPORTS_BY_PLACE_ID = new Map(
+  Object.values(AIRPORTS).map((airport) => [airport.placeId, airport])
+);
+
+function airportByPlaceId(placeId) {
+  if (typeof placeId !== 'string') return null;
+  return AIRPORTS_BY_PLACE_ID.get(placeId) || null;
+}
+
 function isValidPlaceId(placeId) {
   return typeof placeId === 'string' && PLACE_ID_RE.test(placeId);
 }
@@ -179,6 +212,7 @@ async function resolvePlace(placeId, { apiKey, fetchImpl, deadlineMs }) {
 module.exports = {
   AIRPORTS,
   airportByCode,
+  airportByPlaceId,
   isValidPlaceId,
   resolvePlace,
   MAX_PLACE_ID_LEN,
