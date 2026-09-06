@@ -604,13 +604,14 @@ the old published deploy online but freezes every subsequent production build.
     off-mode background (no_token/no_request_id rows since the PR #76
     writer swap — the graduation instrument working, not a leak). P0
     vehicle-metadata drift guard merged (PR #85). BROWSER FLAG RELEASE
-    (branch browser-flag-activation — local, under review, NOT merged or
-    deployed; only local authoring is authorized): `SERVER_QUOTE_ENABLED=true`
-    with SW v1.3.27 + runtime cache v4 (BOTH caches must bump together —
-    runtime can retain booking HTML). ONCE DEPLOYED: passengers see and
-    submit server prices, bookings stamp `price_authority='client_observe'`,
-    pricing.js is shadow-only. Until then production runs flag-false legacy
-    pricing under observe. Reviewed FORWARD rollback: flag false + SW
+    — **MERGED AND LIVE** (PR #88, merge 2660538, 2026-09-04; corrected
+    2026-09-07, this entry previously said "NOT merged or deployed"):
+    `SERVER_QUOTE_ENABLED = true` at `indexMVP.html:758`, SW `linkmia-v1.3.27`
+    + runtime cache `linkmia-runtime-v4` (BOTH caches must bump together —
+    runtime can retain booking HTML). Passengers now SEE AND SUBMIT server
+    prices, bookings stamp `price_authority='client_observe'`, and pricing.js
+    is shadow-only. The next pricing step is therefore GRADUATION EVIDENCE,
+    not activation. Reviewed FORWARD rollback: flag false + SW
     v1.3.28 + runtime v5 (cache names only ever move forward; the
     emergency R1 revert ladder continues at v1.3.29 + runtime v6) — see
     docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
@@ -674,9 +675,16 @@ the old published deploy online but freezes every subsequent production build.
     string, 409 needs requote/existingBookingId/error, 428 needs
     reload:true, 503 only the writer's exact blocked copy; anything else,
     a parsed 200 {} or gateway JSON 503 included, stays unknown ->
-    durable sessionStorage envelope bound to authSubject+kind+bookingId
-    with a "Check again"/Discard recovery card that re-sends the exact
-    bytes; only definitive responses settle it); 428 reload:true ->
+    durable sessionStorage record bound to authSubject+kind+bookingId
+    with a "Check again"/Discard recovery card; only definitive responses
+    settle it. CORRECTED 2026-09-07 — this entry previously said recovery
+    "re-sends the exact bytes", which R1 changed: the DURABLE record is FIVE
+    identity fields only (operationId, kind, bookingId, authSubject,
+    createdAt — `indexMVP.html:3018-3030`); the exact request bytes live ONLY
+    in same-page memory (`_liveEnvelope`, `:3125-3131`) for a same-page retry;
+    after a RELOAD recovery is the READ-ONLY `/api/operation-status` lookup
+    (`:3243`, `backend/functions/operation-status.js`), never a reconstructed
+    POST); 428 reload:true ->
     reload; requote:true -> quiet refresh + ONE auto-resubmit as a NEW
     envelope (the single-flight lock is held ACROSS the awaited
     recursion), then a visible tap; restored-edit interaction markers

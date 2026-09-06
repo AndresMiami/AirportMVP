@@ -333,10 +333,24 @@ async function check(name, f) {
   );
   assert.ok(gateSlice.includes('function renderNextControl(') && doActionSlice.includes('await postAction(body)'), 'slices extractable');
 
-  function makeUi({ postResult } = {}) {
+  // `now` freezes the context clock. departureGate/renderNextControl default to
+  // Date.now(), so any check asserting a LOCKED card must pin "now" — otherwise
+  // it silently unlocks once the fixture pickup passes in real time. That is
+  // exactly how the Miami-formatting check below went red on 2026-09-06.
+  function makeUi({ postResult, now } = {}) {
     const calls = { gps: 0, post: [], alerts: [], refresh: 0, nav: null };
+    const ctxDate = typeof now === 'number'
+      ? new Proxy(Date, {
+          get: (t, p) => {
+            if (p === 'now') return () => now;
+            const v = Reflect.get(t, p);
+            return typeof v === 'function' ? v.bind(t) : v;
+          },
+          construct: (t, a) => (a.length ? new t(...a) : new t(now))
+        })
+      : Date;
     const ctx = {
-      DEPARTURE_WINDOW_MS: WINDOW_MS, Date, console,
+      DEPARTURE_WINDOW_MS: WINDOW_MS, Date: ctxDate, console,
       esc: (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
       lastBookings: [],
       CHECKPOINT_ACTIONS: ['on_my_way', 'arrived', 'start_trip'],
@@ -471,7 +485,10 @@ async function check(name, f) {
     // it with the SAME fmtMiami. Under TZ=Asia/Tokyo (13h ahead of EDT), a
     // device-local render would show a different day AND hour.
     const whenSlice = driverHtml.slice(driverHtml.indexOf('function fmtWhen('), driverHtml.indexOf('function isUrgent('));
-    const { ctx } = makeUi();
+    // Frozen 4.5h before the fixture pickup, so the ride is genuinely inside
+    // the locked window whatever today's date is. Every asserted string below
+    // is unchanged by the freeze.
+    const { ctx } = makeUi({ now: Date.parse('2026-09-05T18:00:00.000Z') });
     vm.runInContext(whenSlice + '\nthis.fmtWhen = fmtWhen;', ctx);
     const savedTz = process.env.TZ;
     process.env.TZ = 'Asia/Tokyo';
