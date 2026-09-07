@@ -18,6 +18,11 @@ const {
   sharedOutcomeResponse, unknownOutcomeResponse
 } = require('./lib/booking-writer');
 const { isValidPlaceId } = require('./lib/place-identity');
+const { resolveRateCard } = require('./lib/rate-card-resolver');
+const {
+  VEHICLE_KEYS: CONTRACT_KEYS, WRITER_CEILINGS,
+  ownVehicle, storedPairToKey
+} = require('./lib/vehicle-contract');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VEHICLE_TYPE = {
@@ -186,15 +191,301 @@ async function sendUpdatedDoorbell(booking) {
   }
 }
 
+// ============================================================
+// PR-A — AUTHENTICATED HYDRATION READ (plan v8.6 §3A).
+//
+// Dark for PASSENGERS (no UI and no first-party caller ship with PR-A) but
+// LIVE ON THE WIRE from merge: an authenticated owner can read their own
+// ride, and an anonymous GET now answers 401 instead of today's 405.
+//
+// The ordering below is the contract, not an implementation detail. Each
+// gate runs before the next, and the rate-card resolver is reached ONLY
+// after ownership, editability and full stored-row validity have passed —
+// a bad id, a foreign row, a non-editable row or an invalid row costs zero
+// resolver calls.
+// ============================================================
+
+// One fixed body for every post-authentication failure that is not a typed
+// 400/404/409. It never echoes a stored category, name or driver message.
+const HYDRATION_FAILURE = { error: 'Ride details unavailable' };
+
+// A stored string ROUND-TRIPS only if the endpoint's own normalizer would
+// hand the writer back exactly these bytes. text() trims and slices, so a
+// padded or over-long stored value would be silently rewritten by an edit
+// that never touched that field. Such a row fails closed instead.
+function roundTrips(value, max, { required }) {
+  if (value === null || value === undefined) return !required;
+  if (typeof value !== 'string') return false;
+  if (value !== value.trim()) return false;
+  if (value.length > max) return false;
+  return required ? value.length > 0 : true;
+}
+
+function normalizedBlank(value) {
+  return typeof value === 'string' && value.trim() === '';
+}
+
+function isIntInRange(value, lo, hi) {
+  return Number.isInteger(value) && value >= lo && value <= hi;
+}
+
+// Classify the stored route from its AUTHORITY and identity tuple alone.
+// Labels never decide a route family: a row is not an airport transfer
+// merely because today's UI sells airport transfers.
+function classifyRoute(row) {
+  const labelsOk = roundTrips(row.pickup_location, 500, { required: true }) &&
+    roundTrips(row.dropoff_location, 500, { required: true });
+  const modeOk = row.booking_mode === 'pickup' || row.booking_mode === 'dropoff';
+  if (!labelsOk || !modeOk) return null;
+
+  if (row.route_authority === 'canonical') {
+    if (!AIRPORT_CODES.includes(row.airport_code)) return null;
+    if (!isValidPlaceId(row.canonical_place_id)) return null;
+    return {
+      kind: 'airport_transfer_v1',
+      authority: 'canonical',
+      bookingMode: row.booking_mode,
+      airportCode: row.airport_code,
+      canonicalPlaceId: row.canonical_place_id,
+      pickupLabel: row.pickup_location,
+      dropoffLabel: row.dropoff_location
+    };
+  }
+
+  if (row.route_authority === 'legacy_text') {
+    // The installed edit writer still PRODUCES this state today on any
+    // non-verified verdict or in mode off (migration 018:1206-1211), so it
+    // is a live reachable state, not a backfill artifact. It asserts only
+    // that the route family is neither stored nor provable.
+    if (row.airport_code !== null || row.canonical_place_id !== null) return null;
+    return {
+      kind: 'legacy_unclassified_v1',
+      authority: 'legacy_text',
+      bookingMode: row.booking_mode,
+      airportCode: null,
+      canonicalPlaceId: null,
+      pickupLabel: row.pickup_location,
+      dropoffLabel: row.dropoff_location
+    };
+  }
+
+  return null;
+}
+
+// Every value PR-B must resubmit is validated here rather than inferred.
+// Trimming may validate formatting; it may never synthesize a value.
+function validateStoredRow(row) {
+  if (!isIntInRange(row.details_version, 1, Number.MAX_SAFE_INTEGER)) return null;
+
+  const pickupMs = Date.parse(row.pickup_datetime);
+  if (!Number.isFinite(pickupMs)) return null;
+  // PostgreSQL TIMESTAMPTZ keeps MICROseconds; a JavaScript Date does not.
+  // Re-emitting a truncated instant would let an edit that never touched the
+  // time silently move it (.123456Z -> .123Z), which breaks round-trip
+  // closure. Precision the browser cannot carry fails closed instead.
+  if (typeof row.pickup_datetime === 'string') {
+    const frac = /\.(\d+)/.exec(row.pickup_datetime);
+    if (frac && /[1-9]/.test(frac[1].slice(3))) return null;
+  }
+
+  if (!roundTrips(row.customer_name, 120, { required: true })) return null;
+  if (!roundTrips(row.customer_phone, 40, { required: true })) return null;
+  if (!roundTrips(row.customer_email, 254, { required: false })) return null;
+  if (!roundTrips(row.notes, 2000, { required: false })) return null;
+  if (!roundTrips(row.pickup_sign, 160, { required: false })) return null;
+  if (!roundTrips(row.booker_name, 120, { required: false })) return null;
+  if (!roundTrips(row.booker_phone, 40, { required: false })) return null;
+
+  // A booker phone cannot exist without a name (the writer resolves the
+  // pair coherently), and a booker name equal to the traveller name is the
+  // installed writer's CLEAR-BOOKER command — a row spelled that way would
+  // lose its booker to an edit that never touched it.
+  const bookerName = row.booker_name || null;
+  // A PRESENT-but-empty stored phone is not the same as an absent one: the
+  // installed writer applies NULLIF(...,'') whenever a booker name is
+  // submitted (migration 018:1093-1100), so an unrelated edit would turn ''
+  // into NULL. Accept only absent or genuinely non-blank.
+  if (row.booker_phone !== null && row.booker_phone !== undefined &&
+      normalizedBlank(row.booker_phone)) {
+    return null;
+  }
+  const bookerPhone = row.booker_phone || null;
+  if (bookerPhone && !bookerName) return null;
+  if (bookerName && bookerName === row.customer_name) return null;
+
+  if (!isIntInRange(row.passengers, 1, WRITER_CEILINGS.passengers)) return null;
+  if (!isIntInRange(row.bags, 0, WRITER_CEILINGS.bags)) return null;
+
+  const cents = Number.isInteger(row.price_cents)
+    ? row.price_cents
+    : Math.round(Number(row.price) * 100);
+  if (!isIntInRange(cents, 1, 100000 * 100)) return null;
+
+  // Only the three exact canonical pairs round-trip. Legacy aliases (a
+  // stored vehicle_type of 'escalade', a name like 'Black Escalade') resolve
+  // to no key: an unrelated edit must never silently canonicalize them.
+  const vehicleKey = storedPairToKey(row.vehicle_type, row.vehicle_name);
+  if (!vehicleKey) return null;
+
+  const route = classifyRoute(row);
+  if (!route) return null;
+
+  return { pickupMs, route, vehicleKey, cents, bookerName, bookerPhone };
+}
+
+// A validated card must ALSO be writer-compatible before any DTO leaves.
+// The rate-card validator deliberately accepts a far wider shape (any
+// nonblank name, capacities to 1000), so card validity alone cannot
+// underwrite what a booking will persist.
+function projectVehicles(card, selectedKey) {
+  if (!card || typeof card !== 'object' || !card.vehicles) return null;
+  const cardVehicles = card.vehicles;
+  if (!Object.prototype.hasOwnProperty.call(cardVehicles, selectedKey)) return null;
+
+  // A validated card may expose any NONEMPTY SUBSET of the canonical keys
+  // (ride-rate-card.js:203-205 fails only on an empty map), so a card that
+  // deliberately omits an unavailable vehicle is legitimate and must project
+  // its remaining alternatives. What may NEVER pass is an unknown exposed key
+  // or a missing BOOKED key — that is the plan's malformed-card 500
+  // (plan v8.6:418-428). Requiring all three keys here would refuse an honest
+  // partial card, and the operator-configurable fleet direction makes partial
+  // cards expected rather than exotic.
+  const exposed = Object.keys(cardVehicles);
+  if (exposed.length === 0) return null;
+  for (const key of exposed) {
+    if (!ownVehicle(key)) return null;
+  }
+
+  // Canonical ORDER is the contract's, never the card's key order.
+  const out = [];
+  for (const key of CONTRACT_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(cardVehicles, key)) continue;
+    const v = cardVehicles[key];
+    const expected = ownVehicle(key);
+    if (!v || !expected) return null;
+
+    // The card's name must be an OWN property of the endpoint's VEHICLE_TYPE
+    // map and must map to this key's own category — an inherited-property
+    // name ('constructor', 'toString') must never satisfy this.
+    if (v.name !== expected.name) return null;
+    if (!Object.prototype.hasOwnProperty.call(VEHICLE_TYPE, v.name)) return null;
+    if (VEHICLE_TYPE[v.name] !== expected.category) return null;
+
+    const pax = v.capacity && v.capacity.passengers;
+    const bags = v.capacity && v.capacity.bags;
+    // Exact per-vehicle equality catches WITHIN-ceiling drift (Tesla 4 -> 5),
+    // and the independent ceilings catch a card no write could carry.
+    if (pax !== expected.passengers || bags !== expected.bags) return null;
+    if (!isIntInRange(pax, 1, WRITER_CEILINGS.passengers)) return null;
+    if (!isIntInRange(bags, 0, WRITER_CEILINGS.bags)) return null;
+
+    out.push({ key, name: expected.name, passengerCapacity: pax, bagCapacity: bags });
+  }
+  return out;
+}
+
+const HYDRATION_FIELDS = [
+  'id', 'trip_id', 'status', 'assigned_driver', 'details_version',
+  'pickup_location', 'dropoff_location', 'pickup_datetime', 'booking_mode',
+  'route_authority', 'airport_code', 'canonical_place_id',
+  'vehicle_type', 'vehicle_name', 'passengers', 'bags', 'price', 'price_cents',
+  'customer_name', 'customer_phone', 'customer_email',
+  'booker_name', 'booker_phone', 'notes', 'pickup_sign'
+].join(', ');
+
+async function hydrationRead(event, db, auth, headers) {
+  const fail = (statusCode, payload) => ({
+    statusCode, headers, body: JSON.stringify(payload)
+  });
+
+  const bookingId = (event.queryStringParameters && event.queryStringParameters.id) || '';
+  if (!UUID_RE.test(bookingId)) {
+    return fail(400, { error: 'Invalid booking id' });
+  }
+
+  const { data: row, error: readError } = await db
+    .from('bookings')
+    .select(HYDRATION_FIELDS)
+    .eq('id', bookingId)
+    .eq('customer_id', auth.customerId)
+    .maybeSingle();
+
+  if (readError) {
+    console.error('hydration read failed:', readError.code || 'db_error');
+    return fail(500, HYDRATION_FAILURE);
+  }
+  // Missing and foreign are ONE answer — non-disclosure.
+  if (!row) return fail(404, { error: 'Booking not found' });
+
+  if (row.status !== 'pending' || row.assigned_driver) {
+    return fail(409, { error: 'not_editable', currentStatus: row.status });
+  }
+
+  const validated = validateStoredRow(row);
+  if (!validated) return fail(500, HYDRATION_FAILURE);
+
+  let resolved;
+  try {
+    resolved = await resolveRateCard({
+      authUserId: auth.authUserId,
+      customerId: auth.customerId,
+      pickupAtMs: validated.pickupMs
+    });
+  } catch (error) {
+    console.error('hydration rate-card resolve threw:', error.code || error.name || 'resolver_error');
+    return fail(500, HYDRATION_FAILURE);
+  }
+  if (!resolved || resolved.ok !== true || !resolved.card) return fail(500, HYDRATION_FAILURE);
+
+  const vehicles = projectVehicles(resolved.card, validated.vehicleKey);
+  if (!vehicles) return fail(500, HYDRATION_FAILURE);
+
+  const selected = ownVehicle(validated.vehicleKey);
+
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+      bookingId: row.id,
+      tripCode: row.trip_id,
+      detailsVersion: row.details_version,
+      status: 'pending',
+      route: validated.route,
+      pickupAt: new Date(validated.pickupMs).toISOString(),
+      passengers: row.passengers,
+      // Legacy stored capacity value. Validated so it round-trips; never
+      // rendered, never passenger demand, never part of quote intent.
+      bags: row.bags,
+      bookedPriceCents: validated.cents,
+      vehicle: { key: validated.vehicleKey, name: selected.name },
+      vehicles,
+      traveler: {
+        name: row.customer_name,
+        phone: row.customer_phone,
+        email: row.customer_email || null
+      },
+      booker: validated.bookerName
+        ? { name: validated.bookerName, phone: validated.bookerPhone }
+        : null,
+      optional: {
+        notes: row.notes || null,
+        pickupSign: row.pickup_sign || null
+      }
+    })
+  };
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'private, no-store',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
-  if (event.httpMethod !== 'POST') {
+  // PR-A adds GET (authenticated hydration read). Every OTHER non-POST
+  // method still answers 405 exactly as before.
+  if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
@@ -208,6 +499,10 @@ exports.handler = async (event) => {
   const auth = await requirePassenger(event, supabaseUrl, anonKey, db);
   if (!auth.customerId) {
     return { statusCode: auth.status, headers, body: JSON.stringify({ error: auth.error }) };
+  }
+
+  if (event.httpMethod === 'GET') {
+    return hydrationRead(event, db, auth, headers);
   }
 
   // The RAW body string is the envelope identity (request_digest hashes

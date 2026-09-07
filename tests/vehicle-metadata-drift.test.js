@@ -83,27 +83,21 @@ const updatePending = fs.readFileSync(path.join(repoRoot, 'backend/functions/upd
 const m018 = fs.readFileSync(path.join(repoRoot, 'database/migrations/018_r1_route_content_non_retention.sql'), 'utf8');
 const { LINKMIA_RATE_CARD, CANONICAL_VEHICLES } = require(path.join(repoRoot, 'backend/functions/lib/ride-rate-card.js'));
 
-// The single place this suite states the expected metadata as literals.
-// A genuine business change (new vehicle, different capacity, a rename)
-// edits THIS table consciously — and the suite then reports every copy
-// that still carries the old values. ORDER MATTERS: this is also the
-// canonical vehicle sequence the carousel array and markup must share.
-const EXPECTED = {
-  tesla: { name: 'Tesla Model Y', category: 'sedan', passengers: 4, bags: 4 },
-  escalade: { name: 'Cadillac Escalade', category: 'suv', passengers: 7, bags: 8 },
-  sprinter: { name: 'Mercedes Sprinter', category: 'sprinter', passengers: 12, bags: 15 }
-};
-const EXPECTED_KEYS = Object.keys(EXPECTED);
+// PR-A PROMOTED this table out of the suite and into the shipped module
+// backend/functions/lib/vehicle-contract.js, so the hydration endpoint can
+// check a resolved rate card against the SAME statement this suite pins
+// every other copy against — rather than the repo gaining a tenth literal
+// catalog. A genuine business change (new vehicle, different capacity, a
+// rename) still edits ONE table consciously; it now lives in the module.
+// ORDER MATTERS: VEHICLE_KEYS is also the canonical vehicle sequence the
+// carousel array and markup must share.
+const CONTRACT = require('../backend/functions/lib/vehicle-contract');
+const EXPECTED = CONTRACT.VEHICLE_CONTRACT;
+const EXPECTED_KEYS = CONTRACT.VEHICLE_KEYS;
 // Category-keyed capacity, including the legacy 'escalade' CATEGORY alias
 // old booking rows still carry — present in trip.html and create-booking's
 // CAPACITY.
-const EXPECTED_CATEGORY = {
-  sedan: { label: 'Tesla Model Y', passengers: 4, bags: 4 },
-  suv: { label: 'Cadillac Escalade', passengers: 7, bags: 8 },
-  escalade: { label: 'Cadillac Escalade', passengers: 7, bags: 8 },
-  sprinter: { label: 'Mercedes Sprinter', passengers: 12, bags: 15 }
-};
-
+const EXPECTED_CATEGORY = CONTRACT.CATEGORY_CONTRACT;
 // Slice a balanced {...} or [...] literal starting at src[openIdx].
 function sliceBalanced(src, openIdx, open, close) {
   assert.strictEqual(src[openIdx], open, `expected '${open}' at slice start`);
