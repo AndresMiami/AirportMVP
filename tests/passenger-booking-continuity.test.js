@@ -115,7 +115,7 @@ function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
   });
   check('lookup includes every nonterminal status and excludes terminal states', () => {
     assert.deepStrictEqual(capturedStatuses,
-      ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress']);
+      ['pending', 'assigned', 'confirmed', 'on_the_way', 'arrived', 'in_progress'] /* 'assigned': legacy stored value kept for continuity only (PR-B) */);
     for (const terminal of ['completed', 'cancelled', 'declined']) {
       assert.ok(!capturedStatuses.includes(terminal));
     }

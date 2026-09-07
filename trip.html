@@ -189,6 +189,14 @@
             background: #3A3A3C;
             padding: 13px;
         }
+        .lifecycle-notice {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 13px;
+            padding: 13px 14px;
+            font-size: 14px;
+            line-height: 1.45;
+        }
         .cancel-quote-card {
             background: rgba(255, 69, 58, 0.08);
             border: 1px solid rgba(255, 69, 58, 0.35);
@@ -332,6 +340,7 @@
             <div class="actions">
                 <a class="btn btn-whatsapp hidden" id="waBtn" target="_blank" rel="noopener">💬 Message your driver on WhatsApp</a>
                 <button class="btn btn-modify hidden" id="backBtn">✏️ Edit ride</button>
+                <div class="lifecycle-notice hidden" id="lifecycleNotice" role="status"></div>
                 <button class="btn btn-cancel hidden" id="cancelBtn">Cancel booking</button>
                 <div class="cancel-quote-card hidden" id="cancelQuoteCard">
                     <div class="cancel-quote-title">Cancel this booking?</div>
@@ -638,7 +647,13 @@
             $('loadingMsg').classList.add('hidden');
             $('tripView').classList.remove('hidden');
 
-            const view = STATUS_VIEW[b.status] || { color: '', pulse: false, text: b.status, sub: '' };
+            // PR-B: 'assigned' is a legacy stored value presented as CONFIRMED —
+            // for the status strip, the stepper, the lifecycle action and the
+            // driver-contact button ONLY. Polling, cancellation eligibility
+            // and every API call keep reading the RAW status below.
+            const presentationStatus = b.status === 'assigned' ? 'confirmed' : b.status;
+
+            const view = STATUS_VIEW[presentationStatus] || { color: '', pulse: false, text: presentationStatus, sub: '' };
             const strip = $('statusStrip');
             strip.className = 'status-strip ' + view.color;
             $('statusText').textContent = view.text;
@@ -676,7 +691,7 @@
             const showSteps = !['declined', 'cancelled'].includes(b.status);
             $('steps').classList.toggle('hidden', !showSteps);
             if (showSteps) {
-                const idx = STEP_ORDER.indexOf(b.status);
+                const idx = STEP_ORDER.indexOf(presentationStatus);
                 document.querySelectorAll('.step').forEach((el) => {
                     const sIdx = STEP_ORDER.indexOf(el.dataset.step);
                     el.classList.remove('done', 'current');
@@ -729,8 +744,42 @@
             // invalidates an open quote: the terms the passenger was
             // reviewing no longer describe the ride (e.g. confirmed →
             // on_the_way). The next tap fetches fresh terms.
+            // PR-B lifecycle presentation. The label follows the passenger's
+            // JOB at this moment, not an error state: a ride nobody has
+            // accepted is still theirs to edit (at EVERY hour — T-3h belongs
+            // to the driver's departure window, never to passenger editing);
+            // once a chauffeur is committed the honest action is managing,
+            // not editing; once they are driving it is coordinating.
+            //
+            // presentationStatus is for DISPLAY ONLY. The raw status stays
+            // authoritative for polling, cancellation eligibility and every
+            // API call — 'assigned' is a legacy stored value, not a new state.
+            // The notice is dismissed by a real status CHANGE, never by the
+            // routine poll re-render — otherwise it would vanish a few seconds
+            // after the tap that asked for it.
+            if (lastPresentationStatus !== null && lastPresentationStatus !== presentationStatus) {
+                $('lifecycleNotice').classList.add('hidden');
+            }
+            lastPresentationStatus = presentationStatus;
             const isPending = b.status === 'pending';
-            $('backBtn').classList.toggle('hidden', !isPending);
+            const lifecycleBtn = $('backBtn');
+            if (isPending) {
+                lifecycleBtn.textContent = '✏️ Edit ride';
+                lifecycleBtn.dataset.action = 'edit';
+                lifecycleBtn.classList.remove('hidden');
+            } else if (presentationStatus === 'confirmed') {
+                lifecycleBtn.textContent = 'Manage ride';
+                lifecycleBtn.dataset.action = 'manage';
+                lifecycleBtn.classList.remove('hidden');
+            } else if (['on_the_way', 'arrived', 'in_progress'].includes(presentationStatus)) {
+                lifecycleBtn.textContent = 'Coordinate with your chauffeur';
+                lifecycleBtn.dataset.action = 'coordinate';
+                lifecycleBtn.classList.remove('hidden');
+            } else {
+                // Terminal rides already have their own "Book another ride".
+                lifecycleBtn.classList.add('hidden');
+                delete lifecycleBtn.dataset.action;
+            }
             const canCancel = CANCELLABLE_STATUSES.includes(b.status);
             if (activeQuote && activeQuote.status !== b.status) hideQuoteCard();
             $('cancelBtn').classList.toggle('hidden', !canCancel || activeQuote !== null);
@@ -741,7 +790,7 @@
             // Hidden when the assigned driver has no valid phone — never
             // route the passenger to a different person's number; the
             // LinkMia support line below stays either way.
-            const isActive = ['confirmed', 'on_the_way', 'arrived', 'in_progress'].includes(b.status);
+            const isActive = ['confirmed', 'on_the_way', 'arrived', 'in_progress'].includes(presentationStatus);
             const showWa = isActive && !!DRIVER.phone;
             const waBtn = $('waBtn');
             waBtn.classList.toggle('hidden', !showWa);
@@ -1045,6 +1094,9 @@
 
         let supabaseLoadPromise = null;
         let activeQuote = null;
+        // Display-only lifecycle tracking (PR-B). Never authoritative for
+        // polling, cancellation eligibility or any API call.
+        let lastPresentationStatus = null;
 
         function loadScript(src) {
             return new Promise((resolve, reject) => {
@@ -1335,6 +1387,26 @@
         // parent keeps the existing booking identity and saves through the
         // authenticated in-place update endpoint — never cancel + recreate.
         $('backBtn').addEventListener('click', () => {
+            const action = $('backBtn').dataset.action;
+
+            // Manage / Coordinate open a calm notice naming only what this
+            // status actually supports. They deliberately do NOT open the
+            // editor: full editing after acceptance is a separate lifecycle
+            // policy, and a button that opened a form which then refused to
+            // save would be worse than one that says so up front. The trip
+            // sheet's own driver-contact, support and cancel controls remain
+            // exactly where they were — this points at them, it does not
+            // duplicate or replace them.
+            if (action === 'manage' || action === 'coordinate') {
+                const el = $('lifecycleNotice');
+                el.textContent = action === 'manage'
+                    ? 'Your chauffeur is confirmed and your ride stays exactly as booked. You can message them directly below.'
+                    : 'Your chauffeur is on the way. Use the message button below to coordinate directly.';
+                el.classList.remove('hidden');
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                return;
+            }
+
             if (isEmbedded) {
                 window.parent.postMessage({
                     type: 'lm-edit',

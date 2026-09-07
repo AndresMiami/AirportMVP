@@ -573,22 +573,31 @@ async function check(name, fn) {
     assert.strictEqual(resolverCalls.length, 0, 'the POST path must not touch the GET resolver');
   });
 
-  // ============ PR-A darkness ============
-  console.log('\nPR-A — darkness pins\n');
+  // ============ PR-B activation ============
+  // PR-A shipped these files dark and this suite pinned that darkness. PR-B
+  // ends it deliberately, so the pins now assert the ACTIVATED state — the
+  // model is loaded and precached, the cache rungs moved to PR-B's reserved
+  // numbers, and the edit entry point hydrates.
+  console.log('\nPR-B — activation pins\n');
 
-  await check('the new model is in NO page and NOT precached', async () => {
+  await check('the model is loaded by the booking page and precached', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    assert.ok(!sw.includes('pending-edit-model'), 'not in STATIC_CACHE_URLS');
-    for (const page of ['indexMVP.html', 'trip.html', 'driver.html', 'index.html', 'login.html']) {
+    assert.ok(sw.includes("'/js/pending-edit-model.js'"), 'must be in STATIC_CACHE_URLS');
+    const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+    assert.ok(/<script src="\.\/js\/pending-edit-model\.js/.test(idx), 'indexMVP must load it');
+    // It stays out of every OTHER page: nothing else has an editor.
+    for (const page of ['trip.html', 'driver.html', 'index.html', 'login.html']) {
       const html = fs.readFileSync(path.join(repoRoot, page), 'utf8');
-      assert.ok(!html.includes('pending-edit-model'), `${page} must not load it`);
+      assert.ok(!html.includes('pending-edit-model'), page + ' must not load it');
     }
   });
 
-  await check('the cache rungs sit on PR-T\'s reserved pair, v1.3.28 / runtime-v5 (PR-A moved nothing; PR-T did)', async () => {
+  await check('both cache rungs moved together to PR-B\'s pair, v1.3.30 / runtime-v7 (PR-T shipped 28/5; 29/6 retired unused)', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.28';/.test(sw));
-    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v5';/.test(sw));
+    // Cache names only ever move FORWARD, and the runtime cache moves with the
+    // static one because it can retain booking HTML.
+    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.30';/.test(sw), 'static rung');
+    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v7';/.test(sw), 'runtime rung');
   });
 
   // Plan v8.6 §3D: cache names only ever move FORWARD, and every rung-moving
@@ -636,10 +645,14 @@ async function check(name, fn) {
     }
   });
 
-  await check('the shipped edit entry point is untouched — no new GET, markers intact', async () => {
+  await check('the edit entry point hydrates and no longer demands re-entry', async () => {
     const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
-    assert.ok(idx.includes('this.editMarkers = {'), 'PR-A does not remove the markers');
-    assert.ok(!idx.includes('update-pending-booking?id='), 'PR-A wires no hydration call');
+    const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
+    assert.ok(idx.includes('update-pending-booking?id='), 'wires the hydration GET');
+    assert.ok(idx.includes('this.editCard().open(dto'), 'hands the snapshot to the review card');
+    assert.ok(sw.includes("'/js/pending-edit-card.js'"), 'the card module is precached too');
+    assert.ok(!idx.includes('Re-enter your trip details'),
+      'the re-enter-everything instruction is gone — that was the defect');
   });
 
   // ============ the dark model ============

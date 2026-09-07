@@ -24,7 +24,12 @@ check('pending action is labeled Edit ride, not Go back', () => {
 
 check('Edit ride is exposed only while status is pending', () => {
   assert.ok(trip.includes("const isPending = b.status === 'pending'"));
-  assert.ok(trip.includes("$('backBtn').classList.toggle('hidden', !isPending)"));
+  // PR-B replaced the single hidden-toggle with the lifecycle ladder. The
+  // guarantee is unchanged and now stronger: the EDIT action exists only on
+  // the pending branch; every other status gets a different label and a
+  // different action, never the editor.
+  assert.ok(trip.includes("lifecycleBtn.dataset.action = 'edit';"));
+  assert.ok(trip.includes("if (isPending) {"));
 });
 
 check('embedded and standalone trip pages carry booking id + version into edit mode', () => {
@@ -35,8 +40,11 @@ check('embedded and standalone trip pages carry booking id + version into edit m
 
 check('booking form clearly enters guarded edit mode', () => {
   assert.ok(booking.includes('beginPendingEdit({ bookingId, tripCode, detailsVersion })'));
-  assert.ok(booking.includes('Your existing ride stays active until these changes are saved.'));
-  assert.ok(booking.includes('<span class="btn-main-text">Save changes</span>'));
+  // PR-B: the edit surface is the review card (its own Save), opened only
+  // after ONE authenticated hydration; the funnel's notice sentence is gone
+  // with the funnel-as-editor.
+  assert.ok(booking.includes('this.editCard().open(dto'));
+  assert.ok(booking.includes('Loading your ride…'));
 });
 
 check('edit preserves trip identity and calls only the in-place endpoint', () => {

@@ -212,6 +212,12 @@ require.cache[mockPath] = { id: mockPath, filename: mockPath, loaded: true, expo
 
 const fn = require(path.join(repoRoot, 'backend/functions/update-pending-booking.js'));
 
+// The submitted pickup must be strictly future at the SERVER clock, so this
+// fixture is computed relative to now. It used to be the hardcoded literal
+// '2026-09-02T16:30:00Z', which was future when written and has since become
+// the past — a suite that silently rots into testing the wrong branch.
+const FUTURE_PICKUP = new Date(Date.now() + 48 * 3600e3).toISOString();
+
 function mkEdit(overrides = {}) {
   return {
     bookingId: BID,
@@ -220,7 +226,7 @@ function mkEdit(overrides = {}) {
     phone: '+1 305 555 0100',
     pickup: 'New pickup',
     dropoff: 'New dropoff',
-    dateTime: '2026-09-02T16:30:00Z',
+    dateTime: FUTURE_PICKUP,
     vehicle: 'Cadillac Escalade',
     price: 165,
     passengers: 4,
@@ -289,7 +295,7 @@ function check(name, fn2) { fn2(); passed++; console.log('✓ ' + name); }
   check('route, schedule, vehicle, capacity and price change atomically', () => {
     assert.strictEqual(booking.pickup_location, 'New pickup');
     assert.strictEqual(booking.dropoff_location, 'New dropoff');
-    assert.strictEqual(booking.pickup_datetime, new Date('2026-09-02T16:30:00Z').toISOString());
+    assert.strictEqual(booking.pickup_datetime, new Date(FUTURE_PICKUP).toISOString());
     assert.strictEqual(booking.vehicle_type, 'suv');
     assert.strictEqual(booking.vehicle_name, 'Cadillac Escalade');
     assert.strictEqual(booking.passengers, 4);

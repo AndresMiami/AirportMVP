@@ -321,6 +321,11 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
     },
   };
   ctx.supabaseClient = ctx.window.supabaseClient;
+  // PR-B: the edit card's Save gating asks the pending-edit model whether the
+  // draft differs from the server's snapshot, so the model must exist in this
+  // realm exactly as the page loads it via <script>.
+  ctx.window.PendingEditModel = require(path.join(repoRoot, 'js/pending-edit-model.js'));
+  ctx.PendingEditModel = ctx.window.PendingEditModel;
   vm.createContext(ctx);
   vm.runInContext(source + '\n;globalThis.__App = AirportBookingApp;', ctx, { filename: 'indexMVP-app.js' });
 
@@ -1141,55 +1146,38 @@ check('COST: no quote is bought before the passenger reaches the Vehicle step', 
   assert.strictEqual(f.calls.length, 1, 'the Vehicle step is where a price is actually needed');
 });
 
-check('SCOPE: an edit quote is edit-scoped — key, request body, and Save gating', async () => {
+check('SCOPE: the funnel never buys an edit quote — the review card is the only edit surface', async () => {
   const f = okFetch(quoteWithTtl(15));
-  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  const { app, runTimers } = makeContext({ enabled: true, fetchImpl: f });
   // A create-scoped quote exists first…
   await app.requestServerQuote();
   const createKey = app.state.quote.key;
   assert.strictEqual(f.calls.length, 1);
 
-  // …then a pending edit begins. PR-2: edits DO quote, in their own scope,
-  // so a create-scoped quote can never impersonate an edit quote.
+  // …then a pending edit begins. The key scope still names the booking and
+  // its captured version, so a create quote can never impersonate an edit
+  // quote — but under PR-B the FUNNEL makes no edit call at all: the review
+  // card (js/pending-edit-card.js) owns the draft, the quote and Save.
   app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
-  app.editMarkers = {
-    routeDirection: false, routeAddress: false,
-    pickupAt: false, vehicle: false, traveler: false
-  };
-  assert.strictEqual(app.quoteFlowActive(), true,
-    'PR-2: pending edits use the quote flow too');
+  assert.strictEqual(app.quoteFlowActive(), true);
   const editKey = app.quoteKey(app.quoteIntent());
-  assert.notStrictEqual(editKey, createKey,
-    'the same trip facts must key differently under an edit');
-  assert.match(editKey, /\|edit\|0b000000-0000-4000-8000-0000000000b1\|3$/,
-    'the edit scope names the booking and its captured version');
+  assert.notStrictEqual(editKey, createKey, 'the same trip facts must key differently under an edit');
+  assert.match(editKey, /\|edit\|0b000000-0000-4000-8000-0000000000b1\|3$/);
 
+  const callsBefore = f.calls.length;
+  app.scheduleQuote();
+  runTimers();                                    // fire the debounce
   await app.requestServerQuote();
-  assert.strictEqual(f.calls.length, 2,
-    'the cached create-scoped quote must not answer an edit');
-  const sentBody = JSON.parse(f.calls[1].opts.body);
-  assert.strictEqual(sentBody.bookingId, '0b000000-0000-4000-8000-0000000000b1',
-    'edit quotes carry the booking identity');
-  assert.strictEqual(sentBody.expectedDetailsVersion, 3,
-    'edit quotes carry the captured CAS version');
-
-  // Interaction markers: a fresh edit quote + selected vehicle is still not
-  // enough — Save stays blocked until route, pickup time, and vehicle were
-  // each EXPLICITLY chosen in this edit session (prefilled never counts).
-  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  assert.strictEqual(f.calls.length, callsBefore,
+    'the create surface buys nothing while an edit session is open');
+  app._editCard = { isOpen: () => true, close() {} };
   app.updateBookAvailability();
-  assert.strictEqual(app.editMarkers.vehicle, true,
-    'an explicit vehicle choice sets its marker');
   assert.strictEqual(app.els.bookBtn.disabled, true,
-    'Save stays blocked while route/pickup markers are unset');
-  app.editMarkers.routeDirection = true;
-  app.editMarkers.routeAddress = true;
-  app.editMarkers.pickupAt = true;
-  app.updateBookAvailability();
-  assert.strictEqual(app.els.bookBtn.disabled, false,
-    'all explicit markers + a fresh quote unlock Save');
-  assert.match(app.els.bookBtn.innerHTML, /Save changes/,
-    'the edit flow labels the primary action Save, not Book');
+    'the funnel button is inert while the card is open');
+  app._editCard = null;
+  // Outside an edit session the create flow is untouched: editReady is true.
+  app.pendingEdit = null;
+  assert.strictEqual(app.editReady(), true);
 });
 
 check('STATIC: the endpoint names its access mode instead of inferring it', () => {
@@ -2188,25 +2176,21 @@ check('IN-FLIGHT: nothing re-enables the button mid-POST, and a second tap is in
   assert.strictEqual(app._submitInFlight, false, 'the flag is released when the chain settles');
 });
 
-check('MARKERS: carousel auto-select (userInitiated:false) never grants the vehicle marker', async () => {
-  const f = okFetch(quoteWithTtl(15));
-  const { app } = makeContext({ enabled: true, fetchImpl: f });
-  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b1', tripCode: 'LM-1', detailsVersion: 3 };
-  app.editMarkers = {
-    routeDirection: true, routeAddress: true, pickupAt: true,
-    vehicle: false, traveler: false
-  };
-  await app.requestServerQuote();
-  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39, userInitiated: false });
-  assert.strictEqual(app.editMarkers.vehicle, false,
-    'the boot-time auto-select is not a passenger choice');
-  app.updateBookAvailability();
-  assert.strictEqual(app.els.bookBtn.disabled, true, 'Save stays blocked');
-  // the passenger's own tap counts
-  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39, userInitiated: true });
-  assert.strictEqual(app.editMarkers.vehicle, true);
-  app.updateBookAvailability();
-  assert.strictEqual(app.els.bookBtn.disabled, false);
+check('EDIT: the create carousel can never touch a booked ride', async () => {
+  // The review card renders its own vehicle options from the hydrated
+  // projection; the create carousel is never driven by hydration and its
+  // selections never reach an edit. The static pin below keeps
+  // selectVehicle free of any edit-session branch, so nothing here can
+  // turn a booked Escalade into a Tesla.
+  const src = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+  const start = src.indexOf('selectVehicle(vehicleData) {');
+  // The method body ends at the next method definition at class indent.
+  const rest = src.slice(start + 'selectVehicle(vehicleData) {'.length);
+  const nextMethod = rest.search(/\n {12}[a-zA-Z_]+\([^)]*\) \{\n/);
+  const body = rest.slice(0, nextMethod);
+  assert.ok(body.length > 200 && body.length < 6000, 'bounded to one method');
+  assert.ok(!/editSnapshot|if \(this\.pendingEdit[^)]*\)\s*return/.test(body),
+    'selectVehicle carries no edit-session branch — the card owns edit vehicles');
 });
 
 check('STATIC: the carousel stamps userInitiated=false on every non-user selection', () => {
@@ -2295,26 +2279,26 @@ check('DEFINITIVE means REGISTRY-SHAPED: 200 {} and a generic JSON 503 stay unkn
 });
 
 check('DEFINITIVE: an edit success without its version is unknown; with it, definitive', async () => {
-  for (const [body, wantPosts, wantEnvelope] of [
-    [{ success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9' }, 2, true],                    // missing detailsVersion
-    [{ success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9', detailsVersion: 8 }, 1, false],
+  // PR-B: edit submissions leave through the review card, which posts via
+  // the SAME shipped envelope machinery the funnel uses (submitEnvelope +
+  // definitiveEnvelopeResult). The property under test is the classifier's:
+  // an edit success MUST carry its committed detailsVersion to be definitive;
+  // without it the envelope is retried once and stays UNKNOWN (kept for
+  // recovery), never settled as success.
+  for (const [body, wantPosts, wantDefinitive] of [
+    [{ success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9' }, 2, false],   // missing detailsVersion
+    [{ success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9', detailsVersion: 8 }, 1, true],
   ]) {
     const f = routedFetch({
-      '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
       '/api/update-pending-booking': { status: 200, body },
     });
-    const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
-    app.showTripSheet = () => {};
-    app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 7 };
-    app.editMarkers = {
-      routeDirection: true, routeAddress: true, pickupAt: true,
-      vehicle: false, traveler: false
-    };
-    await app.requestServerQuote();
-    app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
-    await tap(app);
-    assert.strictEqual(f.to('/api/update-pending-booking').length, wantPosts);
-    assert.strictEqual(!!ctx.sessionStorage.getItem('lm_pending_envelope'), wantEnvelope,
+    const { app } = makeContext({ enabled: true, fetchImpl: f });
+    const out = await app.submitEnvelope('/api/update-pending-booking',
+      JSON.stringify({ operationId: '11111111-2222-4333-8444-555555555555', bookingId: '0b000000-0000-4000-8000-0000000000b9' }),
+      'jwt-abc', 'edit');
+    assert.strictEqual(f.to('/api/update-pending-booking').length, wantPosts,
+      'an unknown result is retried exactly once with the same bytes');
+    assert.strictEqual(out.definitive, wantDefinitive,
       'the edit success shape REQUIRES its committed version');
   }
 });
@@ -2863,94 +2847,139 @@ check('428 reload:true — the outdated bundle reloads instead of arguing', asyn
   assert.match(alerts[0], /updated/i);
 });
 
-check('EDIT: a full edit submission — edit envelope, forced traveler review, CAS carried', async () => {
+check('EDIT: the funnel refuses to quote OR submit an edit — the card owns both', async () => {
+  // Under PR-B a pending edit is never priced or written through this
+  // funnel. The full edit submission (edit envelope, CAS carried, value-bound
+  // traveler confirmation, notes/sign/promo/flight omitted) is EXECUTED in
+  // tests/pending-edit-card.test.js against the real card module.
   const f = routedFetch({
     '/api/quote-ride': { body: quoteWithTtl(15) },
     '/api/update-pending-booking': { status: 200, body: { success: true, bookingId: '0b000000-0000-4000-8000-0000000000b9', tripId: 'LM-9', detailsVersion: 8 } },
   });
-  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
-  const sheets = [];
-  app.showTripSheet = (id) => sheets.push(id);
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
   app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 7 };
-  app.editMarkers = {
-    routeDirection: true, routeAddress: true, pickupAt: true,
-    vehicle: false, traveler: false
-  };
-
   await app.requestServerQuote();
-  const quoteBody = JSON.parse(f.to('/api/quote-ride')[0].opts.body);
-  assert.strictEqual(quoteBody.bookingId, '0b000000-0000-4000-8000-0000000000b9');
-  assert.strictEqual(quoteBody.expectedDetailsVersion, 7);
-
+  assert.strictEqual(f.to('/api/quote-ride').length, 0, 'no funnel quote during an edit');
   app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
-  const before = ctx.__modalOpens || 0;
-  await tap(app);
-  assert.strictEqual((ctx.__modalOpens || 0) - before, 1,
-    'prefilled traveler data never counts — the modal is REOPENED for review');
-
-  const posts = f.to('/api/update-pending-booking');
-  assert.strictEqual(posts.length, 1, 'edits write through the edit lane');
-  const sent = JSON.parse(posts[0].opts.body);
-  assert.strictEqual(sent.bookingId, '0b000000-0000-4000-8000-0000000000b9');
-  assert.strictEqual(sent.expectedDetailsVersion, 7,
-    'the CAPTURED version is the CAS — a server echo never replaces it');
-  assert.match(sent.operationId, /^[0-9a-f-]{36}$/i);
-  assert.strictEqual(sent.quoteToken, 'tok.tesla');
-  assert.ok(!('paymentMethod' in sent),
-    'plan v3.1: the edit contract carries NO payment method — stored values survive');
-  assert.deepStrictEqual(sheets, ['0b000000-0000-4000-8000-0000000000b9']);
-  assert.strictEqual(app.pendingEdit, null, 'a saved edit closes the edit session');
-});
-
-check('EDIT_STALE: a stale edit quote fails closed with honest reopen copy', async () => {
-  const f = routedFetch({
-    '/api/quote-ride': { status: 409, body: { error: 'edit_stale', reason: 'version', currentDetailsVersion: 5 } },
-  });
-  const { app, carousel } = makeContext({ enabled: true, fetchImpl: f });
-  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 3 };
-  app.editMarkers = {
-    routeDirection: true, routeAddress: true, pickupAt: true,
-    vehicle: true, traveler: false
-  };
-
-  await app.requestServerQuote();
-  assert.strictEqual(app.state.quote.status, 'error');
-  assert.strictEqual(app.state.quote.error.retryable, false,
-    'the captured CAS is sacred — never silently refreshed into a retry');
-  assert.strictEqual(app.state.quote.error.editStale, true);
-  assert.match(app.state.quote.error.message, /reopen/i);
-  assert.strictEqual(app.pendingEdit.detailsVersion, 3,
-    'the server-echoed currentDetailsVersion must NEVER be adopted silently');
-  await app.requestServerQuote();
-  assert.strictEqual(f.calls.length, 1,
-    'a stale edit is a dead intent — re-entry must not buy another provider call');
-  assert.deepStrictEqual(carousel.visible(),
-    { tesla: 'Unavailable', escalade: 'Unavailable', sprinter: 'Unavailable' });
   app.updateBookAvailability();
-  assert.strictEqual(app.els.bookBtn.disabled, true);
+  assert.strictEqual(app.els.bookBtn.disabled, true, 'the funnel button is inert during an edit');
+  await tap(app);
+  assert.strictEqual(f.to('/api/update-pending-booking').length, 0, 'no funnel write during an edit');
 });
 
-check('STATIC: every interaction marker is wired to its real explicit action', () => {
-  // beginPendingEdit resets all five markers at edit start
-  assert.match(appBlock,
-    /beginPendingEdit[\s\S]{0,2000}?routeDirection:\s*false,\s*routeAddress:\s*false,[\s\S]{0,40}?pickupAt:\s*false,\s*vehicle:\s*false,\s*traveler:\s*false/,
-    'beginPendingEdit must reset every marker');
-  // each setter is guarded so create flows AND flag-off legacy flows never
-  // touch markers or call updateBookAvailability (dark invariance)
-  assert.match(appBlock, /this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\) &&\s*\n\s*this\.state\.locations\.placeId[\s\S]{0,120}?routeAddress = true/,
-    'routeAddress: only a LIVE autocomplete selection, quote flow only');
-  assert.match(appBlock, /invalidateQuote\('airport changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\)\) \{\s*\n\s*this\.editMarkers\.routeDirection = true/,
-    'routeDirection: an explicit airport choice, quote flow only');
-  assert.match(appBlock, /invalidateQuote\('pickup time changed'\);\s*\n\s*if \(this\.pendingEdit && this\.editMarkers && this\.quoteFlowActive\(\)\) \{\s*\n\s*this\.editMarkers\.pickupAt = true/,
-    'pickupAt: an explicit time set, quote flow only');
-  assert.match(appBlock, /this\.quoteFlowActive\(\) &&\s*\n\s*!\(isObject && vehicleData\.userInitiated === false\)[\s\S]{0,80}?this\.editMarkers\.vehicle = true/,
-    'vehicle: an explicit USER selection — carousel auto-select never counts');
-  // traveler is set ONLY inside the modal completion callback
-  assert.match(appBlock, /openRequired\(\(\) => \{[\s\S]{0,200}?editMarkers\.traveler = true/,
-    'traveler: only the modal review sets it');
-  // an edit session under the quote flow starts with Save honestly DISABLED
-  assert.ok(appBlock.includes('if (this.quoteFlowActive()) this.updateBookAvailability();'),
-    'beginPendingEdit recomputes availability so zero-marker Save is not a silent no-op');
+check('EDIT-ROUTE MODE: typing a new address clears the temporary tuple and disables Done until a fresh selection', async () => {
+  // Codex seq:191 #2: entry calls clearValidation(), so autocomplete's own
+  // 'validation-cleared' (dispatched only when it WAS validated) never fires
+  // on the first keystroke — the old placeId stayed saveable under a new
+  // typed address. The host now watches the passenger's own 'input'.
+  const f = okFetch(quoteWithTtl(15));
+  const { app } = makeContext({ enabled: true, fetchImpl: f });
+  const withHost = (el) => Object.assign(el, {
+    closest: () => null, insertBefore(c) { el.children.unshift(c); c.parent = el; return c; },
+    get firstChild() { return el.children[0] || null; },
+    removeEventListener(evt, fn) { el.listeners[evt] = (el.listeners[evt] || []).filter((x) => x !== fn); },
+    fire(evt) { (el.listeners[evt] || []).forEach((fn) => fn({ target: el })); },
+    value: '', hidden: false, parentElement: makeEl('div')
+  });
+  const mk = () => withHost(makeEl('div'));
+  Object.assign(app.els, {
+    addressInput: withHost(makeEl('input')), addressStep: mk(), airportStep: mk(), flowConnector: mk(),
+    airportTitle: mk(), addressTitle: mk(), flightSection: mk(), continueBtn: mk(),
+    panelsWrapper: mk(), progressLine: mk(), summaryBar: mk(), bookingContainer: mk(),
+    modeBtns: [Object.assign(mk(), { dataset: { mode: 'pickup' } }), Object.assign(mk(), { dataset: { mode: 'dropoff' } })],
+    airportOptions: ['MIA', 'FLL', 'PBI'].map((c) => Object.assign(mk(), { dataset: { airport: c } })),
+  });
+  app.state.ui = { currentPanel: 'vehicle' };
+  app.autocomplete = { invalidateRawCapture() {}, clearValidation() {} };
+  let done = null;
+  // The host receives the OPAQUE route plus the adapter's projections and
+  // builds the airport-specific temporary draft itself (Codex seq:193 #5).
+  app.enterEditRouteMode({
+    route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
+    projection: { origin: { label: 'MIA', placeId: null, attributions: [] },
+      destination: { label: '4441 Collins Ave', placeId: 'ChIJ_old', attributions: [] } },
+    quoteIntent: { mode: 'pickup', airportCode: 'MIA', placeId: 'ChIJ_old' }
+  }, { onDone: (d) => { done = d; }, onBack: () => {} });
+  assert.strictEqual(app.editRouteDoneEnabled(), true, 'the untouched old tuple is complete');
+
+  // (a) airport-only edit with the box never touched keeps the address tuple
+  app.onAirportTap('FLL');
+  assert.strictEqual(app._editRoute.routeDraft.address.placeId, 'ChIJ_old', 'preserved');
+  assert.strictEqual(app.editRouteDoneEnabled(), true);
+
+  // (b) the FIRST keystroke clears only the temporary tuple and disables Done
+  app.els.addressInput.value = '123 New';
+  app.els.addressInput.fire('input');
+  assert.strictEqual(app._editRoute.routeDraft.address.placeId, null, 'old placeId gone');
+  assert.strictEqual(app._editRoute.routeDraft.address.label, '');
+  assert.strictEqual(app.editRouteDoneEnabled(), false, 'Done disabled until a fresh selection');
+  assert.strictEqual(app._editRoute.routeDraft.airport, 'FLL', 'the airport edit survived');
+
+  // (c) a fresh Railway selection replaces the whole tuple atomically
+  app.onAutocompleteSelect({ address: '123 New St', coordinates: { lat: 25.7, lng: -80.1 },
+    place: { id: 'ChIJ_new', attributions: [] } });
+  assert.strictEqual(app._editRoute.routeDraft.address.placeId, 'ChIJ_new');
+  assert.strictEqual(app.editRouteDoneEnabled(), true);
+  // (d) DONE hands the adapter-shaped tuple to the card ATOMICALLY, then
+  //     tears the mode down (listener removed, _editRoute cleared)
+  const controls = app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
+  assert.ok(controls, 'the host built its Done/Back controls');
+  const doneBtn = controls.children[0];
+  const backBtn = controls.children[2];
+  assert.strictEqual(doneBtn.disabled, false);
+  doneBtn.listeners.click[0]();
+  assert.deepStrictEqual(done, { mode: 'pickup', airport: 'FLL',
+    address: { label: '123 New St', placeId: 'ChIJ_new', coordinates: { lat: 25.7, lng: -80.1 }, attributions: [] } },
+    'Done delivers exactly the temporary tuple, whole');
+  assert.strictEqual(app._editRoute, null);
+  assert.strictEqual((app.els.addressInput.listeners.input || []).length, 0,
+    'the input listener is removed on exit, so the create flow is untouched');
+
+  // (e) BACK applies nothing
+  let backed = false; done = null;
+  app.enterEditRouteMode({
+    route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
+    projection: { origin: { label: 'MIA', placeId: null, attributions: [] },
+      destination: { label: '4441 Collins Ave', placeId: 'ChIJ_old', attributions: [] } },
+    quoteIntent: { mode: 'pickup', airportCode: 'MIA', placeId: 'ChIJ_old' }
+  }, { onDone: (d) => { done = d; }, onBack: () => { backed = true; } });
+  app.onAirportTap('PBI');
+  const controls2 = app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
+  controls2.children[2].listeners.click[0]();
+  assert.strictEqual(backed, true);
+  assert.strictEqual(done, null, 'Back applies nothing, even after an edit');
+  assert.strictEqual(app._editRoute, null);
+  void backBtn;
+});
+
+check('EDIT_STALE: the shipped "reopen it from your trip page" branch is GONE from the funnel', () => {
+  // v8.6: neither stale reason may render that copy. The card maps
+  // reason:not_editable to the lifecycle handoff and reason:version to one
+  // fresh hydration with the changed-elsewhere copy (executed in
+  // tests/pending-edit-card.test.js). The funnel never sees edit_stale now,
+  // so the branch — and its copy — must not survive as dead code.
+  assert.ok(!appBlock.includes('reopen it from your trip page'));
+  assert.ok(!appBlock.includes("payload?.error === 'edit_stale'"));
+  assert.ok(!appBlock.includes('editStale: true'));
+});
+
+check('STATIC: the interaction markers are GONE, and the card owns edit gating', () => {
+  // PR-B retires the markers outright. They were a proxy for "did the
+  // passenger mean this?", needed only because nothing was restored. The
+  // review card measures the draft against the server's snapshot instead,
+  // and the funnel's only remaining edit-time rule is "not my job".
+  assert.ok(!appBlock.includes('editMarkers'),
+    'no marker state may survive anywhere in the app block');
+  assert.ok(!appBlock.includes('needsExplicitTraveler = this.pendingEdit'),
+    'the marker-based traveler gate is gone');
+  assert.match(appBlock, /editReady\(\)\s*\{[\s\S]{0,120}?return !this\.pendingEdit;/,
+    'the funnel is never an edit surface');
+  // Paid-surface predicate on the create side: both the scheduler and the
+  // request refuse while an edit session is open.
+  assert.match(appBlock, /scheduleQuote\(\)\s*\{[\s\S]{0,600}?if \(this\.pendingEdit\) return;/,
+    'scheduleQuote refuses during an edit');
+  assert.match(appBlock, /requestServerQuote\([\s\S]{0,900}?if \(this\.pendingEdit\) return;/,
+    'requestServerQuote refuses during an edit');
 });
 
 // A check that awaits a promise that never settles drains node's event loop

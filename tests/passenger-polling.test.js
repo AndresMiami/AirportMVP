@@ -468,6 +468,35 @@ function check(name, fn) {
     assert.ok(!/notified your driver/i.test(swap.element('statusSub').textContent));
   });
 
+  // PR-B (Codex seq:193 #4 / seq:195 #4): a LEGACY `assigned` row is presented as
+  // confirmed — status strip, lifecycle action, driver contact — while every
+  // raw-status rule (cancellation eligibility, polling cadence) keeps reading
+  // 'assigned'. Executed against the real trip sheet, alongside a genuine
+  // confirmed booking for the presentation comparison.
+  const assignedRow = { ...pendingBooking, status: 'assigned',
+    pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() };
+  const confirmedRow = { ...assignedRow, status: 'confirmed' };
+  const driver = { name: 'Carlos M.', phone: '+13055551212' };
+  const assignedSheet = createHarness([response(200, { booking: assignedRow, driver })]);
+  const confirmedSheet = createHarness([response(200, { booking: confirmedRow, driver })]);
+  await assignedSheet.settle(); await confirmedSheet.settle();
+  // Read the SCHEDULED cadence without firing it: the scenario queues one
+  // response, and the raw-status rule is visible in the timer itself.
+  const assignedDelay = [...assignedSheet.timers.values()][0].delay;
+  check('legacy assigned: presented as CONFIRMED, raw status untouched, raw rules intact', () => {
+    assert.strictEqual(assignedSheet.element('statusText').textContent,
+      confirmedSheet.element('statusText').textContent, 'status strip reads as confirmed');
+    assert.strictEqual(assignedSheet.element('backBtn').textContent, 'Manage ride');
+    assert.strictEqual(assignedSheet.element('backBtn').dataset.action, 'manage');
+    assert.ok(!assignedSheet.element('backBtn').classList.contains('hidden'));
+    assert.ok(!assignedSheet.element('waBtn').classList.contains('hidden'), 'driver contact shown');
+    assert.match(assignedSheet.element('waBtn').href || '', /13055551212/);
+    assert.strictEqual(assignedSheet.evaluate('lastBooking.status'), 'assigned', 'raw status never rewritten');
+    assert.ok(assignedSheet.element('cancelBtn').classList.contains('hidden'),
+      'cancellation eligibility reads the RAW status — assigned is not in the list');
+    assert.strictEqual(assignedDelay, 60000, 'polling cadence reads the RAW status (unknown → default 60s)');
+  });
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {
   console.error('\nFAIL:', error.stack || error.message);
