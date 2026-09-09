@@ -23,6 +23,15 @@
 //   HANDLER       — dedicated ZQ019 branch: resets rpc_writer and returns
 //                   pickup_time_elapsed AFTER every write rolled back. Never
 //                   ZQ017, never a verdict row, verdict CHECK untouched.
+//   FINGERPRINTS  — every artifact REFUSES to replace an installed writer whose
+//                   body (sha256 of pg_proc.prosrc, byte-identical to the
+//                   dollar-quoted body in the migration file) is not a
+//                   recognized reviewed body: 019 accepts ONLY the reviewed
+//                   018 bodies; the rollback accepts the 018, 019 or its own
+//                   already-restored bodies. After replacement each artifact
+//                   verifies the installed body equals its generated body
+//                   (an altered paste cannot commit). The expected values are
+//                   generated into the preflight (A2) and the runbook.
 //   HELPER        — public.linkmia_pickup_is_future(TIMESTAMPTZ, TIMESTAMPTZ)
 //                   LANGUAGE sql IMMUTABLE STRICT, security invoker, owned by
 //                   the captured writer owner; EXECUTE grantees canonicalized
@@ -33,12 +42,36 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const MIG_DIR = path.resolve(__dirname, '..');
 const SRC_017 = path.join(MIG_DIR, '017_quote_enforcement_foundation.sql');
 const SRC_018 = path.join(MIG_DIR, '018_r1_route_content_non_retention.sql');
 const OUT_019 = path.join(MIG_DIR, '019_prt_pickup_time_integrity.sql');
 const OUT_RB = path.join(MIG_DIR, '018_r1_rollback.sql');
+const PREFLIGHT = path.join(MIG_DIR, '019_prt_preflight.sql');
+const RUNBOOK = path.resolve(MIG_DIR, '..', '..', 'docs', 'PRT-MIGRATION-RUNBOOK.md');
+
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+// PostgreSQL stores a dollar-quoted body VERBATIM in pg_proc.prosrc, so the
+// fingerprint of the installed writer is the sha256 of exactly this slice.
+function bodyOf(fnText) {
+  const a = fnText.indexOf('AS $$');
+  const b = fnText.lastIndexOf('$$;');
+  if (a < 0 || b <= a) throw new Error('function body delimiters not found');
+  return fnText.slice(a + 'AS $$'.length, b);
+}
+const PREFLIGHT_BEGIN = '-- PRT-EXPECTED-FINGERPRINTS:BEGIN';
+const PREFLIGHT_END = '-- PRT-EXPECTED-FINGERPRINTS:END';
+const RUNBOOK_BEGIN = '<!-- PRT-ARTIFACT-CHECKSUMS:BEGIN';
+const RUNBOOK_END = '<!-- PRT-ARTIFACT-CHECKSUMS:END';
+function splice(text, begin, end, content) {
+  const a = text.indexOf(begin);
+  const lineEnd = text.indexOf('\n', a);
+  const b = text.indexOf(end);
+  if (a < 0 || b < 0 || b < a) throw new Error('generated-block markers not found');
+  return text.slice(0, lineEnd + 1) + content + text.slice(b);
+}
 
 const HELPER_SIG = 'public.linkmia_pickup_is_future(timestamptz,timestamptz)';
 const HELPER_SQL = `-- The comparator, as ONE named IMMUTABLE STRICT SQL function so the exact
@@ -216,12 +249,17 @@ function applyPickupGuard(body, kind) {
 }
 
 // ---- artifact assembly ------------------------------------------------------
-const PRE_CAPTURE = (table, tag, label) => `-- ------------------------------------------------------------
--- PRE-CAPTURE: exact namespace-qualified identities, owners and ACLs of both
--- writers BEFORE replacement (regprocedure resolution is itself fail-closed).
+const sqlArray = (fps) => 'ARRAY[' + fps.map((f) => `'${f}'`).join(', ') + ']::TEXT[]';
+const PRE_CAPTURE = (table, tag, label, accepted) => `-- ------------------------------------------------------------
+-- PRE-CAPTURE: exact namespace-qualified identities, owners, ACLs AND BODY
+-- FINGERPRINTS (sha256 of pg_proc.prosrc) of both writers BEFORE replacement
+-- (regprocedure resolution is itself fail-closed). The precheck REFUSES to
+-- proceed unless each installed body is a recognized reviewed body — an
+-- unnoticed production change is never overwritten.
 -- ------------------------------------------------------------
 CREATE TEMP TABLE ${table} ON COMMIT DROP AS
-SELECT p.oid, p.proname, p.proowner, p.proacl, p.proconfig
+SELECT p.oid, p.proname, p.proowner, p.proacl, p.proconfig,
+       encode(extensions.digest(p.prosrc, 'sha256'), 'hex') AS body_fp
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public'
@@ -229,12 +267,21 @@ WHERE n.nspname = 'public'
                 'public.accept_quote_edit(uuid,uuid,uuid,text,uuid,integer,text,uuid,text,jsonb,numeric,text,text,text,jsonb)'::regprocedure);
 
 DO $${tag}_precheck$
-DECLARE v_row RECORD;
+DECLARE
+  v_row RECORD;
+  v_accepted TEXT[];
 BEGIN
   IF (SELECT count(*) FROM ${table}) <> 2 THEN
     RAISE EXCEPTION '${label}: expected exactly the two public writers before replacement';
   END IF;
   FOR v_row IN SELECT * FROM ${table} LOOP
+    v_accepted := CASE v_row.proname
+      WHEN 'accept_quote_create' THEN ${sqlArray(accepted.create)}
+      ELSE ${sqlArray(accepted.edit)} END;
+    IF NOT (v_row.body_fp = ANY (v_accepted)) THEN
+      RAISE EXCEPTION '${label}: installed % body fingerprint % is not a recognized reviewed body (accepted: %) — an unreviewed change is installed; refusing to overwrite it',
+        v_row.proname, v_row.body_fp, v_accepted;
+    END IF;
     IF has_function_privilege('anon', v_row.oid, 'EXECUTE')
        OR has_function_privilege('authenticated', v_row.oid, 'EXECUTE') THEN
       RAISE EXCEPTION '${label}: client role holds EXECUTE on % — refuse over privilege drift', v_row.proname;
@@ -247,7 +294,7 @@ END;
 $${tag}_precheck$;
 `;
 
-const WRITER_VERIFY = (table, tag, label, extraBodyChecks) => `DO $${tag}_verify$
+const WRITER_VERIFY = (table, tag, label, extraBodyChecks, post) => `DO $${tag}_verify$
 DECLARE
   v_def TEXT;
   v_row RECORD;
@@ -275,6 +322,14 @@ ${helperVerifySql(table, tag)}
     END IF;
     IF NOT (SELECT prosecdef FROM pg_proc WHERE oid = v_row.oid) THEN
       RAISE EXCEPTION '${label}: SECURITY DEFINER was lost on %', v_row.proname;
+    END IF;
+    -- The installed body after replacement must be EXACTLY this artifact's
+    -- generated body (an altered or partial paste cannot commit).
+    -- (the CASE is parenthesized: PL/pgSQL ends an IF condition at the first
+    --  unparenthesized THEN)
+    IF encode(extensions.digest((SELECT prosrc FROM pg_proc WHERE oid = v_row.oid), 'sha256'), 'hex')
+       <> (CASE v_row.proname WHEN 'accept_quote_create' THEN '${post.create}' ELSE '${post.edit}' END) THEN
+      RAISE EXCEPTION '${label}: the installed % body after replacement is not this artifact''s generated body (altered paste?)', v_row.proname;
     END IF;
     IF v_row.proconfig IS NULL OR array_to_string(v_row.proconfig, ',') NOT LIKE '%search_path%' THEN
       RAISE EXCEPTION '${label}: SET search_path drifted on %', v_row.proname;
@@ -427,9 +482,27 @@ END;
 $prt_smoke$;
 `;
 
-function build019(m018) {
-  const create = applyPickupGuard(extract(m018, 'accept_quote_create'), 'create');
-  const edit = applyPickupGuard(extract(m018, 'accept_quote_edit'), 'edit');
+function fingerprints(m017, m018) {
+  const c018 = extract(m018, 'accept_quote_create');
+  const e018 = extract(m018, 'accept_quote_edit');
+  const c019 = applyPickupGuard(c018, 'create');
+  const e019 = applyPickupGuard(e018, 'edit');
+  const crb = applyPickupGuard(extract(m017, 'accept_quote_create'), 'create');
+  const erb = applyPickupGuard(extract(m017, 'accept_quote_edit'), 'edit');
+  return {
+    bodies: { c018, e018, c019, e019, crb, erb },
+    fp: {
+      reviewed018: { create: sha256(bodyOf(c018)), edit: sha256(bodyOf(e018)) },
+      target019: { create: sha256(bodyOf(c019)), edit: sha256(bodyOf(e019)) },
+      rollback: { create: sha256(bodyOf(crb)), edit: sha256(bodyOf(erb)) },
+    },
+  };
+}
+
+function build019(m018, fps) {
+  const create = fps.bodies.c019;
+  const edit = fps.bodies.e019;
+  const accepted = { create: [fps.fp.reviewed018.create], edit: [fps.fp.reviewed018.edit] };
   return `-- ============================================================
 -- Migration 019 — PR-T: pickup-time integrity (plan v8.6 §3E)
 --
@@ -464,14 +537,22 @@ function build019(m018) {
 --   * no minimum lead time; fares, tokens, cancellation and driver-status
 --     semantics are unchanged; accept_optional_edit is untouched.
 --
+-- FINGERPRINT GATE: the pre-capture refuses to run unless BOTH installed
+-- writer bodies are EXACTLY the reviewed 018 bodies (sha256 of
+-- pg_proc.prosrc — the values below, generated from the reviewed 018 text and
+-- printed by preflight A2). Any other body — an unnoticed hotfix, a manual
+-- edit — aborts the whole transaction before anything is touched. After
+-- replacement, the installed bodies must equal this artifact's own bodies.
+--
 -- RUN VIA docs/PRT-MIGRATION-RUNBOOK.md ONLY. Emergency rollback:
--- database/migrations/018_r1_rollback.sql (017 bodies WITH this guard;
--- self-contained — creates the helper first).
+-- database/migrations/018_r1_rollback.sql — restores the migration-017
+-- DURATION BEHAVIOR (the verified-duration requirement returns) PLUS the PR-T
+-- pickup guard; self-contained (creates the helper first).
 -- ============================================================
 
 BEGIN;
 
-${PRE_CAPTURE('prt_pre_state', 'prt', 'PR-T')}
+${PRE_CAPTURE('prt_pre_state', 'prt', 'PR-T', accepted)}
 ${HELPER_SQL}
 
 ${helperAclSql('prt_pre_state', 'prt')}
@@ -489,18 +570,32 @@ ${WRITER_VERIFY('prt_pre_state', 'prt', 'PR-T', `    -- 018 semantics must still
     END IF;
     IF v_row.proname = 'accept_quote_edit' AND v_def NOT LIKE '%duration_minutes = NULL%' THEN
       RAISE EXCEPTION 'PR-T: the edit update persists a duration again';
-    END IF;`)}
+    END IF;`, fps.fp.target019)}
 ${SMOKE}
 COMMIT;
 `;
 }
 
-function buildRollback(m017) {
-  const create = applyPickupGuard(extract(m017, 'accept_quote_create'), 'create');
-  const edit = applyPickupGuard(extract(m017, 'accept_quote_edit'), 'edit');
+function buildRollback(m017, fps) {
+  const create = fps.bodies.crb;
+  const edit = fps.bodies.erb;
+  // Recognized pre-states: 018 installed (019 never ran), 019 installed, or
+  // this rollback already applied. Anything else is an unreviewed body.
+  const accepted = {
+    create: [fps.fp.reviewed018.create, fps.fp.target019.create, fps.fp.rollback.create],
+    edit: [fps.fp.reviewed018.edit, fps.fp.target019.edit, fps.fp.rollback.edit],
+  };
   return `-- ============================================================
 -- Migration 018 EMERGENCY ROLLBACK — restores the migration-017 bodies of
--- accept_quote_create and accept_quote_edit WITH the PR-T pickup guard.
+-- accept_quote_create and accept_quote_edit WITH the PR-T pickup guard:
+-- i.e. the 017 DURATION BEHAVIOR (the verified-duration requirement returns)
+-- PLUS the PR-T pickup-time guard — NOT simply the 017 shape.
+--
+-- FINGERPRINT GATE: refuses to run unless both installed bodies are EXACTLY
+-- one of the recognized reviewed bodies — 018's, 019's, or this rollback's
+-- own (already restored). An unrecognized body aborts before anything is
+-- touched; after replacement the installed bodies must equal this
+-- artifact's own bodies.
 --
 -- GENERATED by database/migrations/tools/prt-guard-transform.js: the 017
 -- bodies (extracted programmatically) with the SAME guard transform that
@@ -524,7 +619,7 @@ function buildRollback(m017) {
 
 BEGIN;
 
-${PRE_CAPTURE('r1_rb_pre_state', 'r1_rb', 'R1 rollback')}
+${PRE_CAPTURE('r1_rb_pre_state', 'r1_rb', 'R1 rollback', accepted)}
 ${HELPER_SQL}
 
 ${helperAclSql('r1_rb_pre_state', 'r1_rb')}
@@ -538,34 +633,80 @@ ${edit}
 -- privilege ceiling re-proven behaviorally.
 ${WRITER_VERIFY('r1_rb_pre_state', 'r1_rb', 'R1 rollback', `    IF v_def NOT LIKE '%v_duration_minutes IS NULL%' THEN
       RAISE EXCEPTION 'R1 rollback: the 017 verified-duration requirement did not return on %', v_row.proname;
-    END IF;`)}
+    END IF;`, fps.fp.rollback)}
 COMMIT;
+`;
+}
+
+// Generated blocks: the preflight's A2 expected-fingerprint expressions and the
+// runbook's checksum table. Deterministic: same sources -> same bytes.
+function preflightBlock(fps) {
+  const r = fps.fp.reviewed018; const t = fps.fp.target019;
+  return `       CASE p.proname
+         WHEN 'accept_quote_create' THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${r.create}'
+         WHEN 'accept_quote_edit'   THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${r.edit}'
+       END AS is_reviewed_018,
+       CASE p.proname
+         WHEN 'accept_quote_create' THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${t.create}'
+         WHEN 'accept_quote_edit'   THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${t.edit}'
+       END AS is_target_019,
+`;
+}
+function runbookBlock(checksums, fps) {
+  return `| Artifact / fingerprint | sha256 |
+|---|---|
+| \`database/migrations/019_prt_pickup_time_integrity.sql\` (file) | \`${checksums.migration}\` |
+| \`database/migrations/018_r1_rollback.sql\` (file) | \`${checksums.rollback}\` |
+| installed \`accept_quote_create\` body 019 REQUIRES (reviewed 018) | \`${fps.fp.reviewed018.create}\` |
+| installed \`accept_quote_edit\` body 019 REQUIRES (reviewed 018) | \`${fps.fp.reviewed018.edit}\` |
+| \`accept_quote_create\` body 019 INSTALLS (target) | \`${fps.fp.target019.create}\` |
+| \`accept_quote_edit\` body 019 INSTALLS (target) | \`${fps.fp.target019.edit}\` |
+| \`accept_quote_create\` body the rollback INSTALLS | \`${fps.fp.rollback.create}\` |
+| \`accept_quote_edit\` body the rollback INSTALLS | \`${fps.fp.rollback.edit}\` |
 `;
 }
 
 function generate() {
   const m017 = fs.readFileSync(SRC_017, 'utf8');
   const m018 = fs.readFileSync(SRC_018, 'utf8');
-  return { migration: build019(m018), rollback: buildRollback(m017) };
+  const fps = fingerprints(m017, m018);
+  const migration = build019(m018, fps);
+  const rollback = buildRollback(m017, fps);
+  const checksums = { migration: sha256(migration), rollback: sha256(rollback) };
+  return { migration, rollback, fps, checksums, preflightBlock: preflightBlock(fps), runbookBlock: runbookBlock(checksums, fps) };
+}
+
+function check() {
+  const g = generate();
+  const pre = fs.readFileSync(PREFLIGHT, 'utf8');
+  const rb = fs.readFileSync(RUNBOOK, 'utf8');
+  return {
+    migration: fs.readFileSync(OUT_019, 'utf8') === g.migration,
+    rollback: fs.readFileSync(OUT_RB, 'utf8') === g.rollback,
+    preflight: splice(pre, PREFLIGHT_BEGIN, PREFLIGHT_END, g.preflightBlock) === pre,
+    runbook: splice(rb, RUNBOOK_BEGIN, RUNBOOK_END, g.runbookBlock) === rb,
+  };
 }
 
 if (require.main === module) {
-  const { migration, rollback } = generate();
   const mode = process.argv[2];
   if (mode === '--write') {
-    fs.writeFileSync(OUT_019, migration);
-    fs.writeFileSync(OUT_RB, rollback);
-    console.log(`wrote ${path.basename(OUT_019)} (${migration.length} bytes) and ${path.basename(OUT_RB)} (${rollback.length} bytes)`);
+    const g = generate();
+    fs.writeFileSync(OUT_019, g.migration);
+    fs.writeFileSync(OUT_RB, g.rollback);
+    fs.writeFileSync(PREFLIGHT, splice(fs.readFileSync(PREFLIGHT, 'utf8'), PREFLIGHT_BEGIN, PREFLIGHT_END, g.preflightBlock));
+    fs.writeFileSync(RUNBOOK, splice(fs.readFileSync(RUNBOOK, 'utf8'), RUNBOOK_BEGIN, RUNBOOK_END, g.runbookBlock));
+    console.log(`wrote ${path.basename(OUT_019)} (${g.migration.length} bytes, sha256 ${g.checksums.migration}) and ${path.basename(OUT_RB)} (${g.rollback.length} bytes, sha256 ${g.checksums.rollback}); preflight A2 + runbook checksum table regenerated`);
   } else if (mode === '--check') {
-    const a = fs.readFileSync(OUT_019, 'utf8') === migration;
-    const b = fs.readFileSync(OUT_RB, 'utf8') === rollback;
-    console.log(`019 ${a ? 'matches' : 'DIFFERS'}; rollback ${b ? 'matches' : 'DIFFERS'}`);
-    process.exit(a && b ? 0 : 1);
+    const c = check();
+    console.log(`019 ${c.migration ? 'matches' : 'DIFFERS'}; rollback ${c.rollback ? 'matches' : 'DIFFERS'}; preflight block ${c.preflight ? 'matches' : 'DIFFERS'}; runbook checksum table ${c.runbook ? 'matches' : 'DIFFERS'}`);
+    process.exit(c.migration && c.rollback && c.preflight && c.runbook ? 0 : 1);
   } else {
     console.log('usage: prt-guard-transform.js --write | --check');
     process.exit(2);
   }
 }
 
-module.exports = { applyPickupGuard, extract, generate, build019, buildRollback, HELPER_SQL, HELPER_SIG,
-  PRE_GUARD, FINAL_GUARD, HANDLER, OUT_019, OUT_RB, SRC_017, SRC_018 };
+module.exports = { applyPickupGuard, extract, generate, check, fingerprints, bodyOf, sha256, build019, buildRollback,
+  HELPER_SQL, HELPER_SIG, PRE_GUARD, FINAL_GUARD, HANDLER, OUT_019, OUT_RB, SRC_017, SRC_018, PREFLIGHT, RUNBOOK,
+  PREFLIGHT_BEGIN, PREFLIGHT_END, RUNBOOK_BEGIN, RUNBOOK_END };

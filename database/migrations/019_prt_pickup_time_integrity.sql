@@ -32,19 +32,31 @@
 --   * no minimum lead time; fares, tokens, cancellation and driver-status
 --     semantics are unchanged; accept_optional_edit is untouched.
 --
+-- FINGERPRINT GATE: the pre-capture refuses to run unless BOTH installed
+-- writer bodies are EXACTLY the reviewed 018 bodies (sha256 of
+-- pg_proc.prosrc — the values below, generated from the reviewed 018 text and
+-- printed by preflight A2). Any other body — an unnoticed hotfix, a manual
+-- edit — aborts the whole transaction before anything is touched. After
+-- replacement, the installed bodies must equal this artifact's own bodies.
+--
 -- RUN VIA docs/PRT-MIGRATION-RUNBOOK.md ONLY. Emergency rollback:
--- database/migrations/018_r1_rollback.sql (017 bodies WITH this guard;
--- self-contained — creates the helper first).
+-- database/migrations/018_r1_rollback.sql — restores the migration-017
+-- DURATION BEHAVIOR (the verified-duration requirement returns) PLUS the PR-T
+-- pickup guard; self-contained (creates the helper first).
 -- ============================================================
 
 BEGIN;
 
 -- ------------------------------------------------------------
--- PRE-CAPTURE: exact namespace-qualified identities, owners and ACLs of both
--- writers BEFORE replacement (regprocedure resolution is itself fail-closed).
+-- PRE-CAPTURE: exact namespace-qualified identities, owners, ACLs AND BODY
+-- FINGERPRINTS (sha256 of pg_proc.prosrc) of both writers BEFORE replacement
+-- (regprocedure resolution is itself fail-closed). The precheck REFUSES to
+-- proceed unless each installed body is a recognized reviewed body — an
+-- unnoticed production change is never overwritten.
 -- ------------------------------------------------------------
 CREATE TEMP TABLE prt_pre_state ON COMMIT DROP AS
-SELECT p.oid, p.proname, p.proowner, p.proacl, p.proconfig
+SELECT p.oid, p.proname, p.proowner, p.proacl, p.proconfig,
+       encode(extensions.digest(p.prosrc, 'sha256'), 'hex') AS body_fp
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public'
@@ -52,12 +64,21 @@ WHERE n.nspname = 'public'
                 'public.accept_quote_edit(uuid,uuid,uuid,text,uuid,integer,text,uuid,text,jsonb,numeric,text,text,text,jsonb)'::regprocedure);
 
 DO $prt_precheck$
-DECLARE v_row RECORD;
+DECLARE
+  v_row RECORD;
+  v_accepted TEXT[];
 BEGIN
   IF (SELECT count(*) FROM prt_pre_state) <> 2 THEN
     RAISE EXCEPTION 'PR-T: expected exactly the two public writers before replacement';
   END IF;
   FOR v_row IN SELECT * FROM prt_pre_state LOOP
+    v_accepted := CASE v_row.proname
+      WHEN 'accept_quote_create' THEN ARRAY['ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388']::TEXT[]
+      ELSE ARRAY['cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41']::TEXT[] END;
+    IF NOT (v_row.body_fp = ANY (v_accepted)) THEN
+      RAISE EXCEPTION 'PR-T: installed % body fingerprint % is not a recognized reviewed body (accepted: %) — an unreviewed change is installed; refusing to overwrite it',
+        v_row.proname, v_row.body_fp, v_accepted;
+    END IF;
     IF has_function_privilege('anon', v_row.oid, 'EXECUTE')
        OR has_function_privilege('authenticated', v_row.oid, 'EXECUTE') THEN
       RAISE EXCEPTION 'PR-T: client role holds EXECUTE on % — refuse over privilege drift', v_row.proname;
@@ -1561,6 +1582,14 @@ BEGIN
     END IF;
     IF NOT (SELECT prosecdef FROM pg_proc WHERE oid = v_row.oid) THEN
       RAISE EXCEPTION 'PR-T: SECURITY DEFINER was lost on %', v_row.proname;
+    END IF;
+    -- The installed body after replacement must be EXACTLY this artifact's
+    -- generated body (an altered or partial paste cannot commit).
+    -- (the CASE is parenthesized: PL/pgSQL ends an IF condition at the first
+    --  unparenthesized THEN)
+    IF encode(extensions.digest((SELECT prosrc FROM pg_proc WHERE oid = v_row.oid), 'sha256'), 'hex')
+       <> (CASE v_row.proname WHEN 'accept_quote_create' THEN 'fc64b32ca907098b8ccceb5c912fa9d290a5e9c14a4f0704013d6b226f506396' ELSE 'ce81f347112d3cd251738d9bece093154ea27cccd09b6a2c8ea0e21f75a6e50d' END) THEN
+      RAISE EXCEPTION 'PR-T: the installed % body after replacement is not this artifact''s generated body (altered paste?)', v_row.proname;
     END IF;
     IF v_row.proconfig IS NULL OR array_to_string(v_row.proconfig, ',') NOT LIKE '%search_path%' THEN
       RAISE EXCEPTION 'PR-T: SET search_path drifted on %', v_row.proname;

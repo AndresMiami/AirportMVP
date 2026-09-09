@@ -181,6 +181,10 @@ async function rpcEdit(db, who, opId, bookingId, version, edit, opts = {}) {
     return r.r;
   } finally { await db.exec('RESET ROLE'); }
 }
+const installedFp = async (db) => {
+  const rows = (await db.query(`SELECT proname, encode(extensions.digest(prosrc,'sha256'),'hex') AS fp FROM pg_proc WHERE proname IN ('accept_quote_create','accept_quote_edit')`)).rows;
+  return Object.fromEntries(rows.map((r) => [r.proname === 'accept_quote_create' ? 'create' : 'edit', r.fp]));
+};
 async function counts(db) {
   return one(db, `SELECT (SELECT count(*) FROM bookings)::int AS b, (SELECT count(*) FROM quote_acceptances)::int AS a,
     (SELECT count(*) FROM operation_receipts)::int AS r, (SELECT count(*) FROM quote_verifications)::int AS v`);
@@ -242,12 +246,24 @@ async function crossing(db, who, writer, kind, extra = {}) {
 }
 
 // ---- artifact surgery for executed mutants --------------------------------
-function withBody(artifact, name, fn) {
+// A mutant models a REGENERATED artifact whose generator produced a different
+// body: the embedded post-replacement fingerprint for that writer is recomputed
+// to match, exactly as a regenerated artifact would carry it. (An artifact whose
+// body was altered WITHOUT that recomputation is refused by the artifact itself —
+// proven by its own row below.)
+function withBody(artifact, name, fn, opts = {}) {
   const body = gen.extract(artifact, name);
   const mutated = fn(body);
   assert.notStrictEqual(mutated, body, `${name}: mutation must change the body`);
   // function replacer: the bodies are $$-quoted and a string replacement would interpret `$$`
-  return artifact.replace(body, () => mutated);
+  let out = artifact.replace(body, () => mutated);
+  if (!opts.keepFingerprint) {
+    const oldFp = gen.sha256(gen.bodyOf(body));
+    const newFp = gen.sha256(gen.bodyOf(mutated));
+    assert.strictEqual(out.split(oldFp).length - 1, 1, `${name}: the artifact embeds its post-replacement fingerprint exactly once`);
+    out = out.replace(oldFp, newFp);
+  }
+  return out;
 }
 const PRE_GUARD_LINE = 'IF NOT public.linkmia_pickup_is_future(v_pickup_at, transaction_timestamp()) THEN';
 const FINAL_RAISE = "RAISE EXCEPTION USING ERRCODE = 'ZQ019', MESSAGE = 'pickup_time_elapsed';";
@@ -289,10 +305,25 @@ async function runPreflight(db) {
   const WRITERS = [['accept_quote_create', 'created'], ['accept_quote_edit', 'updated']];
 
   // ================================================================ artifacts
-  await check('both artifacts equal the guard transform byte-for-byte (generated, never hand-edited)', async () => {
+  await check('both artifacts, the preflight fingerprint block and the runbook checksum table equal the guard transform byte-for-byte (generated, never hand-edited); the recorded checksums are the files\' sha256', async () => {
     const g = gen.generate();
     assert.strictEqual(m019, g.migration, '019 drifted from the generator');
     assert.strictEqual(rollback, g.rollback, 'the rollback drifted from the generator');
+    const c = gen.check();
+    assert.deepStrictEqual(c, { migration: true, rollback: true, preflight: true, runbook: true }, JSON.stringify(c));
+    assert.strictEqual(gen.sha256(m019), g.checksums.migration);
+    assert.strictEqual(gen.sha256(rollback), g.checksums.rollback);
+    const runbook = fs.readFileSync(path.join(repoRoot, 'docs/PRT-MIGRATION-RUNBOOK.md'), 'utf8');
+    assert.ok(runbook.includes(g.checksums.migration) && runbook.includes(g.checksums.rollback), 'the runbook records both file checksums');
+    for (const k of ['reviewed018', 'target019', 'rollback']) for (const w of ['create', 'edit']) {
+      assert.ok(runbook.includes(g.fps.fp[k][w]), `runbook records the ${k}/${w} body fingerprint`);
+    }
+    const pre = fs.readFileSync(path.join(repoRoot, 'database/migrations/019_prt_preflight.sql'), 'utf8');
+    assert.ok(pre.includes(g.fps.fp.reviewed018.create) && pre.includes(g.fps.fp.reviewed018.edit) && pre.includes(g.fps.fp.target019.create), 'preflight A2 carries the expected fingerprints');
+    // the 019 artifact embeds exactly the reviewed-018 acceptance set; the rollback the three recognized bodies
+    assert.ok(m019.includes(`ARRAY['${g.fps.fp.reviewed018.create}']::TEXT[]`), '019 accepts only the reviewed 018 create body');
+    assert.ok(!m019.includes(g.fps.fp.rollback.create) || m019.indexOf(g.fps.fp.rollback.create) < 0, '019 does not accept the rollback body');
+    assert.ok(rollback.includes(g.fps.fp.reviewed018.create) && rollback.includes(g.fps.fp.target019.create) && rollback.includes(g.fps.fp.rollback.create), 'the rollback accepts 018, 019 and its own bodies');
   });
 
   await check('STATEMENT ORDER: pre-mutation guard AFTER receipt recovery and before rpc_writer on; final guard the LAST blocking statement — after the telemetry insert, before set_config off + RETURN', async () => {
@@ -361,10 +392,41 @@ async function runPreflight(db) {
 
   // ================================================================ chain + comparator
   const db = await freshDb();
-  await check('chain: schema + 001..017 -> exact 018 -> exact 019 apply on a fresh replica (mode off)', async () => {
+  await check('chain: schema + 001..017 -> exact 018 -> exact 019 apply on a fresh replica (mode off); the installed bodies fingerprint EXACTLY as the generator derives them from the migration text (018 before, 019 after)', async () => {
     let r = await tryExec(db, m018); assert.ok(r.ok, r.error);
+    const g = gen.generate();
+    assert.deepStrictEqual(await installedFp(db), g.fps.fp.reviewed018, 'a clean 018 install carries exactly the reviewed 018 fingerprints (prosrc == the dollar-quoted body)');
     r = await tryExec(db, m019); assert.ok(r.ok, r.error);
+    assert.deepStrictEqual(await installedFp(db), g.fps.fp.target019, 'after 019 the installed bodies are exactly the target bodies');
     assert.strictEqual((await modeRow(db)).mode, 'off');
+  });
+
+  await check('SABOTAGE: a ONE-CHARACTER comment change in an installed writer keeps every marker check green but STOPS migration 019 AND the rollback at the fingerprint gate with zero changes; restoring the exact reviewed body lets 019 through', async () => {
+    const d = await baselineDb();
+    // sabotage = one trailing comment character inside the body: valid SQL,
+    // identical behaviour, every marker still matches — only prosrc differs
+    const sabotage = (fn) => { const i = fn.lastIndexOf('END $$;'); assert.ok(i > 0); return fn.slice(0, i) + 'END -- x\n$$;'; };
+    const sab = sabotage(gen.extract(m018, 'accept_quote_create'));
+    assert.notStrictEqual(sab, gen.extract(m018, 'accept_quote_create'), 'sabotage applied');
+    await d.exec(sab);
+    const marker = await one(d, `SELECT pg_get_functiondef(oid) LIKE '%NULL::INTEGER%' AS m FROM pg_proc WHERE proname = 'accept_quote_create'`);
+    assert.strictEqual(marker.m, true, 'the old marker check would still say 018');
+    const fpBefore = await installedFp(d);
+    let r = await tryExec(d, m019);
+    assert.ok(!r.ok && /accept_quote_create body fingerprint .* is not a recognized reviewed body/.test(r.error), '019 refuses: ' + (r.error || 'committed?!'));
+    assert.strictEqual((await one(d, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n, 0, 'the refusal happened before the helper was created — nothing changed');
+    assert.deepStrictEqual(await installedFp(d), fpBefore, 'bodies untouched');
+    r = await tryExec(d, rollback);
+    assert.ok(!r.ok && /is not a recognized reviewed body/.test(r.error), 'the rollback refuses the same unreviewed body: ' + (r.error || 'committed?!'));
+    // restore the exact reviewed body -> 019 applies
+    await d.exec(gen.extract(m018, 'accept_quote_create'));
+    assert.deepStrictEqual(await installedFp(d), gen.generate().fps.fp.reviewed018);
+    r = await tryExec(d, m019); assert.ok(r.ok, r.error);
+    // now sabotage the EDIT writer on the post-019 state: the rollback must refuse it too
+    const sabEdit = sabotage(gen.extract(m019, 'accept_quote_edit'));
+    await d.exec(sabEdit);
+    r = await tryExec(d, rollback);
+    assert.ok(!r.ok && /accept_quote_edit body fingerprint .* is not a recognized reviewed body/.test(r.error), 'rollback refuses a sabotaged edit writer: ' + (r.error || 'committed?!'));
   });
 
   await check('COMPARATOR (transaction-stable clock): exact now is refused, one microsecond later passes', async () => {
@@ -571,6 +633,16 @@ async function runPreflight(db) {
   });
 
   // ================================================================ EXECUTED MUTANTS
+  await check('ALTERED PASTE: an artifact whose writer body was changed WITHOUT regenerating (embedded fingerprint stale) is refused by its own post-replacement check — the transaction aborts, nothing changes', async () => {
+    const altered = withBody(m019, 'accept_quote_create', (b) => b.replace(FINAL_RAISE, FINAL_RAISE + ' -- altered'), { keepFingerprint: true });
+    const d = await baselineDb();
+    const fpBefore = await installedFp(d);
+    const r = await tryExec(d, altered);
+    assert.ok(!r.ok && /is not this artifact's generated body/.test(r.error), 'refused: ' + (r.error || 'committed?!'));
+    assert.deepStrictEqual(await installedFp(d), fpBefore, 'the whole transaction rolled back');
+    assert.strictEqual((await one(d, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n, 0, 'no helper either');
+  });
+
   // Strips the artifact's rollback-contained smoke so a mutant the smoke would
   // refuse can still be INSTALLED — to prove the executed suite rows catch it
   // on their own (two independent lines of defense).
@@ -674,7 +746,17 @@ async function runPreflight(db) {
     assert.ok(def.d.includes('v_duration_minutes IS NULL'), '017 semantics returned');
   });
 
-  await check('HOSTILE-ACL PROBE: a transform WITHOUT the canonicalization loop FAILS its own exact-set verification when a rogue grantee exists (the artifact refuses to commit) — then the real 019 re-applies and canonicalizes', async () => {
+  await check('019 IS STRICT: on a rollback-state database (or a post-019 one) migration 019 REFUSES — only the reviewed 018 bodies are accepted; the forward path after a rollback is 018 again, then 019', async () => {
+    const fpNow = await installedFp(db);
+    assert.deepStrictEqual(fpNow, gen.generate().fps.fp.rollback, 'precondition: rollback bodies installed');
+    const r = await tryExec(db, m019);
+    assert.ok(!r.ok && /is not a recognized reviewed body/.test(r.error), '019 refuses rollback bodies: ' + (r.error || 'committed?!'));
+    assert.deepStrictEqual(await installedFp(db), fpNow, 'nothing changed');
+    const r2 = await tryExec(db, m018); assert.ok(r2.ok, '018 re-applies on the rollback state: ' + (r2.error || ''));
+    assert.deepStrictEqual(await installedFp(db), gen.generate().fps.fp.reviewed018);
+  });
+
+  await check('HOSTILE-ACL PROBE: a transform WITHOUT the canonicalization loop FAILS its own exact-set verification when a rogue grantee exists (the artifact refuses to commit) — then the real 019 applies (forward again) and canonicalizes', async () => {
     await db.exec(`GRANT EXECUTE ON FUNCTION ${HELPER} TO prt_rogue`);
     const start = m019.indexOf('  -- CANONICALIZE: revoke every EXECUTE grantee outside the allowed set');
     const end = m019.indexOf('END;\n$prt_helper_acl$;');
@@ -687,8 +769,12 @@ async function runPreflight(db) {
     assert.strictEqual((await one(db, `SELECT has_function_privilege('prt_rogue', '${HELPER}', 'EXECUTE') AS x`)).x, true, 'the failed transaction changed nothing');
     const ok = await tryExec(db, m019); assert.ok(ok.ok, ok.error);
     const h = await helperAcl(db);
-    assert.deepStrictEqual(h.grantees, h.writer_owners, '019 re-apply canonicalized the rogue away');
+    assert.deepStrictEqual(h.grantees, h.writer_owners, '019 (forward again) canonicalized the rogue away');
     assert.strictEqual((await one(db, `SELECT has_function_privilege('prt_rogue', '${HELPER}', 'EXECUTE') AS x`)).x, false);
+    assert.deepStrictEqual(await installedFp(db), gen.generate().fps.fp.target019);
+    // and a post-019 database is not a valid 019 pre-state either (run ONCE)
+    const again = await tryExec(db, m019);
+    assert.ok(!again.ok && /is not a recognized reviewed body/.test(again.error), '019 refuses to re-run on its own bodies');
   });
 
   const db2 = await freshDb();
@@ -836,7 +922,9 @@ async function runPreflight(db) {
     assert.ok(preflightUnits(zed).units.Z9, 'a unit labeled outside A-C is still parsed (the seven-key assertion above then fails loudly)');
     assert.strictEqual(g.A1.length, 2);
     for (const r of g.A1) { assert.strictEqual(r.prosecdef, true); assert.strictEqual(r.sr_exec, true); assert.strictEqual(r.anon_exec, false); assert.strictEqual(r.auth_exec, false); assert.ok(String(r.proconfig).includes('search_path')); }
-    assert.deepStrictEqual(g.A2.map((r) => [r.proname, r.is_018, r.guarded]), [['accept_quote_create', true, false], ['accept_quote_edit', true, false]], 'A2 is row-specific and unambiguous');
+    assert.deepStrictEqual(g.A2.map((r) => [r.proname, r.is_reviewed_018, r.is_target_019, r.guarded]), [['accept_quote_create', true, false, false], ['accept_quote_edit', true, false, false]], 'A2 is exact: reviewed 018 fingerprints, no guard');
+    const fp = gen.generate().fps.fp;
+    assert.deepStrictEqual(g.A2.map((r) => r.body_sha256), [fp.reviewed018.create, fp.reviewed018.edit], 'A2 prints the exact fingerprints the migration requires');
     assert.strictEqual(Number(g.A3[0].helper_signatures), 0);
     assert.strictEqual(g.B1[0].mode, 'off'); assert.strictEqual(g.B1[0].enforcement_started_at, null);
     assert.strictEqual(g.B2.length, 1, 'B2 yields exactly one row');
@@ -850,7 +938,8 @@ async function runPreflight(db) {
     // after 019: A2 guarded=true (is_018 still true), A3 = 1, B2 unchanged
     const r = await tryExec(d, m019); assert.ok(r.ok, r.error);
     const g3 = await runPreflight(d);
-    assert.deepStrictEqual(g3.A2.map((x) => [x.proname, x.is_018, x.guarded]), [['accept_quote_create', true, true], ['accept_quote_edit', true, true]]);
+    assert.deepStrictEqual(g3.A2.map((x) => [x.proname, x.is_reviewed_018, x.is_target_019, x.guarded]), [['accept_quote_create', false, true, true], ['accept_quote_edit', false, true, true]]);
+    assert.deepStrictEqual(g3.A2.map((x) => x.body_sha256), [fp.target019.create, fp.target019.edit]);
     assert.strictEqual(Number(g3.A3[0].helper_signatures), 1);
     assert.strictEqual(Number(g3.B2[0].verdict_literals), 16); assert.strictEqual(g3.B2[0].widened, false);
   });

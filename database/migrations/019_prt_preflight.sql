@@ -29,15 +29,26 @@ ROLLBACK;
 
 BEGIN;
 SET TRANSACTION READ ONLY;
--- A2. The installed bodies are 018's (duration never persisted) and carry NO
---     pickup guard yet. is_018 is ROW-SPECIFIC (create's marker is the
---     NULL::INTEGER insert; edit's is `duration_minutes = NULL`). Expect
---     is_018=true AND guarded=false for BOTH rows.
+-- A2. The installed bodies are EXACTLY the reviewed 018 bodies — fingerprint =
+--     sha256(pg_proc.prosrc), the same value migration 019's pre-capture
+--     REQUIRES — and carry NO pickup guard yet. Expect, for BOTH rows,
+--     is_reviewed_018=true, is_target_019=false, guarded=false. ANY other
+--     body_sha256 means an unreviewed change is installed: STOP (019 would
+--     refuse it too). The expected values between the markers are GENERATED
+--     into this file by prt-guard-transform.js --write and verified by
+--     --check and the executed suite — never hand-edit them.
 SELECT p.proname,
+       encode(extensions.digest(p.prosrc, 'sha256'), 'hex') AS body_sha256,
+-- PRT-EXPECTED-FINGERPRINTS:BEGIN (generated — do not hand-edit)
        CASE p.proname
-         WHEN 'accept_quote_create' THEN (pg_get_functiondef(p.oid) LIKE '%NULL::INTEGER%')
-         WHEN 'accept_quote_edit'   THEN (pg_get_functiondef(p.oid) LIKE '%duration_minutes = NULL%')
-       END AS is_018,
+         WHEN 'accept_quote_create' THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = 'ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388'
+         WHEN 'accept_quote_edit'   THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = 'cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41'
+       END AS is_reviewed_018,
+       CASE p.proname
+         WHEN 'accept_quote_create' THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = 'fc64b32ca907098b8ccceb5c912fa9d290a5e9c14a4f0704013d6b226f506396'
+         WHEN 'accept_quote_edit'   THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = 'ce81f347112d3cd251738d9bece093154ea27cccd09b6a2c8ea0e21f75a6e50d'
+       END AS is_target_019,
+-- PRT-EXPECTED-FINGERPRINTS:END
        (pg_get_functiondef(p.oid) LIKE '%linkmia_pickup_is_future%') AS guarded
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public' AND p.proname IN ('accept_quote_create', 'accept_quote_edit')
