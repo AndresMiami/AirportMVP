@@ -27,10 +27,12 @@
 // ORDER MATTERS: VEHICLE_KEYS is also the canonical vehicle sequence the
 // carousel array and its markup must share.
 
-// Independent of the table above: the bounds the INSTALLED writers enforce
-// (update-pending-booking.js parseEdit, migration 018 accept_quote_edit's
-// band check). A card may satisfy every per-vehicle equality above and still
-// expose a capacity no write could carry, so both checks are required.
+// Independent of the table above: the bounds the writer paths enforce
+// (update-pending-booking.js parseEdit, and the accept_quote_create/edit band
+// check — pinned by the drift suite against the target writer source and the
+// live 018; which migration is installed is the migration record's business,
+// not this table's). A card may satisfy every per-vehicle equality above and
+// still expose a capacity no write could carry, so both checks are required.
 const WRITER_CEILINGS = Object.freeze({ passengers: 12, bags: 15 });
 
 const VEHICLE_CONTRACT = Object.freeze({

@@ -148,9 +148,18 @@ check('018 contains NO setval on any live sequence — smoke gaps are accepted, 
     'the deliberate no-restore decision must be stated where the restore used to be');
 });
 
-check('the ROLLBACK file restores the 017 bodies BYTE-EXACTLY', () => {
-  assert.strictEqual(extract(rollback, 'accept_quote_create'), create017);
-  assert.strictEqual(extract(rollback, 'accept_quote_edit'), edit017);
+check('the ROLLBACK file restores the 017 bodies WITH the PR-T pickup guard — byte-exact to the guard transform', () => {
+  // PR-T (plan v8.6 §3E): a byte-exact-to-017 rollback would silently
+  // DELETE the pickup guard. The rollback is now GENERATED: the 017 bodies
+  // passed through the same transform that produced 019, plus a
+  // self-contained helper. Byte-equality is asserted against that
+  // transform, so the "programmatically extracted" contract survives.
+  const { applyPickupGuard } = require(path.join(repoRoot, 'database/migrations/tools/prt-guard-transform.js'));
+  assert.strictEqual(extract(rollback, 'accept_quote_create'), applyPickupGuard(create017, 'create'));
+  assert.strictEqual(extract(rollback, 'accept_quote_edit'), applyPickupGuard(edit017, 'edit'));
+  assert.ok(rollback.includes('CREATE OR REPLACE FUNCTION public.linkmia_pickup_is_future('),
+    'the rollback creates the helper BEFORE restoring guard-carrying bodies');
+  assert.ok(rollback.indexOf('linkmia_pickup_is_future(p_pickup') < rollback.indexOf('CREATE OR REPLACE FUNCTION accept_quote_create('));
   assert.match(rollback, /^BEGIN;/m);
   assert.match(rollback, /^COMMIT;/m);
 });

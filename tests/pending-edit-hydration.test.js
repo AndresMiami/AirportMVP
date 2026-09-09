@@ -585,10 +585,55 @@ async function check(name, fn) {
     }
   });
 
-  await check('no cache name moved: the service worker still reads v1.3.27 / runtime-v4', async () => {
+  await check('the cache rungs sit on PR-T\'s reserved pair, v1.3.28 / runtime-v5 (PR-A moved nothing; PR-T did)', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.27';/.test(sw));
-    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v4';/.test(sw));
+    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.28';/.test(sw));
+    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v5';/.test(sw));
+  });
+
+  // Plan v8.6 §3D: cache names only ever move FORWARD, and every rung-moving
+  // commit moves the complete literal-site inventory. This REPO-WIDE pin
+  // reads the shipped pair from service-worker.js and refuses any file on
+  // main that still names a burned rung as "next"/"reserved" or as a
+  // rollback/revert target (the class Codex seq:204 found in a test message).
+  await check('REPO-WIDE burned-rung pin: no file names a rung at or below the shipped pair as next/reserved or as a rollback target; the inventory sites name the §3D ladder exactly', async () => {
+    const read = (f) => fs.readFileSync(path.join(repoRoot, f), 'utf8');
+    const sw = read('service-worker.js');
+    const cur = Number(/const CACHE_NAME = 'linkmia-v1\.3\.(\d+)';/.exec(sw)[1]);
+    const curRt = Number(/const RUNTIME_CACHE = 'linkmia-runtime-v(\d+)';/.exec(sw)[1]);
+    const list = (dir, ext) => fs.readdirSync(path.join(repoRoot, dir)).filter((f) => f.endsWith(ext)).map((f) => `${dir}/${f}`);
+    const files = ['CLAUDE.md', 'indexMVP.html', 'service-worker.js', '.github/workflows/tests.yml', ...list('tests', '.js'), ...list('docs', '.md')];
+    const offenders = [];
+    for (const f of files) {
+      read(f).split('\n').forEach((line, i) => {
+        // historical/ownership statements are not claims about the future
+        if (/\b(belong|burned|historical|shipped|superseded|retired|deployed)\b/i.test(line)) return;
+        const forward = /\b(next|rollback|revert)\b/i.test(line);
+        const reserved = /\breserved\b/i.test(line);
+        if (!forward && !reserved) return;
+        for (const m of line.matchAll(/v1\.3\.(\d+)/g)) {
+          const n = Number(m[1]);
+          if ((forward && n <= cur) || (reserved && n < cur)) offenders.push(`${f}:${i + 1} names v1.3.${n} (shipped ${cur}): ${line.trim().slice(0, 120)}`);
+        }
+        for (const m of line.matchAll(/runtime[- ]?(?:cache )?v(\d+)\b/gi)) {
+          const n = Number(m[1]);
+          if ((forward && n <= curRt) || (reserved && n < curRt)) offenders.push(`${f}:${i + 1} names runtime v${n} (shipped ${curRt}): ${line.trim().slice(0, 120)}`);
+        }
+      });
+    }
+    assert.deepStrictEqual(offenders, [], 'burned rungs named as next/reserved/rollback targets');
+    // the inventory sites (plan v8.6 §3D, [v6]/[v8.5]) name the ladder exactly
+    const act = read('docs/BROWSER-FLAG-ACTIVATION.md');
+    assert.ok(act.includes('| Browser-flag rollback (reserved)                | `linkmia-v1.3.32` | `linkmia-runtime-v9` |'), 'activation table: browser-flag rollback rung');
+    assert.ok(act.includes("`CACHE_NAME` → `'linkmia-v1.3.32'`") && act.includes("`RUNTIME_CACHE` → `'linkmia-runtime-v9'`"), 'activation rollback steps');
+    const r1 = read('docs/R1-MIGRATION-RUNBOOK.md');
+    assert.ok(r1.includes('SW v1.3.32 + runtime cache v9') && r1.includes('`linkmia-v1.3.33` + `linkmia-runtime-v10`'), 'R1 runbook steps 1 and 2');
+    assert.ok(read('CLAUDE.md').includes('v1.3.32 + runtime v9'), 'CLAUDE.md activation entry');
+    assert.ok(read('indexMVP.html').includes('bump CACHE_NAME to v1.3.32'), 'flag-site comment');
+    assert.ok(read('tests/quote-browser-integration.test.js').includes('SW v1.3.32 + runtime v9'), 'the assertion message names the browser-flag rung');
+    for (const rung of ['v1.3.28 / runtime-v5', 'v1.3.29 / runtime-v6', 'v1.3.30 / runtime-v7', 'v1.3.31 / runtime-v8', 'v1.3.32 / runtime-v9', 'v1.3.33 / runtime-v10']) {
+      assert.ok(sw.includes(rung), `SW ladder comment lists ${rung}`);
+    }
   });
 
   await check('the shipped edit entry point is untouched — no new GET, markers intact', async () => {

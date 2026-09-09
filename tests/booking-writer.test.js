@@ -272,7 +272,9 @@ function check(name, f) { f(); passed++; console.log('✓ ' + name); }
     ['quote_not_yet_valid', 409, 'quote_expired', { requote: true }],
     ['epoch_conflict', 409, 'quote_stale', { requote: true }],
     ['conflict', 409, 'Could not process this request', {}],
-    ['refused', 409, 'Could not process this request', {}]
+    ['refused', 409, 'Could not process this request', {}],
+    // PR-T: typed, definitive, never requote/reload
+    ['pickup_time_elapsed', 400, 'pickup_time_elapsed', { message: 'This pickup time has passed. Choose a new time to continue.', requote: undefined, reload: undefined }]
   ];
   for (const [outcome, status, error, extra] of rows) {
     check(`registry: ${outcome} -> ${status}`, () => {

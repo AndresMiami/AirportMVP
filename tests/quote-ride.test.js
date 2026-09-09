@@ -70,7 +70,13 @@ const MIA_PLACE_ID = EXPECTED_AIRPORTS.MIA.placeId;
 
 // ---------- mock state ----------
 const state = {};
+// PR-T: a controllable skew on the clock the endpoint reads for its refusal
+// decisions. Set INSIDE a provider stub to make time pass between gates.
+const realDateNow = Date.now;
+Date.now = () => realDateNow() + (state.clockSkewMs || 0);
+
 function resetState() {
+  state.clockSkewMs = 0;
   state.authOutage = false;
   state.customerError = null;
   state.placesCalls = [];
@@ -275,13 +281,61 @@ async function check(name, fn) {
   });
 
   // ---------- pickup-time rules ----------
-  await check('pickup >5min past -> 400 REJECTED (never re-routed as now); boundary respected', async () => {
-    let r = await post(goodIntent({ pickupAt: new Date(Date.now() - 6 * 60000).toISOString() }));
+  await check('PR-T: ANY non-future pickup -> typed 400 pickup_time_elapsed, ZERO provider calls; the 5-min tolerance is gone', async () => {
+    for (const offsetMs of [-6 * 60000, -4 * 60000, -1000, 0]) {
+      resetState();
+      const r = await post(goodIntent({ pickupAt: new Date(Date.now() + offsetMs).toISOString() }));
+      assert.strictEqual(r.statusCode, 400, `offset ${offsetMs}`);
+      const body = JSON.parse(r.body);
+      assert.strictEqual(body.error, 'pickup_time_elapsed');
+      assert.strictEqual(body.message, 'This pickup time has passed. Choose a new time to continue.');
+      assert.ok(!('requote' in body), 'never a requote');
+      assert.strictEqual(googleCalls(), 0, 'elapsed before Places means zero paid calls');
+    }
+    resetState();
+    const r = await post(goodIntent({ pickupAt: new Date(Date.now() + 60000).toISOString() }));
+    assert.strictEqual(r.statusCode, 200, 'a one-minute-future pickup still quotes (no lead-time policy)');
+  });
+
+  await check('PR-T gate 2: elapsed BETWEEN Places and Routes -> typed 400, Places spent once, Routes never called', async () => {
+    resetState();
+    const okPlaces = state.placesResponse;
+    state.placesResponse = () => { state.clockSkewMs = 5 * 60000; return okPlaces(); };
+    const r = await post(goodIntent({ pickupAt: new Date(Date.now() + 2 * 60000).toISOString() }));
     assert.strictEqual(r.statusCode, 400);
-    assert.ok(/past/i.test(JSON.parse(r.body).error));
-    assert.strictEqual(googleCalls(), 0);
-    r = await post(goodIntent({ pickupAt: new Date(Date.now() - 4 * 60000).toISOString() }));
-    assert.strictEqual(r.statusCode, 200, 'within tolerance still quotes');
+    assert.strictEqual(JSON.parse(r.body).error, 'pickup_time_elapsed');
+    assert.strictEqual(state.placesCalls.length, 1, 'Places cannot be undone');
+    assert.strictEqual(state.routesCalls.length, 0, 'Routes is prevented');
+    assert.ok(state.logLines.some((l) => /pickup_time_elapsed/.test(l)), 'the refusal is a classified telemetry outcome');
+  });
+
+  await check('PR-T gate 3: elapsed AFTER Routes -> typed 400 and NO vehicle token is issued', async () => {
+    resetState();
+    const okRoutes = state.routesResponse;
+    state.routesResponse = () => { state.clockSkewMs = 5 * 60000; return okRoutes(); };
+    const r = await post(goodIntent({ pickupAt: new Date(Date.now() + 2 * 60000).toISOString() }));
+    assert.strictEqual(r.statusCode, 400);
+    assert.strictEqual(JSON.parse(r.body).error, 'pickup_time_elapsed');
+    assert.strictEqual(state.routesCalls.length, 1);
+    assert.ok(!r.body.includes('"token"'), 'no partial token set can leak');
+  });
+
+  await check('PR-T: the request-entry clock stays the iat/exp anchor — a skew after entry never moves the token', async () => {
+    resetState();
+    const okPlaces = state.placesResponse;
+    // Smaller than the 7 s provider budget (a larger skew would trip the
+    // Routes deadline, which is a different, correct refusal).
+    const SKEW = 3000;
+    state.placesResponse = () => { state.clockSkewMs = SKEW; return okPlaces(); };
+    const entry = realDateNow();
+    const r = await post(goodIntent({ pickupAt: new Date(entry + 3 * 3600e3).toISOString() }));
+    assert.strictEqual(r.statusCode, 200, r.body);
+    const quote = JSON.parse(r.body).quote;
+    const tok = decodeTokenPayload(quote.vehicles.tesla.token);
+    assert.ok(tok.iat >= entry && tok.iat < entry + SKEW,
+      'iat is the request-entry instant — had it read the skewed refusal clock it would be >= entry + SKEW');
+    assert.strictEqual(Date.parse(quote.issuedAt), tok.iat, 'issuedAt echoes the same anchor');
+    assert.strictEqual(Date.parse(quote.vehicles.tesla.expiresAt), tok.iat + QUOTE_TTL_MS, 'expiry derives from the anchor too');
   });
 
   await check('departureTime: omitted inside the ±5min window, contractual instant verbatim beyond it', async () => {
@@ -1643,11 +1697,11 @@ async function check(name, fn) {
     const worker = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
     const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(cacheName, 'linkmia-v1.3.27', 'activation ships with the reviewed cache bump');
+    assert.strictEqual(cacheName, 'linkmia-v1.3.28', 'PR-T ships on its reserved static rung (plan v8.6 §3D)');
     // BOTH caches must move together: the runtime cache can retain booking
     // HTML, so a static-only bump is not a dependable rollback.
     const runtimeName = worker.match(/const RUNTIME_CACHE\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(runtimeName, 'linkmia-runtime-v4', 'activation bumps the runtime cache WITH the static cache');
+    assert.strictEqual(runtimeName, 'linkmia-runtime-v5', 'PR-T bumps the runtime cache WITH the static cache (its reserved v5)');
     // The bump is only meaningful if BOTH changed assets are actually in the
     // precache list — a dropped entry would serve a stale page under a new
     // cache name.

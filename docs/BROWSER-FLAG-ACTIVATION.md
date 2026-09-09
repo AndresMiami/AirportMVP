@@ -3,9 +3,10 @@
 This document records the step-5 activation PR of the post-R1 sequence and
 carries its REVIEWED FORWARD ROLLBACK. It is procedure and record, not
 authorization: every completed production action here was separately
-authorized by Andres in Claude's chat, and the release itself waits on ONE
-further authorization — merge/production release (merge deploys; see
-below).
+authorized by Andres in Claude's chat. STATUS (corrected 2026-09-08): the
+release MERGED AND DEPLOYED as PR #88 (merge 2660538, 2026-09-04) — the
+flag is true in production and the rollback below is the live emergency
+path (merge deploys; see below).
 
 ## The cache-version ladder (forward-only, one deployment per rung)
 
@@ -19,8 +20,12 @@ name):
 | ------------------------------------------------- | ----------------- | -------------------- |
 | Stripe removal, commit `57f617c` via #87 (shipped) | `linkmia-v1.3.26` | `linkmia-runtime-v3` |
 | THIS activation               | `linkmia-v1.3.27` | `linkmia-runtime-v4` |
-| Browser-flag rollback         | `linkmia-v1.3.28` | `linkmia-runtime-v5` |
-| Emergency R1 code revert      | `linkmia-v1.3.29` | `linkmia-runtime-v6` |
+| PR-T release (elapsed-pickup message, plan v8.6 §3D) | `linkmia-v1.3.28` | `linkmia-runtime-v5` |
+| PR-T pre-migration code rollback (phase-bounded) | `linkmia-v1.3.29` | `linkmia-runtime-v6` |
+| PR-B release (review card)                      | `linkmia-v1.3.30` | `linkmia-runtime-v7` |
+| PR-B-only forward rollback (reserved)           | `linkmia-v1.3.31` | `linkmia-runtime-v8` |
+| Browser-flag rollback (reserved)                | `linkmia-v1.3.32` | `linkmia-runtime-v9` |
+| Emergency R1 code revert (reserved)             | `linkmia-v1.3.33` | `linkmia-runtime-v10` |
 
 ## What the activation PR changes — and nothing else
 
@@ -48,12 +53,13 @@ name):
    tests/quote-browser-integration.test.js (no assertion or
    implementation bytes changed).
 
-This document describes the release's CONDITIONAL behavior. MERGE IS THE
-RELEASE GATE: Netlify deploys `main` automatically, so merging this PR IS
-the production release — there is no separate deploy pause, and none is
-promised. Until Andres gives that ONE explicit merge/production-release
-authorization in Claude's chat (after the PRE-MERGE gate below),
-production runs the flag-false legacy path under observe mode.
+This document describes the release's behavior. MERGE WAS THE RELEASE
+GATE: Netlify deploys `main` automatically, so merging the PR WAS the
+production release — there was no separate deploy pause. That merge
+(PR #88, 2026-09-04) was separately authorized by Andres after the
+PRE-MERGE gate below; since then production runs the flag-true server-quote
+path under observe mode (the flag-false legacy path is the ROLLBACK state,
+not the current one).
 
 NO SQL, environment, Railway, pricing-formula, token, RPC, or vehicle
 changes. `QUOTE_SERVICE_DISABLED` stays present in Netlify (value 0) as the
@@ -124,8 +130,9 @@ name by an earlier deployment (exactly the v1.3.26 collision this release
 sidestepped). The rollback is therefore a new commit, exactly:
 
 1. `indexMVP.html`: `SERVER_QUOTE_ENABLED` true → false.
-2. `service-worker.js`: `CACHE_NAME` → `'linkmia-v1.3.28'`.
-3. `service-worker.js`: `RUNTIME_CACHE` → `'linkmia-runtime-v5'`.
+2. `service-worker.js`: `CACHE_NAME` → `'linkmia-v1.3.32'` (the reserved
+   browser-flag rung; v1.3.28–v1.3.31 belong to PR-T and PR-B per plan v8.6 §3D).
+3. `service-worker.js`: `RUNTIME_CACHE` → `'linkmia-runtime-v9'`.
 4. Test updates mirroring the same sites this PR touched: in the
    ship-state check, flip the REGEX EXPECTATION back to false AND rewrite
    the check TITLE and assert MESSAGE to say the default ships false
@@ -133,7 +140,16 @@ sidestepped). The rollback is therefore a new commit, exactly:
    activation" is a lie the next reader inherits. That regex literal
    appears exactly once; do NOT touch the quoted replacement strings
    inside makeContext, which must remain the two-way true/false pair.
-   Then the three static pins to v1.3.28 and the runtime pin to v5. The
+   Then EVERY cache pin — PR-T widened the set beyond the original four:
+   the static pins in `tests/quote-ride`, `google-policy-readiness` and
+   `maps-direct-loader`, the runtime pin in `quote-ride`, the rung check in
+   `tests/pending-edit-hydration` (`v1.3.28` / `runtime-v5` today), and that
+   suite's burned-rung INVENTORY assertions, which pin this document's
+   rollback-rung table row and rollback steps, the R1 runbook steps, the
+   CLAUDE.md ladder, the flag-site comment, the `:399` message and the SW
+   ladder comment (once the rollback ships, that table row stops being
+   "reserved" and the inventory assertions move with it). Run the repo-wide
+   burned-rung pin and let it list every site. The
    two-way harness normalization itself needs NO change — that is why it
    exists, and the ROLLBACK/DISABLED checks (legacy fare computed, posted,
    re-priced on route change, and submitted) keep the flag-off path
@@ -171,10 +187,16 @@ Deploy via the normal branch → PR → merge path. This rolls back PASSENGER
 pricing display/submission only; `pricing_state` stays `observe`, which is
 safe with the flag off: a no-token write in observe records verdict
 `no_token` and still succeeds, storing the client amount with
-`client_observe` authority — verified against the INSTALLED migration-018
-writer bodies (create: mode branch `:367-395`, telemetry insert
-`:550-560`; edit: enforce-only rejection `:970-977`, observe branch
-`:1138-1144`, telemetry insert `:1285-1295`) — so bookings keep working.
+`client_observe` authority — verified by executed tests rather than by
+generated-SQL line anchors (the artifact is regenerated and its lines
+move). Phase truth: 018 is the LIVE installed writer source until the
+separately authorized PR-T migration window; 019 is the TARGET (018's
+bodies plus the pickup guard, byte-derived by the generator). The PR-T
+matrix in `tests/prt-pickup-integrity.test.js` proves observe × no_token
+create AND edit succeed on the 019 bodies, and the TARGET-writer authority
+pin in `tests/vehicle-metadata-drift.test.js` refuses any target-writer
+assertion that reads a superseded migration — so bookings keep working on
+either side of the window.
 Two further, independent levers exist and
 are NOT part of this rollback: closing the ENDPOINT is the one-edit
 Netlify change (`QUOTE_SERVICE_DISABLED=1` + redeploy), and reverting

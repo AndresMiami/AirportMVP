@@ -198,7 +198,7 @@ function makeEl(tag) {
 }
 
 let uuidCounter = 0;
-function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselReady = true, sessionGate = null }) {
+function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselReady = true, sessionGate = null, sourceOverride = null }) {
   // Normalize the flag to the REQUESTED mode regardless of the shipped
   // default. The old one-way replace exercised both modes only while the
   // committed default was false — after activation every "disabled"
@@ -207,9 +207,12 @@ function makeContext({ enabled, fetchImpl, sessionToken = 'jwt-abc', carouselRea
   // would silently stop covering the OFF path (Codex, activation review).
   // The normalization and its assertion hold for either shipped default,
   // which is also what makes the forward-rollback commit test-neutral.
+  // sourceOverride: a MUTATED app block for mutation proofs (the real block
+  // otherwise). Mutants run through the identical harness.
+  const base = sourceOverride || appBlock;
   const source = enabled
-    ? appBlock.replace('const SERVER_QUOTE_ENABLED = false;', 'const SERVER_QUOTE_ENABLED = true;')
-    : appBlock.replace('const SERVER_QUOTE_ENABLED = true;', 'const SERVER_QUOTE_ENABLED = false;');
+    ? base.replace('const SERVER_QUOTE_ENABLED = false;', 'const SERVER_QUOTE_ENABLED = true;')
+    : base.replace('const SERVER_QUOTE_ENABLED = true;', 'const SERVER_QUOTE_ENABLED = false;');
   assert.ok(
     source.includes(`const SERVER_QUOTE_ENABLED = ${enabled === true};`),
     'flag normalization failed — the const declaration changed shape'
@@ -393,7 +396,7 @@ console.log('\nPR 3C-2B2 — server quote browser integration\n');
 // ============ the rollout flag ============
 check('STATIC: the committed candidate default is ON — server quoting ONCE this release deploys', () => {
   assert.ok(/const SERVER_QUOTE_ENABLED = true;/.test(appBlock),
-    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + SW v1.3.28 + runtime v5)');
+    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + SW v1.3.32 + runtime v9 — the plan v8.6 §3D browser-flag rung; the pairs between belong to PR-T and PR-B and are burned once shipped)');
 });
 
 check('DISABLED: no quote request is made and pricing.js still drives the carousel', async () => {
@@ -2331,6 +2334,269 @@ check('DEFINITIVE: the writer\'s exact blocked copy IS definitive — one attemp
   assert.strictEqual(f.to('/api/create-booking').length, 1, 'a recognized outcome is not retried');
   assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null, 'settled');
   assert.match(shownError, /nothing was booked/i, 'the failure is spoken honestly');
+});
+
+// PR-T create refusal — ONE runner, so the preservation pin and its mutation
+// proofs exercise the identical scenario. The COMPLETE editable intent is
+// direction/mode, route/location (address, airport, place id), date/time,
+// flight, traveler context (passengers, guestData), notes and vehicle; ONLY
+// the quote/token may be invalidated by the refusal.
+function intentSnapshot(app) {
+  return JSON.stringify({
+    mode: app.state.mode, locations: app.state.locations, dateTime: app.state.dateTime,
+    flight: app.state.flight, passengers: app.state.passengers, guestData: app.state.guestData,
+    pickupNotes: app.state.pickupNotes, vehicle: app.state.vehicle.selected,
+  });
+}
+async function runElapsedCreate(sourceOverride = null) {
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': { status: 400, body: { error: 'pickup_time_elapsed', message: 'This pickup time has passed. Choose a new time to continue.' } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f, sourceOverride });
+  let shownError = null; let nav = null;
+  app.showPaymentError = (m) => { shownError = String(m); };
+  app.navigateToPanel = (p) => { nav = p; };
+  app.els.hourSelect = Object.assign(makeEl('select'), { focused: false, focus() { this.focused = true; } });
+  const removed = [];
+  const origRemove = ctx.localStorage.removeItem;
+  ctx.localStorage.removeItem = (k) => { removed.push(k); return origRemove(k); };
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  app.state.flight = 'AA123';
+  app.state.pickupNotes = 'blue suitcase, meet at door 3';
+  const before = intentSnapshot(app);
+  await tap(app);
+  return { app, ctx, f, removed, before, after: intentSnapshot(app), shownError: () => shownError, nav: () => nav };
+}
+
+check('PR-T create: a 400 pickup_time_elapsed settles the envelope, removes the provisional record, preserves the COMPLETE editable intent, returns to When — never the generic copy', async () => {
+  const r = await runElapsedCreate();
+  const { app, ctx, f, removed } = r;
+  assert.strictEqual(f.to('/api/create-booking').length, 1, 'definitive: no retry');
+  assert.strictEqual(ctx.sessionStorage.getItem('lm_pending_envelope'), null, 'the envelope settled');
+  assert.ok(removed.some((k) => k.startsWith('trip_')), 'the provisional trip_ record is removed (exit invariant)');
+  assert.strictEqual(r.shownError(), null, 'the generic "nothing was booked — please try again" is NOT shown');
+  assert.strictEqual(r.nav(), 'when', 'returned to the When step');
+  assert.strictEqual(app.els.hourSelect.focused, true, 'focus on the time control');
+  assert.strictEqual(r.after, r.before, 'EVERY entered value preserved: mode, route/location/place id, date/time, flight, passengers, traveler, notes, vehicle');
+  const parsed = JSON.parse(r.after);
+  assert.ok(parsed.locations && parsed.vehicle && parsed.dateTime, 'the snapshot is not vacuous');
+  const notice = ctx.document.body.children.find((c) => c.id === 'pickupElapsedNotice');
+  assert.ok(notice && notice.textContent === 'This pickup time has passed. Choose a new time to continue.', 'the typed copy is rendered');
+  assert.strictEqual(app.state.quote.status, 'idle', 'ONLY the unusable quote was invalidated');
+});
+
+check('MUTATION: an elapsed branch that clears the route, the vehicle, the time or the traveler FAILS the preservation pin (the promise is regression-pinned, not incidental)', async () => {
+  const anchor = "this.invalidateQuote('pickup time elapsed at the server');";
+  assert.strictEqual(appBlock.split(anchor).length - 1, 1, 'mutation anchor is unique in the app block');
+  const mutants = {
+    route: appBlock.replace(anchor, anchor + ' this.state.locations = { address: null, airport: null, placeId: null };'),
+    vehicle: appBlock.replace(anchor, anchor + ' this.state.vehicle.selected = null;'),
+    time: appBlock.replace(anchor, anchor + ' this.state.dateTime = { date: new Date(0), time: null };'),
+    traveler: appBlock.replace(anchor, anchor + ' this.state.passengers = 1; this.state.guestData = null; this.state.pickupNotes = null; this.state.flight = "";'),
+  };
+  const control = await runElapsedCreate();
+  assert.strictEqual(control.after, control.before, 'control: the real branch preserves');
+  for (const [label, src] of Object.entries(mutants)) {
+    assert.notStrictEqual(src, appBlock, `${label}: mutant differs from the real block`);
+    const r = await runElapsedCreate(src);
+    assert.notStrictEqual(r.after, r.before, `${label}-clearing mutant must change the intent snapshot — otherwise the pin proves nothing`);
+  }
+});
+
+// PR-T Save (edit) refusal through the edit lane: the EXISTING ride's trip_
+// record must SURVIVE (removal is create-only), the edit session stays open
+// with its captured CAS, every entered value is preserved.
+async function runElapsedEdit(sourceOverride = null) {
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/update-pending-booking': { status: 400, body: { error: 'pickup_time_elapsed', message: 'This pickup time has passed. Choose a new time to continue.' } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f, sourceOverride });
+  let shownError = null; let nav = null;
+  app.showPaymentError = (m) => { shownError = String(m); };
+  app.navigateToPanel = (p) => { nav = p; };
+  app.showTripSheet = () => { throw new Error('must not reach the trip sheet'); };
+  app.els.hourSelect = Object.assign(makeEl('select'), { focused: false, focus() { this.focused = true; } });
+  app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 7 };
+  app.editMarkers = { routeDirection: true, routeAddress: true, pickupAt: true, vehicle: false, traveler: false };
+  ctx.localStorage.setItem('trip_LM-9', JSON.stringify({ existing: true }));
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  app.state.flight = 'AA123';
+  app.state.pickupNotes = 'blue suitcase, meet at door 3';
+  const before = intentSnapshot(app);
+  await tap(app);
+  return { app, ctx, f, before, after: intentSnapshot(app), shownError: () => shownError, nav: () => nav };
+}
+
+check('PR-T edit (Save): a 400 pickup_time_elapsed keeps the edit session open with its CAS, leaves the EXISTING ride\'s trip_ record in place, preserves every value, returns to When', async () => {
+  const r = await runElapsedEdit();
+  assert.strictEqual(r.f.to('/api/update-pending-booking').length, 1, 'definitive: no retry');
+  assert.strictEqual(r.ctx.sessionStorage.getItem('lm_pending_envelope'), null, 'the envelope settled');
+  assert.strictEqual(r.ctx.localStorage.getItem('trip_LM-9'), JSON.stringify({ existing: true }), 'the existing ride\'s record SURVIVES — the removal is create-only');
+  assert.ok(r.app.pendingEdit && r.app.pendingEdit.detailsVersion === 7, 'the edit session stays open with its captured CAS');
+  assert.strictEqual(r.shownError(), null, 'no generic failure copy');
+  assert.strictEqual(r.nav(), 'when', 'returned to the When step');
+  assert.strictEqual(r.app.els.hourSelect.focused, true, 'focus on the time control');
+  assert.strictEqual(r.after, r.before, 'every entered value preserved on the edit path too');
+  assert.strictEqual(r.app.state.quote.status, 'idle', 'only the unusable quote was invalidated');
+  // No usable price exists after the refusal, so Save honestly WAITS for a
+  // fresh quote (the passenger picks a new time first) — disabled, but never
+  // stuck: not "Processing…", and the in-flight lock is released.
+  assert.strictEqual(r.app.els.bookBtn.disabled, true, 'Save waits for a fresh quote');
+  assert.ok(!/Processing/.test(r.app.els.bookBtn.innerHTML), 'the button is not stuck in Processing');
+  assert.strictEqual(r.app._submitInFlight, false, 'the submit lock is released');
+  const notice = r.ctx.document.body.children.find((c) => c.id === 'pickupElapsedNotice');
+  assert.ok(notice && notice.textContent === 'This pickup time has passed. Choose a new time to continue.', 'the typed copy is rendered');
+});
+
+check('MUTATION: dropping the create-only guard on the trip_ removal deletes the EXISTING ride\'s record on an edit refusal — the Save pin catches it', async () => {
+  // the same cleanup line also opens the requote branch, so anchor on the
+  // 400-elapsed branch by its trailing button restore
+  const anchor = "if (!isEditing) { try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {} }\n                        bookBtn.innerHTML = originalText;";
+  assert.strictEqual(appBlock.split(anchor).length - 1, 1, 'guard anchor is unique');
+  const mutant = appBlock.replace(anchor, anchor.replace('if (!isEditing) ', ''));
+  const r = await runElapsedEdit(mutant);
+  assert.strictEqual(r.ctx.localStorage.getItem('trip_LM-9'), null, 'the mutant deletes the existing record — which the pin above refuses');
+});
+
+// PR-T create via REQUOTE: a definitive 409 requote ENDS the attempt; the quiet
+// re-quote may then answer ANYTHING (400 elapsed, a 502, drift). The provisional
+// record of THIS attempt is removed on entry — observed as the exact key
+// written, then removed, then read back null (the instrumented pattern above).
+function instrumentLocalStorage(ctx) {
+  const ops = [];
+  const raw = ctx.localStorage;
+  ctx.localStorage = {
+    getItem: (k) => raw.getItem(k),
+    setItem: (k, v) => { ops.push(['set', k]); return raw.setItem(k, v); },
+    removeItem: (k) => { ops.push(['remove', k]); return raw.removeItem(k); },
+  };
+  return {
+    ops,
+    tripSets: () => ops.filter(([op, k]) => op === 'set' && k.startsWith('trip_')).map(([, k]) => k),
+    tripRemoves: () => ops.filter(([op, k]) => op === 'remove' && k.startsWith('trip_')).map(([, k]) => k),
+  };
+}
+const ELAPSED_400 = { status: 400, body: { error: 'pickup_time_elapsed', message: 'RAW SERVER TEXT' } };
+const UPSTREAM_502 = { status: 502, body: { error: 'upstream' } };
+async function runRequoteExit({ requote, sourceOverride = null, edit = false }) {
+  let quotes = 0;
+  const writer = edit ? '/api/update-pending-booking' : '/api/create-booking';
+  const f = routedFetch({
+    '/api/quote-ride': () => (++quotes === 1 ? { body: quoteWithTtl(15) } : requote),
+    [writer]: { status: 409, body: { error: 'quote_expired', requote: true } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f, sourceOverride });
+  app.navigateToPanel = () => {};
+  app.showTripSheet = () => { throw new Error('must not reach the trip sheet'); };
+  const ls = instrumentLocalStorage(ctx);
+  if (edit) {
+    app.pendingEdit = { bookingId: '0b000000-0000-4000-8000-0000000000b9', tripCode: 'LM-9', detailsVersion: 7 };
+    app.editMarkers = { routeDirection: true, routeAddress: true, pickupAt: true, vehicle: false, traveler: false };
+    ctx.localStorage.setItem('trip_LM-9', JSON.stringify({ existing: true }));
+  }
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  const before = intentSnapshot(app);
+  await tap(app);
+  await new Promise((r) => setTimeout(r, 0));
+  return { app, ctx, f, ls, writer, before, after: intentSnapshot(app) };
+}
+function assertAttemptCleaned(r, label) {
+  const sets = r.ls.tripSets().filter((k) => k !== 'trip_LM-9');
+  const removes = r.ls.tripRemoves();
+  assert.strictEqual(sets.length, 1, `${label}: exactly one provisional trip_ record was written`);
+  assert.deepStrictEqual(removes, [sets[0]], `${label}: the SAME key is removed, exactly once`);
+  assert.strictEqual(r.ctx.localStorage.getItem(sets[0]), null, `${label}: nothing survives`);
+}
+
+check('PR-T create via REQUOTE, quiet re-quote refused as ELAPSED: this attempt\'s exact provisional key is removed and reads back null; one writer POST, two quote calls, typed notice, values preserved', async () => {
+  const r = await runRequoteExit({ requote: ELAPSED_400 });
+  assert.strictEqual(r.f.to('/api/create-booking').length, 1, 'no auto-resubmit after an elapsed re-quote');
+  assert.strictEqual(r.f.to('/api/quote-ride').length, 2, 'the initial quote + ONE quiet refresh');
+  assertAttemptCleaned(r, 'elapsed');
+  assert.strictEqual(r.app.state.quote.status, 'error');
+  assert.strictEqual(r.app.state.quote.error.elapsed, true);
+  assert.strictEqual(r.app.state.quote.error.message, 'This pickup time has passed. Choose a new time to continue.', 'typed copy, never raw server text');
+  assert.ok(r.ctx.document.body.children.find((c) => c.id === 'pickupElapsedNotice'), 'the When-step notice is up');
+  assert.strictEqual(r.after, r.before, 'every entered value preserved');
+});
+
+check('PR-T create via REQUOTE, quiet re-quote answers 502: the SAME cleanup — the attempt ended at the definitive 409, whatever the re-quote said', async () => {
+  const r = await runRequoteExit({ requote: UPSTREAM_502 });
+  assert.strictEqual(r.f.to('/api/create-booking').length, 1);
+  assert.strictEqual(r.f.to('/api/quote-ride').length, 2);
+  assertAttemptCleaned(r, '502');
+  assert.strictEqual(r.app.state.quote.status, 'error');
+  assert.strictEqual(r.app.state.quote.error.retryable, true, 'an upstream failure stays retryable');
+  assert.strictEqual(r.after, r.before);
+});
+
+check('PR-T create via REQUOTE, sanctioned auto-resubmit: the FIRST attempt\'s key is removed and reads back null; the resubmit is a NEW attempt under its own key', async () => {
+  let created = 0;
+  const f = routedFetch({
+    '/api/quote-ride': () => ({ body: quoteWithTtl(15) }),
+    '/api/create-booking': () => (++created === 1 ? { status: 409, body: { error: 'quote_expired', requote: true } } : CREATED),
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  const sheets = []; app.showTripSheet = (id) => sheets.push(id);
+  const ls = instrumentLocalStorage(ctx);
+  await app.requestServerQuote();
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 39 });
+  await tap(app);
+  assert.deepStrictEqual(sheets, ['db-1'], 'the resubmit succeeded');
+  const sets = ls.tripSets(); const removes = ls.tripRemoves();
+  assert.ok(sets.length >= 2, `two attempts write two provisional keys (saw ${sets.length})`);
+  assert.notStrictEqual(sets[0], sets[1], 'the resubmit is a NEW attempt with its own key');
+  assert.ok(removes.includes(sets[0]), 'the first attempt\'s key is removed on the definitive requote');
+  assert.strictEqual(ctx.localStorage.getItem(sets[0]), null, 'and reads back null');
+});
+
+check('PR-T edit via REQUOTE, quiet re-quote answers 502: the EXISTING ride\'s record survives — the cleanup is create-only; the edit session stays open', async () => {
+  const r = await runRequoteExit({ requote: UPSTREAM_502, edit: true });
+  assert.strictEqual(r.f.to('/api/update-pending-booking').length, 1);
+  assert.deepStrictEqual(r.ls.tripRemoves(), [], 'an edit never removes a trip_ record on requote');
+  assert.strictEqual(r.ctx.localStorage.getItem('trip_LM-9'), JSON.stringify({ existing: true }));
+  assert.ok(r.app.pendingEdit && r.app.pendingEdit.detailsVersion === 7, 'the edit session stays open with its CAS');
+});
+
+check('MUTATIONS: disabling the requote-entry cleanup leaves the record on BOTH exits; generalizing it (dropping the create-only guard) deletes the existing ride\'s record on an edit requote — the pins above catch each', async () => {
+  const anchor = "if (!isEditing) { try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {} }\n                        if (snap && !snap.refreshUsed && !snap.resubmitUsed) {";
+  assert.strictEqual(appBlock.split(anchor).length - 1, 1, 'requote-entry cleanup anchor is unique');
+  const disabled = appBlock.replace(anchor, anchor.replace('if (!isEditing)', 'if (false)'));
+  for (const [label, requote] of [['elapsed', ELAPSED_400], ['502', UPSTREAM_502]]) {
+    const r = await runRequoteExit({ requote, sourceOverride: disabled });
+    assert.strictEqual(r.ls.tripSets().length, 1, `${label}: the record was written`);
+    assert.deepStrictEqual(r.ls.tripRemoves(), [], `${label}: the disabled mutant removes nothing — the exact-key pins refuse it`);
+  }
+  const generalized = appBlock.replace(anchor, anchor.replace('if (!isEditing) ', ''));
+  const e = await runRequoteExit({ requote: UPSTREAM_502, edit: true, sourceOverride: generalized });
+  assert.strictEqual(e.ctx.localStorage.getItem('trip_LM-9'), null, 'the generalized mutant deletes the existing record — the edit pin refuses it');
+});
+
+check('PR-T quote: a 400 pickup_time_elapsed renders the typed copy — never raw server text — and is not retryable', async () => {
+  const f = routedFetch({
+    '/api/quote-ride': { status: 400, body: { error: 'pickup_time_elapsed', message: 'RAW SERVER TEXT' } },
+  });
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  app.navigateToPanel = () => {};
+  await app.requestServerQuote();
+  assert.strictEqual(app.state.quote.status, 'error');
+  assert.strictEqual(app.state.quote.error.message, 'This pickup time has passed. Choose a new time to continue.');
+  assert.notStrictEqual(app.state.quote.error.message, 'RAW SERVER TEXT');
+  assert.strictEqual(app.state.quote.error.retryable, false);
+  const notice = ctx.document.body.children.find((c) => c.id === 'pickupElapsedNotice');
+  assert.ok(notice, 'the When-step notice is shown for a quote-time refusal too');
+});
+
+check('STATIC: the create-side elapsed branch precedes the generic refusal — a fall-through mutation fails', () => {
+  const branch = appBlock.indexOf("result?.error === 'pickup_time_elapsed'");
+  const generic = appBlock.indexOf('Booking could not be submitted — nothing was booked');
+  assert.ok(branch > 0 && branch < generic, 'typed branch must come first');
+  assert.ok(appBlock.includes("const PICKUP_ELAPSED_COPY = 'This pickup time has passed. Choose a new time to continue.'"), 'the copy is the browser\'s own constant');
 });
 
 check('STATIC: the blocked registry copy is pinned identically in writer and browser', () => {

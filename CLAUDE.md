@@ -432,9 +432,14 @@ the old published deploy online but freezes every subsequent production build.
     address; client route facts/coordinates/bags rejected by name);
     Routes API computeRoutes with place_id waypoints both sides,
     TRAFFIC_AWARE, minimal field mask incl. fallbackInfo, 8s timeout,
-    strict "123s" duration parsing, ONE attempt; departureTime rule:
-    >5min-past pickups 400 (never re-routed as now), ±5min omits
-    departureTime, future passes the contractual instant verbatim;
+    strict "123s" duration parsing, ONE attempt; departureTime rule
+    (HISTORICAL — SUPERSEDED by PR-T, plan v8.6 §3E: three strict-future
+    gates on a fresh server clock with NO past tolerance — any pickup not
+    strictly later than the server clock is 400 pickup_time_elapsed at
+    the quote endpoint, and only the FUTURE side of the near window still
+    omits departureTime): >5min-past pickups 400 (never re-routed as now),
+    ±5min omits departureTime, future passes the contractual instant
+    verbatim;
     quantization mirrors indexMVP getRouteData exactly (0.1mi /
     whole minutes); routeQuality 'traffic_aware'|'fallback' stamped
     in response AND token (2B2 owes a deliberate decision before
@@ -612,9 +617,11 @@ the old published deploy online but freezes every subsequent production build.
     prices, bookings stamp `price_authority='client_observe'`, and pricing.js
     is shadow-only. The next pricing step is therefore GRADUATION EVIDENCE,
     not activation. Reviewed FORWARD rollback: flag false + SW
-    v1.3.28 + runtime v5 (cache names only ever move forward; the
-    emergency R1 revert ladder continues at v1.3.29 + runtime v6) — see
-    docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
+    v1.3.32 + runtime v9 (cache names only ever move forward; plan v8.6
+    §3D reassigned the ladder — v1.3.28/v5 PR-T release, v1.3.29/v6 PR-T
+    pre-migration rollback, v1.3.30/v7 PR-B, v1.3.31/v8 PR-B rollback,
+    v1.3.32/v9 browser-flag rollback, v1.3.33/v10 emergency R1 revert) —
+    see docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
     Remaining after deploy: graduation evidence, then enforce.
   * PR 3C-2C-B — plan v3.1 ratified (Codex GO, sign-off on file): TWO PRs,
     both SHIPPED dark and since activated — the descriptions that follow

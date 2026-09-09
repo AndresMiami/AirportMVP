@@ -18,10 +18,13 @@
 //      exist in the repo, so this copy is the real second line of defence)
 //   5. vehicle-carousel-standalone.html         — the carousel's JS vehicle
 //      array, plus the card markup (data-vehicle keys + image-fallback names)
-//   6. database/migrations/018_...sql           — the INSTALLED production
-//      writers: the vehicle-key allowlist and the key→category / key→name
-//      CASE mappings in accept_quote_create AND accept_quote_edit (drift
-//      here rejects valid signed quotes or stores wrong names)
+//   6. database/migrations/019_...sql           — the TARGET (post-019)
+//      production writers: PR-T's artifact, authored and executed here but
+//      NOT yet run in production — 018 remains the LIVE installed source
+//      until the separately authorized migration window, and keeps its own
+//      labelled check below: the vehicle-key allowlist and the key→category
+//      / key→name CASE mappings in accept_quote_create AND accept_quote_edit
+//      (drift here rejects valid signed quotes or stores wrong names)
 // CATEGORY-keyed copies (sedan / suv / sprinter, + the legacy 'escalade'
 // category alias kept for old rows):
 //   7. trip.html                                — the passenger vehicle-hero
@@ -35,7 +38,7 @@
 // Plus the HIDDEN LIMITS that would quietly veto a capacity change made in
 // all nine copies above (Codex P0 review, seq:110):
 //   - four hardcoded validation CEILINGS (max passengers/bags of the largest
-//     vehicle): create-booking, update-pending-booking, and BOTH installed
+//     vehicle): create-booking, update-pending-booking, and BOTH target
 //     SQL writers — raise Sprinter to 13/16 everywhere above and these
 //     would still reject the booking;
 //   - two LAST-RESORT vehicle-key lists the browser falls back to when the
@@ -65,8 +68,8 @@
 // by bracket counting and evaluated in an empty vm context. The literals
 // hold only plain strings and numbers (no braces inside strings) — if that
 // ever changes, the balanced-slice helper below fails loudly, not silently.
-// The SQL copy is pinned as text against the installed artifact's file (the
-// checksum discipline ties file to production; the chain test EXECUTES it).
+// The SQL copy is pinned as text against the target artifact's file (the
+// checksum discipline ties file to production; the PR-T suite EXECUTES it).
 
 const fs = require('fs');
 const path = require('path');
@@ -81,6 +84,15 @@ const tripHtml = fs.readFileSync(path.join(repoRoot, 'trip.html'), 'utf8');
 const createBooking = fs.readFileSync(path.join(repoRoot, 'backend/functions/create-booking.js'), 'utf8');
 const updatePending = fs.readFileSync(path.join(repoRoot, 'backend/functions/update-pending-booking.js'), 'utf8');
 const m018 = fs.readFileSync(path.join(repoRoot, 'database/migrations/018_r1_route_content_non_retention.sql'), 'utf8');
+// PR-T (plan v8.6 "installedWriterSql"): assertions about the TARGET writers
+// read them from the migration that WILL install them — PR-T's 019, authored
+// and executed here, NOT yet run in production. A SEPARATE source, so a
+// superseded migration can never be mistaken for the target. 018 remains the
+// LIVE installed source until the separately authorized migration window and
+// keeps its own labelled check; 017 stays historical. The pin below refuses a
+// regression of the target to an older number.
+const TARGET_WRITER_MIGRATION = '019_prt_pickup_time_integrity.sql';
+const targetWriterSql = fs.readFileSync(path.join(repoRoot, 'database/migrations', TARGET_WRITER_MIGRATION), 'utf8');
 const { LINKMIA_RATE_CARD, CANONICAL_VEHICLES } = require(path.join(repoRoot, 'backend/functions/lib/ride-rate-card.js'));
 
 // PR-A PROMOTED this table out of the suite and into the shipped module
@@ -130,7 +142,7 @@ function extractLiteral(src, anchor, open, close, label) {
 // suite: CREATE OR REPLACE ... through the closing $$;).
 function extractSqlFunction(src, name) {
   const start = src.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`);
-  assert.ok(start >= 0, `${name} not found in migration 018`);
+  assert.ok(start >= 0, `${name} not found in the supplied migration source`);
   return src.slice(start, src.indexOf('$$;', start) + 3);
 }
 
@@ -284,7 +296,7 @@ function check(name, f) {
     assert.deepStrictEqual(keysB, EXPECTED_KEYS, 'update-pending VEHICLE_KEYS drifted');
   });
 
-  check('validation CEILINGS equal the largest vehicle capacity (endpoints + BOTH installed RPCs)', () => {
+  check('validation CEILINGS equal the largest vehicle capacity (endpoints + BOTH TARGET RPCs, read from the 019 source)', () => {
     // These four hardcoded limits are invisible to every copy above: a
     // future operator could raise Sprinter to 13/16 in all nine pinned
     // copies, P0 would pass, and bookings would still be rejected here.
@@ -299,7 +311,7 @@ function check(name, f) {
         `${label}: bag ceiling must be ${maxBags} (the largest vehicle)`);
     }
     for (const fn of ['accept_quote_create', 'accept_quote_edit']) {
-      const body = extractSqlFunction(m018, fn);
+      const body = extractSqlFunction(targetWriterSql, fn);
       assert.match(body, new RegExp(`v_passengers\\s*<\\s*1\\s+OR\\s+v_passengers\\s*>\\s*${maxPax}`),
         `${fn}: SQL passenger ceiling must be ${maxPax}`);
       assert.match(body, new RegExp(`v_bags\\s*<\\s*0\\s+OR\\s+v_bags\\s*>\\s*${maxBags}`),
@@ -319,7 +331,33 @@ function check(name, f) {
       'carousel clearPrices last-resort list drifted');
   });
 
-  check('migration 018 (INSTALLED writers): key allowlist + key->category + key->name in BOTH RPCs', () => {
+  check('TARGET-writer authority pin (post-019): the TARGET source is the highest-numbered forward migration that defines the writers, never a superseded one', () => {
+    const dir = path.join(repoRoot, 'database/migrations');
+    const defining = fs.readdirSync(dir)
+      .filter((f) => /^0\d\d_.*\.sql$/.test(f) && !/rollback|preflight/.test(f))
+      .filter((f) => fs.readFileSync(path.join(dir, f), 'utf8').includes('CREATE OR REPLACE FUNCTION accept_quote_create('))
+      .sort();
+    assert.ok(defining.length >= 3, `expected 017, 018 and 019 to define the writers, saw ${defining.join(', ')}`);
+    assert.strictEqual(defining[defining.length - 1], TARGET_WRITER_MIGRATION,
+      `TARGET authority must move to ${defining[defining.length - 1]} — a target-writer assertion may not read a superseded migration`);
+    assert.ok(targetWriterSql.includes('linkmia_pickup_is_future'), 'the target source carries the PR-T guard');
+  });
+
+  check('migration 019 (TARGET writers — post-install; 018 stays live until the window): key allowlist + key->category + key->name in BOTH RPCs', () => {
+    for (const fn of ['accept_quote_create', 'accept_quote_edit']) {
+      const body = extractSqlFunction(targetWriterSql, fn);
+      assert.ok(body.includes(`NOT IN ('tesla','escalade','sprinter')`),
+        `${fn}: vehicle-key allowlist drifted or moved`);
+      for (const key of EXPECTED_KEYS) {
+        const cat = new RegExp(`WHEN\\s+'${key}'\\s+THEN\\s+'${EXPECTED[key].category}'`);
+        assert.match(body, cat, `${fn}: ${key} -> ${EXPECTED[key].category} category CASE drifted`);
+        const name = new RegExp(`WHEN\\s+'${key}'\\s+THEN\\s+'${EXPECTED[key].name}'`);
+        assert.match(body, name, `${fn}: ${key} -> "${EXPECTED[key].name}" name CASE drifted`);
+      }
+    }
+  });
+
+  check('migration 018 (LIVE installed writers until the 019 window; superseded once 019 runs): key allowlist + key->category + key->name in BOTH RPCs', () => {
     for (const fn of ['accept_quote_create', 'accept_quote_edit']) {
       const body = extractSqlFunction(m018, fn);
       assert.ok(body.includes(`NOT IN ('tesla','escalade','sprinter')`),
