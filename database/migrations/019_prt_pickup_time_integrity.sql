@@ -32,8 +32,8 @@
 --   * no minimum lead time; fares, tokens, cancellation and driver-status
 --     semantics are unchanged; accept_optional_edit is untouched.
 --
--- FINGERPRINT GATE: the pre-capture refuses to run unless BOTH installed
--- writer bodies are EXACTLY the reviewed 018 bodies (sha256 of
+-- FINGERPRINT GATE: the pre-capture refuses to run unless the installed
+-- (create, edit) PAIR is EXACTLY the reviewed 018 pair (sha256 of
 -- pg_proc.prosrc — the values below, generated from the reviewed 018 text and
 -- printed by preflight A2). Any other body — an unnoticed hotfix, a manual
 -- edit — aborts the whole transaction before anything is touched. After
@@ -51,8 +51,9 @@ BEGIN;
 -- PRE-CAPTURE: exact namespace-qualified identities, owners, ACLs AND BODY
 -- FINGERPRINTS (sha256 of pg_proc.prosrc) of both writers BEFORE replacement
 -- (regprocedure resolution is itself fail-closed). The precheck REFUSES to
--- proceed unless each installed body is a recognized reviewed body — an
--- unnoticed production change is never overwritten.
+-- proceed unless the installed (create, edit) PAIR is one of the recognized
+-- reviewed pairs — an unnoticed production change, or a mixed state, is
+-- never overwritten.
 -- ------------------------------------------------------------
 CREATE TEMP TABLE prt_pre_state ON COMMIT DROP AS
 SELECT p.oid, p.proname, p.proowner, p.proacl, p.proconfig,
@@ -66,19 +67,21 @@ WHERE n.nspname = 'public'
 DO $prt_precheck$
 DECLARE
   v_row RECORD;
-  v_accepted TEXT[];
+  v_create_fp TEXT;
+  v_edit_fp TEXT;
 BEGIN
   IF (SELECT count(*) FROM prt_pre_state) <> 2 THEN
     RAISE EXCEPTION 'PR-T: expected exactly the two public writers before replacement';
   END IF;
+  SELECT body_fp INTO v_create_fp FROM prt_pre_state WHERE proname = 'accept_quote_create';
+  SELECT body_fp INTO v_edit_fp FROM prt_pre_state WHERE proname = 'accept_quote_edit';
+  -- The ORDERED PAIR must be one of the recognized reviewed pairs.
+  IF v_create_fp IS NULL OR v_edit_fp IS NULL
+     OR NOT ((v_create_fp, v_edit_fp) IN (('ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388', 'cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41'))) THEN
+    RAISE EXCEPTION 'PR-T: the installed writer pair is not a recognized reviewed pair (accept_quote_create body fingerprint %, accept_quote_edit body fingerprint %; accepted pairs (create, edit): (''ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388'', ''cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41'')) — an unreviewed or mixed state is installed; refusing to overwrite it',
+      v_create_fp, v_edit_fp;
+  END IF;
   FOR v_row IN SELECT * FROM prt_pre_state LOOP
-    v_accepted := CASE v_row.proname
-      WHEN 'accept_quote_create' THEN ARRAY['ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388']::TEXT[]
-      ELSE ARRAY['cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41']::TEXT[] END;
-    IF NOT (v_row.body_fp = ANY (v_accepted)) THEN
-      RAISE EXCEPTION 'PR-T: installed % body fingerprint % is not a recognized reviewed body (accepted: %) — an unreviewed change is installed; refusing to overwrite it',
-        v_row.proname, v_row.body_fp, v_accepted;
-    END IF;
     IF has_function_privilege('anon', v_row.oid, 'EXECUTE')
        OR has_function_privilege('authenticated', v_row.oid, 'EXECUTE') THEN
       RAISE EXCEPTION 'PR-T: client role holds EXECUTE on % — refuse over privilege drift', v_row.proname;

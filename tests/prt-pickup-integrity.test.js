@@ -320,10 +320,15 @@ async function runPreflight(db) {
     }
     const pre = fs.readFileSync(path.join(repoRoot, 'database/migrations/019_prt_preflight.sql'), 'utf8');
     assert.ok(pre.includes(g.fps.fp.reviewed018.create) && pre.includes(g.fps.fp.reviewed018.edit) && pre.includes(g.fps.fp.target019.create), 'preflight A2 carries the expected fingerprints');
-    // the 019 artifact embeds exactly the reviewed-018 acceptance set; the rollback the three recognized bodies
-    assert.ok(m019.includes(`ARRAY['${g.fps.fp.reviewed018.create}']::TEXT[]`), '019 accepts only the reviewed 018 create body');
-    assert.ok(!m019.includes(g.fps.fp.rollback.create) || m019.indexOf(g.fps.fp.rollback.create) < 0, '019 does not accept the rollback body');
-    assert.ok(rollback.includes(g.fps.fp.reviewed018.create) && rollback.includes(g.fps.fp.target019.create) && rollback.includes(g.fps.fp.rollback.create), 'the rollback accepts 018, 019 and its own bodies');
+    // the artifacts embed ORDERED PAIRS: 019 exactly the reviewed-018 pair; the rollback the three coherent pairs — never a mixed one
+    const pair = (p) => `('${p.create}', '${p.edit}')`;
+    const f = g.fps.fp;
+    assert.ok(m019.includes(`IN (${pair(f.reviewed018)}))`), '019 accepts only the reviewed 018 pair');
+    assert.ok(!m019.includes(pair(f.target019)) && !m019.includes(pair(f.rollback)), '019 accepts no other pair');
+    assert.ok(rollback.includes(`IN (${pair(f.reviewed018)}, ${pair(f.target019)}, ${pair(f.rollback)}))`), 'the rollback accepts exactly the three coherent pairs');
+    for (const [a, b] of [[f.target019.create, f.reviewed018.edit], [f.reviewed018.create, f.target019.edit], [f.rollback.create, f.target019.edit]]) {
+      assert.ok(!rollback.includes(`('${a}', '${b}')`), 'no mixed pair is embedded');
+    }
   });
 
   await check('STATEMENT ORDER: pre-mutation guard AFTER receipt recovery and before rpc_writer on; final guard the LAST blocking statement — after the telemetry insert, before set_config off + RETURN', async () => {
@@ -401,6 +406,29 @@ async function runPreflight(db) {
     assert.strictEqual((await modeRow(db)).mode, 'off');
   });
 
+  await check('MIXED PAIRS: one writer at 019 and the other at 018 (both inverses) and a rollback-body mix are NOT reviewed states — the rollback AND 019 abort before the helper or either writer changes; fingerprints, owner, ACL and config read back unchanged', async () => {
+    const g = gen.generate();
+    const meta = async (d) => (await d.query(`SELECT proname, proowner::int AS owner, proacl::text AS acl, proconfig::text AS cfg, encode(extensions.digest(prosrc,'sha256'),'hex') AS fp FROM pg_proc WHERE proname IN ('accept_quote_create','accept_quote_edit') ORDER BY proname`)).rows;
+    const states = [
+      ['create@019 + edit@018', gen.extract(m019, 'accept_quote_create'), { create: g.fps.fp.target019.create, edit: g.fps.fp.reviewed018.edit }],
+      ['create@018 + edit@019', gen.extract(m019, 'accept_quote_edit'), { create: g.fps.fp.reviewed018.create, edit: g.fps.fp.target019.edit }],
+      ['create@rollback + edit@018', gen.extract(rollback, 'accept_quote_create'), { create: g.fps.fp.rollback.create, edit: g.fps.fp.reviewed018.edit }],
+    ];
+    for (const [label, install, expectFp] of states) {
+      const d = await baselineDb();
+      await d.exec(install);
+      assert.deepStrictEqual(await installedFp(d), expectFp, `${label}: mixed state installed`);
+      const before = await meta(d);
+      const helpers = (await one(d, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n;
+      for (const [name, artifact] of [['rollback', rollback], ['019', m019]]) {
+        const r = await tryExec(d, artifact);
+        assert.ok(!r.ok && /is not a recognized reviewed pair/.test(r.error), `${label}: ${name} must refuse the mixed pair: ` + (r.error || 'committed?!'));
+        assert.deepStrictEqual(await meta(d), before, `${label}: ${name} changed nothing (fingerprints/owner/ACL/config)`);
+        assert.strictEqual((await one(d, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n, helpers, `${label}: ${name} did not create the helper`);
+      }
+    }
+  });
+
   await check('SABOTAGE: a ONE-CHARACTER comment change in an installed writer keeps every marker check green but STOPS migration 019 AND the rollback at the fingerprint gate with zero changes; restoring the exact reviewed body lets 019 through', async () => {
     const d = await baselineDb();
     // sabotage = one trailing comment character inside the body: valid SQL,
@@ -413,11 +441,11 @@ async function runPreflight(db) {
     assert.strictEqual(marker.m, true, 'the old marker check would still say 018');
     const fpBefore = await installedFp(d);
     let r = await tryExec(d, m019);
-    assert.ok(!r.ok && /accept_quote_create body fingerprint .* is not a recognized reviewed body/.test(r.error), '019 refuses: ' + (r.error || 'committed?!'));
+    assert.ok(!r.ok && /is not a recognized reviewed pair \(accept_quote_create body fingerprint/.test(r.error), '019 refuses: ' + (r.error || 'committed?!'));
     assert.strictEqual((await one(d, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n, 0, 'the refusal happened before the helper was created — nothing changed');
     assert.deepStrictEqual(await installedFp(d), fpBefore, 'bodies untouched');
     r = await tryExec(d, rollback);
-    assert.ok(!r.ok && /is not a recognized reviewed body/.test(r.error), 'the rollback refuses the same unreviewed body: ' + (r.error || 'committed?!'));
+    assert.ok(!r.ok && /is not a recognized reviewed pair/.test(r.error), 'the rollback refuses the same unreviewed body: ' + (r.error || 'committed?!'));
     // restore the exact reviewed body -> 019 applies
     await d.exec(gen.extract(m018, 'accept_quote_create'));
     assert.deepStrictEqual(await installedFp(d), gen.generate().fps.fp.reviewed018);
@@ -426,7 +454,7 @@ async function runPreflight(db) {
     const sabEdit = sabotage(gen.extract(m019, 'accept_quote_edit'));
     await d.exec(sabEdit);
     r = await tryExec(d, rollback);
-    assert.ok(!r.ok && /accept_quote_edit body fingerprint .* is not a recognized reviewed body/.test(r.error), 'rollback refuses a sabotaged edit writer: ' + (r.error || 'committed?!'));
+    assert.ok(!r.ok && /is not a recognized reviewed pair \(accept_quote_create body fingerprint .*accept_quote_edit body fingerprint/.test(r.error), 'rollback refuses a sabotaged edit writer: ' + (r.error || 'committed?!'));
   });
 
   await check('COMPARATOR (transaction-stable clock): exact now is refused, one microsecond later passes', async () => {
@@ -750,7 +778,7 @@ async function runPreflight(db) {
     const fpNow = await installedFp(db);
     assert.deepStrictEqual(fpNow, gen.generate().fps.fp.rollback, 'precondition: rollback bodies installed');
     const r = await tryExec(db, m019);
-    assert.ok(!r.ok && /is not a recognized reviewed body/.test(r.error), '019 refuses rollback bodies: ' + (r.error || 'committed?!'));
+    assert.ok(!r.ok && /is not a recognized reviewed pair/.test(r.error), '019 refuses rollback bodies: ' + (r.error || 'committed?!'));
     assert.deepStrictEqual(await installedFp(db), fpNow, 'nothing changed');
     const r2 = await tryExec(db, m018); assert.ok(r2.ok, '018 re-applies on the rollback state: ' + (r2.error || ''));
     assert.deepStrictEqual(await installedFp(db), gen.generate().fps.fp.reviewed018);
@@ -774,7 +802,7 @@ async function runPreflight(db) {
     assert.deepStrictEqual(await installedFp(db), gen.generate().fps.fp.target019);
     // and a post-019 database is not a valid 019 pre-state either (run ONCE)
     const again = await tryExec(db, m019);
-    assert.ok(!again.ok && /is not a recognized reviewed body/.test(again.error), '019 refuses to re-run on its own bodies');
+    assert.ok(!again.ok && /is not a recognized reviewed pair/.test(again.error), '019 refuses to re-run on its own bodies');
   });
 
   const db2 = await freshDb();
@@ -909,7 +937,7 @@ async function runPreflight(db) {
   });
 
   // ================================================================ the operator preflight, executed
-  await check('PREFLIGHT (executed on the 018 baseline): A1 two writers, A2 per-row is_018=true/guarded=false, A3 helper absent, B1 off/observe with NULL high-water, B2 exactly ONE named CHECK with 16 literals and widened=false, C1/C2 shaped', async () => {
+  await check('PREFLIGHT (executed on the 018 baseline): A1 two writers, A2 exact fingerprints is_reviewed_018=true/is_target_019=false/guarded=false, A3 helper absent, B1 off/observe with NULL high-water, B2 exactly ONE named CHECK with 16 literals and widened=false, C1/C2 shaped', async () => {
     const d = await baselineDb();
     const g = await runPreflight(d);
     assert.deepStrictEqual(Object.keys(g).sort(), ['A1', 'A2', 'A3', 'B1', 'B2', 'C1', 'C2'], 'seven labeled units parsed');
@@ -935,7 +963,7 @@ async function runPreflight(db) {
     await setMode(d, 'observe');
     const g2 = await runPreflight(d);
     assert.strictEqual(g2.B1[0].mode, 'observe'); assert.strictEqual(g2.B1[0].enforcement_started_at, null);
-    // after 019: A2 guarded=true (is_018 still true), A3 = 1, B2 unchanged
+    // after 019: A2 guarded=true, is_reviewed_018=false, is_target_019=true; A3 = 1; B2 unchanged
     const r = await tryExec(d, m019); assert.ok(r.ok, r.error);
     const g3 = await runPreflight(d);
     assert.deepStrictEqual(g3.A2.map((x) => [x.proname, x.is_reviewed_018, x.is_target_019, x.guarded]), [['accept_quote_create', false, true, true], ['accept_quote_edit', false, true, true]]);

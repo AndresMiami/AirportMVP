@@ -1,8 +1,8 @@
 # Migration 019 (PR-T) rollout and emergency runbook
 
 STATUS: AUTHORED, NOT RUN. Migration 019 is a generated, test-executed
-artifact committed on branch `prt-pickup-time-integrity` (draft PR #93),
-not merged and not executed. Nothing in this document is authorization: the
+artifact committed in PR #93 (branch `prt-pickup-time-integrity`); the
+migration is NOT RUN in production. Nothing in this document is authorization: the
 code release, the preflight, the migration execution, the post-install
 verification and any rollback are each a SEPARATE, explicit Andres
 authorization in Claude's chat, quoting the 019 checksum from the generated
@@ -53,8 +53,8 @@ rollback refuses anything but the 018, 019 or its own already-restored bodies.
 <!-- PRT-ARTIFACT-CHECKSUMS:BEGIN (generated) -->
 | Artifact / fingerprint | sha256 |
 |---|---|
-| `database/migrations/019_prt_pickup_time_integrity.sql` (file) | `9e9d144227939805ab1d56b6844609dec2c4fba6c42a175e766fc1a4fe241f55` |
-| `database/migrations/018_r1_rollback.sql` (file) | `d60b82b5226941e4dab8880091d33321a48e4feefce9f07ecf8fab658cbd1a04` |
+| `database/migrations/019_prt_pickup_time_integrity.sql` (file) | `ebeccd9e04c84555f8cd6496c25fa412c346d1c8a46e74e1558107c1efe4ba7f` |
+| `database/migrations/018_r1_rollback.sql` (file) | `550e2ed2ac0ef22ba2a8ea58155d1da93602309a48473c4751a3f081787a933a` |
 | installed `accept_quote_create` body 019 REQUIRES (reviewed 018) | `ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388` |
 | installed `accept_quote_edit` body 019 REQUIRES (reviewed 018) | `cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41` |
 | `accept_quote_create` body 019 INSTALLS (target) | `fc64b32ca907098b8ccceb5c912fa9d290a5e9c14a4f0704013d6b226f506396` |

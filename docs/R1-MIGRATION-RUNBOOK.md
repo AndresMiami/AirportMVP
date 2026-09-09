@@ -179,8 +179,11 @@ Andres in Claude's chat:
    block that RAISEs unless the duration requirement provably returned, both
    guards and the helper are present with the right owner/ACL, SECURITY
    DEFINER and service_role EXECUTE held, and no overload appeared.
-4. POST-ROLLBACK VERIFICATION: run the namespace-qualified preflight grid
-   (expect the 017 shape); then one live no-token test booking through the
+4. POST-ROLLBACK VERIFICATION: run the namespace-qualified preflight grid —
+   expect the post-rollback state, NOT simply the 017 shape: 017 duration
+   behaviour PLUS the PR-T guard and its helper, both writers carrying the
+   rollback's own fingerprints from the PR-T runbook table; then one live
+   no-token test booking through the
    normal flow — expect success WITH a stored duration again — and cancel it
    by the usual protocol.
 

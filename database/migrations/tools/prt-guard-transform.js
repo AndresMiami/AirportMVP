@@ -26,9 +26,10 @@
 //   FINGERPRINTS  — every artifact REFUSES to replace an installed writer whose
 //                   body (sha256 of pg_proc.prosrc, byte-identical to the
 //                   dollar-quoted body in the migration file) is not a
-//                   recognized reviewed body: 019 accepts ONLY the reviewed
-//                   018 bodies; the rollback accepts the 018, 019 or its own
-//                   already-restored bodies. After replacement each artifact
+//                   recognized reviewed PAIR (create, edit): 019 accepts ONLY
+//                   the reviewed 018 pair; the rollback accepts the 018, 019
+//                   or its own already-restored pair — never a mixed state.
+//                   After replacement each artifact
 //                   verifies the installed body equals its generated body
 //                   (an altered paste cannot commit). The expected values are
 //                   generated into the preflight (A2) and the runbook.
@@ -249,13 +250,17 @@ function applyPickupGuard(body, kind) {
 }
 
 // ---- artifact assembly ------------------------------------------------------
-const sqlArray = (fps) => 'ARRAY[' + fps.map((f) => `'${f}'`).join(', ') + ']::TEXT[]';
+// accepted = array of ORDERED PAIRS [createFp, editFp]: the gate validates the
+// installed (create, edit) tuple as a whole, never each writer on its own — a
+// mixed state (one writer at 019, the other at 018) is not a reviewed state.
+const sqlPairs = (pairs) => pairs.map(([c, e]) => `('${c}', '${e}')`).join(', ');
 const PRE_CAPTURE = (table, tag, label, accepted) => `-- ------------------------------------------------------------
 -- PRE-CAPTURE: exact namespace-qualified identities, owners, ACLs AND BODY
 -- FINGERPRINTS (sha256 of pg_proc.prosrc) of both writers BEFORE replacement
 -- (regprocedure resolution is itself fail-closed). The precheck REFUSES to
--- proceed unless each installed body is a recognized reviewed body — an
--- unnoticed production change is never overwritten.
+-- proceed unless the installed (create, edit) PAIR is one of the recognized
+-- reviewed pairs — an unnoticed production change, or a mixed state, is
+-- never overwritten.
 -- ------------------------------------------------------------
 CREATE TEMP TABLE ${table} ON COMMIT DROP AS
 SELECT p.oid, p.proname, p.proowner, p.proacl, p.proconfig,
@@ -269,19 +274,21 @@ WHERE n.nspname = 'public'
 DO $${tag}_precheck$
 DECLARE
   v_row RECORD;
-  v_accepted TEXT[];
+  v_create_fp TEXT;
+  v_edit_fp TEXT;
 BEGIN
   IF (SELECT count(*) FROM ${table}) <> 2 THEN
     RAISE EXCEPTION '${label}: expected exactly the two public writers before replacement';
   END IF;
+  SELECT body_fp INTO v_create_fp FROM ${table} WHERE proname = 'accept_quote_create';
+  SELECT body_fp INTO v_edit_fp FROM ${table} WHERE proname = 'accept_quote_edit';
+  -- The ORDERED PAIR must be one of the recognized reviewed pairs.
+  IF v_create_fp IS NULL OR v_edit_fp IS NULL
+     OR NOT ((v_create_fp, v_edit_fp) IN (${sqlPairs(accepted)})) THEN
+    RAISE EXCEPTION '${label}: the installed writer pair is not a recognized reviewed pair (accept_quote_create body fingerprint %, accept_quote_edit body fingerprint %; accepted pairs (create, edit): ${sqlPairs(accepted).replace(/'/g, "''")}) — an unreviewed or mixed state is installed; refusing to overwrite it',
+      v_create_fp, v_edit_fp;
+  END IF;
   FOR v_row IN SELECT * FROM ${table} LOOP
-    v_accepted := CASE v_row.proname
-      WHEN 'accept_quote_create' THEN ${sqlArray(accepted.create)}
-      ELSE ${sqlArray(accepted.edit)} END;
-    IF NOT (v_row.body_fp = ANY (v_accepted)) THEN
-      RAISE EXCEPTION '${label}: installed % body fingerprint % is not a recognized reviewed body (accepted: %) — an unreviewed change is installed; refusing to overwrite it',
-        v_row.proname, v_row.body_fp, v_accepted;
-    END IF;
     IF has_function_privilege('anon', v_row.oid, 'EXECUTE')
        OR has_function_privilege('authenticated', v_row.oid, 'EXECUTE') THEN
       RAISE EXCEPTION '${label}: client role holds EXECUTE on % — refuse over privilege drift', v_row.proname;
@@ -502,7 +509,7 @@ function fingerprints(m017, m018) {
 function build019(m018, fps) {
   const create = fps.bodies.c019;
   const edit = fps.bodies.e019;
-  const accepted = { create: [fps.fp.reviewed018.create], edit: [fps.fp.reviewed018.edit] };
+  const accepted = [[fps.fp.reviewed018.create, fps.fp.reviewed018.edit]];
   return `-- ============================================================
 -- Migration 019 — PR-T: pickup-time integrity (plan v8.6 §3E)
 --
@@ -537,8 +544,8 @@ function build019(m018, fps) {
 --   * no minimum lead time; fares, tokens, cancellation and driver-status
 --     semantics are unchanged; accept_optional_edit is untouched.
 --
--- FINGERPRINT GATE: the pre-capture refuses to run unless BOTH installed
--- writer bodies are EXACTLY the reviewed 018 bodies (sha256 of
+-- FINGERPRINT GATE: the pre-capture refuses to run unless the installed
+-- (create, edit) PAIR is EXACTLY the reviewed 018 pair (sha256 of
 -- pg_proc.prosrc — the values below, generated from the reviewed 018 text and
 -- printed by preflight A2). Any other body — an unnoticed hotfix, a manual
 -- edit — aborts the whole transaction before anything is touched. After
@@ -579,23 +586,25 @@ COMMIT;
 function buildRollback(m017, fps) {
   const create = fps.bodies.crb;
   const edit = fps.bodies.erb;
-  // Recognized pre-states: 018 installed (019 never ran), 019 installed, or
-  // this rollback already applied. Anything else is an unreviewed body.
-  const accepted = {
-    create: [fps.fp.reviewed018.create, fps.fp.target019.create, fps.fp.rollback.create],
-    edit: [fps.fp.reviewed018.edit, fps.fp.target019.edit, fps.fp.rollback.edit],
-  };
+  // Recognized pre-states, as COHERENT PAIRS: 018 installed (019 never ran),
+  // 019 installed, or this rollback already applied. A mixed pair (one
+  // writer at 019, the other at 018) is not a reviewed state and is refused.
+  const accepted = [
+    [fps.fp.reviewed018.create, fps.fp.reviewed018.edit],
+    [fps.fp.target019.create, fps.fp.target019.edit],
+    [fps.fp.rollback.create, fps.fp.rollback.edit],
+  ];
   return `-- ============================================================
 -- Migration 018 EMERGENCY ROLLBACK — restores the migration-017 bodies of
 -- accept_quote_create and accept_quote_edit WITH the PR-T pickup guard:
 -- i.e. the 017 DURATION BEHAVIOR (the verified-duration requirement returns)
 -- PLUS the PR-T pickup-time guard — NOT simply the 017 shape.
 --
--- FINGERPRINT GATE: refuses to run unless both installed bodies are EXACTLY
--- one of the recognized reviewed bodies — 018's, 019's, or this rollback's
--- own (already restored). An unrecognized body aborts before anything is
--- touched; after replacement the installed bodies must equal this
--- artifact's own bodies.
+-- FINGERPRINT GATE: refuses to run unless the installed (create, edit) PAIR
+-- is EXACTLY one of the recognized reviewed pairs — 018's, 019's, or this
+-- rollback's own (already restored). A mixed or unrecognized pair aborts
+-- before anything is touched; after replacement the installed bodies must
+-- equal this artifact's own bodies.
 --
 -- GENERATED by database/migrations/tools/prt-guard-transform.js: the 017
 -- bodies (extracted programmatically) with the SAME guard transform that
