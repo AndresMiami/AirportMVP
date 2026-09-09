@@ -56,7 +56,7 @@ async function freshDb(PGlite, pgcrypto) {
   // schema + 001..017 (exclude the 017 preflight and both 018 files)
   await db.exec(fs.readFileSync(path.join(repoRoot, 'database/linkmia-schema.sql'), 'utf8'));
   const files = fs.readdirSync(path.join(repoRoot, 'database/migrations'))
-    .filter((f) => /^0\d\d_/.test(f) && !/preflight|^018_/.test(f)).sort();
+    .filter((f) => /^0\d\d_/.test(f) && !/preflight|^018_|^019_/.test(f)).sort();
   for (const f of files) await db.exec(mig(f));
   return db;
 }
@@ -241,9 +241,13 @@ async function rpcCreate(db, { authUserId, customerId }, opId, verdict, jti, pay
     assert.strictEqual(post.au, false);
   });
 
-  await check('EXACT ROLLBACK applies — and RESTORES 017 behavior (duration required and persisted again)', async () => {
+  await check('EXACT ROLLBACK applies — and RESTORES 017 behavior (duration required and persisted again) WITH the PR-T guard', async () => {
+    // PR-T: the regenerated rollback is self-contained — it creates the
+    // pickup helper first, so it is valid here with 019 never installed.
     const r = await tryExec(db, rollback);
     assert.ok(r.ok, r.error);
+    const helper = await one(db, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`);
+    assert.strictEqual(helper.n, 1, 'the rollback carries its helper');
     // requirement returns
     const cust = await seedCustomer(db, 'CHAIN-RB-A');
     const jti = uuid();

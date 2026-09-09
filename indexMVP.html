@@ -749,8 +749,10 @@
         // shadow-only while this flag is true, and the server records both
         // sides' cents in quote_verifications).
         // FORWARD ROLLBACK (reviewed with this activation, never reverse):
-        // set this flag false + bump CACHE_NAME to v1.3.28 AND
-        // RUNTIME_CACHE to v5 in the same commit — the runtime cache can
+        // set this flag false + bump CACHE_NAME to v1.3.32 AND
+        // RUNTIME_CACHE to v9 in the same commit (the reserved browser-flag
+        // rung of plan v8.6 §3D; v1.3.28–v1.3.31 belong to PR-T and PR-B) —
+        // the runtime cache can
         // retain booking HTML, so a static-only bump is not a dependable
         // rollback. See docs/BROWSER-FLAG-ACTIVATION.md.
         // Follows the client-side rollout-constant pattern (a build-time
@@ -760,6 +762,9 @@
         // A quote is priced for one exact intent. Anything that changes the
         // intent must throw the old quote away rather than reprice silently.
         const QUOTE_DEBOUNCE_MS = 500;
+        // PR-T: the passenger copy for a server-refused elapsed pickup. The
+        // browser's OWN constant — raw server text is never rendered.
+        const PICKUP_ELAPSED_COPY = 'This pickup time has passed. Choose a new time to continue.';
 
         // Main Application Class
         class AirportBookingApp {
@@ -1779,6 +1784,7 @@
                 } else {
                     this.hideTimeWarning();
                 }
+                document.getElementById('pickupElapsedNotice')?.remove();   // PR-T: a new pick clears it
                 
                 const prevPickup = this.state.dateTime.time
                     ? new Date(this.state.dateTime.time).getTime() : null;
@@ -1811,6 +1817,25 @@
                     this.els.timeNote.parentElement.insertBefore(warning, this.els.timeNote);
                 }
                 warning.classList.add('visible');
+            }
+
+            // PR-T: render the typed elapsed-pickup copy on the When step and
+            // return focus to the time control. Distinct from the picker's own
+            // "30 minutes from now" nudge, which is only guidance.
+            showPickupElapsed() {
+                let el = document.getElementById('pickupElapsedNotice');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'pickupElapsedNotice';
+                    el.className = 'time-warning visible';
+                    el.setAttribute('role', 'alert');
+                    const host = this.els.timeNote?.parentElement;
+                    if (host && this.els.timeNote) host.insertBefore(el, this.els.timeNote);
+                    else document.body.appendChild(el);
+                }
+                el.textContent = PICKUP_ELAPSED_COPY;
+                try { this.navigateToPanel('when'); } catch (_) { /* panel DOM may be absent; the notice still speaks */ }
+                this.els.hourSelect?.focus?.();
             }
 
             hideTimeWarning() {
@@ -2253,6 +2278,16 @@
                                 editStale: true
                             };
                             this.renderQuoteState();
+                            return;
+                        }
+                        // PR-T: the server's FRESH clock refused an elapsed pickup.
+                        // Typed and definitive: never retried automatically, and
+                        // the passenger is returned to the control that can fix it.
+                        if (res.status === 400 && payload?.error === 'pickup_time_elapsed') {
+                            q.status = 'error';
+                            q.error = { message: PICKUP_ELAPSED_COPY, retryable: false, elapsed: true };
+                            this.renderQuoteState();
+                            this.showPickupElapsed();
                             return;
                         }
                         // 400 identity refusals are the passenger's to fix. 422 is a
@@ -3746,6 +3781,13 @@
                         const snap = this._tapSnapshot;
                         bookBtn.innerHTML = originalText;
                         bookBtn.disabled = false;
+                        // PR-T: a definitive requote ENDS this attempt, whatever
+                        // the quiet re-quote answers next (elapsed, a 502,
+                        // sequence or price drift). CREATE CLEANUP IS AN EXIT
+                        // INVARIANT: this attempt's provisional record goes NOW.
+                        // A sanctioned auto-resubmit is a NEW attempt and writes
+                        // its own record under its own trip id.
+                        if (!isEditing) { try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {} }
                         if (snap && !snap.refreshUsed && !snap.resubmitUsed) {
                             snap.resubmitUsed = true;
                             const ok = await this.quietRefreshForTap(snap);
@@ -3808,6 +3850,21 @@
                         bookBtn.innerHTML = originalText;
                         bookBtn.disabled = false;
                         this.showTripSheet(result.existingBookingId);
+                        return;
+                    }
+                    // PR-T: the DATABASE clock refused an elapsed pickup. A definitive
+                    // 400 — the envelope is already settled. Every entered value is
+                    // preserved, the unusable quote is dropped, and the passenger is
+                    // returned to When. CREATE CLEANUP IS AN EXIT INVARIANT: the
+                    // provisional trip_ record for a ride that never existed goes.
+                    // The generic "please try again" would be false guidance for a
+                    // state retrying can never clear.
+                    if (response.status === 400 && result?.error === 'pickup_time_elapsed') {
+                        if (!isEditing) { try { localStorage.removeItem(`trip_${tripId}`); } catch (_) {} }
+                        bookBtn.innerHTML = originalText;
+                        bookBtn.disabled = false;
+                        this.invalidateQuote('pickup time elapsed at the server');
+                        this.showPickupElapsed();
                         return;
                     }
                     if (!response.ok || !result?.bookingId) {

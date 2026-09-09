@@ -19,13 +19,25 @@
 // v1.3.27: browser-flag activation — SERVER_QUOTE_ENABLED true in the
 // precached indexMVP; the runtime cache bumps WITH it (to v4) because it
 // can retain booking HTML, and a static-only bump is not a dependable
-// rollback. Reviewed forward rollback: flag false + v1.3.28 + runtime v5;
-// the emergency R1 revert ladder continues at v1.3.29 + runtime v6.
-const CACHE_NAME = 'linkmia-v1.3.27';
+// rollback. Cache names only ever move FORWARD.
+// v1.3.28: PR-T — the create-side elapsed-pickup message lands in the
+// precached indexMVP; runtime bumps WITH it to v5. Residual (recorded): a
+// page still on v1.3.27 renders the new quote 400 token verbatim for one
+// session (docs/PRT-MIGRATION-RUNBOOK.md, Known residuals). The complete reserved
+// ladder (plan v8.6 §3D — every rung distinct, none ever reused):
+//   v1.3.28 / runtime-v5   PR-T release — THIS tree
+//   v1.3.29 / runtime-v6   PR-T pre-migration code rollback (phase-bounded;
+//                          retired once the migration is verified)
+//   v1.3.30 / runtime-v7   PR-B release (parked review card)
+//   v1.3.31 / runtime-v8   PR-B-only forward rollback
+//   v1.3.32 / runtime-v9   Browser-flag rollback (SERVER_QUOTE_ENABLED false)
+//   v1.3.33 / runtime-v10  Emergency R1 code revert
+// (or the next never-used pairs resolved at execution if main has moved).
+const CACHE_NAME = 'linkmia-v1.3.28';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v4';
+const RUNTIME_CACHE = 'linkmia-runtime-v5';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [

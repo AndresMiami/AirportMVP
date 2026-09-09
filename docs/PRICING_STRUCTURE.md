@@ -1,6 +1,6 @@
 # LinkMia Pricing Structure
 
-**Status:** Current production rates and the pricing-authority path · updated 2026-09-04 for the browser-flag activation release (activation language below is CONDITIONAL on that release deploying; prior rungs are recorded as completed)
+**Status:** Current production rates and the pricing-authority path · corrected 2026-09-08: the browser-flag activation release SHIPPED as PR #88 (2026-09-04), so the activation language below describes the LIVE state (prior rungs are recorded as completed)
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Layer | Where | Status |
 |---|---|---|
-| **Passenger-visible authority ONCE the browser-flag release deploys** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` via `/api/quote-ride` | With `SERVER_QUOTE_ENABLED` true (this release — local, under review, not yet deployed) and `pricing_state` = `observe` (live since 2026-09-03), passengers see and submit the SERVER quote; the writer RPC verifies + consumes the signed token and records the amount as `client_observe`. Until that deploy, production runs the flag-false legacy path below under observe. Nothing is charged automatically — payment is cash/Zelle collected at ride time. |
+| **Passenger-visible authority (LIVE)** | `backend/functions/lib/ride-rate-card.js` + `ride-quote.js` via `/api/quote-ride` | With `SERVER_QUOTE_ENABLED` true (LIVE since PR #88, 2026-09-04) and `pricing_state` = `observe` (live since 2026-09-03), passengers see and submit the SERVER quote; the writer RPC verifies + consumes the signed token and records the amount as `client_observe`. The flag-false legacy path below is the reviewed ROLLBACK state, not the current one. Nothing is charged automatically — payment is cash/Zelle collected at ride time. |
 | **Shadow engine (rollback authority)** | `pricing.js` (browser, loaded by `indexMVP.html`) | Left unchanged for rollback safety (the P0 drift guard pins its vehicle metadata — keys, names, capacities — not every byte) and shadow-only while the flag is true; the tested forward rollback (docs/BROWSER-FLAG-ACTIVATION.md) makes it the passenger-visible authority again with `client_observe` stamps continuing in observe mode. Cent-exact with the server engine in the canonical America/New_York case. |
 | Legacy server endpoint | *(retired in PR 3C-2C-B PR-1)* | The drifted calculator was removed. An inert 404-only stub remains solely because Netlify reserves the direct function namespace; both former URLs return 404 and no pricing code is reachable. |
 | **Server quote service + token consumer** | `backend/functions/quote-ride.js`; `create-booking.js`; `update-pending-booking.js` | LIVE (authenticated-only; `QUOTE_SERVICE_DISABLED` kept at 0 as the one-edit emergency stop). The service issues signed server quotes from trusted route facts; the writer endpoints verify, consume, and classify them in `quote_verifications`. |
@@ -29,9 +29,9 @@ activation steps below.
    quoting and the passenger refresh UX shipped; quote service enabled
    (kill-switch variable kept at 0), MIA/FLL/PBI paid smoke green,
    `pricing_state` = `observe` (2026-09-03).
-4. **Browser-flag release** — UNDER REVIEW (local, uncommitted): flips
-   `SERVER_QUOTE_ENABLED` true with SW v1.3.27 / runtime-v4. Its
-   passenger-visible effect is conditional on merge + deploy.
+4. **Browser-flag release** — SHIPPED (PR #88, 2026-09-04): flipped
+   `SERVER_QUOTE_ENABLED` true with SW v1.3.27 / runtime-v4 (its historical
+   rung; later rungs follow plan v8.6 §3D's forward-only ladder).
 5. **Graduation evidence, then a separately authorized one-way transition
    to enforce** — REMAINING.
 6. DEFERRED (no date): versioned **Supabase pricing profiles** +

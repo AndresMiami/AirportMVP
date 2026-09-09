@@ -10,12 +10,13 @@
 // (indexMVP.html getRouteData — the parity contract.)
 //
 // departureTime rule (plan v3): the CONTRACTUAL pickup instant is
-// never rewritten. A pickup more than PAST_TOLERANCE_MS in the past
-// must be rejected by the CALLER before this module runs; a pickup
-// within ±NEAR_WINDOW_MS of now OMITS departureTime (Google defaults);
-// a future pickup is passed verbatim. Google rejects past departure
-// times, and fabricating "now" as the pickup would misrepresent the
-// contract.
+// never rewritten. PR-T: the CALLER (quote-ride) refuses any pickup that
+// is not strictly future on a fresh server clock BEFORE this module runs —
+// the former five-minute past tolerance is retired. A pickup within
+// NEAR_WINDOW_MS of now OMITS departureTime (Google defaults to current
+// traffic); a later pickup is passed verbatim. Google rejects past
+// departure times, and fabricating "now" as the pickup would misrepresent
+// the contract.
 //
 // COST, STATED HONESTLY — two levers, not one. Google bills a
 // computeRoutes request at the highest tier ANY single element
@@ -46,8 +47,7 @@
 
 const ROUTES_TIMEOUT_MS = 8000;
 const FIELD_MASK = 'routes.distanceMeters,routes.duration,fallbackInfo';
-const NEAR_WINDOW_MS = 5 * 60 * 1000; // ±5 min of now: omit departureTime
-const PAST_TOLERANCE_MS = 5 * 60 * 1000; // beyond this in the past: caller rejects
+const NEAR_WINDOW_MS = 5 * 60 * 1000; // within 5 min of now: omit departureTime
 
 // Provider-value bounds. distanceMeters is documented int32; the metre
 // bound is an operational sanity limit far beyond any drivable
@@ -66,10 +66,6 @@ function quantizeMiles(meters) {
 }
 function quantizeMinutes(seconds) {
   return Math.round(seconds / 60);
-}
-
-function isMeaningfullyPast(pickupAtMs, nowMs) {
-  return pickupAtMs < nowMs - PAST_TOLERANCE_MS;
 }
 
 // { originPlaceId, destinationPlaceId, pickupAtMs, nowMs } ->
@@ -176,10 +172,8 @@ module.exports = {
   computeRouteFacts,
   quantizeMiles,
   quantizeMinutes,
-  isMeaningfullyPast,
   FIELD_MASK,
   NEAR_WINDOW_MS,
-  PAST_TOLERANCE_MS,
   MAX_ROUTE_METERS,
   MAX_ROUTE_SECONDS
 };

@@ -50,13 +50,27 @@ function authUserIdOf(userData) {
   return userData.user.id;
 }
 const { airportByCode, isValidPlaceId, resolvePlace } = require('./lib/place-identity');
-const { computeRouteFacts, isMeaningfullyPast } = require('./lib/route-facts');
+const { computeRouteFacts } = require('./lib/route-facts');
 const { resolveRateCard } = require('./lib/rate-card-resolver');
 const { computeCommitment, signQuoteToken, newJti, resolveSigningKeys, QUOTE_TTL_MS } = require('./lib/quote-token');
 const { quoteRide } = require('./lib/ride-quote');
 
 // The strict intent allowlist — the boundary is enforced, not advisory.
 const ALLOWED_FIELDS = ['mode', 'airportCode', 'placeId', 'pickupAt', 'passengers'];
+
+// PR-T: the typed refusal for a pickup that is no longer strictly future on a
+// FRESH server clock. The browser maps this by name; the message is the
+// passenger copy rendered verbatim on both surfaces. Definitive 400 — never
+// requote (an elapsed intent cannot be re-quoted into validity).
+const ELAPSED_MESSAGE = 'This pickup time has passed. Choose a new time to continue.';
+function elapsedResponse(headers) {
+  return { statusCode: 400, headers, body: JSON.stringify({ error: 'pickup_time_elapsed', message: ELAPSED_MESSAGE }) };
+}
+// Strictly future on a clock read at the moment of the check. Exact "now" is
+// refused (the database comparator has the same boundary).
+function pickupElapsed(pickupAtMs) {
+  return !(pickupAtMs > Date.now());
+}
 // EDIT-PURPOSE QUOTING (PR 3C-2C-B PR-2): the SAME intent plus the booking
 // being edited. Both fields travel together; either alone is a 400. The
 // owner/status/version gates run BEFORE any paid provider call, and the
@@ -336,12 +350,10 @@ exports.handler = async (event) => {
     if (!Number.isFinite(pickupAtMs)) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'pickupAt must be a real RFC 3339 datetime with a UTC offset (e.g. 2026-08-20T14:00:00Z)' }) };
     }
+    // Request-entry anchor for Routes' departureTime and every token's
+    // iat/exp/expiry display. NEVER used for a refusal decision (PR-T): the
+    // strict-future gates below read their own fresh clock each time.
     const nowMs = Date.now();
-    if (isMeaningfullyPast(pickupAtMs, nowMs)) {
-      // A quote for a past pickup is meaningless — REJECTED, never
-      // silently re-routed as "now".
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'pickupAt is in the past' }) };
-    }
     if (!Number.isInteger(passengers) || passengers < 1 || passengers > 100) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'passengers must be a positive integer' }) };
     }
@@ -402,6 +414,14 @@ exports.handler = async (event) => {
       };
     }
 
+    // ---- PR-T gate 1: strictly future on a FRESH clock, before any paid
+    // call. Elapsed here means ZERO provider calls. (Edit gates ran first,
+    // so an elapsed time never masks a lifecycle or version conflict.)
+    if (pickupElapsed(pickupAtMs)) {
+      logTelemetry({ startedMs, outcome: 'pickup_time_elapsed' });
+      return elapsedResponse(headers);
+    }
+
     // ---- place identity: ONE identity for routing and storage ----
     const providerDeadline = Date.now() + PROVIDER_BUDGET_MS;
     const placesStart = Date.now();
@@ -427,6 +447,12 @@ exports.handler = async (event) => {
     // ---- server route facts (place_id waypoints, both sides) ----
     const originPlaceId = mode === 'dropoff' ? canonicalPlaceId : airport.placeId;
     const destinationPlaceId = mode === 'dropoff' ? airport.placeId : canonicalPlaceId;
+    // ---- PR-T gate 2: fresh clock again. Places is already spent and
+    // cannot be undone; an elapsed pickup here prevents the Routes call.
+    if (pickupElapsed(pickupAtMs)) {
+      logTelemetry({ startedMs, placesMs, routesMs, outcome: 'pickup_time_elapsed' });
+      return elapsedResponse(headers);
+    }
     const routesStart = Date.now();
     const route = await computeRouteFacts(
       { originPlaceId, destinationPlaceId, pickupAtMs, nowMs },
@@ -475,6 +501,10 @@ exports.handler = async (event) => {
     // vehicle tokens can never multiply one quote into several
     // bookings (retries are told apart by exact-token digest).
     const quoteJti = newJti();
+    // STAGE A (PR-T): price, commit and assemble every UNSIGNED per-vehicle
+    // result first — no signing yet, and no await anywhere from here to the
+    // response, so an elapsed boundary can never expose a partial token set.
+    const unsigned = [];
     for (const key of Object.keys(card.vehicles)) {
       const q = quoteRide({
         vehicle: key,
@@ -534,6 +564,21 @@ exports.handler = async (event) => {
         tokenFields.bookingId = editBooking.id;
         tokenFields.assignmentEpoch = editBooking.assignment_epoch;
       }
+      unsigned.push({ key, q, tokenFields });
+    }
+
+    // ---- PR-T gate 3: ONE fresh issuance clock, captured after every
+    // unsigned result exists. Elapsed here prevents EVERY vehicle token.
+    const issuanceGuardNowMs = Date.now();
+    if (!(pickupAtMs > issuanceGuardNowMs)) {
+      logTelemetry({ startedMs, placesMs, routesMs, outcome: 'pickup_time_elapsed' });
+      return elapsedResponse(headers);
+    }
+
+    // STAGE B: signing-only, synchronous. The request-entry nowMs remains
+    // the iat/exp anchor for every token and its displayed expiry — the
+    // guard clock is never passed into route facts or token signing.
+    for (const { key, q, tokenFields } of unsigned) {
       const quoteToken = signQuoteToken(tokenFields,
         { keyId: signing.current.id, secret: signing.current.secret, nowMs });
       vehicles[key] = {
@@ -636,6 +681,12 @@ exports.handler = async (event) => {
 // as one fixed literal — an unrecognized class must never echo its input.
 const OUTCOME_CLASSES = Object.freeze([
   'ok',
+  // PR-T strict-future refusal. Gate 1 logs neither timing (no provider call
+  // was made); gates 2 and 3 BOTH log placesMs/routesMs (routesMs is 0 at
+  // gate 2 because Routes was never called) — they are told apart by the
+  // provider CALL COUNTS the executed suite pins per gate, not by field
+  // presence.
+  'pickup_time_elapsed',
   // place-identity.js
   'invalid_place_id', 'places_timeout', 'places_5xx', 'places_invalid_request',
   'places_not_found', 'places_denied', 'places_rate_limited',

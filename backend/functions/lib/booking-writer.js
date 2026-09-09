@@ -179,6 +179,13 @@ function sharedOutcomeResponse(outcome) {
     case 'conflict':
     case 'refused':
       return { statusCode: 409, body: { error: 'Could not process this request' } };
+    case 'pickup_time_elapsed':
+      // PR-T: the database clock refused a genuinely new write because the
+      // submitted/proposed pickup was no longer future. DEFINITIVE 400 — a
+      // recognized envelope shape — never a requote (re-quoting an elapsed
+      // intent is impossible) and never a reload. The message is the typed
+      // passenger copy both surfaces render verbatim.
+      return { statusCode: 400, body: { error: 'pickup_time_elapsed', message: 'This pickup time has passed. Choose a new time to continue.' } };
     case 'blocked':
       return {
         statusCode: 503,
