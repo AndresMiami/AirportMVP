@@ -1,8 +1,9 @@
 # Migration 019 (PR-T) rollout and emergency runbook
 
 STATUS: AUTHORED, NOT RUN. Migration 019 is a generated, test-executed
-artifact committed in PR #93 (branch `prt-pickup-time-integrity`); the
-migration is NOT RUN in production. Nothing in this document is authorization: the
+artifact. Its CURRENT revision (checksums in the table below) was regenerated
+in PR #94 (branch `prt-fingerprint-c-plus`) on top of the original PR-T tree
+from PR #93; the migration is NOT RUN in production. Nothing in this document is authorization: the
 code release, the preflight, the migration execution, the post-install
 verification and any rollback are each a SEPARATE, explicit Andres
 authorization in Claude's chat, quoting the 019 checksum from the generated
