@@ -181,8 +181,9 @@ Andres in Claude's chat:
    DEFINER and service_role EXECUTE held, and no overload appeared.
 4. POST-ROLLBACK VERIFICATION: run the namespace-qualified preflight grid —
    expect the post-rollback state, NOT simply the 017 shape: 017 duration
-   behaviour PLUS the PR-T guard and its helper, both writers carrying the
-   rollback's own fingerprints from the PR-T runbook table; then one live
+   behaviour PLUS the PR-T guard and its helper, A2 `installed_pair =
+   rollback` (the rollback's own fingerprints from the PR-T runbook table);
+   then one live
    no-token test booking through the
    normal flow — expect success WITH a stored duration again — and cancel it
    by the usual protocol.

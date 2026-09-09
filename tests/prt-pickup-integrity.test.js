@@ -320,15 +320,27 @@ async function runPreflight(db) {
     }
     const pre = fs.readFileSync(path.join(repoRoot, 'database/migrations/019_prt_preflight.sql'), 'utf8');
     assert.ok(pre.includes(g.fps.fp.reviewed018.create) && pre.includes(g.fps.fp.reviewed018.edit) && pre.includes(g.fps.fp.target019.create), 'preflight A2 carries the expected fingerprints');
-    // the artifacts embed ORDERED PAIRS: 019 exactly the reviewed-018 pair; the rollback the three coherent pairs — never a mixed one
+    // the artifacts embed ORDERED PAIRS: 019 exactly the two reviewed-018 pairs
+    // (as the file has it; as production received it); the rollback those two
+    // plus the 019 and its own pair — never a mixed one
     const pair = (p) => `('${p.create}', '${p.edit}')`;
     const f = g.fps.fp;
-    assert.ok(m019.includes(`IN (${pair(f.reviewed018)}))`), '019 accepts only the reviewed 018 pair');
+    assert.ok(m019.includes(`IN (${pair(f.reviewed018)}, ${pair(f.reviewed018AsPasted)}))`), '019 accepts exactly the reviewed 018 pair and its as-pasted rendering');
     assert.ok(!m019.includes(pair(f.target019)) && !m019.includes(pair(f.rollback)), '019 accepts no other pair');
-    assert.ok(rollback.includes(`IN (${pair(f.reviewed018)}, ${pair(f.target019)}, ${pair(f.rollback)}))`), 'the rollback accepts exactly the three coherent pairs');
-    for (const [a, b] of [[f.target019.create, f.reviewed018.edit], [f.reviewed018.create, f.target019.edit], [f.rollback.create, f.target019.edit]]) {
-      assert.ok(!rollback.includes(`('${a}', '${b}')`), 'no mixed pair is embedded');
+    assert.ok(rollback.includes(`IN (${pair(f.reviewed018)}, ${pair(f.reviewed018AsPasted)}, ${pair(f.target019)}, ${pair(f.rollback)}))`), 'the rollback accepts exactly the four coherent pairs');
+    for (const [a, b] of [[f.target019.create, f.reviewed018.edit], [f.reviewed018.create, f.target019.edit], [f.rollback.create, f.target019.edit],
+                          [f.reviewed018AsPasted.create, f.reviewed018.edit], [f.reviewed018.create, f.reviewed018AsPasted.edit]]) {
+      assert.ok(!rollback.includes(`('${a}', '${b}')`) && !m019.includes(`('${a}', '${b}')`), 'no mixed pair is embedded');
     }
+    // ASCII-ONLY DELIVERY: every byte of both artifacts is <= 0x7f (the paste
+    // channel that re-encoded 018's comments cannot alter these)
+    for (const [label, text] of [['019', m019], ['rollback', rollback]]) {
+      const buf = Buffer.from(text, 'utf8');
+      let bad = -1; for (let i = 0; i < buf.length; i++) if (buf[i] > 0x7f) { bad = i; break; }
+      assert.strictEqual(bad, -1, `${label}: non-ASCII byte at offset ${bad}`);
+    }
+    assert.ok(runbook.includes(f.reviewed018AsPasted.create) && runbook.includes(f.reviewed018AsPasted.edit), 'runbook records the as-pasted pair');
+    assert.ok(pre.includes('installed_pair') && pre.includes(f.reviewed018AsPasted.create), 'preflight A2 carries the pair identity incl. the as-pasted values');
   });
 
   await check('STATEMENT ORDER: pre-mutation guard AFTER receipt recovery and before rpc_writer on; final guard the LAST blocking statement — after the telemetry insert, before set_config off + RETURN', async () => {
@@ -397,6 +409,21 @@ async function runPreflight(db) {
 
   // ================================================================ chain + comparator
   const db = await freshDb();
+  // Observed on production by the read-only preflight of 2026-09-09 19:58Z (A2
+  // body_sha256). The generator must DERIVE exactly these from the reviewed
+  // 018 text through the named transform — never hand-entered.
+  const OBSERVED_AS_PASTED_2026_09_09 = {
+    create: '3bb8663d8a052c02512538f3beb147740ae956e41c5f757a01c85b65c7cb85b6',
+    edit: '07fdcd2d564c6fbdf043b0b0d6f17ff67c8b3f3736153217e034a329822c1c81',
+  };
+  await check('AS-PASTED DERIVATION: the named Mac Roman transform of the reviewed 018 bodies equals the fingerprints OBSERVED on production (2026-09-09 preflight) — both halves, derived, never typed', async () => {
+    const g = gen.generate();
+    assert.deepStrictEqual(g.fps.fp.reviewed018AsPasted, OBSERVED_AS_PASTED_2026_09_09);
+    assert.notDeepStrictEqual(g.fps.fp.reviewed018AsPasted, g.fps.fp.reviewed018, 'the as-pasted rendering differs from the file');
+    assert.strictEqual(gen.asPasted20260901('a \u2014 b \u00a7 c'), 'a \u201a\u00c4\u00ee b \u00ac\u00df c', 'the transform is the UTF-8-as-Mac-Roman re-encoding');
+    assert.throws(() => gen.toAscii('x \u2192 y'), /no transliteration/, 'an unmapped non-ASCII character is a generation error');
+  });
+
   await check('chain: schema + 001..017 -> exact 018 -> exact 019 apply on a fresh replica (mode off); the installed bodies fingerprint EXACTLY as the generator derives them from the migration text (018 before, 019 after)', async () => {
     let r = await tryExec(db, m018); assert.ok(r.ok, r.error);
     const g = gen.generate();
@@ -406,6 +433,26 @@ async function runPreflight(db) {
     assert.strictEqual((await modeRow(db)).mode, 'off');
   });
 
+  await check('AS-PASTED BASELINE (production\'s actual state): the 018 bodies as production received them are ACCEPTED as one coherent pair by 019 — reaching the IDENTICAL target as the canonical baseline — and by the rollback; A2 names the pair', async () => {
+    const g = gen.generate();
+    const d = await baselineDb();
+    for (const fn of ['accept_quote_create', 'accept_quote_edit']) await d.exec(gen.asPasted20260901(gen.extract(m018, fn)));
+    assert.deepStrictEqual(await installedFp(d), g.fps.fp.reviewed018AsPasted, 'the replica now carries exactly production\'s fingerprints');
+    let pre = await runPreflight(d);
+    assert.deepStrictEqual(pre.A2.map((r) => [r.installed_pair, r.guarded]), [['reviewed_018_as_pasted_2026_09_01', false], ['reviewed_018_as_pasted_2026_09_01', false]], 'A2 names the pair on both rows');
+    let r = await tryExec(d, m019); assert.ok(r.ok, '019 accepts the as-pasted pair: ' + (r.error || ''));
+    assert.deepStrictEqual(await installedFp(d), g.fps.fp.target019, 'and installs the identical ASCII target pair');
+    assert.deepStrictEqual((await runPreflight(d)).A2.map((x) => x.installed_pair), ['target_019', 'target_019']);
+    const who = await seedCustomer(d, 'PRT-ASPASTED');
+    assert.strictEqual((await rpcCreate(d, who, uuid(), pastMs())).outcome, 'pickup_time_elapsed', 'the guard works from that path too');
+    // and the rollback accepts the as-pasted 018 pair directly as a pre-state
+    const d2 = await baselineDb();
+    for (const fn of ['accept_quote_create', 'accept_quote_edit']) await d2.exec(gen.asPasted20260901(gen.extract(m018, fn)));
+    r = await tryExec(d2, rollback); assert.ok(r.ok, 'rollback accepts the as-pasted pair: ' + (r.error || ''));
+    assert.deepStrictEqual(await installedFp(d2), g.fps.fp.rollback);
+    assert.deepStrictEqual((await runPreflight(d2)).A2.map((x) => x.installed_pair), ['rollback', 'rollback']);
+  });
+
   await check('MIXED PAIRS: one writer at 019 and the other at 018 (both inverses) and a rollback-body mix are NOT reviewed states — the rollback AND 019 abort before the helper or either writer changes; fingerprints, owner, ACL and config read back unchanged', async () => {
     const g = gen.generate();
     const meta = async (d) => (await d.query(`SELECT proname, proowner::int AS owner, proacl::text AS acl, proconfig::text AS cfg, encode(extensions.digest(prosrc,'sha256'),'hex') AS fp FROM pg_proc WHERE proname IN ('accept_quote_create','accept_quote_edit') ORDER BY proname`)).rows;
@@ -413,11 +460,15 @@ async function runPreflight(db) {
       ['create@019 + edit@018', gen.extract(m019, 'accept_quote_create'), { create: g.fps.fp.target019.create, edit: g.fps.fp.reviewed018.edit }],
       ['create@018 + edit@019', gen.extract(m019, 'accept_quote_edit'), { create: g.fps.fp.reviewed018.create, edit: g.fps.fp.target019.edit }],
       ['create@rollback + edit@018', gen.extract(rollback, 'accept_quote_create'), { create: g.fps.fp.rollback.create, edit: g.fps.fp.reviewed018.edit }],
+      // the as-pasted halves are recognized ONLY as a pair: mixed with the canonical halves they abort too
+      ['create@018-as-pasted + edit@018', gen.asPasted20260901(gen.extract(m018, 'accept_quote_create')), { create: g.fps.fp.reviewed018AsPasted.create, edit: g.fps.fp.reviewed018.edit }],
+      ['create@018 + edit@018-as-pasted', gen.asPasted20260901(gen.extract(m018, 'accept_quote_edit')), { create: g.fps.fp.reviewed018.create, edit: g.fps.fp.reviewed018AsPasted.edit }],
     ];
     for (const [label, install, expectFp] of states) {
       const d = await baselineDb();
       await d.exec(install);
       assert.deepStrictEqual(await installedFp(d), expectFp, `${label}: mixed state installed`);
+      assert.deepStrictEqual((await runPreflight(d)).A2.map((x) => x.installed_pair), ['UNRECOGNIZED_OR_MIXED', 'UNRECOGNIZED_OR_MIXED'], `${label}: A2 names the mixed state`);
       const before = await meta(d);
       const helpers = (await one(d, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n;
       for (const [name, artifact] of [['rollback', rollback], ['019', m019]]) {
@@ -450,6 +501,16 @@ async function runPreflight(db) {
     await d.exec(gen.extract(m018, 'accept_quote_create'));
     assert.deepStrictEqual(await installedFp(d), gen.generate().fps.fp.reviewed018);
     r = await tryExec(d, m019); assert.ok(r.ok, r.error);
+    // an EXECUTABLE one-character change (a bound) is refused the same way
+    const d4 = await baselineDb();
+    const exe = gen.extract(m018, 'accept_quote_create');
+    assert.strictEqual(exe.split('v_passengers > 12').length - 1, 1, 'executable anchor unique');
+    await d4.exec(exe.replace('v_passengers > 12', 'v_passengers > 13'));
+    for (const [name, artifact] of [['019', m019], ['rollback', rollback]]) {
+      const rx = await tryExec(d4, artifact);
+      assert.ok(!rx.ok && /is not a recognized reviewed pair/.test(rx.error), `${name} refuses a one-character executable change: ` + (rx.error || 'committed?!'));
+    }
+    assert.strictEqual((await one(d4, `SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'linkmia_pickup_is_future'`)).n, 0);
     // now sabotage the EDIT writer on the post-019 state: the rollback must refuse it too
     const sabEdit = sabotage(gen.extract(m019, 'accept_quote_edit'));
     await d.exec(sabEdit);
@@ -682,11 +743,16 @@ async function runPreflight(db) {
   }
 
   await check('MUTANT (executed): either guard NESTED under the verified branch — the artifact\'s OWN smoke refuses to install it; with the smoke stripped it commits, and the no_token matrix rows catch it', async () => {
+    // the artifact bodies are ASCII-transliterated, so splice the ASCII form of the guard constants
+    const PRE_A = gen.toAscii(gen.PRE_GUARD); const FINAL_A = gen.toAscii(gen.FINAL_GUARD);
     let mutant = m019;
     for (const [name] of WRITERS) {
-      mutant = withBody(mutant, name, (b) => b
-        .replace(gen.PRE_GUARD, "  IF p_verdict = 'verified' THEN\n" + gen.PRE_GUARD + '  END IF;\n')
-        .replace(gen.FINAL_GUARD, "    IF p_verdict = 'verified' THEN\n" + gen.FINAL_GUARD + '    END IF;\n'));
+      mutant = withBody(mutant, name, (b) => {
+        assert.ok(b.includes(PRE_A) && b.includes(FINAL_A), `${name}: ASCII guard constants present in the body`);
+        return b
+          .replace(PRE_A, "  IF p_verdict = 'verified' THEN\n" + PRE_A + '  END IF;\n')
+          .replace(FINAL_A, "    IF p_verdict = 'verified' THEN\n" + FINAL_A + '    END IF;\n');
+      });
     }
     // first line of defense: the migration's rollback-contained smoke
     const d0 = await baselineDb();
@@ -937,7 +1003,7 @@ async function runPreflight(db) {
   });
 
   // ================================================================ the operator preflight, executed
-  await check('PREFLIGHT (executed on the 018 baseline): A1 two writers, A2 exact fingerprints is_reviewed_018=true/is_target_019=false/guarded=false, A3 helper absent, B1 off/observe with NULL high-water, B2 exactly ONE named CHECK with 16 literals and widened=false, C1/C2 shaped', async () => {
+  await check('PREFLIGHT (executed on the 018 baseline): A1 two writers, A2 installed_pair=reviewed_018/guarded=false, A3 helper absent, B1 off/observe with NULL high-water, B2 exactly ONE named CHECK with 16 literals and widened=false, C1/C2 shaped', async () => {
     const d = await baselineDb();
     const g = await runPreflight(d);
     assert.deepStrictEqual(Object.keys(g).sort(), ['A1', 'A2', 'A3', 'B1', 'B2', 'C1', 'C2'], 'seven labeled units parsed');
@@ -950,9 +1016,9 @@ async function runPreflight(db) {
     assert.ok(preflightUnits(zed).units.Z9, 'a unit labeled outside A-C is still parsed (the seven-key assertion above then fails loudly)');
     assert.strictEqual(g.A1.length, 2);
     for (const r of g.A1) { assert.strictEqual(r.prosecdef, true); assert.strictEqual(r.sr_exec, true); assert.strictEqual(r.anon_exec, false); assert.strictEqual(r.auth_exec, false); assert.ok(String(r.proconfig).includes('search_path')); }
-    assert.deepStrictEqual(g.A2.map((r) => [r.proname, r.is_reviewed_018, r.is_target_019, r.guarded]), [['accept_quote_create', true, false, false], ['accept_quote_edit', true, false, false]], 'A2 is exact: reviewed 018 fingerprints, no guard');
+    assert.deepStrictEqual(g.A2.map((r) => [r.proname, r.installed_pair, r.guarded]), [['accept_quote_create', 'reviewed_018', false], ['accept_quote_edit', 'reviewed_018', false]], 'A2 names the installed PAIR on both rows, no guard');
     const fp = gen.generate().fps.fp;
-    assert.deepStrictEqual(g.A2.map((r) => r.body_sha256), [fp.reviewed018.create, fp.reviewed018.edit], 'A2 prints the exact fingerprints the migration requires');
+    assert.deepStrictEqual(g.A2.map((r) => r.body_sha256), [fp.reviewed018.create, fp.reviewed018.edit], 'A2 prints the exact fingerprints the migration accepts');
     assert.strictEqual(Number(g.A3[0].helper_signatures), 0);
     assert.strictEqual(g.B1[0].mode, 'off'); assert.strictEqual(g.B1[0].enforcement_started_at, null);
     assert.strictEqual(g.B2.length, 1, 'B2 yields exactly one row');
@@ -963,10 +1029,10 @@ async function runPreflight(db) {
     await setMode(d, 'observe');
     const g2 = await runPreflight(d);
     assert.strictEqual(g2.B1[0].mode, 'observe'); assert.strictEqual(g2.B1[0].enforcement_started_at, null);
-    // after 019: A2 guarded=true, is_reviewed_018=false, is_target_019=true; A3 = 1; B2 unchanged
+    // after 019: A2 installed_pair=target_019, guarded=true; A3 = 1; B2 unchanged
     const r = await tryExec(d, m019); assert.ok(r.ok, r.error);
     const g3 = await runPreflight(d);
-    assert.deepStrictEqual(g3.A2.map((x) => [x.proname, x.is_reviewed_018, x.is_target_019, x.guarded]), [['accept_quote_create', false, true, true], ['accept_quote_edit', false, true, true]]);
+    assert.deepStrictEqual(g3.A2.map((x) => [x.proname, x.installed_pair, x.guarded]), [['accept_quote_create', 'target_019', true], ['accept_quote_edit', 'target_019', true]]);
     assert.deepStrictEqual(g3.A2.map((x) => x.body_sha256), [fp.target019.create, fp.target019.edit]);
     assert.strictEqual(Number(g3.A3[0].helper_signatures), 1);
     assert.strictEqual(Number(g3.B2[0].verdict_literals), 16); assert.strictEqual(g3.B2[0].widened, false);
