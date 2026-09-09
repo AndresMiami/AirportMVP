@@ -46,21 +46,34 @@ below.
 Written by `prt-guard-transform.js --write`, verified by `--check` and the
 executed suite. The file checksums are what an execution authorization
 quotes and what the operator compares before pasting; the body fingerprints
-are sha256 of `pg_proc.prosrc` — 019 REFUSES to run unless both installed
-writers carry the "REQUIRES" values (preflight A2 shows them), and the
-rollback refuses anything but the 018, 019 or its own already-restored bodies.
+are sha256 of `pg_proc.prosrc`. 019 REFUSES to run unless the installed
+(create, edit) PAIR is the reviewed 018 pair — as the file has it, or as
+production received it on 2026-09-01 (preflight A2 prints the pair identity)
+— and the rollback refuses anything but those two, the 019 pair or its own
+already-restored pair. Mixed pairs are never accepted.
+
+DELIVERY CHANNEL (recorded 2026-09-09): the 2026-09-01 paste of migration
+018 through the SQL editor re-encoded every non-ASCII character in the
+function comments (UTF-8 read as Mac Roman), which is why production's
+bodies fingerprint differently from the file while the code is identical.
+Both PR-T artifacts are therefore generated ASCII-ONLY (every byte <= 0x7f,
+asserted at generation and pinned by the suite), so the same channel cannot
+alter them. Copy artifacts from a UTF-8 editor, never from a terminal
+listing; the ASCII property makes either safe.
 
 <!-- PRT-ARTIFACT-CHECKSUMS:BEGIN (generated) -->
 | Artifact / fingerprint | sha256 |
 |---|---|
-| `database/migrations/019_prt_pickup_time_integrity.sql` (file) | `ebeccd9e04c84555f8cd6496c25fa412c346d1c8a46e74e1558107c1efe4ba7f` |
-| `database/migrations/018_r1_rollback.sql` (file) | `550e2ed2ac0ef22ba2a8ea58155d1da93602309a48473c4751a3f081787a933a` |
-| installed `accept_quote_create` body 019 REQUIRES (reviewed 018) | `ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388` |
-| installed `accept_quote_edit` body 019 REQUIRES (reviewed 018) | `cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41` |
-| `accept_quote_create` body 019 INSTALLS (target) | `fc64b32ca907098b8ccceb5c912fa9d290a5e9c14a4f0704013d6b226f506396` |
-| `accept_quote_edit` body 019 INSTALLS (target) | `ce81f347112d3cd251738d9bece093154ea27cccd09b6a2c8ea0e21f75a6e50d` |
-| `accept_quote_create` body the rollback INSTALLS | `558cc70aaa9d0eae6e46147391cc80ac5017740ea7969cfc930293a00c143cb7` |
-| `accept_quote_edit` body the rollback INSTALLS | `c676571b976f278dbadf7b1f363b847718e238f8d3368a9a9a2267a54a40addc` |
+| `database/migrations/019_prt_pickup_time_integrity.sql` (file) | `ce4cb2b4e4850d7a53c08338211519e11dd8d1c3c7cd7498d7e2f69510921f5b` |
+| `database/migrations/018_r1_rollback.sql` (file) | `baa9cee60b6100a9727cece8dbd0f35237a8a5df87fe9ae57b132cf1f5cbb445` |
+| installed `accept_quote_create` body 019 ACCEPTS (reviewed 018, as the file has it) | `ed86cca5e4f5046dc9503771a38bb63f7b4140956dfb94b645f076cd59483388` |
+| installed `accept_quote_edit` body 019 ACCEPTS (reviewed 018, as the file has it) | `cc56cc673236db967d738209c9f9d5423e0e7117a74358e48280c08f0cd14b41` |
+| installed `accept_quote_create` body 019 ACCEPTS (reviewed 018 as production received it on 2026-09-01) | `3bb8663d8a052c02512538f3beb147740ae956e41c5f757a01c85b65c7cb85b6` |
+| installed `accept_quote_edit` body 019 ACCEPTS (reviewed 018 as production received it on 2026-09-01) | `07fdcd2d564c6fbdf043b0b0d6f17ff67c8b3f3736153217e034a329822c1c81` |
+| `accept_quote_create` body 019 INSTALLS (target) | `bed377560252619862bcad768a2d5615496aca0f3d5016c4731d5afad651b6e1` |
+| `accept_quote_edit` body 019 INSTALLS (target) | `0acb70791a784c9569ab062dba2c04e17be380f9e0a9ed28361f1f5dea2d5ed8` |
+| `accept_quote_create` body the rollback INSTALLS | `f4f86e63f7b782e2206dc48468be738a7ba54077b5a450107fe176d362058f3e` |
+| `accept_quote_edit` body the rollback INSTALLS | `373edeb895dafcc7f06894915504829caaba5b9b47366df2f8b07aa804e364f0` |
 <!-- PRT-ARTIFACT-CHECKSUMS:END -->
 
 ## Ordering relative to the code deploy — CODE FIRST, then SQL
@@ -117,10 +130,11 @@ live is a separately designed coordinated SQL-and-code decision.
    `database/migrations/019_prt_preflight.sql`:
    - A1: exactly the two writers, SECURITY DEFINER, search_path present,
      `sr_exec=true`, client execs false.
-   - A2: two rows, each `is_reviewed_018=true`, `is_target_019=false`,
-     `guarded=false`; `body_sha256` equals the "REQUIRES" value in the
-     generated table. ANY other fingerprint = STOP: an unreviewed change is
-     installed and 019 would refuse it.
+   - A2: two rows, `installed_pair` IN (`reviewed_018`,
+     `reviewed_018_as_pasted_2026_09_01`) on BOTH rows, `guarded=false`;
+     `body_sha256` equals the matching "ACCEPTS" values in the generated
+     table. `UNRECOGNIZED_OR_MIXED` = STOP: an unreviewed change or a mixed
+     state is installed and 019 would refuse it.
    - A3: helper signatures = 0.
    - B1: `mode IN ('off','observe')`, `enforcement_started_at IS NULL`.
      Anything else: STOP.
@@ -163,9 +177,9 @@ live is a separately designed coordinated SQL-and-code decision.
    whole transaction: diagnose, return to preflight, never run fragments.
 3. POST-INSTALL VERIFICATION, read-only, one grid each:
    - A1 again: identical identities, `sr_exec=true`, client execs false.
-   - A2 again: `guarded=true` for both rows, `is_reviewed_018=false`,
-     `is_target_019=true`; `body_sha256` equals the "INSTALLS (target)"
-     values in the generated table.
+   - A2 again: `installed_pair = target_019` on both rows, `guarded=true`;
+     `body_sha256` equals the "INSTALLS (target)" values in the generated
+     table.
    - A3 again: helper signatures = 1; and
      ```sql
      SELECT p.provolatile, p.proisstrict, p.prosecdef, pg_get_userbyid(p.proowner) AS owner,
@@ -219,10 +233,10 @@ simply the 017 shape — and is SELF-CONTAINED: it creates/replaces the helper
 first, so it is valid whether 019 was installed or not (a rollback that
 assumed the helper would succeed at CREATE and then fail every booking at
 RUNTIME; `tests/prt-pickup-integrity.test.js` executes that mutant to prove
-the class). Its fingerprint gate accepts only the recognized 018, 019 or
-already-restored bodies; anything else aborts and a human must look. After a
-rollback, the forward path is 018 again, then 019 (019 accepts only the
-reviewed 018 bodies). The sequence, each step separately
+the class). Its fingerprint gate accepts only the recognized pairs — 018 (as
+the file has it or as production received it), 019, or already-restored;
+anything else aborts and a human must look. After a rollback, the forward
+path is 018 again, then 019 (019 accepts only a reviewed 018 pair). The sequence, each step separately
 and explicitly authorized, is `docs/R1-MIGRATION-RUNBOOK.md`'s: HOLD DARK →
 CODE FIRST (fresh cache rung, drain in-flight requests) → SQL SECOND (this
 checksum-matched artifact) → post-rollback verification. Its rung facts are

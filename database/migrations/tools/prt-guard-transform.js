@@ -27,8 +27,13 @@
 //                   body (sha256 of pg_proc.prosrc, byte-identical to the
 //                   dollar-quoted body in the migration file) is not a
 //                   recognized reviewed PAIR (create, edit): 019 accepts ONLY
-//                   the reviewed 018 pair; the rollback accepts the 018, 019
-//                   or its own already-restored pair — never a mixed state.
+//                   the reviewed 018 pair or the 018 pair AS PRODUCTION
+//                   RECEIVED IT on 2026-09-01 (derived, see asPasted20260901);
+//                   the rollback accepts those two, the 019 pair or its own
+//                   already-restored pair — never a mixed state.
+//   ASCII-ONLY    — both artifacts are emitted with every byte <= 0x7f, so
+//                   the paste channel that re-encoded 018's comments cannot
+//                   alter them; enforced by assertAscii at generation.
 //                   After replacement each artifact
 //                   verifies the installed body equals its generated body
 //                   (an altered paste cannot commit). The expected values are
@@ -54,6 +59,37 @@ const PREFLIGHT = path.join(MIG_DIR, '019_prt_preflight.sql');
 const RUNBOOK = path.resolve(MIG_DIR, '..', '..', 'docs', 'PRT-MIGRATION-RUNBOOK.md');
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+
+// ASCII-ONLY DELIVERY. The 2026-09-01 paste of migration 018 through the SQL
+// editor re-encoded every non-ASCII character in the comments (the file's
+// UTF-8 bytes were read as Mac Roman), so the installed bodies no longer hash
+// like the reviewed file. Every artifact is therefore emitted ASCII-only. The
+// map is explicit; any other non-ASCII character is a generation ERROR, never
+// silently passed through.
+const ASCII_MAP = new Map([['\u2014', '-'], ['\u00a7', 'section ']]);
+function toAscii(text) {
+  let out = '';
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp <= 0x7f) { out += ch; continue; }
+    const rep = ASCII_MAP.get(ch);
+    if (rep === undefined) throw new Error(`non-ASCII character U+${cp.toString(16).toUpperCase()} has no transliteration`);
+    out += rep;
+  }
+  return out;
+}
+function assertAscii(text, label) {
+  const buf = Buffer.from(text, 'utf8');
+  for (let i = 0; i < buf.length; i++) if (buf[i] > 0x7f) throw new Error(`${label}: byte > 0x7f at offset ${i}`);
+  return text;
+}
+// The NAMED, deterministic reproduction of the 2026-09-01 delivery defect: the
+// file's UTF-8 bytes interpreted as Mac Roman ("macintosh"). Applied to the
+// reviewed 018 bodies it yields EXACTLY production's installed bodies — the
+// executed suite pins the derived values to the observed preflight hashes.
+function asPasted20260901(text) {
+  return new TextDecoder('macintosh').decode(Buffer.from(text, 'utf8'));
+}
 // PostgreSQL stores a dollar-quoted body VERBATIM in pg_proc.prosrc, so the
 // fingerprint of the installed writer is the sha256 of exactly this slice.
 function bodyOf(fnText) {
@@ -250,10 +286,12 @@ function applyPickupGuard(body, kind) {
 }
 
 // ---- artifact assembly ------------------------------------------------------
-// accepted = array of ORDERED PAIRS [createFp, editFp]: the gate validates the
-// installed (create, edit) tuple as a whole, never each writer on its own — a
-// mixed state (one writer at 019, the other at 018) is not a reviewed state.
-const sqlPairs = (pairs) => pairs.map(([c, e]) => `('${c}', '${e}')`).join(', ');
+// accepted = array of NAMED ORDERED PAIRS {name, create, edit}: the gate
+// validates the installed (create, edit) tuple as a whole, never each writer
+// on its own — a mixed state (one writer at 019, the other at 018) is not a
+// reviewed state.
+const sqlPairs = (pairs) => pairs.map((p) => `('${p.create}', '${p.edit}')`).join(', ');
+const pairNames = (pairs) => pairs.map((p) => `${p.name} (${p.create.slice(0, 12)}.., ${p.edit.slice(0, 12)}..)`).join('; ');
 const PRE_CAPTURE = (table, tag, label, accepted) => `-- ------------------------------------------------------------
 -- PRE-CAPTURE: exact namespace-qualified identities, owners, ACLs AND BODY
 -- FINGERPRINTS (sha256 of pg_proc.prosrc) of both writers BEFORE replacement
@@ -285,8 +323,8 @@ BEGIN
   -- The ORDERED PAIR must be one of the recognized reviewed pairs.
   IF v_create_fp IS NULL OR v_edit_fp IS NULL
      OR NOT ((v_create_fp, v_edit_fp) IN (${sqlPairs(accepted)})) THEN
-    RAISE EXCEPTION '${label}: the installed writer pair is not a recognized reviewed pair (accept_quote_create body fingerprint %, accept_quote_edit body fingerprint %; accepted pairs (create, edit): ${sqlPairs(accepted).replace(/'/g, "''")}) — an unreviewed or mixed state is installed; refusing to overwrite it',
-      v_create_fp, v_edit_fp;
+      RAISE EXCEPTION '${label}: the installed writer pair is not a recognized reviewed pair (accept_quote_create body fingerprint %, accept_quote_edit body fingerprint %; accepted pairs: ${pairNames(accepted)}) - an unreviewed or mixed state is installed; refusing to overwrite it',
+        v_create_fp, v_edit_fp;
   END IF;
   FOR v_row IN SELECT * FROM ${table} LOOP
     IF has_function_privilege('anon', v_row.oid, 'EXECUTE')
@@ -492,14 +530,19 @@ $prt_smoke$;
 function fingerprints(m017, m018) {
   const c018 = extract(m018, 'accept_quote_create');
   const e018 = extract(m018, 'accept_quote_edit');
-  const c019 = applyPickupGuard(c018, 'create');
-  const e019 = applyPickupGuard(e018, 'edit');
-  const crb = applyPickupGuard(extract(m017, 'accept_quote_create'), 'create');
-  const erb = applyPickupGuard(extract(m017, 'accept_quote_edit'), 'edit');
+  // The bodies the artifacts INSTALL are ASCII-only (delivery-safe). The
+  // reviewed 018 bodies are hashed as the file has them (canonical) AND as
+  // production received them on 2026-09-01 (as-pasted) — both are the same
+  // reviewed code; only comment punctuation differs.
+  const c019 = toAscii(applyPickupGuard(c018, 'create'));
+  const e019 = toAscii(applyPickupGuard(e018, 'edit'));
+  const crb = toAscii(applyPickupGuard(extract(m017, 'accept_quote_create'), 'create'));
+  const erb = toAscii(applyPickupGuard(extract(m017, 'accept_quote_edit'), 'edit'));
   return {
     bodies: { c018, e018, c019, e019, crb, erb },
     fp: {
       reviewed018: { create: sha256(bodyOf(c018)), edit: sha256(bodyOf(e018)) },
+      reviewed018AsPasted: { create: sha256(asPasted20260901(bodyOf(c018))), edit: sha256(asPasted20260901(bodyOf(e018))) },
       target019: { create: sha256(bodyOf(c019)), edit: sha256(bodyOf(e019)) },
       rollback: { create: sha256(bodyOf(crb)), edit: sha256(bodyOf(erb)) },
     },
@@ -509,7 +552,13 @@ function fingerprints(m017, m018) {
 function build019(m018, fps) {
   const create = fps.bodies.c019;
   const edit = fps.bodies.e019;
-  const accepted = [[fps.fp.reviewed018.create, fps.fp.reviewed018.edit]];
+  // Recognized pre-states for 019: the reviewed 018 pair as the file has it,
+  // or as production received it on 2026-09-01 (comment punctuation re-encoded
+  // by the paste channel; identical code). Nothing else.
+  const accepted = [
+    { name: 'reviewed_018', ...fps.fp.reviewed018 },
+    { name: 'reviewed_018_as_pasted_2026_09_01', ...fps.fp.reviewed018AsPasted },
+  ];
   return `-- ============================================================
 -- Migration 019 — PR-T: pickup-time integrity (plan v8.6 §3E)
 --
@@ -546,10 +595,15 @@ function build019(m018, fps) {
 --
 -- FINGERPRINT GATE: the pre-capture refuses to run unless the installed
 -- (create, edit) PAIR is EXACTLY the reviewed 018 pair (sha256 of
--- pg_proc.prosrc — the values below, generated from the reviewed 018 text and
--- printed by preflight A2). Any other body — an unnoticed hotfix, a manual
--- edit — aborts the whole transaction before anything is touched. After
+-- pg_proc.prosrc) either as the reviewed file has it or as production
+-- received it on 2026-09-01 (the paste channel re-encoded comment punctuation;
+-- the code is identical; the derivation is named and pinned). Both values are
+-- generated from the reviewed 018 text and printed by preflight A2 as the
+-- pair identity. Any other body - an unnoticed hotfix, a manual edit, a mixed
+-- pair - aborts the whole transaction before anything is touched. After
 -- replacement, the installed bodies must equal this artifact's own bodies.
+-- THIS ARTIFACT IS ASCII-ONLY (every byte <= 0x7f), so the same paste channel
+-- cannot alter it.
 --
 -- RUN VIA docs/PRT-MIGRATION-RUNBOOK.md ONLY. Emergency rollback:
 -- database/migrations/018_r1_rollback.sql — restores the migration-017
@@ -586,13 +640,14 @@ COMMIT;
 function buildRollback(m017, fps) {
   const create = fps.bodies.crb;
   const edit = fps.bodies.erb;
-  // Recognized pre-states, as COHERENT PAIRS: 018 installed (019 never ran),
-  // 019 installed, or this rollback already applied. A mixed pair (one
-  // writer at 019, the other at 018) is not a reviewed state and is refused.
+  // Recognized pre-states, as COHERENT PAIRS: 018 installed (as the file has
+  // it, or as production received it on 2026-09-01), 019 installed, or this
+  // rollback already applied. A mixed pair is not a reviewed state.
   const accepted = [
-    [fps.fp.reviewed018.create, fps.fp.reviewed018.edit],
-    [fps.fp.target019.create, fps.fp.target019.edit],
-    [fps.fp.rollback.create, fps.fp.rollback.edit],
+    { name: 'reviewed_018', ...fps.fp.reviewed018 },
+    { name: 'reviewed_018_as_pasted_2026_09_01', ...fps.fp.reviewed018AsPasted },
+    { name: 'target_019', ...fps.fp.target019 },
+    { name: 'rollback', ...fps.fp.rollback },
   ];
   return `-- ============================================================
 -- Migration 018 EMERGENCY ROLLBACK — restores the migration-017 bodies of
@@ -601,10 +656,11 @@ function buildRollback(m017, fps) {
 -- PLUS the PR-T pickup-time guard — NOT simply the 017 shape.
 --
 -- FINGERPRINT GATE: refuses to run unless the installed (create, edit) PAIR
--- is EXACTLY one of the recognized reviewed pairs — 018's, 019's, or this
--- rollback's own (already restored). A mixed or unrecognized pair aborts
--- before anything is touched; after replacement the installed bodies must
--- equal this artifact's own bodies.
+-- is EXACTLY one of the recognized reviewed pairs - 018's (as the file has it
+-- or as production received it on 2026-09-01), 019's, or this rollback's own
+-- (already restored). A mixed or unrecognized pair aborts before anything is
+-- touched; after replacement the installed bodies must equal this artifact's
+-- own bodies. THIS ARTIFACT IS ASCII-ONLY (every byte <= 0x7f).
 --
 -- GENERATED by database/migrations/tools/prt-guard-transform.js: the 017
 -- bodies (extracted programmatically) with the SAME guard transform that
@@ -649,16 +705,18 @@ COMMIT;
 
 // Generated blocks: the preflight's A2 expected-fingerprint expressions and the
 // runbook's checksum table. Deterministic: same sources -> same bytes.
+// A2 reports the installed PAIR identity (the same value on both rows), never
+// two individually recognized halves: a mixed state reads UNRECOGNIZED_OR_MIXED.
 function preflightBlock(fps) {
-  const r = fps.fp.reviewed018; const t = fps.fp.target019;
-  return `       CASE p.proname
-         WHEN 'accept_quote_create' THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${r.create}'
-         WHEN 'accept_quote_edit'   THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${r.edit}'
-       END AS is_reviewed_018,
-       CASE p.proname
-         WHEN 'accept_quote_create' THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${t.create}'
-         WHEN 'accept_quote_edit'   THEN encode(extensions.digest(p.prosrc, 'sha256'), 'hex') = '${t.edit}'
-       END AS is_target_019,
+  const f = fps.fp;
+  const c = `(SELECT encode(extensions.digest(prosrc, 'sha256'), 'hex') FROM pg_proc WHERE oid = 'public.accept_quote_create(uuid,uuid,uuid,text,text,uuid,text,jsonb,numeric,text,text,text,jsonb)'::regprocedure)`;
+  const e = `(SELECT encode(extensions.digest(prosrc, 'sha256'), 'hex') FROM pg_proc WHERE oid = 'public.accept_quote_edit(uuid,uuid,uuid,text,uuid,integer,text,uuid,text,jsonb,numeric,text,text,text,jsonb)'::regprocedure)`;
+  return `       CASE
+         WHEN ${c} = '${f.reviewed018.create}' AND ${e} = '${f.reviewed018.edit}' THEN 'reviewed_018'
+         WHEN ${c} = '${f.reviewed018AsPasted.create}' AND ${e} = '${f.reviewed018AsPasted.edit}' THEN 'reviewed_018_as_pasted_2026_09_01'
+         WHEN ${c} = '${f.target019.create}' AND ${e} = '${f.target019.edit}' THEN 'target_019'
+         WHEN ${c} = '${f.rollback.create}' AND ${e} = '${f.rollback.edit}' THEN 'rollback'
+         ELSE 'UNRECOGNIZED_OR_MIXED' END AS installed_pair,
 `;
 }
 function runbookBlock(checksums, fps) {
@@ -666,8 +724,10 @@ function runbookBlock(checksums, fps) {
 |---|---|
 | \`database/migrations/019_prt_pickup_time_integrity.sql\` (file) | \`${checksums.migration}\` |
 | \`database/migrations/018_r1_rollback.sql\` (file) | \`${checksums.rollback}\` |
-| installed \`accept_quote_create\` body 019 REQUIRES (reviewed 018) | \`${fps.fp.reviewed018.create}\` |
-| installed \`accept_quote_edit\` body 019 REQUIRES (reviewed 018) | \`${fps.fp.reviewed018.edit}\` |
+| installed \`accept_quote_create\` body 019 ACCEPTS (reviewed 018, as the file has it) | \`${fps.fp.reviewed018.create}\` |
+| installed \`accept_quote_edit\` body 019 ACCEPTS (reviewed 018, as the file has it) | \`${fps.fp.reviewed018.edit}\` |
+| installed \`accept_quote_create\` body 019 ACCEPTS (reviewed 018 as production received it on 2026-09-01) | \`${fps.fp.reviewed018AsPasted.create}\` |
+| installed \`accept_quote_edit\` body 019 ACCEPTS (reviewed 018 as production received it on 2026-09-01) | \`${fps.fp.reviewed018AsPasted.edit}\` |
 | \`accept_quote_create\` body 019 INSTALLS (target) | \`${fps.fp.target019.create}\` |
 | \`accept_quote_edit\` body 019 INSTALLS (target) | \`${fps.fp.target019.edit}\` |
 | \`accept_quote_create\` body the rollback INSTALLS | \`${fps.fp.rollback.create}\` |
@@ -679,8 +739,9 @@ function generate() {
   const m017 = fs.readFileSync(SRC_017, 'utf8');
   const m018 = fs.readFileSync(SRC_018, 'utf8');
   const fps = fingerprints(m017, m018);
-  const migration = build019(m018, fps);
-  const rollback = buildRollback(m017, fps);
+  // ASCII-only delivery: transliterate every comment/message, then PROVE it.
+  const migration = assertAscii(toAscii(build019(m018, fps)), '019');
+  const rollback = assertAscii(toAscii(buildRollback(m017, fps)), 'rollback');
   const checksums = { migration: sha256(migration), rollback: sha256(rollback) };
   return { migration, rollback, fps, checksums, preflightBlock: preflightBlock(fps), runbookBlock: runbookBlock(checksums, fps) };
 }
@@ -717,5 +778,6 @@ if (require.main === module) {
 }
 
 module.exports = { applyPickupGuard, extract, generate, check, fingerprints, bodyOf, sha256, build019, buildRollback,
+  toAscii, assertAscii, asPasted20260901, ASCII_MAP,
   HELPER_SQL, HELPER_SIG, PRE_GUARD, FINAL_GUARD, HANDLER, OUT_019, OUT_RB, SRC_017, SRC_018, PREFLIGHT, RUNBOOK,
   PREFLIGHT_BEGIN, PREFLIGHT_END, RUNBOOK_BEGIN, RUNBOOK_END };

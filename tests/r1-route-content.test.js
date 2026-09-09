@@ -154,9 +154,12 @@ check('the ROLLBACK file restores the 017 bodies WITH the PR-T pickup guard — 
   // passed through the same transform that produced 019, plus a
   // self-contained helper. Byte-equality is asserted against that
   // transform, so the "programmatically extracted" contract survives.
-  const { applyPickupGuard } = require(path.join(repoRoot, 'database/migrations/tools/prt-guard-transform.js'));
-  assert.strictEqual(extract(rollback, 'accept_quote_create'), applyPickupGuard(create017, 'create'));
-  assert.strictEqual(extract(rollback, 'accept_quote_edit'), applyPickupGuard(edit017, 'edit'));
+  // C+ (2026-09-09): the rollback's restored bodies are the guarded 017 bodies
+  // TRANSLITERATED TO ASCII (delivery-safe; comment punctuation only), so the
+  // byte-equality is against toAscii(applyPickupGuard(...)).
+  const { applyPickupGuard, toAscii } = require(path.join(repoRoot, 'database/migrations/tools/prt-guard-transform.js'));
+  assert.strictEqual(extract(rollback, 'accept_quote_create'), toAscii(applyPickupGuard(create017, 'create')));
+  assert.strictEqual(extract(rollback, 'accept_quote_edit'), toAscii(applyPickupGuard(edit017, 'edit')));
   assert.ok(rollback.includes('CREATE OR REPLACE FUNCTION public.linkmia_pickup_is_future('),
     'the rollback creates the helper BEFORE restoring guard-carrying bodies');
   assert.ok(rollback.indexOf('linkmia_pickup_is_future(p_pickup') < rollback.indexOf('CREATE OR REPLACE FUNCTION accept_quote_create('));
