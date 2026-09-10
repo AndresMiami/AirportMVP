@@ -619,7 +619,8 @@ the old published deploy online but freezes every subsequent production build.
     vehicle-metadata drift guard merged (PR #85). BROWSER FLAG RELEASE
     — **MERGED AND LIVE** (PR #88, merge 2660538, 2026-09-04; corrected
     2026-09-07, this entry previously said "NOT merged or deployed"):
-    `SERVER_QUOTE_ENABLED = true` at `indexMVP.html:758`, SW `linkmia-v1.3.27`
+    the `SERVER_QUOTE_ENABLED` constant in indexMVP.html is `true` (grep
+    for it — never cite its line number), SW `linkmia-v1.3.27`
     + runtime cache `linkmia-runtime-v4` (BOTH caches must bump together —
     runtime can retain booking HTML). Passengers now SEE AND SUBMIT server
     prices, bookings stamp `price_authority='client_observe'`, and pricing.js
@@ -657,6 +658,41 @@ the old published deploy online but freezes every subsequent production build.
     docs/PRT-MIGRATION-RUNBOOK.md (Known residuals recorded there). PR-A
     (dark hydration read, #91) and PR-B (review card, this release on
     30/7) complete the pending-edit hydration plan v8.6.
+  * PR-B CORRECTION ROUND (2026-09-10, Codex seq:234 verified findings,
+    Andres-authorized local scope; all EXECUTED in
+    tests/pending-edit-card.test.js unless noted): (1) confirming an
+    UNCHANGED self selection via the "Travel myself" tap records the
+    value-bound key and Save continues (it used to clear the key and end
+    the chain silently; the prefilled-form submit always worked); (2) the
+    airport-side label is never re-synthesized from the code — the model's
+    projectRoute projects the STORED label byte for byte, fromRouteDraft
+    honours the host's `airportLabel` (indexMVP seeds it from the stored
+    projection and replaces it via getAirportName only on an airport tap),
+    so time/passenger/traveler-only and address-only edits round-trip
+    pickup/dropoff_location exactly (executed for both modes; host seeding
+    executed in quote-browser-integration); (3) the card validates a quote
+    against the HYDRATED card's key set (any nonempty canonical subset —
+    one-vehicle and partial cards save; a key-set mismatch in either
+    direction is the typed incomplete refusal), never create's fixed three;
+    (4) a writer `requote:true` expires the held quote BEFORE the refresh —
+    a failed refresh leaves "Refresh and Save", the next tap refreshes
+    first and posts nothing while the refresh keeps failing (mutation-
+    proved); (5) the exact pending envelope is stored then cleared for its
+    operation before `pickup_time_elapsed` is classified, nothing is
+    offered for recovery, the whole draft survives (recorded hooks +
+    executed mutant of an early return); (6) the SW precaches the EXACT
+    versioned URLs the page requests (`/js/pending-edit-*.js?v=1` — an
+    unversioned entry never served; executed against the real worker in
+    pending-edit-hydration). Bounded follow-ups in the same round: the
+    traveler dialog is named (`aria-labelledby`), focus enters its first
+    usable control, Escape leaves like Back and focus returns to the
+    opener; Change/Edit controls and the vehicle radiogroup carry
+    contextual names; the lifecycle notices name the WhatsApp message
+    button by what it is (it renders ABOVE the notice — no "below");
+    docs/BROWSER-FLAG-ACTIVATION.md records 019 as installed; the retired
+    booking-form edit lane is pinned as RETIRED only (its deletion is the
+    recorded cleanup under Known gaps). The three-vehicle CREATE validator
+    is untouched.
   * PR 3C-2C-B — plan v3.1 ratified (Codex GO, sign-off on file): TWO PRs,
     both SHIPPED dark and since activated — the descriptions that follow
     are HISTORICAL. **PR-1 (merged as #76) — the WRITER SWAP:** create-booking and
@@ -850,6 +886,18 @@ the old published deploy online but freezes every subsequent production build.
     silently skipped. Pilot-acceptable (admin already received the
     ride_released notice); the clean fix needs era-aware admin event
     identity (its own migration decision, not a patch).
+- RETIRED booking-form edit lane — cleanup owed (recorded 2026-09-09,
+  separately scoped; NOT part of the PR-B release): under PR-B the live
+  pending-edit surface is the review card (`js/pending-edit-card.js`,
+  executed by `tests/pending-edit-card.test.js`) and indexMVP's
+  requestServerQuote refuses inside an edit session, so confirmBooking's
+  `isEditing`/`editContext` branches in indexMVP.html (roughly lines
+  4047-4452 at the PR-B head; anchor: `editContext = this.pendingEdit`)
+  are dead code. The pins in `tests/pending-ride-editing-frontend.test.js`
+  that guard that lane (titled "RETIRED form lane (pinned until
+  cleanup)") pass only because the dead code remains and must never be
+  read as live-card proof. Delete the lane and retire those pins together
+  in their OWN cleanup PR.
 - Approved, NOT yet built: invitation-only driver onboarding — emailed
   invite / password-set flow replacing admin-set passwords. Record only;
   implement post-RLS.
