@@ -287,8 +287,13 @@ captures nothing.
   576px, border-radius 20px 20px 0 0, slideUp 0.3s (see passenger-modal.js).
   The Manage ride sheet (indexMVP `openEditSheet`) and the trip sheet
   (`showTripSheet`) follow it; new passenger surfaces must too.
-- Service worker: cache name must be BUMPED when cached assets change;
-  never intercepts non-GET; disabled on localhost.
+- Service worker: cache name must be BUMPED when cached assets change —
+  BOTH caches together, to the NEXT UNUSED pair (one above the current
+  constants), plus the pair's history line in service-worker.js. Nothing
+  is assigned ahead of time anywhere (simplified 2026-09-10: pre-reserved
+  rollback numbers made every release a ~10-file re-plan); the one derived
+  check lives in tests/pending-edit-hydration. Never intercepts non-GET;
+  disabled on localhost.
 
 ## Env vars (Netlify)
 
@@ -632,22 +637,12 @@ the old published deploy online but freezes every subsequent production build.
     runtime can retain booking HTML). Passengers now SEE AND SUBMIT server
     prices, bookings stamp `price_authority='client_observe'`, and pricing.js
     is shadow-only. The next pricing step is therefore GRADUATION EVIDENCE,
-    not activation. Reviewed FORWARD rollback: flag false + SW
-    v1.3.37 + runtime v14 (cache names only ever move forward; plan v8.6
-    §3D ladder, as executed:
-    v1.3.28/v5 PR-T release — shipped 2026-09-09 (PR #93);
-    v1.3.29/v6 PR-T pre-migration code rollback — retired unused;
-    v1.3.30/v7 PR-B release (the Manage Ride review card) — shipped
-    2026-09-10 (PR #92, merge d3bed4b);
-    v1.3.31/v8, v1.3.32/v9, v1.3.33/v10 — burned unused by the 34/11
-    release (a reserved rung must sit ABOVE the shipped pair);
-    v1.3.34/v11 Manage ride SHEET release (the card opens as a bottom-sheet
-    modal; booking page changed) — shipped 2026-09-10 (PR #96);
-    v1.3.35/v12 card styling + "Start your journey" release (its PR-B
-    forward-rollback reservation burned unused);
-    v1.3.36/v13 PR-B forward rollback (reserved);
-    v1.3.37/v14 browser-flag rollback (reserved);
-    v1.3.38/v15 emergency R1 revert (reserved)) —
+    not activation. Reviewed FORWARD rollback: flag false + the next unused cache pair
+    (cache names only ever move forward, both caches together;
+    service-worker.js carries the append-only history — shipped so far:
+    27/4 activation, 28/5 PR-T, 29/6 retired unused, 30/7 PR-B,
+    31–33/8–10 burned unused, 34/11 Manage ride sheet, 35/12 card styling;
+    nothing is assigned ahead of time) —
     see docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
     Remaining after deploy: graduation evidence, then enforce.
   * PR-T PICKUP-TIME INTEGRITY — SHIPPED AND INSTALLED (2026-09-09): code

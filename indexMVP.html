@@ -886,9 +886,9 @@
         // shadow-only while this flag is true, and the server records both
         // sides' cents in quote_verifications).
         // FORWARD ROLLBACK (reviewed with this activation, never reverse):
-        // set this flag false + bump CACHE_NAME to v1.3.37 AND
-        // RUNTIME_CACHE to v9 in the same commit (the reserved browser-flag
-        // rung of plan v8.6 §3D; v1.3.28–v1.3.31 belong to PR-T and PR-B) —
+        // set this flag false + bump CACHE_NAME and RUNTIME_CACHE to the next
+        // unused pair in the same commit (service-worker.js history is the
+        // single source; nothing is assigned ahead of time) —
         // the runtime cache can
         // retain booking HTML, so a static-only bump is not a dependable
         // rollback. See docs/BROWSER-FLAG-ACTIVATION.md.

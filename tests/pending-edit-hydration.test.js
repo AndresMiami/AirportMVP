@@ -621,56 +621,43 @@ async function check(name, fn) {
     }
   });
 
-  await check('both cache rungs moved together to the card-styling release pair, v1.3.35 / runtime-v12 (PR-T shipped 28/5; 29/6 retired unused; PR-B shipped 30/7; Manage ride sheet shipped 34/11)', async () => {
-    const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    // Cache names only ever move FORWARD, and the runtime cache moves with the
-    // static one because it can retain booking HTML.
-    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.35';/.test(sw), 'static rung');
-    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v12';/.test(sw), 'runtime rung');
-  });
 
-  // Plan v8.6 §3D: cache names only ever move FORWARD, and every rung-moving
-  // commit moves the complete literal-site inventory. This REPO-WIDE pin
-  // reads the shipped pair from service-worker.js and refuses any file on
-  // main that still names a burned rung as "next"/"reserved" or as a
-  // rollback/revert target (the class Codex seq:204 found in a test message).
-  await check('REPO-WIDE burned-rung pin: no file names a rung at or below the shipped pair as next/reserved or as a rollback target; the inventory sites name the §3D ladder exactly', async () => {
+  // The cache ladder has ONE source — service-worker.js — and ONE check:
+  // both caches move together, nothing anywhere pre-assigns a rung above the
+  // current pair, the current pair carries its history line, and the pair
+  // only moves forward versus main (when git can see main). Every release
+  // used to re-plan pre-reserved rollback numbers across ~10 files; now a
+  // bump is two constants plus one history line.
+  await check('CACHE LADDER: single source (service-worker.js) — nothing pre-assigned above the current pair anywhere, history line present, forward-only vs main, both caches together', async () => {
     const read = (f) => fs.readFileSync(path.join(repoRoot, f), 'utf8');
     const sw = read('service-worker.js');
     const cur = Number(/const CACHE_NAME = 'linkmia-v1\.3\.(\d+)';/.exec(sw)[1]);
     const curRt = Number(/const RUNTIME_CACHE = 'linkmia-runtime-v(\d+)';/.exec(sw)[1]);
+    const maxIn = (text, re) => Math.max(0, ...[...text.matchAll(re)].map((m) => Number(m[1])));
+    assert.strictEqual(maxIn(sw, /v1\.3\.(\d+)/g), cur, 'no static number above the current one in the SW');
+    assert.strictEqual(maxIn(sw, /runtime-v(\d+)/g), curRt, 'no runtime number above the current one in the SW');
+    assert.ok(sw.includes(`//   v1.3.${cur} / runtime-v${curRt} `), `the current pair v1.3.${cur} / runtime-v${curRt} has its history line`);
     const list = (dir, ext) => fs.readdirSync(path.join(repoRoot, dir)).filter((f) => f.endsWith(ext)).map((f) => `${dir}/${f}`);
-    const files = ['CLAUDE.md', 'indexMVP.html', 'service-worker.js', '.github/workflows/tests.yml', ...list('tests', '.js'), ...list('docs', '.md')];
+    const files = ['CLAUDE.md', 'indexMVP.html', '.github/workflows/tests.yml', ...list('tests', '.js'), ...list('docs', '.md')];
     const offenders = [];
     for (const f of files) {
       read(f).split('\n').forEach((line, i) => {
-        // historical/ownership statements are not claims about the future
-        if (/\b(belong|burned|historical|shipped|superseded|retired|deployed)\b/i.test(line)) return;
-        const forward = /\b(next|rollback|revert)\b/i.test(line);
-        const reserved = /\breserved\b/i.test(line);
-        if (!forward && !reserved) return;
-        for (const m of line.matchAll(/v1\.3\.(\d+)/g)) {
-          const n = Number(m[1]);
-          if ((forward && n <= cur) || (reserved && n < cur)) offenders.push(`${f}:${i + 1} names v1.3.${n} (shipped ${cur}): ${line.trim().slice(0, 120)}`);
-        }
-        for (const m of line.matchAll(/runtime[- ]?(?:cache )?v(\d+)\b/gi)) {
-          const n = Number(m[1]);
-          if ((forward && n <= curRt) || (reserved && n < curRt)) offenders.push(`${f}:${i + 1} names runtime v${n} (shipped ${curRt}): ${line.trim().slice(0, 120)}`);
-        }
+        for (const m of line.matchAll(/v1\.3\.(\d+)/g)) if (Number(m[1]) > cur) offenders.push(`${f}:${i + 1} names v1.3.${m[1]} above the current ${cur}`);
+        for (const m of line.matchAll(/runtime[- ]?(?:cache )?v(\d+)\b/gi)) if (Number(m[1]) > curRt) offenders.push(`${f}:${i + 1} names runtime v${m[1]} above the current ${curRt}`);
+        if (/\breserved\b/i.test(line) && /v1\.3\.\d+|runtime[- ]?v\d+/i.test(line)) offenders.push(`${f}:${i + 1} pre-assigns a cache rung: ${line.trim().slice(0, 100)}`);
       });
     }
-    assert.deepStrictEqual(offenders, [], 'burned rungs named as next/reserved/rollback targets');
-    // the inventory sites (plan v8.6 §3D, [v6]/[v8.5]) name the ladder exactly
-    const act = read('docs/BROWSER-FLAG-ACTIVATION.md');
-    assert.ok(act.includes('| Browser-flag rollback (reserved)                | `linkmia-v1.3.37` | `linkmia-runtime-v14` |'), 'activation table: browser-flag rollback rung');
-    assert.ok(act.includes("`CACHE_NAME` → `'linkmia-v1.3.37'`") && act.includes("`RUNTIME_CACHE` → `'linkmia-runtime-v14'`"), 'activation rollback steps');
-    const r1 = read('docs/R1-MIGRATION-RUNBOOK.md');
-    assert.ok(r1.includes('SW v1.3.37 + runtime cache v14') && r1.includes('`linkmia-v1.3.38` + `linkmia-runtime-v15`'), 'R1 runbook steps 1 and 2');
-    assert.ok(read('CLAUDE.md').includes('v1.3.37 + runtime v14'), 'CLAUDE.md activation entry');
-    assert.ok(read('indexMVP.html').includes('bump CACHE_NAME to v1.3.37'), 'flag-site comment');
-    assert.ok(read('tests/quote-browser-integration.test.js').includes('SW v1.3.37 + runtime v14'), 'the assertion message names the browser-flag rung');
-    for (const rung of ['v1.3.28 / runtime-v5', 'v1.3.29 / runtime-v6', 'v1.3.30 / runtime-v7', 'v1.3.31 / runtime-v8', 'v1.3.32 / runtime-v9', 'v1.3.33 / runtime-v10', 'v1.3.34 / runtime-v11', 'v1.3.35 / runtime-v12', 'v1.3.36 / runtime-v13', 'v1.3.37 / runtime-v14', 'v1.3.38 / runtime-v15']) {
-      assert.ok(sw.includes(rung), `SW ladder comment lists ${rung}`);
+    assert.deepStrictEqual(offenders, [], 'the ladder is history only — no rung may be assigned ahead of time');
+    let base = null;
+    try {
+      base = require('child_process').execFileSync('git', ['show', 'origin/main:service-worker.js'],
+        { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch (_) { base = null; }
+    if (base) {
+      const b = Number(/const CACHE_NAME = 'linkmia-v1\.3\.(\d+)';/.exec(base)[1]);
+      const bRt = Number(/const RUNTIME_CACHE = 'linkmia-runtime-v(\d+)';/.exec(base)[1]);
+      assert.ok(cur >= b && curRt >= bRt, `cache names only move forward (main has v1.3.${b} / runtime-v${bRt})`);
+      assert.strictEqual(cur > b, curRt > bRt, 'both caches move together');
     }
   });
 
