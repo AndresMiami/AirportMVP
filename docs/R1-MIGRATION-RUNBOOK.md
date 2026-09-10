@@ -147,7 +147,7 @@ Andres in Claude's chat:
    (post-activation, 2026-09-03): these are no longer the standing state —
    this step is now a real CHANGE: flip `QUOTE_SERVICE_DISABLED` back to 1
    (+ redeploy) and apply the browser-flag FORWARD rollback (flag false +
-   SW v1.3.32 + runtime cache v9, per docs/BROWSER-FLAG-ACTIVATION.md)
+   SW v1.3.36 + runtime cache v13, per docs/BROWSER-FLAG-ACTIVATION.md)
    BEFORE the code revert below.
 2. CODE FIRST: deploy the pre-R1 code (revert the R1 PR on main → Netlify
    deploy). This restores endpoints that forward duration and a browser that
@@ -156,8 +156,8 @@ Andres in Claude's chat:
    moved past — redeploying them would leave returning browsers serving
    stale caches under "current" names. Before deploying the revert, in the
    SAME revert commit: set both service-worker constants to FRESH,
-   never-used versions — static `linkmia-v1.3.33` + `linkmia-runtime-v10`
-   (the emergency R1 rung of plan v8.6 §3D, after the browser rollback's v1.3.32/v9; if the ladder
+   never-used versions — static `linkmia-v1.3.37` + `linkmia-runtime-v14`
+   (the emergency R1 rung of plan v8.6 §3D, after the browser rollback's v1.3.36/v13; if the ladder
    has moved on by then, take the next unclaimed numbers) — AND update EVERY
    cache pin to match (the static pins in quote-ride,
    google-policy-readiness and maps-direct-loader, the runtime pin in

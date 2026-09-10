@@ -108,6 +108,43 @@ async function check(name, fn) {
 
   console.log('\nPR-B — SOURCE: the trip-sheet lifecycle ladder\n');
 
+  await check('SOURCE: Manage ride opens as the page\'s own bottom-sheet modal — the booking form is never revealed for an edit', async () => {
+    const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+    const begin = idx.slice(idx.indexOf('async beginPendingEdit('), idx.indexOf('editCard() {'));
+    assert.ok(!begin.includes("navigateToPanel('where')"), 'beginPendingEdit never navigates to the Where panel');
+    assert.ok(!begin.includes('this.startBooking()'), 'beginPendingEdit never activates the booking form');
+    assert.ok(begin.includes('this.openEditSheet(bookingId, this.pendingEdit.tripCode);'), 'the sheet opens at once');
+    assert.ok(idx.includes("loading.textContent = 'Loading your ride…';"), 'the honest loading line lives INSIDE the sheet');
+    // the sibling modals' values, verbatim (passenger-modal.js is the reference)
+    for (const rule of [
+      '.edit-sheet-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7);',
+      'z-index: 9999; display: none; justify-content: center; align-items: flex-end; }',
+      '.edit-sheet-overlay.active { display: flex; animation: editSheetFadeIn 0.3s ease-out; }',
+      '.edit-sheet-panel { width: 100%; max-width: 576px; min-height: 200px; max-height: 88vh; background: #2C2C2E;',
+      'animation: editSheetSlideUp 0.3s ease-out; border-radius: 20px 20px 0 0; }',
+      '@keyframes editSheetSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }',
+      '@keyframes editSheetFadeIn { from { opacity: 0; } to { opacity: 1; } }',
+      'border-bottom: 1px solid #3A3A3C; background: #2C2C2E; position: sticky; top: 0; z-index: 10;',
+      '.edit-sheet-content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }',
+      '.edit-sheet-panel { border-radius: 0; max-width: 100%; height: 100vh; max-height: 100vh; }'
+    ]) assert.ok(idx.includes(rule), `sheet CSS carries the modal value: ${rule.slice(0, 60)}`);
+    assert.ok(idx.includes("setTimeout(() => {\n                    overlay.classList.add('active');"), 'append, then .active a tick later — the sibling modals\' open choreography');
+    assert.ok(idx.includes("sheet.overlay.classList.remove('active');\n                setTimeout(() => sheet.overlay.remove(), 300);"), 'close = drop .active, remove after 300ms');
+    const mount = idx.slice(idx.indexOf('mountEditCard(node) {'), idx.indexOf('editCardClosed(bookingId) {'));
+    assert.ok(mount.includes('sheet.content.appendChild(node);'), 'the card mounts INTO the sheet');
+    assert.ok(!mount.includes('bookingContainer?.appendChild(node)'), 'never inline into the booking container');
+    const enter = idx.slice(idx.indexOf('enterEditRouteMode(editorInput, { onDone, onBack }) {'), idx.indexOf('exitEditRouteMode() {'));
+    assert.ok(enter.includes('if (this._editSheet) this._editSheet.overlay.hidden = true;'), 'a route change parks the sheet');
+    assert.ok(enter.includes('this._editActivatedContainer = true;\n                    this.startBooking();'), 'the booking form activates only for the Where screen');
+    const exit = idx.slice(idx.indexOf('exitEditRouteMode() {'), idx.indexOf('editRouteDoneEnabled() {'));
+    assert.ok(exit.includes('if (this._editSheet) this._editSheet.overlay.hidden = false;'), 'Done/Back bring the sheet back');
+    assert.ok(idx.includes("if (urlParams.get('book') === '1' && !pendingEditIntent) {"), 'a returning Manage ride intent never auto-starts the empty form');
+    const card = fs.readFileSync(path.join(repoRoot, 'js/pending-edit-card.js'), 'utf8');
+    assert.ok(card.includes('discard: onDiscard,'), 'the sheet ✕ reuses the card\'s own Discard');
+    assert.ok(idx.includes("close.setAttribute('aria-label', 'Close without saving');"), 'the ✕ is named');
+    assert.ok(idx.includes("overlay.setAttribute('aria-labelledby', 'editSheetTitle');"), 'the dialog is named by its header');
+  });
+
   await check('SOURCE: the passenger destination is STABLE — "Manage ride" from Pending through Arrived; only a ride in progress reads Coordinate', async () => {
     assert.strictEqual((trip.match(/lifecycleBtn\.textContent = 'Manage ride';/g) || []).length, 3, 'pending, confirmed, on_the_way/arrived branches');
     assert.strictEqual((trip.match(/lifecycleBtn\.textContent = 'Coordinate with your chauffeur';/g) || []).length, 1, 'in_progress only');
@@ -161,8 +198,8 @@ async function check(name, fn) {
     assert.match(indexMvp, /<script src="\.\/js\/pending-edit-model\.js/);
     const sw = read('service-worker.js');
     assert.ok(sw.includes("'/js/pending-edit-model.js?v=1'"));
-    assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.30'/);
-    assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v7'/);
+    assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.34'/);
+    assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v11'/);
   });
 
   console.log(`\n  ${failed ? `${failed} CHECK(S) FAILED` : `ALL ${passed} CHECKS PASS`}\n`);

@@ -62,8 +62,13 @@ verified checkpoint locations all live in the web app backed by Supabase.
   ONE stable passenger destination Pending through Arrived; Pending opens
   the hydrated review card, Confirmed/On the way/Arrived show a
   phase-bounded coordination notice inside it). Pending
-  edits open the REVIEW CARD (`js/pending-edit-card.js`, mounted by
-  indexMVP) hydrated from the server snapshot (GET
+  edits open the REVIEW CARD (`js/pending-edit-card.js`) INSIDE the Manage
+  ride SHEET — one of the page's bottom-sheet modals (indexMVP
+  `openEditSheet`: passenger-modal values verbatim; it opens the instant
+  Manage ride is tapped with the "Loading your ride…" line inside it, the
+  booking form is NEVER revealed for an edit, a route change parks the
+  sheet and activates the Where screen only then, ✕ = the card's Discard;
+  2026-09-10 visual-test finding), hydrated from the server snapshot (GET
   `/api/update-pending-booking?id=`, PR-A #91 — never browser storage),
   quote edit-purpose through `/api/quote-ride`, and save through the same
   `/api/update-pending-booking` envelope, updating the same booking row in
@@ -280,6 +285,8 @@ captures nothing.
   columns).
 - Bottom-sheet modals: dimmed backdrop rgba(0,0,0,0.7), panel max-width
   576px, border-radius 20px 20px 0 0, slideUp 0.3s (see passenger-modal.js).
+  The Manage ride sheet (indexMVP `openEditSheet`) and the trip sheet
+  (`showTripSheet`) follow it; new passenger surfaces must too.
 - Service worker: cache name must be BUMPED when cached assets change;
   never intercepts non-GET; disabled on localhost.
 
@@ -626,14 +633,19 @@ the old published deploy online but freezes every subsequent production build.
     prices, bookings stamp `price_authority='client_observe'`, and pricing.js
     is shadow-only. The next pricing step is therefore GRADUATION EVIDENCE,
     not activation. Reviewed FORWARD rollback: flag false + SW
-    v1.3.32 + runtime v9 (cache names only ever move forward; plan v8.6
+    v1.3.36 + runtime v13 (cache names only ever move forward; plan v8.6
     §3D ladder, as executed:
     v1.3.28/v5 PR-T release — shipped 2026-09-09 (PR #93);
     v1.3.29/v6 PR-T pre-migration code rollback — retired unused;
-    v1.3.30/v7 PR-B release (the Manage Ride review card);
-    v1.3.31/v8 PR-B forward rollback (reserved);
-    v1.3.32/v9 browser-flag rollback (reserved);
-    v1.3.33/v10 emergency R1 revert (reserved)) —
+    v1.3.30/v7 PR-B release (the Manage Ride review card) — shipped
+    2026-09-10 (PR #92, merge d3bed4b);
+    v1.3.31/v8, v1.3.32/v9, v1.3.33/v10 — burned unused by the 34/11
+    release (a reserved rung must sit ABOVE the shipped pair);
+    v1.3.34/v11 Manage ride SHEET release (the card opens as a bottom-sheet
+    modal; booking page changed);
+    v1.3.35/v12 PR-B forward rollback (reserved);
+    v1.3.36/v13 browser-flag rollback (reserved);
+    v1.3.37/v14 emergency R1 revert (reserved)) —
     see docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
     Remaining after deploy: graduation evidence, then enforce.
   * PR-T PICKUP-TIME INTEGRITY — SHIPPED AND INSTALLED (2026-09-09): code
@@ -658,6 +670,19 @@ the old published deploy online but freezes every subsequent production build.
     docs/PRT-MIGRATION-RUNBOOK.md (Known residuals recorded there). PR-A
     (dark hydration read, #91) and PR-B (review card, this release on
     30/7) complete the pending-edit hydration plan v8.6.
+  * PR-B — RELEASED 2026-09-10 (PR #92, merge d3bed4b, rung 30/7; Codex
+    seq:238 corrections authored by Codex, reviewed and applied as d7a30e1).
+    Andres's visual test: prefill works; finding #1 — the booking form's
+    Where inputs flashed before the card. MANAGE RIDE SHEET (branch
+    prb-manage-ride-sheet, rung 34/11): beginPendingEdit no longer calls
+    startBooking/navigateToPanel('where'); it opens the sheet at once
+    (loading line inside), mountEditCard appends the card INTO the sheet
+    body, enterEditRouteMode parks the sheet and activates the booking
+    form only for the Where screen (finishPendingEdit puts the landing
+    state back), the header ✕ reuses the card's Discard (inert while a
+    save chain is claimed), `?book=1` never auto-starts the form for a
+    returning edit intent. Executed in quote-browser-integration (three
+    MANAGE RIDE SHEET scenarios) + source pins in pending-edit-activation.
   * PR-B CORRECTION ROUND (2026-09-10, Codex seq:234 verified findings,
     Andres-authorized local scope; all EXECUTED in
     tests/pending-edit-card.test.js unless noted): (1) confirming an

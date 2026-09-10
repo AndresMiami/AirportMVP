@@ -22,10 +22,14 @@ name):
 | THIS activation               | `linkmia-v1.3.27` | `linkmia-runtime-v4` |
 | PR-T release (elapsed-pickup message, plan v8.6 §3D) — shipped 2026-09-09 | `linkmia-v1.3.28` | `linkmia-runtime-v5` |
 | PR-T pre-migration code rollback rung — retired unused (migration 019 verified 2026-09-09) | `linkmia-v1.3.29` | `linkmia-runtime-v6` |
-| PR-B release (review card)                      | `linkmia-v1.3.30` | `linkmia-runtime-v7` |
-| PR-B-only forward rollback (reserved)           | `linkmia-v1.3.31` | `linkmia-runtime-v8` |
-| Browser-flag rollback (reserved)                | `linkmia-v1.3.32` | `linkmia-runtime-v9` |
-| Emergency R1 code revert (reserved)             | `linkmia-v1.3.33` | `linkmia-runtime-v10` |
+| PR-B release (review card) — shipped 2026-09-10 (PR #92) | `linkmia-v1.3.30` | `linkmia-runtime-v7` |
+| PR-B-only forward rollback — burned unused by the 34/11 release | `linkmia-v1.3.31` | `linkmia-runtime-v8` |
+| Browser-flag rollback — burned unused by the 34/11 release | `linkmia-v1.3.32` | `linkmia-runtime-v9` |
+| Emergency R1 code revert — burned unused by the 34/11 release | `linkmia-v1.3.33` | `linkmia-runtime-v10` |
+| Manage ride sheet release (the review card opens as a bottom sheet) | `linkmia-v1.3.34` | `linkmia-runtime-v11` |
+| PR-B-only forward rollback (reserved)           | `linkmia-v1.3.35` | `linkmia-runtime-v12` |
+| Browser-flag rollback (reserved)                | `linkmia-v1.3.36` | `linkmia-runtime-v13` |
+| Emergency R1 code revert (reserved)             | `linkmia-v1.3.37` | `linkmia-runtime-v14` |
 
 ## What the activation PR changes — and nothing else
 
@@ -130,9 +134,10 @@ name by an earlier deployment (exactly the v1.3.26 collision this release
 sidestepped). The rollback is therefore a new commit, exactly:
 
 1. `indexMVP.html`: `SERVER_QUOTE_ENABLED` true → false.
-2. `service-worker.js`: `CACHE_NAME` → `'linkmia-v1.3.32'` (the reserved
-   browser-flag rung; v1.3.28–v1.3.31 belong to PR-T and PR-B per plan v8.6 §3D).
-3. `service-worker.js`: `RUNTIME_CACHE` → `'linkmia-runtime-v9'`.
+2. `service-worker.js`: `CACHE_NAME` → `'linkmia-v1.3.36'` (the reserved
+   browser-flag rung; v1.3.28–v1.3.34 belong to PR-T, PR-B and the Manage ride
+   sheet per plan v8.6 §3D, and every reserved rung sits above the shipped pair).
+3. `service-worker.js`: `RUNTIME_CACHE` → `'linkmia-runtime-v13'`.
 4. Test updates mirroring the same sites this PR touched: in the
    ship-state check, flip the REGEX EXPECTATION back to false AND rewrite
    the check TITLE and assert MESSAGE to say the default ships false
@@ -143,7 +148,7 @@ sidestepped). The rollback is therefore a new commit, exactly:
    Then EVERY cache pin — PR-T widened the set beyond the original four:
    the static pins in `tests/quote-ride`, `google-policy-readiness` and
    `maps-direct-loader`, the runtime pin in `quote-ride`, the rung check in
-   `tests/pending-edit-hydration` (`v1.3.30` / `runtime-v7` today), and that
+   `tests/pending-edit-hydration` (`v1.3.34` / `runtime-v11` today), and that
    suite's burned-rung INVENTORY assertions, which pin this document's
    rollback-rung table row and rollback steps, the R1 runbook steps, the
    CLAUDE.md ladder, the flag-site comment, the `:399` message and the SW

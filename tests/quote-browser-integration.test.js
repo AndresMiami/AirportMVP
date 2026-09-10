@@ -401,7 +401,7 @@ console.log('\nPR 3C-2B2 — server quote browser integration\n');
 // ============ the rollout flag ============
 check('STATIC: the committed candidate default is ON — server quoting ONCE this release deploys', () => {
   assert.ok(/const SERVER_QUOTE_ENABLED = true;/.test(appBlock),
-    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + SW v1.3.32 + runtime v9 — the plan v8.6 §3D browser-flag rung; the pairs between belong to PR-T and PR-B and are burned once shipped)');
+    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + SW v1.3.36 + runtime v13 — the plan v8.6 §3D browser-flag rung; the pairs between belong to PR-T and PR-B and are burned once shipped)');
 });
 
 check('DISABLED: no quote request is made and pricing.js still drives the carousel', async () => {
@@ -2811,6 +2811,154 @@ check('EDIT: the funnel refuses to quote OR submit an edit — the card owns bot
   assert.strictEqual(app.els.bookBtn.disabled, true, 'the funnel button is inert during an edit');
   await tap(app);
   assert.strictEqual(f.to('/api/update-pending-booking').length, 0, 'no funnel write during an edit');
+});
+
+// MANAGE RIDE SHEET: the edit is one of the page's bottom-sheet modals. It
+// opens synchronously with the loading line INSIDE it, the booking form is
+// never revealed (navigateToPanel/startBooking would be the old flash), the
+// card mounts INTO the sheet, a route change parks the sheet and activates the
+// form only then, ✕ discards, and closing drops .active before the trip sheet
+// returns. The card itself is executed in tests/pending-edit-card.test.js; here
+// a minimal stand-in calls mountEditCard exactly as the real buildDom does.
+const SHEET_BID = '0b000000-0000-4000-8000-0000000000c1';
+const SHEET_DTO = { bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3, status: 'pending',
+  route: { kind: 'airport_transfer_v1', authority: 'canonical', bookingMode: 'pickup', airportCode: 'MIA',
+    canonicalPlaceId: 'ChIJ_s', pickupLabel: 'Miami International', dropoffLabel: '4441 Collins Ave',
+    addressCoordinates: null, addressAttributions: [] },
+  pickupAt: '2026-12-24T23:30:00.000Z', passengers: 2, bags: 4, bookedPriceCents: 9000,
+  vehicle: { key: 'tesla', name: 'Tesla Model Y' }, vehicles: [{ key: 'tesla', name: 'Tesla Model Y', passengerCapacity: 4, bagCapacity: 4 }],
+  traveler: { name: 'Pat', phone: '+1 305 555 0100', email: null }, booker: null, optional: {} };
+function findIn(el, pred) { for (const c of el.children || []) { if (pred(c)) return c; const d = findIn(c, pred); if (d) return d; } return null; }
+function sheetContext({ snapshot = SHEET_DTO, deferGet = false } = {}) {
+  // deferGet: the snapshot GET stays pending until resolveGet() — and a
+  // resolveGet() issued BEFORE the fetch was even made (the host awaits the
+  // session first) lets that later fetch answer at once, so a check can never
+  // hang on an unreachable promise.
+  let released = !deferGet; let pending = null;
+  const f = routedFetch({
+    [`/api/update-pending-booking?id=${SHEET_BID}`]: () => released
+      ? { body: snapshot }
+      : new Promise((r) => { pending = () => r({ body: snapshot }); }),
+  });
+  const resolveGet = () => { released = true; if (pending) { const fn = pending; pending = null; fn(); } };
+  const h = makeContext({ enabled: true, fetchImpl: f });
+  const { app } = h;
+  // the same host-element stand-ins the EDIT-ROUTE checks use
+  const withHost = (el) => Object.assign(el, {
+    closest: () => null, insertBefore(c) { el.children.unshift(c); c.parent = el; return c; },
+    get firstChild() { return el.children[0] || null; },
+    removeEventListener(evt, fn) { el.listeners[evt] = (el.listeners[evt] || []).filter((x) => x !== fn); },
+    fire(evt) { (el.listeners[evt] || []).forEach((fn) => fn({ target: el })); },
+    focus() {}, value: '', hidden: false, parentElement: makeEl('div')
+  });
+  const mk = () => withHost(makeEl('div'));
+  Object.assign(app.els, {
+    panelsWrapper: mk(), summaryBar: mk(), bookingContainer: mk(), startSearchBtn: Object.assign(mk(), { style: {} }),
+    progressLine: mk(), addressInput: withHost(makeEl('input')), addressStep: mk(), airportStep: mk(), flowConnector: mk(),
+    airportTitle: mk(), addressTitle: mk(), flightSection: mk(), continueBtn: mk(),
+    modeBtns: [Object.assign(mk(), { dataset: { mode: 'pickup' } }), Object.assign(mk(), { dataset: { mode: 'dropoff' } })],
+    airportOptions: ['MIA', 'FLL', 'PBI'].map((c) => Object.assign(mk(), { dataset: { airport: c } })),
+  });
+  app.state.ui = { currentPanel: 'vehicle' };
+  app.autocomplete = { invalidateRawCapture() {}, clearValidation() {} };
+  app.invalidateQuote = () => {};
+  app.updateBookAvailability = () => {};
+  app.quoteFlowActive = () => true;
+  const sheets = []; app.showTripSheet = (id) => sheets.push(id);
+  app.navigateToPanel = () => { throw new Error('the booking form must never be revealed for an edit'); };
+  let opened = false; let busy = false; const mounted = [];
+  // ONE stand-in, reachable both ways the host reaches the card: the lazy
+  // editCard() accessor and the cached this._editCard field it fills.
+  const stub = {
+    open: (dto, c) => { const node = makeEl('section'); node.id = 'pendingEditCard'; opened = true; app.mountEditCard(node); mounted.push({ dto, c, node }); },
+    isOpen: () => opened,
+    close: () => { opened = false; },
+    discard: () => { opened = false; app.editCardClosed(SHEET_BID); },
+    _chainBusy: () => busy,
+  };
+  app._editCard = stub;
+  app.editCard = () => stub;
+  return { ...h, app, sheets, mounted, setBusy: (b) => { busy = b; }, resolveGet,
+    overlay: () => h.ctx.document.body.children.find((c) => c.className === 'edit-sheet-overlay') || null };
+}
+
+check('MANAGE RIDE SHEET: opens at once as a bottom sheet with the loading line inside; the booking form is never revealed; the card mounts INTO the sheet', async () => {
+  const s = sheetContext();
+  const p = s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
+  const overlay = s.overlay();
+  assert.ok(overlay, 'the sheet exists synchronously, before any await');
+  assert.strictEqual(overlay.getAttribute('role'), 'dialog');
+  assert.strictEqual(overlay.getAttribute('aria-modal'), 'true');
+  assert.strictEqual(overlay.getAttribute('aria-labelledby'), 'editSheetTitle');
+  const title = findIn(overlay, (n) => n.id === 'editSheetTitle');
+  assert.strictEqual(title.textContent, 'Manage ride · LM-SHEET');
+  const loading = findIn(overlay, (n) => n.className === 'edit-sheet-loading');
+  assert.strictEqual(loading.textContent, 'Loading your ride…', 'the honest loading line is INSIDE the sheet');
+  assert.ok(!s.app.els.bookingContainer.classList.contains('active'), 'the booking form is not activated for an edit');
+  assert.ok(!overlay.classList.contains('active'), 'appended first…');
+  s.runTimers();
+  assert.ok(overlay.classList.contains('active'), '…then .active a tick later (the sibling modals\' choreography)');
+  await p;
+  const content = findIn(overlay, (n) => n.className === 'edit-sheet-content');
+  assert.deepStrictEqual(content.children.map((c) => c.id), ['pendingEditCard'], 'the card replaced the loading line inside the sheet');
+  assert.strictEqual(s.mounted.length, 1);
+  assert.strictEqual(s.mounted[0].c.bookingId, SHEET_BID);   // vm-realm object: compare fields, not prototypes
+  assert.strictEqual(s.mounted[0].c.tripCode, 'LM-SHEET');
+  assert.ok(s.app.els.panelsWrapper.classList.contains('hidden-for-edit'));
+  assert.deepStrictEqual(s.sheets, [], 'no trip sheet while editing');
+});
+
+check('MANAGE RIDE SHEET: a route change parks the sheet and activates the booking form only then; Back brings the sheet back; ✕ discards, the sheet fades before the trip sheet returns, and the landing state is restored', async () => {
+  const s = sheetContext();
+  await s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
+  s.runTimers();
+  const overlay = s.overlay();
+  s.app.enterEditRouteMode({
+    route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
+    projection: { origin: { label: 'Miami International', placeId: null, attributions: [] },
+      destination: { label: '4441 Collins Ave', placeId: 'ChIJ_s', attributions: [] } },
+    quoteIntent: { mode: 'pickup', airportCode: 'MIA', placeId: 'ChIJ_s' }
+  }, { onDone: () => {}, onBack: () => {} });
+  assert.strictEqual(overlay.hidden, true, 'the sheet is parked while the Where screen is up');
+  assert.ok(s.app.els.bookingContainer.classList.contains('active'), 'the booking form activates only for the route change');
+  const controls = s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
+  controls.children[2].listeners.click[0]();   // Back
+  assert.strictEqual(overlay.hidden, false, 'Back brings the sheet back');
+  assert.ok(s.app.els.bookingContainer.classList.contains('active'), 'still active until the edit ends');
+  const close = findIn(overlay, (n) => n.className === 'edit-sheet-close');
+  assert.strictEqual(close.getAttribute('aria-label'), 'Close without saving');
+  close.listeners.click[0]();
+  assert.deepStrictEqual(s.sheets, [SHEET_BID], 'the trip sheet returns');
+  assert.ok(!overlay.classList.contains('active'), '.active dropped at once');
+  assert.ok(!overlay.removed, 'the node stays for the 300ms close choreography…');
+  s.runTimers();
+  assert.ok(overlay.removed, '…then it is removed');
+  assert.ok(!s.app.els.bookingContainer.classList.contains('active'), 'the landing state is restored under the trip sheet');
+  assert.strictEqual(s.app.els.startSearchBtn.style.display, '', 'the Start button is back');
+  assert.strictEqual(s.app.pendingEdit, null);
+});
+
+check('MANAGE RIDE SHEET: ✕ during hydration ends the session — the trip sheet returns and the late snapshot mounts nothing; ✕ is inert while a save chain is claimed', async () => {
+  const s = sheetContext({ deferGet: true });
+  const p = s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
+  const overlay = s.overlay();
+  s.runTimers();
+  await new Promise((r) => setImmediate(r));   // the session await passed; the GET is now in flight
+  assert.strictEqual(s.app._editHydrating, true, 'precondition: hydrating');
+  findIn(overlay, (n) => n.className === 'edit-sheet-close').listeners.click[0]();
+  assert.deepStrictEqual(s.sheets, [SHEET_BID]);
+  assert.strictEqual(s.app.pendingEdit, null);
+  s.resolveGet(); await p;
+  assert.strictEqual(s.mounted.length, 0, 'the late snapshot is dropped — the session moved on');
+  assert.strictEqual(s.overlay() && s.overlay().classList.contains('active'), false);
+  // busy chain: ✕ does nothing
+  const t = sheetContext();
+  await t.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
+  t.runTimers();
+  t.setBusy(true);
+  findIn(t.overlay(), (n) => n.className === 'edit-sheet-close').listeners.click[0]();
+  assert.deepStrictEqual(t.sheets, [], 'inert while the card owns the moment');
+  assert.ok(t.overlay().classList.contains('active'));
 });
 
 check('EDIT-ROUTE MODE: typing a new address clears the temporary tuple and disables Done until a fresh selection', async () => {
