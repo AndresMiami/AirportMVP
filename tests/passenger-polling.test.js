@@ -40,6 +40,8 @@ class FakeElement {
     this.scrollHeight = 500;
   }
   addEventListener(type, fn) { this.listeners[type] = fn; }
+  click() { if (this.listeners.click) this.listeners.click({ type: 'click', target: this }); }
+  scrollIntoView() { this.scrolledIntoView = true; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name) || null; }
 }
@@ -59,7 +61,8 @@ function createHarness(responses, storage = new Map(), { mapsLoad } = {}) {
   const hiddenIds = new Set([
     'tripView', 'pausedCard', 'pausedNote', 'mapCard', 'liveMap', 'waBtn',
     'backBtn', 'cancelBtn', 'rebookBtn', 'actionError', 'rideDuration',
-    'etaTime', 'routeAttribution', 'flightLine', 'reassignCard', 'cancelQuoteCard'
+    'etaTime', 'routeAttribution', 'flightLine', 'reassignCard', 'cancelQuoteCard',
+    'lifecycleNotice'
   ]);
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new FakeElement(hiddenIds.has(id)));
@@ -128,6 +131,8 @@ function createHarness(responses, storage = new Map(), { mapsLoad } = {}) {
   };
   if (mapsLoad === null) delete context.window.LinkMiaMapsLoader;
   context.window.window = context.window;
+  // The standalone (non-embedded) sheet navigates through window.location.
+  context.window.location = context.location;
   context.google = {
     maps: {
       importLibrary: async () => ({}),
@@ -466,6 +471,156 @@ function check(name, fn) {
   check('the status subtitle agrees with the reassignment notice — never "we\'ve notified your driver"', () => {
     assert.match(swap.element('statusSub').textContent, /finding you a new driver/i);
     assert.ok(!/notified your driver/i.test(swap.element('statusSub').textContent));
+  });
+
+  // PR-B (Codex seq:193 #4 / seq:195 #4): a LEGACY `assigned` row is presented as
+  // confirmed — status strip, lifecycle action, driver contact — while every
+  // raw-status rule (cancellation eligibility, polling cadence) keeps reading
+  // 'assigned'. Executed against the real trip sheet, alongside a genuine
+  // confirmed booking for the presentation comparison.
+  const assignedRow = { ...pendingBooking, status: 'assigned',
+    pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() };
+  const confirmedRow = { ...assignedRow, status: 'confirmed' };
+  const driver = { name: 'Carlos M.', phone: '+13055551212' };
+  const assignedSheet = createHarness([response(200, { booking: assignedRow, driver })]);
+  const confirmedSheet = createHarness([response(200, { booking: confirmedRow, driver })]);
+  await assignedSheet.settle(); await confirmedSheet.settle();
+  // Read the SCHEDULED cadence without firing it: the scenario queues one
+  // response, and the raw-status rule is visible in the timer itself.
+  const assignedDelay = [...assignedSheet.timers.values()][0].delay;
+  check('legacy assigned: presented as CONFIRMED, raw status untouched, raw rules intact', () => {
+    assert.strictEqual(assignedSheet.element('statusText').textContent,
+      confirmedSheet.element('statusText').textContent, 'status strip reads as confirmed');
+    assert.strictEqual(assignedSheet.element('backBtn').textContent, 'Manage ride');
+    assert.strictEqual(assignedSheet.element('backBtn').dataset.action, 'manage');
+    assert.ok(!assignedSheet.element('backBtn').classList.contains('hidden'));
+    assert.ok(!assignedSheet.element('waBtn').classList.contains('hidden'), 'driver contact shown');
+    assert.match(assignedSheet.element('waBtn').href || '', /13055551212/);
+    assert.strictEqual(assignedSheet.evaluate('lastBooking.status'), 'assigned', 'raw status never rewritten');
+    assert.ok(assignedSheet.element('cancelBtn').classList.contains('hidden'),
+      'cancellation eligibility reads the RAW status — assigned is not in the list');
+    assert.strictEqual(assignedDelay, 60000, 'polling cadence reads the RAW status (unknown → default 60s)');
+  });
+
+  // PR-B naming (Andres 2026-09-10; Codex seq:231/232): the destination is
+  // "Manage ride" from Pending through Arrived; only a ride in progress reads
+  // "Coordinate with your chauffeur". The INTERNAL dispatch (dataset.action +
+  // dataset.phase) keeps every status-bounded behaviour. Executed against
+  // the real trip sheet, one status per harness — the label first, then the
+  // TAP itself: Manage / Coordinate reveal the phase-bounded notice INSIDE
+  // the sheet carrying that phase's exact sentence (read back from the
+  // sheet's own LIFECYCLE_NOTICES), copy that names the WhatsApp message
+  // button by what it is and never by position ("below"/"above" — the button
+  // renders ABOVE the notice); a pending tap hands off to the booking form
+  // and shows no notice at all.
+  const labelCases = [
+    ['pending', 'Manage ride', 'edit', null],
+    ['confirmed', 'Manage ride', 'manage', /confirmed.*stays exactly as booked.*WhatsApp/],
+    ['on_the_way', 'Manage ride', 'coordinate', /on the way.*stays exactly as booked.*WhatsApp.*pickup/],
+    ['arrived', 'Manage ride', 'coordinate', /arrived.*waiting.*WhatsApp.*meet-up/],
+    ['in_progress', 'Coordinate with your chauffeur', 'coordinate', /in progress.*WhatsApp.*directly/],
+  ];
+  for (const [status, label, action, noticeShape] of labelCases) {
+    const row = { ...pendingBooking, status, pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() };
+    const sheet = createHarness([response(200, { booking: row, driver })]);
+    await sheet.settle();
+    check(`lifecycle destination — ${status}: "${label}", internal action ${action}, phase ${status}`, () => {
+      assert.strictEqual(sheet.element('backBtn').textContent, label);
+      assert.strictEqual(sheet.element('backBtn').dataset.action, action);
+      assert.strictEqual(sheet.element('backBtn').dataset.phase, status);
+      assert.ok(!sheet.element('backBtn').classList.contains('hidden'), 'the destination is offered');
+    });
+    const notice = sheet.element('lifecycleNotice');
+    if (noticeShape === null) {
+      check(`lifecycle tap — ${status}: hands off to the booking form, no notice`, () => {
+        assert.ok(notice.classList.contains('hidden') && notice.textContent === '', 'notice starts hidden and empty');
+        sheet.element('backBtn').click();
+        assert.ok(notice.classList.contains('hidden'), 'a pending tap opens the editor, never a notice');
+        assert.strictEqual(notice.textContent, '');
+        assert.strictEqual(sheet.context.location.href, '/indexMVP.html?book=1', 'the standalone sheet navigates to the booking form');
+      });
+    } else {
+      check(`lifecycle tap — ${status}: the phase-bounded notice opens INSIDE the sheet`, () => {
+        const expected = sheet.evaluate(`LIFECYCLE_NOTICES.${status}`);
+        assert.ok(typeof expected === 'string' && expected.length > 0, 'the sheet defines a sentence for this phase');
+        assert.ok(notice.classList.contains('hidden') && notice.textContent === '', 'notice starts hidden and empty');
+        sheet.element('backBtn').click();
+        assert.ok(!notice.classList.contains('hidden'), 'notice revealed');
+        assert.strictEqual(notice.textContent, expected, 'the exact sentence for THIS phase');
+        assert.ok(notice.scrolledIntoView, 'the sheet scrolls the notice into view');
+        assert.match(expected, noticeShape, 'honest, phase-bounded copy naming the WhatsApp control');
+        assert.doesNotMatch(expected, /\b(below|above)\b/i, 'location-neutral: the WhatsApp button renders ABOVE the notice');
+        assert.strictEqual(sheet.context.location.href, '', 'no navigation away from the sheet');
+      });
+    }
+  }
+
+  // The same phases when the sheet has NO chauffeur contact to offer (the
+  // assigned driver's phone is missing/invalid, so the WhatsApp button is
+  // hidden): the tap must not send the passenger to a control that is not
+  // there — it names LinkMia's own line instead.
+  for (const status of ['confirmed', 'arrived']) {
+    const row = { ...pendingBooking, status, pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() };
+    const sheet = createHarness([response(200, { booking: row, driver: { name: 'Carlos M.', phone: null } })]);
+    await sheet.settle();
+    check(`lifecycle tap — ${status} with NO driver contact: the notice names LinkMia's line, never a hidden WhatsApp button`, () => {
+      assert.ok(sheet.element('waBtn').classList.contains('hidden'), 'precondition: the WhatsApp button is hidden');
+      const expected = sheet.evaluate(`LIFECYCLE_NOTICES_NO_CONTACT.${status}`);
+      assert.ok(typeof expected === 'string' && expected.length > 0);
+      sheet.element('backBtn').click();
+      const notice = sheet.element('lifecycleNotice');
+      assert.ok(!notice.classList.contains('hidden'));
+      assert.strictEqual(notice.textContent, expected);
+      assert.doesNotMatch(expected, /WhatsApp/, 'no reference to a control that is not on the sheet');
+      assert.match(expected, /\+1 \(786\) 509-3955/, 'the channel that IS on the sheet');
+    });
+  }
+
+  const contactDriftRow = { ...pendingBooking, status: 'confirmed',
+    pickup_datetime: new Date(Date.now() + 20 * 60000).toISOString() };
+  const contactDrift = createHarness([
+    response(200, { booking: contactDriftRow, driver }),
+    response(200, { booking: contactDriftRow, driver }),
+    response(200, { booking: contactDriftRow, driver: { name: 'Carlos M.', phone: null } }),
+    response(200, { booking: contactDriftRow, driver })
+  ]);
+  await contactDrift.settle();
+  const contactNotice = contactDrift.element('lifecycleNotice');
+  let noticeWrites = 0;
+  let noticeText = contactNotice.textContent;
+  Object.defineProperty(contactNotice, 'textContent', {
+    configurable: true,
+    get: () => noticeText,
+    set: (value) => { noticeWrites++; noticeText = String(value); }
+  });
+  contactDrift.element('backBtn').click();
+  check('open lifecycle notice starts with the current same-status contact guidance', () => {
+    assert.ok(!contactNotice.classList.contains('hidden'));
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES.confirmed'));
+    assert.strictEqual(noticeWrites, 1, 'the passenger tap writes the initial guidance once');
+  });
+  await contactDrift.runNextTimer();
+  check('unchanged same-status contact polling does not re-announce the open live notice', () => {
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES.confirmed'));
+    assert.strictEqual(noticeWrites, 1, 'identical copy is not written into the live region again');
+  });
+  await contactDrift.runNextTimer();
+  check('same-status contact removal keeps the notice open but switches it to the honest LinkMia channel', () => {
+    assert.ok(contactDrift.element('waBtn').classList.contains('hidden'));
+    assert.ok(!contactNotice.classList.contains('hidden'));
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES_NO_CONTACT.confirmed'));
+    assert.match(contactNotice.textContent, /\+1 \(786\) 509-3955/);
+    assert.doesNotMatch(contactNotice.textContent, /WhatsApp/);
+    assert.strictEqual(noticeWrites, 2, 'contact loss changes the live guidance once');
+  });
+  await contactDrift.runNextTimer();
+  check('same-status contact restoration updates the still-open notice back to WhatsApp guidance', () => {
+    assert.ok(!contactDrift.element('waBtn').classList.contains('hidden'));
+    assert.match(contactDrift.element('waBtn').href || '', /13055551212/);
+    assert.ok(!contactNotice.classList.contains('hidden'));
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES.confirmed'));
+    assert.match(contactNotice.textContent, /WhatsApp/);
+    assert.strictEqual(noticeWrites, 3, 'contact restoration changes the live guidance once');
   });
 
   console.log(`\nALL ${passed} CHECKS PASS`);

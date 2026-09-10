@@ -6,14 +6,17 @@
 //      non-editable row or an invalid stored row must cost ZERO rate-card
 //      resolver calls, and every post-authentication failure that is not a
 //      typed 400/404/409 answers ONE fixed body that leaks nothing;
-//   2. PR-A is dark for PASSENGERS — no page loads the new model, no
-//      precached asset changes, and no cache name moves.
+//   2. HISTORICAL (PR-A): the model was dark for passengers. Under PR-B the
+//      booking page loads it, both modules are precached under their EXACT
+//      requested URLs, and the cache names sit on the PR-B rung (30/7) — the
+//      "PR-B — activation pins" section below owns those facts.
 //
 // Run: node tests/pending-edit-hydration.test.js
 
 const path = require('path');
 const fs = require('fs');
 const assert = require('assert');
+const vm = require('vm');
 
 process.env.SUPABASE_URL = 'https://example.supabase.co';
 process.env.SUPABASE_SERVICE_KEY = 'service-key';
@@ -573,22 +576,56 @@ async function check(name, fn) {
     assert.strictEqual(resolverCalls.length, 0, 'the POST path must not touch the GET resolver');
   });
 
-  // ============ PR-A darkness ============
-  console.log('\nPR-A — darkness pins\n');
+  // ============ PR-B activation ============
+  // PR-A shipped these files dark and this suite pinned that darkness. PR-B
+  // ends it deliberately, so the pins now assert the ACTIVATED state — the
+  // model is loaded and precached, the cache rungs moved to PR-B's reserved
+  // numbers, and the edit entry point hydrates.
+  console.log('\nPR-B — activation pins\n');
 
-  await check('the new model is in NO page and NOT precached', async () => {
+  // Both PR-B modules are requested by indexMVP with a cache-busting query
+  // (./js/<name>.js?v=N). The SW's cacheFirst/networkFirst fallbacks call
+  // caches.match(request) WITHOUT ignoreSearch, so a precache entry can serve
+  // that request ONLY when its URL — query included — is byte-identical to
+  // the src the page asks for. Derive the expected literal FROM THE PAGE and
+  // pin it exactly; the earlier basename pin accepted an unversioned entry
+  // that was stored on install yet never served anything (reviewer P2).
+  function assertPrecachedExactly(basename, idx, sw) {
+    const m = idx.match(new RegExp(`<script src="\\./js/${basename}\\.js(\\?v=\\d+)?"`));
+    assert.ok(m, `indexMVP must load ./js/${basename}.js`);
+    const query = m[1] || '';
+    const literal = `'/js/${basename}.js${query}'`;
+    const listStart = sw.indexOf('const STATIC_CACHE_URLS = [');
+    assert.ok(listStart >= 0, 'STATIC_CACHE_URLS is declared');
+    const list = sw.slice(listStart, sw.indexOf('];', listStart));
+    assert.ok(list.includes(literal), `${literal} must be in STATIC_CACHE_URLS — the EXACT URL the page requests`);
+    if (query) {
+      assert.ok(!sw.includes(`'/js/${basename}.js'`),
+        `a stale unversioned '/js/${basename}.js' entry must not remain anywhere in the SW`);
+    }
+    const entries = sw.match(new RegExp(`'/js/${basename}\\.js(\\?[^']*)?'`, 'g')) || [];
+    assert.deepStrictEqual(entries, [literal], `exactly one ${basename} precache entry, and it is the requested URL`);
+    return literal;
+  }
+
+  await check('the model is loaded by the booking page and precached', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    assert.ok(!sw.includes('pending-edit-model'), 'not in STATIC_CACHE_URLS');
-    for (const page of ['indexMVP.html', 'trip.html', 'driver.html', 'index.html', 'login.html']) {
+    const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+    assert.ok(/<script src="\.\/js\/pending-edit-model\.js/.test(idx), 'indexMVP must load it');
+    assertPrecachedExactly('pending-edit-model', idx, sw);
+    // It stays out of every OTHER page: nothing else has an editor.
+    for (const page of ['trip.html', 'driver.html', 'index.html', 'login.html']) {
       const html = fs.readFileSync(path.join(repoRoot, page), 'utf8');
-      assert.ok(!html.includes('pending-edit-model'), `${page} must not load it`);
+      assert.ok(!html.includes('pending-edit-model'), page + ' must not load it');
     }
   });
 
-  await check('the cache rungs sit on PR-T\'s reserved pair, v1.3.28 / runtime-v5 (PR-A moved nothing; PR-T did)', async () => {
+  await check('both cache rungs moved together to PR-B\'s pair, v1.3.30 / runtime-v7 (PR-T shipped 28/5; 29/6 retired unused)', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.28';/.test(sw));
-    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v5';/.test(sw));
+    // Cache names only ever move FORWARD, and the runtime cache moves with the
+    // static one because it can retain booking HTML.
+    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.30';/.test(sw), 'static rung');
+    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v7';/.test(sw), 'runtime rung');
   });
 
   // Plan v8.6 §3D: cache names only ever move FORWARD, and every rung-moving
@@ -636,10 +673,84 @@ async function check(name, fn) {
     }
   });
 
-  await check('the shipped edit entry point is untouched — no new GET, markers intact', async () => {
+  await check('the edit entry point hydrates and no longer demands re-entry', async () => {
     const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
-    assert.ok(idx.includes('this.editMarkers = {'), 'PR-A does not remove the markers');
-    assert.ok(!idx.includes('update-pending-booking?id='), 'PR-A wires no hydration call');
+    const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
+    assert.ok(idx.includes('update-pending-booking?id='), 'wires the hydration GET');
+    assert.ok(idx.includes('this.editCard().open(dto'), 'hands the snapshot to the review card');
+    assertPrecachedExactly('pending-edit-card', idx, sw); // the card module is precached too
+    assert.ok(!idx.includes('Re-enter your trip details'),
+      'the re-enter-everything instruction is gone — that was the defect');
+  });
+
+  await check('EXECUTED: the real fetch fallback serves the page\'s versioned request from the precache — the pre-fix unversioned entry never could', async () => {
+    const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+    const swSource = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
+    const ORIGIN = 'https://linkmia.com';
+    // Drive the real worker: run its install handler against a fake Cache
+    // Storage keyed on the FULL URL (the Cache API's default — no
+    // ignoreSearch), take the network away, then ask for the page's src.
+    const driveWorker = async (source, pathWithQuery) => {
+      const listeners = {};
+      const stores = new Map();
+      const keyOf = (req) => new URL(typeof req === 'string' ? req : req.url, ORIGIN).href;
+      const context = vm.createContext({
+        self: {
+          location: { origin: ORIGIN },
+          clients: { claim: async () => {} },
+          skipWaiting: async () => {},
+          addEventListener(type, fn) { listeners[type] = fn; }
+        },
+        caches: {
+          open: async (name) => {
+            if (!stores.has(name)) stores.set(name, new Map());
+            const store = stores.get(name);
+            return {
+              add: async (url) => { store.set(keyOf(url), { precached: url }); },
+              put: async (req, res) => { store.set(keyOf(req), res); },
+              delete: async (req) => store.delete(keyOf(req))
+            };
+          },
+          keys: async () => [...stores.keys()],
+          match: async (req) => {
+            const key = keyOf(req);
+            for (const store of stores.values()) if (store.has(key)) return store.get(key);
+            return null;
+          },
+          delete: async (name) => stores.delete(name)
+        },
+        fetch: async () => { throw new Error('offline'); },
+        URL,
+        Response: class FakeResponse { constructor(body, init) { this.body = body; this.status = init && init.status; } },
+        console: { log() {}, warn() {}, error() {} }
+      });
+      vm.runInContext(source, context, { filename: 'service-worker.js' });
+      let installing = null;
+      listeners.install({ waitUntil(p) { installing = p; } });
+      await installing;
+      let responding = null;
+      listeners.fetch({
+        request: { method: 'GET', url: `${ORIGIN}${pathWithQuery}`, mode: 'same-origin' },
+        respondWith(p) { responding = p; }
+      });
+      assert.ok(responding, 'the worker must intercept a same-origin script request');
+      return responding;
+    };
+    for (const basename of ['pending-edit-model', 'pending-edit-card']) {
+      const m = idx.match(new RegExp(`<script src="\\./js/${basename}\\.js(\\?v=\\d+)?"`));
+      assert.ok(m && m[1], `${basename} is requested with a cache-busting query`);
+      const requested = `/js/${basename}.js${m[1]}`;
+      // Fixed worker: the precache answers the exact request with the network down.
+      assert.deepStrictEqual(await driveWorker(swSource, requested), { precached: requested },
+        `${requested} must be served from the precache offline`);
+      // Pre-fix worker (identical source, the query stripped from the list
+      // entry): the entry is stored on install, yet the request falls all the
+      // way through to the 408 error response — the P2 defect, reproduced.
+      const preFix = swSource.replace(`'${requested}'`, `'/js/${basename}.js'`);
+      assert.notStrictEqual(preFix, swSource, 'the pre-fix source differs only in the list entry');
+      const miss = await driveWorker(preFix, requested);
+      assert.strictEqual(miss && miss.status, 408, 'an unversioned precache entry never serves the versioned request');
+    }
   });
 
   // ============ the dark model ============
@@ -851,6 +962,26 @@ async function check(name, fn) {
     const dropoff = a.projectRoute(dropoffRoute);
     assert.strictEqual(dropoff.origin.label, '4441 Collins Ave');
     assert.strictEqual(dropoff.destination.label, 'MIA');
+  });
+
+  await check('projectRoute projects the STORED airport-side label byte for byte (the code only when the tuple carries none); fromRouteDraft honours the host\'s airportLabel and falls back to the code', async () => {
+    const a = MODEL.adapterFor('airport_transfer_v1');
+    const stored = { ...DTO.route, pickupLabel: 'Miami International' };
+    assert.strictEqual(a.projectRoute(stored).origin.label, 'Miami International', 'pickup mode: origin = stored airport label');
+    assert.strictEqual(a.projectRoute(stored).destination.label, '4441 Collins Ave');
+    const storedDrop = { ...DTO.route, bookingMode: 'dropoff', airportCode: 'PBI', pickupLabel: '4441 Collins Ave', dropoffLabel: 'Palm Beach' };
+    assert.strictEqual(a.projectRoute(storedDrop).destination.label, 'Palm Beach', 'dropoff mode: destination = the stored label, verbatim');
+    assert.strictEqual(a.projectRoute(storedDrop).origin.label, '4441 Collins Ave');
+    assert.strictEqual(a.projectRoute({ ...DTO.route, pickupLabel: '' }).origin.label, 'MIA', 'the code is only the fallback');
+    const withLabel = a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', airportLabel: 'Fort Lauderdale', address: { placeId: 'p', label: 'L' } });
+    assert.strictEqual(withLabel.pickupLabel, 'Fort Lauderdale');
+    assert.strictEqual(withLabel.dropoffLabel, 'L');
+    const dropLabel = a.fromRouteDraft({ mode: 'dropoff', airport: 'PBI', airportLabel: 'Palm Beach', address: { placeId: 'p', label: 'L' } });
+    assert.strictEqual(dropLabel.pickupLabel, 'L');
+    assert.strictEqual(dropLabel.dropoffLabel, 'Palm Beach');
+    assert.strictEqual(a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', airportLabel: '   ', address: { placeId: 'p', label: 'L' } }).pickupLabel, 'FLL', 'a blank label falls back to the code');
+    assert.strictEqual(a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', address: { placeId: 'p', label: 'L' } }).pickupLabel, 'FLL', 'no label → the code');
+    assert.strictEqual(a.routeIdentity(withLabel), a.routeIdentity({ ...withLabel, pickupLabel: 'FLL' }), 'labels stay OUT of identity');
   });
 
   await check('the legacy kind projects labels, is ALWAYS incomplete, and can never be quoted', async () => {

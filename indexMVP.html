@@ -724,6 +724,78 @@
     <script src="/maps-loader.js"></script>
     
     <!-- Modal Controllers -->
+    <!-- PR-B: the pending-edit model shipped dark in PR-A. It owns route
+         identity, the snapshot/draft comparator and the Miami time controller
+         so the edit card never re-implements any of them inline. -->
+    <style id="pending-edit-card-styles">
+        .hidden-for-edit { display: none !important; }
+        .pending-edit-card { padding: 12px 16px 24px; color: #fff; }
+        .pending-edit-card[hidden] { display: none; }
+        .pe-title { font-size: 20px; font-weight: 700; margin: 8px 0 14px; }
+        .pe-line { display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin: 8px 0;
+                   background: #2C2C2E; border-radius: 12px; font-size: 14px; }
+        .pe-line-text { flex: 1; min-width: 0; line-height: 1.4; }
+        .pe-readonly { color: #C7C7CC; }
+        .pe-readonly[hidden] { display: none; }
+        .pe-change, .pe-step, .pe-choice, .pe-retry, .pe-secondary, .pe-sheet-option, .pe-sheet-action {
+            font-family: inherit; cursor: pointer; border-radius: 10px; font-weight: 600; }
+        .pe-change { background: transparent; border: 1px solid rgba(255,255,255,0.25); color: #FF9933; padding: 8px 12px; }
+        .pe-change:disabled, .pe-step:disabled, .pe-save:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pe-attribution-slot, .edit-route-reference-attribution, .pe-attribution {
+            font-family: Roboto, Arial, sans-serif; font-size: 12px; color: #FFFFFF; padding: 0 14px 6px; }
+        .pe-attribution a { color: #FFFFFF; }
+        .pe-date, .pe-time-input { background: #1C1C1E; color: #fff; border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px; padding: 8px; font-family: inherit; font-size: 14px; }
+        .pe-time-choice { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px; }
+        .pe-time-choice:empty { display: none; }
+        .pe-choice-note { width: 100%; font-size: 13px; color: #FF9933; }
+        .pe-choice { background: #2C2C2E; color: #fff; border: 1px solid rgba(255,255,255,0.25); padding: 8px 12px; }
+        .pe-vehicle-options { display: flex; flex-direction: column; gap: 8px; padding: 0 0 4px; }
+        .pe-vehicle-options[hidden] { display: none; }
+        .pe-vehicle-option { text-align: left; background: #2C2C2E; color: #fff; border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px; padding: 12px 14px; font-family: inherit; cursor: pointer; }
+        .pe-vehicle-option[aria-checked="true"] { border-color: #FF9933; }
+        .pe-vehicle-option:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pe-vo-name { font-weight: 700; font-size: 15px; }
+        .pe-vo-cap { font-size: 12px; color: #C7C7CC; margin-top: 2px; }
+        .pe-vo-price { font-size: 14px; color: #FF9933; margin-top: 4px; }
+        .pe-stepper { display: flex; align-items: center; gap: 14px; padding: 4px 14px 8px; }
+        .pe-stepper[hidden] { display: none; }
+        .pe-step { width: 40px; height: 40px; background: #2C2C2E; color: #fff; border: 1px solid rgba(255,255,255,0.25); font-size: 20px; }
+        .pe-step-value { font-size: 18px; font-weight: 700; min-width: 24px; text-align: center; }
+        .pe-changes { padding: 4px 14px; font-size: 13px; color: #32D74B; }
+        .pe-change-line { padding: 2px 0; }
+        .pe-quote-status { margin: 8px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,69,58,0.10);
+            border: 1px solid rgba(255,69,58,0.45); color: #F3C6C2; font-size: 14px; display: flex; gap: 12px; align-items: center; }
+        .pe-quote-status[hidden] { display: none; }
+        .pe-retry { border: 1px solid currentColor; background: transparent; color: inherit; padding: 8px 12px; }
+        .pe-save { width: 100%; margin-top: 12px; padding: 16px; border: none; border-radius: 14px; font-size: 16px; font-weight: 700;
+            color: #fff; background: linear-gradient(135deg, #FF9933, #FF5733); font-family: inherit; cursor: pointer; }
+        .pe-reason { min-height: 18px; padding: 8px 14px 0; font-size: 13px; color: #C7C7CC; }
+        .pe-actions { padding: 8px 14px; }
+        .pe-secondary { background: transparent; border: none; color: #8E8E93; padding: 8px 0; text-decoration: underline; }
+        .pe-sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 10000;
+            display: flex; justify-content: center; align-items: flex-end; }
+        .pe-sheet-panel { width: 100%; max-width: 576px; background: #2C2C2E; border-radius: 20px 20px 0 0;
+            padding: 20px; animation: peSlideUp 0.3s ease-out; display: flex; flex-direction: column; gap: 10px; }
+        @keyframes peSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .pe-sheet-title { margin: 0 0 6px; font-size: 18px; }
+        .pe-sheet-option, .pe-sheet-action { padding: 14px; border: none; color: #fff; font-size: 15px;
+            background: linear-gradient(135deg, #FF9933, #FF5733); }
+        .pe-sheet-option:disabled { opacity: 0.4; cursor: not-allowed; }
+        .pe-sheet-reason { font-size: 13px; color: #C7C7CC; }
+        .pe-sheet-form { display: flex; flex-direction: column; gap: 8px; }
+        .pe-sheet-form input { background: #1C1C1E; color: #fff; border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px; padding: 12px; font-family: inherit; font-size: 15px; }
+        .edit-route-reference { margin: 0 0 10px; padding: 10px 12px; background: #2C2C2E; border-radius: 10px; font-size: 14px; }
+        .edit-route-controls { display: flex; flex-direction: column; gap: 8px; }
+        .edit-route-reason { font-size: 13px; color: #C7C7CC; min-height: 16px; }
+        .edit-route-back { background: transparent; border: none; color: #8E8E93; text-decoration: underline; font-family: inherit; padding: 8px 0; cursor: pointer; }
+    </style>
+    <script src="./js/pending-edit-model.js?v=1"></script>
+    <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
+         edit-scoped traveler sheet and the immutable-attempt submission. -->
+    <script src="./js/pending-edit-card.js?v=1"></script>
     <script src="./js/passenger-modal.js?v=3"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=1"></script>
@@ -972,6 +1044,11 @@
                             this.els.autocompleteDropdown,
                             null
                         );
+                        // PR-B: a no-op outside edit-route mode; inside it,
+                        // the WHOLE address tuple (label + placeId +
+                        // coordinates + attributions) is replaced atomically
+                        // in routeDraft. autocomplete.js itself is untouched.
+                        this.autocomplete.onSelect = (sel) => this.onAutocompleteSelect(sel);
                         
                         // Add event listeners with safety checks
                         if (this.els.addressInput) {
@@ -1022,11 +1099,11 @@
                 this.els.startSearchBtn?.addEventListener('click', () => this.startBooking());
                 
                 this.els.modeBtns.forEach(btn => {
-                    btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
+                    btn.addEventListener('click', () => this.onModeTap(btn.dataset.mode));
                 });
                 
                 this.els.airportOptions.forEach(option => {
-                    option.addEventListener('click', () => this.selectAirport(option.dataset.airport));
+                    option.addEventListener('click', () => this.onAirportTap(option.dataset.airport));
                 });
                 
                 this.els.continueBtn?.addEventListener('click', () => this.navigateToPanel('when'));
@@ -1071,6 +1148,230 @@
                 }
             }
             
+            // ================= PR-B edit-route mode (plan v8.6 §3C line 1) =================
+            // While the review card's Change opens the Where screen, the screen
+            // is driven by a TEMPORARY routeDraft cloned from the draft — never
+            // by live state, setMode() or selectAirport(). Done converts the
+            // tuple through the adapter; Back discards it with zero mutation
+            // and zero quotes. The Where screen is NOT a quote surface and the
+            // create-flow /api/directions call is never made here.
+            // The host-specific editor for today's airport-transfer shape. The
+            // generic card hands over the route OPAQUELY with the adapter's
+            // projections; the airport-specific temporary draft is built HERE.
+            enterEditRouteMode(editorInput, { onDone, onBack }) {
+                const projection = editorInput?.projection || null;
+                const intent = editorInput?.quoteIntent || null;
+                const route = editorInput?.route || null;
+                const mode = intent?.mode === 'pickup' || intent?.mode === 'dropoff'
+                    ? intent.mode
+                    : (route?.bookingMode === 'pickup' ? 'pickup' : 'dropoff');
+                const addressLabel = projection
+                    ? (mode === 'dropoff' ? projection.origin.label : projection.destination.label)
+                    : '';
+                // The airport-side DISPLAY label travels with the draft: seeded from
+                // the stored projection so an address-only or direction-only Done
+                // keeps the stored text byte for byte, and replaced by
+                // getAirportName only when the passenger taps a different airport
+                // (the same name create stores). Codex seq:234 #2.
+                const storedAirportLabel = projection
+                    ? (mode === 'dropoff' ? projection.destination.label : projection.origin.label)
+                    : '';
+                const routeDraft = {
+                    mode,
+                    airport: intent?.airportCode || null,
+                    airportLabel: storedAirportLabel ||
+                        (intent?.airportCode ? this.getAirportName(intent.airportCode) : ''),
+                    address: {
+                        label: addressLabel || '',
+                        placeId: intent?.placeId || null,
+                        coordinates: route?.addressCoordinates
+                            ? { lat: route.addressCoordinates.lat, lng: route.addressCoordinates.lng } : null,
+                        attributions: Array.isArray(route?.addressAttributions)
+                            ? JSON.parse(JSON.stringify(route.addressAttributions)) : []
+                    }
+                };
+                this._editRoute = { routeDraft, onDone, onBack };
+                this.els.panelsWrapper?.classList.remove('hidden-for-edit', 'show-when', 'show-vehicle');
+                document.getElementById('pendingEditCard')?.setAttribute('hidden', '');
+                this.els.progressLine?.classList.remove('active');
+                this.els.summaryBar?.classList.remove('visible');
+                this.state.ui.currentPanel = 'where';
+                this.autocomplete?.invalidateRawCapture?.();
+                this.autocomplete?.clearValidation?.();
+                if (this.els.addressInput) this.els.addressInput.value = '';   // EMPTY search box
+                // P0 (Codex seq:191 #2): clearValidation() above sets
+                // isValidated=false, so autocomplete's own 'validation-cleared'
+                // (dispatched only when it WAS validated) never fires on the
+                // first keystroke here. The host therefore watches the
+                // passenger's own typing: the first USER edit clears ONLY the
+                // temporary address tuple and disables Done until a fresh
+                // Railway selection replaces it. A direction/airport-only edit
+                // with an untouched box keeps the old tuple. autocomplete.js
+                // and the Railway request path are untouched.
+                if (!this._editRouteInputHandler) {
+                    this._editRouteInputHandler = () => {
+                        const er = this._editRoute;
+                        if (!er) return;
+                        const a = er.routeDraft.address;
+                        if (a && (a.placeId || a.label)) {
+                            er.routeDraft.address = { label: '', placeId: null, coordinates: null, attributions: [] };
+                            this.renderEditRouteWhere();
+                        }
+                    };
+                }
+                this.els.addressInput?.addEventListener('input', this._editRouteInputHandler);
+                this.buildEditRouteControls();
+                this.renderEditRouteWhere();
+            }
+
+            exitEditRouteMode() {
+                const er = this._editRoute;
+                this._editRoute = null;
+                if (this._editRouteInputHandler) {
+                    this.els.addressInput?.removeEventListener('input', this._editRouteInputHandler);
+                }
+                document.getElementById('editRouteControls')?.remove();
+                document.getElementById('editRouteReference')?.remove();
+                this.autocomplete?.clearValidation?.();
+                if (this.els.addressInput) this.els.addressInput.value = '';
+                this.els.panelsWrapper?.classList.add('hidden-for-edit');
+                document.getElementById('pendingEditCard')?.removeAttribute('hidden');
+                if (this.els.continueBtn) this.els.continueBtn.hidden = false;
+                // Restore the create flow's own presentation from ITS state.
+                this.updateStepOrder(this.state.mode === 'dropoff');
+                this.els.airportOptions?.forEach(opt => {
+                    opt.classList.toggle('selected', opt.dataset.airport === this.state.locations.airport?.code);
+                });
+                return er;
+            }
+
+            editRouteDoneEnabled() {
+                const d = this._editRoute?.routeDraft;
+                return !!(d && (d.mode === 'pickup' || d.mode === 'dropoff') &&
+                    ['MIA', 'FLL', 'PBI'].includes(d.airport) && d.address && d.address.placeId);
+            }
+
+            buildEditRouteControls() {
+                if (document.getElementById('editRouteControls')) return;
+                const host = this.els.addressInput?.closest('.step-section') || this.els.addressStep;
+                // Read-only reference of the CURRENT address above the empty
+                // search box, with its own static Google Maps credit.
+                const ref = document.createElement('div');
+                ref.id = 'editRouteReference';
+                ref.className = 'edit-route-reference';
+                const refLabel = document.createElement('div');
+                refLabel.className = 'edit-route-reference-label';
+                ref.appendChild(refLabel);
+                const refAttr = document.createElement('div');
+                refAttr.className = 'edit-route-reference-attribution';
+                refAttr.setAttribute('translate', 'no');
+                refAttr.textContent = 'Google Maps';
+                ref.appendChild(refAttr);
+                host?.insertBefore(ref, host.firstChild);
+
+                const controls = document.createElement('div');
+                controls.id = 'editRouteControls';
+                controls.className = 'edit-route-controls';
+                const done = document.createElement('button');
+                done.type = 'button';
+                done.id = 'editRouteDone';
+                done.className = 'continue-btn';
+                done.textContent = 'Use this route';
+                const reason = document.createElement('div');
+                reason.id = 'editRouteReason';
+                reason.className = 'edit-route-reason';
+                reason.setAttribute('aria-live', 'polite');
+                const back = document.createElement('button');
+                back.type = 'button';
+                back.id = 'editRouteBack';
+                back.className = 'edit-route-back';
+                back.textContent = 'Back';
+                controls.appendChild(done);
+                controls.appendChild(reason);
+                controls.appendChild(back);
+                done.addEventListener('click', () => {
+                    if (!this.editRouteDoneEnabled()) return;
+                    const er = this.exitEditRouteMode();
+                    const finalDraft = JSON.parse(JSON.stringify(er.routeDraft));
+                    er.onDone(finalDraft);
+                });
+                back.addEventListener('click', () => {
+                    const er = this.exitEditRouteMode();
+                    er.onBack();
+                });
+                if (this.els.continueBtn) {
+                    this.els.continueBtn.hidden = true;
+                    this.els.continueBtn.parentElement?.appendChild(controls);
+                } else {
+                    this.els.bookingContainer?.appendChild(controls);
+                }
+            }
+
+            renderEditRouteWhere() {
+                const er = this._editRoute;
+                if (!er) return;
+                const d = er.routeDraft;
+                const isDropoff = d.mode === 'dropoff';
+                this.els.modeBtns?.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === d.mode));
+                this.updateStepOrder(isDropoff);
+                // Step enablement derives from routeDraft, not live state.
+                const addressOn = isDropoff || !!d.airport;
+                if (this.els.addressInput) this.els.addressInput.disabled = !addressOn;
+                this.els.addressStep?.classList.toggle('disabled', !addressOn);
+                const airportsOn = !isDropoff || !!(d.address && d.address.placeId);
+                this.els.airportStep?.classList.toggle('disabled', !airportsOn);
+                this.els.airportOptions?.forEach(opt => {
+                    opt.disabled = !airportsOn;
+                    opt.classList.toggle('selected', opt.dataset.airport === d.airport);
+                });
+                const refLabel = document.querySelector('#editRouteReference .edit-route-reference-label');
+                if (refLabel) refLabel.textContent = d.address && d.address.label
+                    ? `Current address: ${d.address.label}` : 'Current address: —';
+                const done = document.getElementById('editRouteDone');
+                const reason = document.getElementById('editRouteReason');
+                const ok = this.editRouteDoneEnabled();
+                if (done) done.disabled = !ok;
+                if (reason) reason.textContent = ok ? '' : 'Re-select your address to continue';
+            }
+
+            onModeTap(mode) {
+                if (this._editRoute) {
+                    this._editRoute.routeDraft.mode = mode;
+                    this.renderEditRouteWhere();
+                    return;
+                }
+                this.setMode(mode);
+            }
+
+            onAirportTap(code) {
+                if (this._editRoute) {
+                    const d = this._editRoute.routeDraft;
+                    if (d.mode === 'dropoff' && !(d.address && d.address.placeId)) return;
+                    d.airport = code;   // airport/direction-only Done preserves the address tuple
+                    d.airportLabel = this.getAirportName(code);
+                    this.renderEditRouteWhere();
+                    return;
+                }
+                this.selectAirport(code);
+            }
+
+            onAutocompleteSelect(sel) {
+                if (!this._editRoute) return;   // no-op outside edit-route mode
+                const place = sel && sel.place;
+                const placeId = place && typeof place.id === 'string' && place.id !== 'unknown' ? place.id : null;
+                if (!placeId) return;           // no usable prediction → tuple untouched
+                const c = sel.coordinates || {};
+                const coordinates = Number.isFinite(c.lat) && Number.isFinite(c.lng) ? { lat: c.lat, lng: c.lng } : null;
+                this._editRoute.routeDraft.address = {
+                    label: sel.address || '',
+                    placeId,
+                    coordinates,
+                    attributions: Array.isArray(place.attributions) ? JSON.parse(JSON.stringify(place.attributions)) : []
+                };
+                this.renderEditRouteWhere();
+            }
+            // =============== end PR-B edit-route mode ===============
+
             setMode(mode) {
                 this.state.mode = mode;
                 
@@ -1138,6 +1439,7 @@
             }
             
             handleAddressSelected(detail) {
+                if (this._editRoute) return;   // PR-B: onSelect replaced the tuple atomically
                 // PR 3C-2B2: keep autocomplete's place_id. Before this it was
                 // received here and thrown away, which is why
                 // `state.locations.address.place_id` was read at the pricing
@@ -1149,14 +1451,10 @@
                     (typeof placeId === 'string' && placeId && placeId !== 'unknown')
                         ? placeId
                         : null;
-                // Edit-session interaction marker: only a LIVE autocomplete
-                // selection in this session counts — retained text never does.
-                // quoteFlowActive() keeps every flag-off legacy path untouched.
-                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive() &&
-                    this.state.locations.placeId) {
-                    this.editMarkers.routeAddress = true;
-                    this.updateBookAvailability();
-                }
+                // PR-B: a live address selection can change what Save is
+                // allowed to do, so re-evaluate. The COMPARATOR decides; there
+                // is no marker to set any more.
+                if (this.pendingEdit && this.quoteFlowActive()) this.updateBookAvailability();
 
                 this.updateAddressStepState();
                 this.updateAirportStepState();
@@ -1164,6 +1462,7 @@
             }
 
             handleAddressCoordinates(detail) {
+                if (this._editRoute) return;   // PR-B: never calculateRoute/getRouteData in edit-route mode
                 this.state.locations.address = {
                     address: detail.address,
                     coordinates: { lat: detail.lat, lng: detail.lng }
@@ -1183,6 +1482,13 @@
             }
 
             handleAddressValidationCleared() {
+                if (this._editRoute) {
+                    // Clears ONLY the temporary tuple/input — never the main
+                    // draft's identity or its held quote.
+                    this._editRoute.routeDraft.address = { label: '', placeId: null, coordinates: null, attributions: [] };
+                    this.renderEditRouteWhere();
+                    return;
+                }
                 this.state.locations.address = null;
                 this.state.locations.placeId = null;
                 this.clearRouteState();
@@ -1217,10 +1523,7 @@
                 };
                 this.clearRouteState();
                 this.invalidateQuote('airport changed');
-                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive()) {
-                    this.editMarkers.routeDirection = true;
-                    this.updateBookAvailability();
-                }
+                if (this.pendingEdit && this.quoteFlowActive()) this.updateBookAvailability();
 
                 this.els.airportOptions.forEach(opt => {
                     opt.classList.toggle('selected', opt.dataset.airport === airportCode);
@@ -1790,10 +2093,7 @@
                     ? new Date(this.state.dateTime.time).getTime() : null;
                 this.state.dateTime.time = date;
                 if (prevPickup !== date.getTime()) this.invalidateQuote('pickup time changed');
-                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive()) {
-                    this.editMarkers.pickupAt = true;
-                    this.updateBookAvailability();
-                }
+                if (this.pendingEdit && this.quoteFlowActive()) this.updateBookAvailability();
                 this.updateTimeNote();
                 // Time-of-day affects surge pricing. Recalculate the
                 // selected vehicle before either a new booking or an edit is
@@ -1898,6 +2198,9 @@
                 const isObject = typeof vehicleData === 'object';
                 const vehicleType = isObject ? vehicleData.id : vehicleData;
 
+                // PR-B: the create carousel is never an edit surface — the
+                // review card renders its own vehicle options from the
+                // hydrated projection, so nothing here can touch a booked ride.
                 // Use data from carousel if available, otherwise get from pricing service
                 let vehicleName, passengers, bags, carouselPrice;
 
@@ -1932,11 +2235,7 @@
                 // unavailable-advance selections. Absence of the flag (a
                 // stale cached carousel) counts as user — fail-open here is
                 // dark-phase-only and self-heals with the SW bump.
-                if (this.pendingEdit && this.editMarkers && this.quoteFlowActive() &&
-                    !(isObject && vehicleData.userInitiated === false)) {
-                    this.editMarkers.vehicle = true;
-                    this.updateBookAvailability();
-                }
+                if (this.pendingEdit && this.quoteFlowActive()) this.updateBookAvailability();
 
                 // PR 3C-2B2: each vehicle carries its OWN signed token in the
                 // same quote, so switching vehicles selects a different token
@@ -2197,6 +2496,9 @@
                 // navigate back to When, so recheck the stage at execution time
                 // before buying a Places + Compute Routes Pro pair.
                 if (this.state.ui?.currentPanel !== 'vehicle') return;
+                // PR-B: the create Vehicle panel is NOT the edit surface. While
+                // a pending edit is open, only the review card may spend.
+                if (this.pendingEdit) return;
 
                 const intent = this.quoteIntent();
                 const key = this.quoteKey(intent);
@@ -2266,20 +2568,13 @@
                     if (seq !== q.seq) return;
 
                     if (!res.ok) {
-                        // edit_stale gets its own branch BEFORE the generic
-                        // handling: the ride changed since the edit began, and
-                        // the honest move is explicit review — never a silent
-                        // version refresh (the captured CAS is sacred).
-                        if (payload?.error === 'edit_stale') {
-                            q.status = 'error';
-                            q.error = {
-                                message: 'This ride changed since you opened it. Please reopen it from your trip page to edit the latest version.',
-                                retryable: false,
-                                editStale: true
-                            };
-                            this.renderQuoteState();
-                            return;
-                        }
+                        // PR-B: edit_stale can no longer reach this funnel —
+                        // requestServerQuote refuses while an edit session is
+                        // open, and the review card handles edit_stale itself
+                        // (reason:not_editable → lifecycle handoff;
+                        // reason:version → one fresh hydration with the
+                        // changed-elsewhere copy). The shipped "reopen it from
+                        // your trip page" branch is removed with it.
                         // PR-T: the server's FRESH clock refused an elapsed pickup.
                         // Typed and definitive: never retried automatically, and
                         // the passenger is returned to the control that can fix it.
@@ -2346,6 +2641,7 @@
                 // in a row while the passenger is still deciding. Only the Vehicle
                 // step — where a price is actually shown — may spend.
                 if (this.state.ui?.currentPanel !== 'vehicle') return;
+                if (this.pendingEdit) return;   // PR-B: the card is the edit quote surface
                 clearTimeout(this._quoteTimer);
                 this._quoteTimer = setTimeout(() => this.requestServerQuote(), QUOTE_DEBOUNCE_MS);
             }
@@ -2540,11 +2836,18 @@
             // Interaction markers (PR-2, plan v3.1 §4): a restored edit form
             // is NOT the ride — only explicit actions in THIS edit session
             // count. Prefilled or merely nonempty values never do.
+            // PR-B: editing happens on the review card, never on this funnel.
+            // While a pending edit is open the funnel's primary action is
+            // irrelevant (the card owns Save); outside an edit the create
+            // flow is untouched.
             editReady() {
-                if (!this.pendingEdit || !this.quoteFlowActive()) return true;
-                const m = this.editMarkers || {};
-                return !!(m.routeDirection && m.routeAddress && m.pickupAt && m.vehicle);
+                return !this.pendingEdit;
             }
+
+            // PR-T owns the elapsed-pickup rule on BOTH surfaces, inside the
+            // writers' transactions (database clock, receipt-first). Device time
+            // is advisory only: the create picker's own snap-forward remains,
+            // and this page never BLOCKS a submission on the phone clock.
 
             // A quote that is missing or incomplete blocks Book/Save — there is
             // deliberately no fallback to the browser calculator: the price
@@ -2558,6 +2861,23 @@
                 if (!btn) return;
                 const baseLabel = this.pendingEdit ? 'Save changes' : 'Book Service';
                 if (!this.quoteFlowActive()) { btn.disabled = false; return; }
+
+                if (this._editCard && this._editCard.isOpen()) {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.5';
+                    btn.style.cursor = 'not-allowed';
+                    return;
+                }
+
+                if (this._editHydrating) {
+                    // Never grey without a reason: the notice above the form
+                    // says "Loading your ride…" while this holds.
+                    btn.disabled = true;
+                    btn.style.opacity = '0.5';
+                    btn.style.cursor = 'wait';
+                    this.setBookLabel('Loading your ride…');
+                    return;
+                }
 
                 if (this._quoteRefreshing) {
                     btn.disabled = true;
@@ -2888,10 +3208,14 @@
                         !Number.isInteger(this._tapSnapshot.finalCents)) return;
                 }
 
-                // Edit sessions require an EXPLICIT traveler review in the
-                // modal every time (prefilled data never counts as confirmed).
-                const needsExplicitTraveler = this.pendingEdit &&
-                    this.quoteFlowActive() && !this.editMarkers?.traveler;
+                // PR-B: the blanket "re-confirm the traveler on every edit"
+                // gate is gone. It existed because NOTHING was restored, so no
+                // value on the form could be trusted as this ride's. A
+                // hydrated form carries the server's own traveler, and a
+                // passenger who did change it confirmed that by saving the
+                // sheet. The modal still opens on its own when there is no
+                // traveler data at all (the hasUserData branch below).
+                const needsExplicitTraveler = false; // the card owns edit travelers
 
                 if (passengerModal.hasUserData() && !needsExplicitTraveler) {
                     // User already provided info, proceed to booking
@@ -2900,13 +3224,19 @@
                     // Open passenger modal to collect (or explicitly re-confirm)
                     passengerModal.openRequired(() => {
                         console.log('✅ User info collected, proceeding to booking');
-                        if (this.pendingEdit && this.editMarkers) this.editMarkers.traveler = true;
                         this.confirmBooking();
                     });
                 }
             }
 
-            beginPendingEdit({ bookingId, tripCode, detailsVersion }) {
+            // PR-B: the editor now HYDRATES. Before this, an edit reset every
+            // marker and told the passenger to "re-enter your trip details" —
+            // changing a pickup time by ten minutes meant retyping the whole
+            // ride. beginPendingEdit is async: it shows an honest loading
+            // state, performs ONE authenticated GET, and applies the server's
+            // snapshot. Genuine failures FAIL CLOSED — no half-restored
+            // editor, and the ride is never touched.
+            async beginPendingEdit({ bookingId, tripCode, detailsVersion }) {
                 if (!bookingId) return;
                 this.pendingEdit = {
                     bookingId,
@@ -2914,16 +3244,12 @@
                     detailsVersion: Number(detailsVersion) ||
                         Number(currentActiveBooking?.details_version) || 1
                 };
-                // Interaction markers (plan v3.1 §4, sign-off pin): reset at
-                // EVERY edit start. Only explicit actions in this edit session
-                // set them; a restored/prefilled form never counts. Save stays
-                // unavailable until direction+address, pickup time, and vehicle
-                // were each explicitly chosen; the traveler details are
-                // explicitly reviewed in the modal at the Save tap.
-                this.editMarkers = {
-                    routeDirection: false, routeAddress: false,
-                    pickupAt: false, vehicle: false, traveler: false
-                };
+                // PR-B RETIRES the interaction markers. They existed because
+                // nothing was restored, so no value on the form could be
+                // trusted as this ride's and the passenger had to re-touch
+                // every control to prove intent. A hydrated form IS the ride,
+                // and the comparator answers the real question — did anything
+                // change? — which is what editReady() now asks.
                 // Milestone A: the previous booking's raw-query snapshot must
                 // not survive into this edit session, and an in-flight Details
                 // response must not republish it. Raw-capture state only —
@@ -2945,22 +3271,232 @@
                     notice.style.cssText = 'margin:12px 16px;padding:12px 14px;border-radius:12px;background:#fff3e0;color:#a85b00;font-weight:600;';
                     this.els.bookingContainer?.prepend(notice);
                 }
-                notice.textContent = `Editing ${this.pendingEdit.tripCode || 'your pending ride'}. Your existing ride stays active until these changes are saved.` +
-                    (this.quoteFlowActive() ? ' Re-enter your trip details to change this ride.' : '');
                 const bookBtn = document.getElementById('bookBtn');
                 if (bookBtn) {
                     bookBtn.innerHTML = '<span class="btn-main-text">Save changes</span>';
                     bookBtn.disabled = false;
                 }
-                // Under the quote flow, Save starts DISABLED — the markers
-                // are all unset, and an enabled button whose taps are silent
-                // no-ops would be dishonest. (Flag off keeps the legacy
-                // enabled button above.)
-                if (this.quoteFlowActive()) this.updateBookAvailability();
+
+                if (!this.quoteFlowActive()) {
+                    // Flag-false (decision 21, ratified): the hydrated editor
+                    // prices ONLY through the server quote, so with the flag
+                    // off pending editing is UNAVAILABLE. Show the honest
+                    // notice without closing the live trip sheet — never fall
+                    // back to the un-hydrated legacy form this project removes.
+                    this.finishPendingEdit();
+                    this.showEditExitNotice('Editing is temporarily unavailable. Your ride is unchanged. Please try again later or contact LinkMia.');
+                    this.reopenTripSheet(bookingId);
+                    return;
+                }
+                notice.textContent = 'Loading your ride…';
+                this._editHydrating = true;
+                this.updateBookAvailability();
+
+                let dto = null;
+                try {
+                    dto = await this.fetchRideSnapshot(bookingId);
+                } finally {
+                    this._editHydrating = false;
+                }
+
+                if (!this.pendingEdit || this.pendingEdit.bookingId !== bookingId) {
+                    // The session moved on while the GET was in flight.
+                    return;
+                }
+
+                if (!dto) {
+                    this.failClosedFromEdit(
+                        'We couldn\'t load the latest ride details. Your ride is unchanged.');
+                    return;
+                }
+                if (dto.notEditable) {
+                    this.handleLifecycleHandoff(dto.currentStatus);
+                    return;
+                }
+
+                // Hand the SERVER's snapshot to the review card. The card
+                // owns the draft, the quote surface and the submission; the
+                // three-step funnel underneath is hidden and never consulted.
+                try {
+                    this.editCard().open(dto, { bookingId, tripCode: this.pendingEdit.tripCode });
+                } catch (err) {
+                    console.error('edit card failed to open', err);
+                    this.failClosedFromEdit(
+                        'We couldn\'t load the latest ride details. Your ride is unchanged.');
+                    return;
+                }
+                notice.remove();
+            }
+
+            // Lazily built once; injected dependencies keep the card free of
+            // globals so its behaviour is executed, not grepped, in tests.
+            editCard() {
+                if (this._editCard) return this._editCard;
+                this._editCard = window.PendingEditCard.createPendingEditCard({
+                    model: window.PendingEditModel,
+                    document,
+                    fetch: (url, opts) => fetch(url, opts),
+                    getSession: async () => {
+                        if (!window.supabaseClient) return null;
+                        const { data: { session } } = await window.supabaseClient.auth.getSession();
+                        return session || null;
+                    },
+                    app: this,
+                    accountIdentity: () => ({
+                        name: currentProfile?.name || '',
+                        phone: currentProfile?.phone || '',
+                        // profile value first, authenticated session as fallback
+                        email: currentProfile?.email || currentSession?.user?.email || '',
+                        ambassador: !!currentAmbassador
+                    }),
+                    randomUUID: () => (crypto.randomUUID && crypto.randomUUID()) || this.newOperationId()
+                });
+                return this._editCard;
+            }
+
+            // ---- hooks the card calls (narrow, explicit surface) ----
+            mountEditCard(node) {
+                this.els.bookingContainer?.classList.add('editing-ride');
+                this.els.panelsWrapper?.classList.add('hidden-for-edit');
+                this.els.summaryBar?.classList.remove('visible');
+                this.els.bookingContainer?.appendChild(node);
+            }
+
+            editCardClosed(bookingId) {
+                this.els.bookingContainer?.classList.remove('editing-ride');
+                this.els.panelsWrapper?.classList.remove('hidden-for-edit');
+                this.finishPendingEdit();
+                if (bookingId) this.showTripSheet(bookingId);
+            }
+
+            editSaved({ bookingId, tripCode, detailsVersion }) {
+                this.els.bookingContainer?.classList.remove('editing-ride');
+                this.els.panelsWrapper?.classList.remove('hidden-for-edit');
+                currentActiveBooking = {
+                    id: bookingId,
+                    trip_id: tripCode || currentActiveBooking?.trip_id || '',
+                    status: 'pending',
+                    details_version: detailsVersion
+                };
+                this.finishPendingEdit();
+                this.showTripSheet(bookingId);
+            }
+
+            // The shipped unresolved-envelope gate, exposed to the card as a
+            // predicate rather than re-implemented.
+            async unresolvedEnvelopeBlocks() {
+                let raw = null;
+                try { raw = sessionStorage.getItem('lm_pending_envelope'); } catch (_) {}
+                if (!raw) return false;
+                const subject = (typeof currentSession !== 'undefined' && currentSession?.user?.id) || null;
+                if (!subject) return true;
+                const env = this.readPendingEnvelope(subject);
+                if (env) { this.offerPendingEnvelope(subject); return true; }
+                return false;
+            }
+
+            newOperationId() {
+                return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+                    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+            }
+
+            reloadOutdated() {
+                alert('LinkMia has been updated — reloading to get the latest version.');
+                window.location.reload();
+            }
+
+            // ONE authenticated read. Returns the DTO, `{notEditable:true}` for
+            // a ride that left the editable window, or null for every genuine
+            // failure — the caller fails closed on null and never guesses.
+            async fetchRideSnapshot(bookingId) {
+                try {
+                    if (!window.supabaseClient) return null;
+                    const { data: { session } } = await window.supabaseClient.auth.getSession();
+                    if (!session?.access_token) return null;
+                    const res = await fetch(
+                        `/api/update-pending-booking?id=${encodeURIComponent(bookingId)}`,
+                        { headers: { 'Authorization': `Bearer ${session.access_token}` } });
+                    if (res.status === 409) {
+                        let body = null;
+                        try { body = await res.json(); } catch (_) { body = null; }
+                        // 409 alone never chooses the experience: only a typed
+                        // not-editable answer is a lifecycle change.
+                        if (body && body.error === 'not_editable') {
+                            return { notEditable: true, currentStatus: body.currentStatus || null };
+                        }
+                        return null;
+                    }
+                    if (!res.ok) return null;
+                    const dto = await res.json();
+                    return this.validHydrationDto(dto) ? dto : null;
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            // A malformed DTO is a genuine failure, not something to render
+            // half of. Every field the editor depends on must be present and
+            // the right shape before any of it reaches the form.
+            validHydrationDto(dto) {
+                if (!dto || typeof dto !== 'object') return false;
+                const r = dto.route;
+                if (!r || typeof r !== 'object') return false;
+                if (r.kind !== 'airport_transfer_v1' && r.kind !== 'legacy_unclassified_v1') return false;
+                if (r.bookingMode !== 'pickup' && r.bookingMode !== 'dropoff') return false;
+                if (!Number.isInteger(dto.passengers) || dto.passengers < 1) return false;
+                if (!Number.isInteger(dto.detailsVersion)) return false;
+                if (typeof dto.pickupAt !== 'string' ||
+                    !Number.isFinite(Date.parse(dto.pickupAt))) return false;
+                if (!dto.vehicle || typeof dto.vehicle.key !== 'string') return false;
+                if (!Array.isArray(dto.vehicles) || dto.vehicles.length === 0) return false;
+                return true;
+            }
+
+            // Fail closed: leave the editor, say plainly that nothing changed,
+            // and return the passenger to the trip sheet.
+            failClosedFromEdit(message) {
+                const id = this.pendingEdit?.bookingId || this.activeSheetBookingId;
+                this.finishPendingEdit();
+                this.showEditExitNotice(message);
+                this.reopenTripSheet(id);
+            }
+
+            handleLifecycleHandoff(currentStatus) {
+                const presentation = currentStatus === 'assigned' ? 'confirmed' : currentStatus;
+                const copy = presentation === 'on_the_way' || presentation === 'arrived' ||
+                    presentation === 'in_progress'
+                    ? 'Your chauffeur is already on the way, so this ride can no longer be edited here. Your ride is unchanged.'
+                    : 'A chauffeur accepted this ride while you were editing, so it can no longer be changed here. Your ride is unchanged.';
+                this.failClosedFromEdit(copy);
+            }
+
+            showEditExitNotice(message) {
+                let el = document.getElementById('editExitNotice');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'editExitNotice';
+                    el.setAttribute('role', 'status');
+                    el.style.cssText = 'margin:12px 16px;padding:12px 14px;border-radius:12px;background:#2C2C2E;color:#fff;font-weight:600;';
+                    this.els.bookingContainer?.prepend(el);
+                }
+                el.textContent = message;
+            }
+
+            // indexMVP OWNS the trip sheet (trip.html is its iframe), so this
+            // reopens it directly. The sheet re-reads authoritative status on
+            // load, which is what shows the passenger the ride's real state
+            // after a failed or overtaken edit.
+            reopenTripSheet(bookingId) {
+                const id = bookingId || this.activeSheetBookingId;
+                if (id) this.showTripSheet(id);
             }
 
             finishPendingEdit() {
                 this.pendingEdit = null;
+                this._editHydrating = false;
+                if (this._editCard && this._editCard.isOpen()) this._editCard.close();
+                this.els.bookingContainer?.classList.remove('editing-ride');
+                this.els.panelsWrapper?.classList.remove('hidden-for-edit');
                 document.getElementById('editRideNotice')?.remove();
             }
 

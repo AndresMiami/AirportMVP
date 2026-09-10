@@ -20,8 +20,8 @@ name):
 | ------------------------------------------------- | ----------------- | -------------------- |
 | Stripe removal, commit `57f617c` via #87 (shipped) | `linkmia-v1.3.26` | `linkmia-runtime-v3` |
 | THIS activation               | `linkmia-v1.3.27` | `linkmia-runtime-v4` |
-| PR-T release (elapsed-pickup message, plan v8.6 §3D) | `linkmia-v1.3.28` | `linkmia-runtime-v5` |
-| PR-T pre-migration code rollback (phase-bounded) | `linkmia-v1.3.29` | `linkmia-runtime-v6` |
+| PR-T release (elapsed-pickup message, plan v8.6 §3D) — shipped 2026-09-09 | `linkmia-v1.3.28` | `linkmia-runtime-v5` |
+| PR-T pre-migration code rollback rung — retired unused (migration 019 verified 2026-09-09) | `linkmia-v1.3.29` | `linkmia-runtime-v6` |
 | PR-B release (review card)                      | `linkmia-v1.3.30` | `linkmia-runtime-v7` |
 | PR-B-only forward rollback (reserved)           | `linkmia-v1.3.31` | `linkmia-runtime-v8` |
 | Browser-flag rollback (reserved)                | `linkmia-v1.3.32` | `linkmia-runtime-v9` |
@@ -143,7 +143,7 @@ sidestepped). The rollback is therefore a new commit, exactly:
    Then EVERY cache pin — PR-T widened the set beyond the original four:
    the static pins in `tests/quote-ride`, `google-policy-readiness` and
    `maps-direct-loader`, the runtime pin in `quote-ride`, the rung check in
-   `tests/pending-edit-hydration` (`v1.3.28` / `runtime-v5` today), and that
+   `tests/pending-edit-hydration` (`v1.3.30` / `runtime-v7` today), and that
    suite's burned-rung INVENTORY assertions, which pin this document's
    rollback-rung table row and rollback steps, the R1 runbook steps, the
    CLAUDE.md ladder, the flag-site comment, the `:399` message and the SW
@@ -189,14 +189,18 @@ safe with the flag off: a no-token write in observe records verdict
 `no_token` and still succeeds, storing the client amount with
 `client_observe` authority — verified by executed tests rather than by
 generated-SQL line anchors (the artifact is regenerated and its lines
-move). Phase truth: 018 is the LIVE installed writer source until the
-separately authorized PR-T migration window; 019 is the TARGET (018's
-bodies plus the pickup guard, byte-derived by the generator). The PR-T
-matrix in `tests/prt-pickup-integrity.test.js` proves observe × no_token
-create AND edit succeed on the 019 bodies, and the TARGET-writer authority
-pin in `tests/vehicle-metadata-drift.test.js` refuses any target-writer
-assertion that reads a superseded migration — so bookings keep working on
-either side of the window.
+move). Phase truth (INSTALLED 2026-09-09): the migration-019 bodies are
+the LIVE installed writers — 019 was executed ONCE in production, the
+post-install grids pass (`installed_pair = target_019`), the live smoke
+passed, and the watchdog was re-enabled 2026-09-10 00:55Z (see
+`docs/PRT-MIGRATION-RUNBOOK.md` STATUS). 018 is SUPERSEDED as writer
+source; its regenerated `018_r1_rollback.sql` remains the designed
+emergency path only. The PR-T matrix in
+`tests/prt-pickup-integrity.test.js` proves observe × no_token create AND
+edit succeed on those installed 019 bodies, and the TARGET-writer
+authority pin in `tests/vehicle-metadata-drift.test.js` refuses any
+target-writer assertion that reads a superseded migration — so a flag-off
+no-token write keeps working on the installed writers.
 Two further, independent levers exist and
 are NOT part of this rollback: closing the ENDPOINT is the one-edit
 Netlify change (`QUOTE_SERVICE_DISABLED=1` + redeploy), and reverting

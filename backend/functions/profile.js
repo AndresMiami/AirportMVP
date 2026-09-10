@@ -7,7 +7,11 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'on_the_way', 'arrived', 'in_progress'];
+// 'assigned' is a LEGACY stored value (old rows accepted before the current
+// lifecycle) kept here for account CONTINUITY only: a reload must not lose
+// such a ride. It is presented as confirmed by the trip sheet; it is never
+// written, and it gains no polling or cancellation behaviour of its own.
+const ACTIVE_BOOKING_STATUSES = ['pending', 'assigned', 'confirmed', 'on_the_way', 'arrived', 'in_progress'];
 
 exports.handler = async (event) => {
   const headers = {

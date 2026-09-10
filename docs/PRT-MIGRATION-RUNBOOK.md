@@ -1,9 +1,13 @@
 # Migration 019 (PR-T) rollout and emergency runbook
 
-STATUS: AUTHORED, NOT RUN. Migration 019 is a generated, test-executed
-artifact. Its CURRENT revision (checksums in the table below) was regenerated
-in PR #94 (branch `prt-fingerprint-c-plus`) on top of the original PR-T tree
-from PR #93; the migration is NOT RUN in production. Nothing in this document is authorization: the
+STATUS: INSTALLED IN PRODUCTION (2026-09-09; Andres at the keyboard, ONE run
+in the Supabase SQL editor, "Success. No rows returned"; post-install grids
+ALL PASS with `installed_pair = target_019` and zero smoke residue; live
+smoke PASSED; watchdog re-enabled 2026-09-10 00:55Z with a normal tick; the
+phase-bounded 29/6 code rollback rung retired unused). Migration 019 is a
+generated, test-executed artifact; its INSTALLED revision (checksums in the
+table below) was regenerated in PR #94 (branch `prt-fingerprint-c-plus`) on
+top of the original PR-T tree from PR #93. Nothing in this document is authorization: the
 code release, the preflight, the migration execution, the post-install
 verification and any rollback are each a SEPARATE, explicit Andres
 authorization in Claude's chat, quoting the 019 checksum from the generated
@@ -91,12 +95,12 @@ verified BEFORE the migration:
   outcome through `unknownOutcomeResponse` as a sanitized 500 — a real
   refusal presented as an outage.
 
-Between the code deploy and the migration the phase-bounded PR-T
-pre-migration code rollback rung (`linkmia-v1.3.29` / `linkmia-runtime-v6`)
-exists: a code revert commit taking that fresh pair. It is RETIRED once the
-migration is verified — after that, removing the endpoint mapping, the
-passenger handling or the helper dependency while guard-carrying writers are
-live is a separately designed coordinated SQL-and-code decision.
+Between the code deploy and the migration a phase-bounded PR-T pre-migration
+code rollback rung (29/6) existed: a code revert commit taking that fresh
+pair. It was RETIRED UNUSED once migration 019 was verified on 2026-09-09 —
+from here, removing the endpoint mapping, the passenger handling or the
+helper dependency while guard-carrying writers are live is a separately
+designed coordinated SQL-and-code decision.
 
 ## Before the window
 
@@ -206,7 +210,7 @@ live is a separately designed coordinated SQL-and-code decision.
    rollout record). From here the emergency path is the sequenced rollback
    below, which keeps the guard.
 
-## Live smoke (production, no paid calls beyond the normal flow)
+## Live smoke (production, no paid calls beyond the normal flow) — PASSED 2026-09-09
 
 1. From the signed-in test account, attempt a NEW booking whose pickup time
    is deliberately in the past (the picker snaps forward, so this is done
