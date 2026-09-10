@@ -1124,7 +1124,7 @@
                             });
                             
                             this.els.addressInput.addEventListener('place-coordinates', (e) => {
-                                this.handleAddressCoordinates(e.detail);
+                                this.onAddressCoordinates(e.detail);
                             });
                             
                             this.els.addressInput.addEventListener('validation-cleared', () => {
@@ -1428,6 +1428,37 @@
                     return;
                 }
                 this.selectAirport(code);
+                this.maybeAutoAdvanceAfterRouteSelection('airport');
+            }
+
+            // Only the live autocomplete event enters through this wrapper.
+            // Restoration and hydration call the state handlers directly, so
+            // a complete restored route can never move the passenger forward.
+            onAddressCoordinates(detail) {
+                this.handleAddressCoordinates(detail);
+                this.maybeAutoAdvanceAfterRouteSelection('address');
+            }
+
+            maybeAutoAdvanceAfterRouteSelection(source) {
+                // Manage Ride temporarily reuses the Where panel. Its route
+                // draft must return to the review card, never enter the create
+                // flow's When panel. Hydration is excluded for the same reason.
+                if (this._editRoute || this.pendingEdit || this._editHydrating) return false;
+                if (this.state.ui.currentPanel !== 'where') return false;
+
+                // Preserve today's required order: an address finishes the
+                // airport-pickup route; an airport finishes the airport-dropoff
+                // route. No generic render/update path calls this helper.
+                const completesCurrentMode =
+                    (source === 'address' && this.state.mode === 'pickup') ||
+                    (source === 'airport' && this.state.mode === 'dropoff');
+                if (!completesCurrentMode || !this.canContinue()) return false;
+
+                // The autocomplete suggestions are non-focusable divs, so an
+                // iPhone can otherwise carry its address keyboard into When.
+                if (source === 'address') this.els.addressInput?.blur?.();
+                this.navigateToPanel('when');
+                return true;
             }
 
             onAutocompleteSelect(sel) {
