@@ -8,7 +8,7 @@
 //      typed 400/404/409 answers ONE fixed body that leaks nothing;
 //   2. HISTORICAL (PR-A): the model was dark for passengers. Under PR-B the
 //      booking page loads it, both modules are precached under their EXACT
-//      requested URLs, and the cache names sit on the current rung (34/11 —
+//      requested URLs, and the cache names sit on the current rung (35/12 —
 //      the Manage-ride-sheet release; PR-B itself shipped on 30/7) — the
 //      "PR-B — activation pins" section below owns those facts.
 //
@@ -621,12 +621,12 @@ async function check(name, fn) {
     }
   });
 
-  await check('both cache rungs moved together to the Manage-ride-sheet release pair, v1.3.34 / runtime-v11 (PR-T shipped 28/5; 29/6 retired unused; PR-B shipped 30/7)', async () => {
+  await check('both cache rungs moved together to the card-styling release pair, v1.3.35 / runtime-v12 (PR-T shipped 28/5; 29/6 retired unused; PR-B shipped 30/7; Manage ride sheet shipped 34/11)', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     // Cache names only ever move FORWARD, and the runtime cache moves with the
     // static one because it can retain booking HTML.
-    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.34';/.test(sw), 'static rung');
-    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v11';/.test(sw), 'runtime rung');
+    assert.ok(/const CACHE_NAME = 'linkmia-v1\.3\.35';/.test(sw), 'static rung');
+    assert.ok(/const RUNTIME_CACHE = 'linkmia-runtime-v12';/.test(sw), 'runtime rung');
   });
 
   // Plan v8.6 §3D: cache names only ever move FORWARD, and every rung-moving
@@ -662,14 +662,14 @@ async function check(name, fn) {
     assert.deepStrictEqual(offenders, [], 'burned rungs named as next/reserved/rollback targets');
     // the inventory sites (plan v8.6 §3D, [v6]/[v8.5]) name the ladder exactly
     const act = read('docs/BROWSER-FLAG-ACTIVATION.md');
-    assert.ok(act.includes('| Browser-flag rollback (reserved)                | `linkmia-v1.3.36` | `linkmia-runtime-v13` |'), 'activation table: browser-flag rollback rung');
-    assert.ok(act.includes("`CACHE_NAME` → `'linkmia-v1.3.36'`") && act.includes("`RUNTIME_CACHE` → `'linkmia-runtime-v13'`"), 'activation rollback steps');
+    assert.ok(act.includes('| Browser-flag rollback (reserved)                | `linkmia-v1.3.37` | `linkmia-runtime-v14` |'), 'activation table: browser-flag rollback rung');
+    assert.ok(act.includes("`CACHE_NAME` → `'linkmia-v1.3.37'`") && act.includes("`RUNTIME_CACHE` → `'linkmia-runtime-v14'`"), 'activation rollback steps');
     const r1 = read('docs/R1-MIGRATION-RUNBOOK.md');
-    assert.ok(r1.includes('SW v1.3.36 + runtime cache v13') && r1.includes('`linkmia-v1.3.37` + `linkmia-runtime-v14`'), 'R1 runbook steps 1 and 2');
-    assert.ok(read('CLAUDE.md').includes('v1.3.36 + runtime v13'), 'CLAUDE.md activation entry');
-    assert.ok(read('indexMVP.html').includes('bump CACHE_NAME to v1.3.36'), 'flag-site comment');
-    assert.ok(read('tests/quote-browser-integration.test.js').includes('SW v1.3.36 + runtime v13'), 'the assertion message names the browser-flag rung');
-    for (const rung of ['v1.3.28 / runtime-v5', 'v1.3.29 / runtime-v6', 'v1.3.30 / runtime-v7', 'v1.3.31 / runtime-v8', 'v1.3.32 / runtime-v9', 'v1.3.33 / runtime-v10', 'v1.3.34 / runtime-v11', 'v1.3.35 / runtime-v12', 'v1.3.36 / runtime-v13', 'v1.3.37 / runtime-v14']) {
+    assert.ok(r1.includes('SW v1.3.37 + runtime cache v14') && r1.includes('`linkmia-v1.3.38` + `linkmia-runtime-v15`'), 'R1 runbook steps 1 and 2');
+    assert.ok(read('CLAUDE.md').includes('v1.3.37 + runtime v14'), 'CLAUDE.md activation entry');
+    assert.ok(read('indexMVP.html').includes('bump CACHE_NAME to v1.3.37'), 'flag-site comment');
+    assert.ok(read('tests/quote-browser-integration.test.js').includes('SW v1.3.37 + runtime v14'), 'the assertion message names the browser-flag rung');
+    for (const rung of ['v1.3.28 / runtime-v5', 'v1.3.29 / runtime-v6', 'v1.3.30 / runtime-v7', 'v1.3.31 / runtime-v8', 'v1.3.32 / runtime-v9', 'v1.3.33 / runtime-v10', 'v1.3.34 / runtime-v11', 'v1.3.35 / runtime-v12', 'v1.3.36 / runtime-v13', 'v1.3.37 / runtime-v14', 'v1.3.38 / runtime-v15']) {
       assert.ok(sw.includes(rung), `SW ladder comment lists ${rung}`);
     }
   });

@@ -633,7 +633,7 @@ the old published deploy online but freezes every subsequent production build.
     prices, bookings stamp `price_authority='client_observe'`, and pricing.js
     is shadow-only. The next pricing step is therefore GRADUATION EVIDENCE,
     not activation. Reviewed FORWARD rollback: flag false + SW
-    v1.3.36 + runtime v13 (cache names only ever move forward; plan v8.6
+    v1.3.37 + runtime v14 (cache names only ever move forward; plan v8.6
     §3D ladder, as executed:
     v1.3.28/v5 PR-T release — shipped 2026-09-09 (PR #93);
     v1.3.29/v6 PR-T pre-migration code rollback — retired unused;
@@ -642,10 +642,12 @@ the old published deploy online but freezes every subsequent production build.
     v1.3.31/v8, v1.3.32/v9, v1.3.33/v10 — burned unused by the 34/11
     release (a reserved rung must sit ABOVE the shipped pair);
     v1.3.34/v11 Manage ride SHEET release (the card opens as a bottom-sheet
-    modal; booking page changed);
-    v1.3.35/v12 PR-B forward rollback (reserved);
-    v1.3.36/v13 browser-flag rollback (reserved);
-    v1.3.37/v14 emergency R1 revert (reserved)) —
+    modal; booking page changed) — shipped 2026-09-10 (PR #96);
+    v1.3.35/v12 card styling + "Start your journey" release (its PR-B
+    forward-rollback reservation burned unused);
+    v1.3.36/v13 PR-B forward rollback (reserved);
+    v1.3.37/v14 browser-flag rollback (reserved);
+    v1.3.38/v15 emergency R1 revert (reserved)) —
     see docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
     Remaining after deploy: graduation evidence, then enforce.
   * PR-T PICKUP-TIME INTEGRITY — SHIPPED AND INSTALLED (2026-09-09): code
