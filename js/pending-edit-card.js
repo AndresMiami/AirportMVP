@@ -1431,6 +1431,7 @@
     return {
       open,
       close,
+      discard: onDiscard,   // the host's sheet ✕ — same outcome as the Discard button
       isOpen: () => !!mount,
       quoteSurfaceActive,
       // test/introspection hooks — read-only views

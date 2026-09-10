@@ -774,6 +774,37 @@
         .pe-reason { min-height: 18px; padding: 8px 14px 0; font-size: 13px; color: #C7C7CC; }
         .pe-actions { padding: 8px 14px; }
         .pe-secondary { background: transparent; border: none; color: #8E8E93; padding: 8px 0; text-decoration: underline; }
+        /* Manage ride SHEET — the review card opens as one of the page's own
+           bottom-sheet modals, with the passenger-modal values verbatim:
+           dimmed backdrop rgba(0,0,0,0.7), #2C2C2E panel, max-width 576px,
+           20px 20px 0 0, fadeIn + slideUp 0.3s ease-out, sticky header with a
+           round ✕, scrollable body, full-height under 480px. It carries its
+           own keyframes so it never depends on another module's injected
+           styles. The card's own h2 is hidden here: the header carries it. */
+        .edit-sheet-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7);
+            z-index: 9999; display: none; justify-content: center; align-items: flex-end; }
+        .edit-sheet-overlay.active { display: flex; animation: editSheetFadeIn 0.3s ease-out; }
+        .edit-sheet-overlay[hidden] { display: none !important; }
+        .edit-sheet-panel { width: 100%; max-width: 576px; min-height: 200px; max-height: 88vh; background: #2C2C2E;
+            display: flex; flex-direction: column; animation: editSheetSlideUp 0.3s ease-out; border-radius: 20px 20px 0 0; }
+        @keyframes editSheetSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes editSheetFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .edit-sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 20px;
+            border-bottom: 1px solid #3A3A3C; background: #2C2C2E; position: sticky; top: 0; z-index: 10;
+            border-radius: 20px 20px 0 0; }
+        .edit-sheet-header h2 { font-size: 20px; font-weight: 600; color: #FFFFFF; margin: 0; flex: 1; text-align: center; }
+        .edit-sheet-close { width: 40px; height: 40px; border: none; background: none; font-size: 24px; color: #FFFFFF;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+            transition: background 0.2s; font-family: inherit; }
+        .edit-sheet-close:hover { background: rgba(255, 255, 255, 0.1); }
+        .edit-sheet-spacer { width: 40px; height: 40px; }
+        .edit-sheet-content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        .edit-sheet-content .pe-title { display: none; }
+        .edit-sheet-loading { padding: 24px 20px; color: #C7C7CC; font-size: 15px; }
+        @media (max-width: 480px) {
+            .edit-sheet-panel { border-radius: 0; max-width: 100%; height: 100vh; max-height: 100vh; }
+            .edit-sheet-header { padding: 16px 20px; border-radius: 0; }
+        }
         .pe-sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 10000;
             display: flex; justify-content: center; align-items: flex-end; }
         .pe-sheet-panel { width: 100%; max-width: 576px; background: #2C2C2E; border-radius: 20px 20px 0 0;
@@ -821,7 +852,7 @@
         // shadow-only while this flag is true, and the server records both
         // sides' cents in quote_verifications).
         // FORWARD ROLLBACK (reviewed with this activation, never reverse):
-        // set this flag false + bump CACHE_NAME to v1.3.32 AND
+        // set this flag false + bump CACHE_NAME to v1.3.36 AND
         // RUNTIME_CACHE to v9 in the same commit (the reserved browser-flag
         // rung of plan v8.6 §3D; v1.3.28–v1.3.31 belong to PR-T and PR-B) —
         // the runtime cache can
@@ -969,9 +1000,11 @@
                 this.initializeDateTime();
                 console.log('✅ AirportBookingApp setup complete');
 
-                // Auto-start booking if coming from landing page or PWA
+                // Auto-start booking if coming from landing page or PWA — but
+                // never for a returning Manage ride intent: that boot opens the
+                // edit SHEET, and the empty booking form must not flash first.
                 const urlParams = new URLSearchParams(window.location.search);
-                if (urlParams.get('book') === '1') {
+                if (urlParams.get('book') === '1' && !pendingEditIntent) {
                     this.startBooking();
                 }
             }
@@ -1191,6 +1224,13 @@
                     }
                 };
                 this._editRoute = { routeDraft, onDone, onBack };
+                // The Where screen lives in the booking form: activate it only
+                // NOW (never at edit start) and park the sheet meanwhile.
+                if (!this.els.bookingContainer?.classList.contains('active')) {
+                    this._editActivatedContainer = true;
+                    this.startBooking();
+                }
+                if (this._editSheet) this._editSheet.overlay.hidden = true;
                 this.els.panelsWrapper?.classList.remove('hidden-for-edit', 'show-when', 'show-vehicle');
                 document.getElementById('pendingEditCard')?.setAttribute('hidden', '');
                 this.els.progressLine?.classList.remove('active');
@@ -1236,6 +1276,7 @@
                 if (this.els.addressInput) this.els.addressInput.value = '';
                 this.els.panelsWrapper?.classList.add('hidden-for-edit');
                 document.getElementById('pendingEditCard')?.removeAttribute('hidden');
+                if (this._editSheet) this._editSheet.overlay.hidden = false;   // slides back up
                 if (this.els.continueBtn) this.els.continueBtn.hidden = false;
                 // Restore the create flow's own presentation from ITS state.
                 this.updateStepOrder(this.state.mode === 'dropoff');
@@ -3261,21 +3302,13 @@
                 this.autocomplete?.invalidateRawCapture?.();
                 this.invalidateQuote('pending edit started — create-scoped quotes do not apply');
                 this.activeSheetBookingId = bookingId;
-                this.startBooking();
-                this.navigateToPanel('where');
-
-                let notice = document.getElementById('editRideNotice');
-                if (!notice) {
-                    notice = document.createElement('div');
-                    notice.id = 'editRideNotice';
-                    notice.style.cssText = 'margin:12px 16px;padding:12px 14px;border-radius:12px;background:#fff3e0;color:#a85b00;font-weight:600;';
-                    this.els.bookingContainer?.prepend(notice);
-                }
-                const bookBtn = document.getElementById('bookBtn');
-                if (bookBtn) {
-                    bookBtn.innerHTML = '<span class="btn-main-text">Save changes</span>';
-                    bookBtn.disabled = false;
-                }
+                // The edit is a bottom SHEET — the page's own modal pattern.
+                // It opens at once with an honest loading line and the card
+                // mounts INTO it when the snapshot lands. The booking form
+                // underneath is never revealed for an edit: the Where screen
+                // appears only when the passenger changes the route.
+                this.openEditSheet(bookingId, this.pendingEdit.tripCode);
+                const notice = this._editSheet ? this._editSheet.loading : null;
 
                 if (!this.quoteFlowActive()) {
                     // Flag-false (decision 21, ratified): the hydrated editor
@@ -3288,7 +3321,7 @@
                     this.reopenTripSheet(bookingId);
                     return;
                 }
-                notice.textContent = 'Loading your ride…';
+                if (notice) notice.textContent = 'Loading your ride…';
                 this._editHydrating = true;
                 this.updateBookAvailability();
 
@@ -3325,7 +3358,7 @@
                         'We couldn\'t load the latest ride details. Your ride is unchanged.');
                     return;
                 }
-                notice.remove();
+                // mountEditCard replaced the loading line with the card.
             }
 
             // Lazily built once; injected dependencies keep the card free of
@@ -3354,12 +3387,91 @@
                 return this._editCard;
             }
 
+            // ---- the Manage ride sheet (the page's bottom-sheet modal pattern) ----
+            // Built the way passenger-modal.js builds its sheet: backdrop,
+            // panel, sticky header (spacer · title · round ✕), scrollable
+            // content. Appended, then .active a tick later so the fade/slide
+            // keyframes run. No backdrop dismiss and no Escape dismiss: like
+            // the trip sheet, an accidental tap must never drop a live edit —
+            // ✕ and the card's own Discard are the explicit exits.
+            openEditSheet(bookingId, tripCode) {
+                this.closeEditSheet();
+                const overlay = document.createElement('div');
+                overlay.className = 'edit-sheet-overlay';
+                overlay.setAttribute('role', 'dialog');
+                overlay.setAttribute('aria-modal', 'true');
+                overlay.setAttribute('aria-labelledby', 'editSheetTitle');
+                const panel = document.createElement('div');
+                panel.className = 'edit-sheet-panel';
+                const header = document.createElement('div');
+                header.className = 'edit-sheet-header';
+                const spacer = document.createElement('div');
+                spacer.className = 'edit-sheet-spacer';
+                const title = document.createElement('h2');
+                title.id = 'editSheetTitle';
+                title.tabIndex = -1;
+                title.textContent = tripCode ? `Manage ride · ${tripCode}` : 'Manage ride';
+                const close = document.createElement('button');
+                close.type = 'button';
+                close.className = 'edit-sheet-close';
+                close.setAttribute('aria-label', 'Close without saving');
+                close.textContent = '✕';
+                close.addEventListener('click', () => this.cancelPendingEdit());
+                header.appendChild(spacer);
+                header.appendChild(title);
+                header.appendChild(close);
+                const content = document.createElement('div');
+                content.className = 'edit-sheet-content';
+                const loading = document.createElement('div');
+                loading.className = 'edit-sheet-loading';
+                loading.setAttribute('role', 'status');
+                loading.textContent = 'Loading your ride…';
+                content.appendChild(loading);
+                panel.appendChild(header);
+                panel.appendChild(content);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+                this._editSheet = { overlay, content, loading, close, title, bookingId };
+                setTimeout(() => {
+                    overlay.classList.add('active');
+                    try { title.focus(); } catch (_) { /* focus is a courtesy */ }
+                }, 10);
+            }
+
+            closeEditSheet() {
+                const sheet = this._editSheet;
+                if (!sheet) return;
+                this._editSheet = null;
+                sheet.overlay.classList.remove('active');
+                setTimeout(() => sheet.overlay.remove(), 300);
+            }
+
+            // Header ✕ — the same outcome as the card's own Discard: nothing
+            // is saved and the trip sheet returns. While a save chain is
+            // claimed the tap is inert (the card owns that moment); during
+            // hydration it ends the session and the in-flight GET's
+            // continuation sees pendingEdit moved on and stops.
+            cancelPendingEdit() {
+                if (!this.pendingEdit) return;
+                if (this._editCard && this._editCard.isOpen()) {
+                    if (this._editCard._chainBusy()) return;
+                    this._editCard.discard();
+                    return;
+                }
+                const id = this.pendingEdit.bookingId;
+                this.finishPendingEdit();
+                this.reopenTripSheet(id);
+            }
+
             // ---- hooks the card calls (narrow, explicit surface) ----
             mountEditCard(node) {
                 this.els.bookingContainer?.classList.add('editing-ride');
                 this.els.panelsWrapper?.classList.add('hidden-for-edit');
                 this.els.summaryBar?.classList.remove('visible');
-                this.els.bookingContainer?.appendChild(node);
+                if (!this._editSheet) this.openEditSheet(this.pendingEdit?.bookingId, this.pendingEdit?.tripCode);
+                const sheet = this._editSheet;
+                if (sheet.loading) { sheet.loading.remove(); sheet.loading = null; }
+                sheet.content.appendChild(node);
             }
 
             editCardClosed(bookingId) {
@@ -3495,9 +3607,18 @@
                 this.pendingEdit = null;
                 this._editHydrating = false;
                 if (this._editCard && this._editCard.isOpen()) this._editCard.close();
+                this.closeEditSheet();
                 this.els.bookingContainer?.classList.remove('editing-ride');
                 this.els.panelsWrapper?.classList.remove('hidden-for-edit');
                 document.getElementById('editRideNotice')?.remove();
+                // A route change activated the booking form only for the Where
+                // screen: put the landing state back, so nothing is left
+                // showing under the returning trip sheet.
+                if (this._editActivatedContainer) {
+                    this._editActivatedContainer = false;
+                    this.els.bookingContainer?.classList.remove('active');
+                    if (this.els.startSearchBtn) this.els.startSearchBtn.style.display = '';
+                }
             }
 
             // ONE quiet refresh per tap (plan v3.1 §4). The refresh's own

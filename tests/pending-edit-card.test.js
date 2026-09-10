@@ -1437,6 +1437,31 @@ async function check(name, fn) {
     assert.strictEqual(h.ui.reason.textContent, COPY.elapsed);
   });
 
+
+  await check('discard(): the host\'s sheet ✕ has exactly the Discard button\'s outcome — closed, editCardClosed with the booking id, and inert while a chain is claimed', async () => {
+    const h = harness();
+    setTime(h); await h.flush();
+    assert.strictEqual(typeof h.card.discard, 'function');
+    h.card.discard();
+    assert.strictEqual(h.card.isOpen(), false);
+    assert.strictEqual(h.calls.closed, BID, 'the host is told which booking\'s edit closed');
+    assert.strictEqual(h.calls.posts.length, 0, 'nothing was saved');
+    const g = harness();
+    g.ui.travelerEdit.click();
+    sheetOf(g).find((n) => n.textContent === 'Travel myself')[0].click();
+    await g.flush();
+    const tap = g.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(g.card._chainBusy(), true, 'the chain is claimed while the confirm sheet waits');
+    g.card.discard();
+    assert.strictEqual(g.card.isOpen(), true, 'discard is inert while a chain is claimed — the card owns that moment');
+    g.doc.dispatch('keydown', { key: 'Escape' });
+    await tap; await g.flush();
+    assert.strictEqual(g.card._chainBusy(), false);
+    g.card.discard();
+    assert.strictEqual(g.card.isOpen(), false, 'and works again once the chain has ended');
+  });
+
   console.log(`\n  ${failed ? `${failed} CHECK(S) FAILED` : `ALL ${passed} CHECKS PASS`}\n`);
   process.exit(failed ? 1 : 0);
 })();
