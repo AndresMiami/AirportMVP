@@ -58,11 +58,19 @@ verified checkpoint locations all live in the web app backed by Supabase.
 - `trip.html` — passenger status page: stepper, vehicle hero (the
   booking-time ETA was REMOVED by R1 — Google grants stored duration no
   retention exception), static verified-checkpoint map marker (honest labels, Miami-time
-  stamps, never a moving dot), WhatsApp button, Edit ride/Cancel. Pending
-  edits reuse the existing booking form and update the same booking row in
-  place (`/api/update-pending-booking`, signed-in owner only): UUID, trip
-  code, owner, creation time, and trip URL remain stable, and a guarded
-  details_version prevents an edit from racing driver Accept. Cancel is
+  stamps, never a moving dot), WhatsApp button, Manage ride/Cancel (PR-B:
+  ONE stable passenger destination Pending through Arrived; Pending opens
+  the hydrated review card, Confirmed/On the way/Arrived show a
+  phase-bounded coordination notice inside it). Pending
+  edits open the REVIEW CARD (`js/pending-edit-card.js`, mounted by
+  indexMVP) hydrated from the server snapshot (GET
+  `/api/update-pending-booking?id=`, PR-A #91 — never browser storage),
+  quote edit-purpose through `/api/quote-ride`, and save through the same
+  `/api/update-pending-booking` envelope, updating the same booking row in
+  place (signed-in owner only): UUID, trip code, owner, creation time, and
+  trip URL remain stable, and a guarded details_version prevents an edit
+  from racing driver Accept (the historical booking-form edit lane is
+  retired: requestServerQuote refuses inside an edit session). Cancel is
   QUOTE-FIRST (PR 1A): tap → server quote from `/api/cancel-booking` →
   inline card shows the SERVER's verdict (pending: a plain "hasn't been
   accepted yet — cancelling is free" sentence, no fee arithmetic; the
@@ -618,11 +626,37 @@ the old published deploy online but freezes every subsequent production build.
     is shadow-only. The next pricing step is therefore GRADUATION EVIDENCE,
     not activation. Reviewed FORWARD rollback: flag false + SW
     v1.3.32 + runtime v9 (cache names only ever move forward; plan v8.6
-    §3D reassigned the ladder — v1.3.28/v5 PR-T release, v1.3.29/v6 PR-T
-    pre-migration rollback, v1.3.30/v7 PR-B, v1.3.31/v8 PR-B rollback,
-    v1.3.32/v9 browser-flag rollback, v1.3.33/v10 emergency R1 revert) —
+    §3D ladder, as executed:
+    v1.3.28/v5 PR-T release — shipped 2026-09-09 (PR #93);
+    v1.3.29/v6 PR-T pre-migration code rollback — retired unused;
+    v1.3.30/v7 PR-B release (the Manage Ride review card);
+    v1.3.31/v8 PR-B forward rollback (reserved);
+    v1.3.32/v9 browser-flag rollback (reserved);
+    v1.3.33/v10 emergency R1 revert (reserved)) —
     see docs/BROWSER-FLAG-ACTIVATION.md, including its PRE-MERGE gate.
     Remaining after deploy: graduation evidence, then enforce.
+  * PR-T PICKUP-TIME INTEGRITY — SHIPPED AND INSTALLED (2026-09-09): code
+    released as PR #93 (rung 28/5), the C+ fingerprint gate as PR #94,
+    migration 019 executed ONCE by Andres in the SQL editor ("Success. No
+    rows returned"), post-install grids all pass (A2 `installed_pair =
+    target_019`, helper present, zero smoke residue), live smoke PASSED
+    (elapsed create/edit refused with the typed message and ZERO writes;
+    future create/edit verified; cancel free; ledger events submitted),
+    watchdog re-enabled 2026-09-10 00:55Z with a normal tick. The writers
+    now refuse any NEW create/edit whose pickup is not strictly later than
+    the database clock (pre-mutation on `transaction_timestamp()`, final on
+    `clock_timestamp()` after the telemetry insert, SQLSTATE `ZQ019` →
+    outcome `pickup_time_elapsed` → HTTP 400, never a requote); the quote
+    endpoint carries three strict-future gates and the five-minute past
+    tolerance is retired. Migration artifacts are GENERATED
+    (`database/migrations/tools/prt-guard-transform.js`), ASCII-only, and
+    gated on the installed writer PAIR's fingerprints (the reviewed 018
+    pair, as the file has it or as production received it on 2026-09-01);
+    the regenerated `018_r1_rollback.sql` restores 017's duration
+    behaviour PLUS the guard. Runbook + evidence:
+    docs/PRT-MIGRATION-RUNBOOK.md (Known residuals recorded there). PR-A
+    (dark hydration read, #91) and PR-B (review card, this release on
+    30/7) complete the pending-edit hydration plan v8.6.
   * PR 3C-2C-B — plan v3.1 ratified (Codex GO, sign-off on file): TWO PRs,
     both SHIPPED dark and since activated — the descriptions that follow
     are HISTORICAL. **PR-1 (merged as #76) — the WRITER SWAP:** create-booking and
