@@ -1697,11 +1697,11 @@ async function check(name, fn) {
     const worker = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     assert.ok(worker.includes("'/api-config.js'"), 'changed API config remains a precached asset');
     const cacheName = worker.match(/const CACHE_NAME\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(cacheName, 'linkmia-v1.3.30', 'PR-B ships on its reserved static rung (plan v8.6 §3D)');
+    assert.strictEqual(cacheName, 'linkmia-v1.3.34', 'the Manage ride sheet release ships on its own static rung, v1.3.34 (PR-B shipped on 30/7; plan v8.6 §3D)');
     // BOTH caches must move together: the runtime cache can retain booking
     // HTML, so a static-only bump is not a dependable rollback.
     const runtimeName = worker.match(/const RUNTIME_CACHE\s*=\s*'([^']+)'/)?.[1];
-    assert.strictEqual(runtimeName, 'linkmia-runtime-v7', 'PR-B bumps the runtime cache WITH the static cache (its reserved v7)');
+    assert.strictEqual(runtimeName, 'linkmia-runtime-v11', 'the Manage ride sheet release bumps the runtime cache WITH the static cache (v11 alongside v1.3.34; PR-B shipped on 30/7)');
     // The bump is only meaningful if BOTH changed assets are actually in the
     // precache list — a dropped entry would serve a stale page under a new
     // cache name.

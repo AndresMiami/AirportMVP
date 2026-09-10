@@ -245,8 +245,8 @@ path is 018 again, then 019 (019 accepts only a reviewed 018 pair). The sequence
 and explicitly authorized, is `docs/R1-MIGRATION-RUNBOOK.md`'s: HOLD DARK →
 CODE FIRST (fresh cache rung, drain in-flight requests) → SQL SECOND (this
 checksum-matched artifact) → post-rollback verification. Its rung facts are
-the plan v8.6 §3D ladder: browser-flag rollback `v1.3.32`/`v9`, emergency R1
-revert `v1.3.33`/`v10`.
+the plan v8.6 §3D ladder: browser-flag rollback `v1.3.36`/`v13`, emergency R1
+revert `v1.3.37`/`v14`.
 
 ## Known residuals (recorded 2026-09-09, accepted for this release)
 

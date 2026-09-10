@@ -26,20 +26,27 @@
 // session (docs/PRT-MIGRATION-RUNBOOK.md, Known residuals).
 // v1.3.30: PR-B — the pending-edit review card and model precached
 // (js/pending-edit-card.js, js/pending-edit-model.js); runtime bumps WITH
-// it to v7. The complete ladder (plan v8.6 §3D — every rung distinct, none
-// ever reused):
+// it to v7.
+// v1.3.34: Manage ride sheet — the precached booking page changed (the
+// review card now opens as a bottom sheet); runtime bumps WITH it to v11.
+// The complete ladder (plan v8.6 §3D — every rung distinct, none ever
+// reused):
 //   v1.3.28 / runtime-v5   PR-T release (shipped 2026-09-09)
 //   v1.3.29 / runtime-v6   PR-T pre-migration code rollback rung, retired unused (migration 019 verified 2026-09-09)
-//   v1.3.30 / runtime-v7   PR-B release — THIS tree
-//   v1.3.31 / runtime-v8   PR-B-only forward rollback
-//   v1.3.32 / runtime-v9   Browser-flag rollback (SERVER_QUOTE_ENABLED false)
-//   v1.3.33 / runtime-v10  Emergency R1 code revert
+//   v1.3.30 / runtime-v7   PR-B release (shipped 2026-09-10, PR #92)
+//   v1.3.31 / runtime-v8   PR-B-only forward rollback — burned unused by the 34/11 release (a reserved rung must sit ABOVE the shipped pair)
+//   v1.3.32 / runtime-v9   Browser-flag rollback — burned unused by the 34/11 release
+//   v1.3.33 / runtime-v10  Emergency R1 code revert — burned unused by the 34/11 release
+//   v1.3.34 / runtime-v11  Manage ride sheet release — THIS tree
+//   v1.3.35 / runtime-v12  PR-B-only forward rollback (reserved)
+//   v1.3.36 / runtime-v13  Browser-flag rollback (SERVER_QUOTE_ENABLED false) (reserved)
+//   v1.3.37 / runtime-v14  Emergency R1 code revert (reserved)
 // (or the next never-used pairs resolved at execution if main has moved).
-const CACHE_NAME = 'linkmia-v1.3.30';
+const CACHE_NAME = 'linkmia-v1.3.34';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v7';
+const RUNTIME_CACHE = 'linkmia-runtime-v11';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
