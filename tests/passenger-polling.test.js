@@ -576,6 +576,53 @@ function check(name, fn) {
     });
   }
 
+  const contactDriftRow = { ...pendingBooking, status: 'confirmed',
+    pickup_datetime: new Date(Date.now() + 20 * 60000).toISOString() };
+  const contactDrift = createHarness([
+    response(200, { booking: contactDriftRow, driver }),
+    response(200, { booking: contactDriftRow, driver }),
+    response(200, { booking: contactDriftRow, driver: { name: 'Carlos M.', phone: null } }),
+    response(200, { booking: contactDriftRow, driver })
+  ]);
+  await contactDrift.settle();
+  const contactNotice = contactDrift.element('lifecycleNotice');
+  let noticeWrites = 0;
+  let noticeText = contactNotice.textContent;
+  Object.defineProperty(contactNotice, 'textContent', {
+    configurable: true,
+    get: () => noticeText,
+    set: (value) => { noticeWrites++; noticeText = String(value); }
+  });
+  contactDrift.element('backBtn').click();
+  check('open lifecycle notice starts with the current same-status contact guidance', () => {
+    assert.ok(!contactNotice.classList.contains('hidden'));
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES.confirmed'));
+    assert.strictEqual(noticeWrites, 1, 'the passenger tap writes the initial guidance once');
+  });
+  await contactDrift.runNextTimer();
+  check('unchanged same-status contact polling does not re-announce the open live notice', () => {
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES.confirmed'));
+    assert.strictEqual(noticeWrites, 1, 'identical copy is not written into the live region again');
+  });
+  await contactDrift.runNextTimer();
+  check('same-status contact removal keeps the notice open but switches it to the honest LinkMia channel', () => {
+    assert.ok(contactDrift.element('waBtn').classList.contains('hidden'));
+    assert.ok(!contactNotice.classList.contains('hidden'));
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES_NO_CONTACT.confirmed'));
+    assert.match(contactNotice.textContent, /\+1 \(786\) 509-3955/);
+    assert.doesNotMatch(contactNotice.textContent, /WhatsApp/);
+    assert.strictEqual(noticeWrites, 2, 'contact loss changes the live guidance once');
+  });
+  await contactDrift.runNextTimer();
+  check('same-status contact restoration updates the still-open notice back to WhatsApp guidance', () => {
+    assert.ok(!contactDrift.element('waBtn').classList.contains('hidden'));
+    assert.match(contactDrift.element('waBtn').href || '', /13055551212/);
+    assert.ok(!contactNotice.classList.contains('hidden'));
+    assert.strictEqual(contactNotice.textContent, contactDrift.evaluate('LIFECYCLE_NOTICES.confirmed'));
+    assert.match(contactNotice.textContent, /WhatsApp/);
+    assert.strictEqual(noticeWrites, 3, 'contact restoration changes the live guidance once');
+  });
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {
   console.error('\nFAIL:', error.stack || error.message);

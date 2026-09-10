@@ -38,6 +38,8 @@
     elapsed: 'This pickup time has passed. Choose a new time to continue.',
     profileNoPhone: 'Add a phone number to your profile to travel yourself',
     profileNoEmail: 'Add an email address to your account to travel yourself',
+    travelerNameRequired: 'Enter the traveler’s name.',
+    travelerPhoneRequired: 'Enter the traveler’s phone number.',
     staleEmail: 'Add an email for this traveler, or keep the current traveler',
     changedElsewhere: 'This ride changed elsewhere. We loaded the latest details; your unsaved changes were not applied.',
     priceChanged: 'The price changed — review it and tap Save again.',
@@ -765,11 +767,14 @@
       }
 
       const form = el(doc, 'form', 'pe-sheet-form');
+      form.noValidate = true;
       const nameIn = doc.createElement('input');
       nameIn.type = 'text'; nameIn.placeholder = 'Traveler name'; nameIn.autocomplete = 'name';
+      nameIn.required = true;
       nameIn.setAttribute('aria-label', 'Traveler name');
       const phoneIn = doc.createElement('input');
       phoneIn.type = 'tel'; phoneIn.placeholder = 'Traveler phone'; phoneIn.autocomplete = 'tel';
+      phoneIn.required = true;
       phoneIn.setAttribute('aria-label', 'Traveler phone');
       const emailIn = doc.createElement('input');
       emailIn.type = 'email'; emailIn.placeholder = 'Traveler email'; emailIn.autocomplete = 'email';
@@ -780,10 +785,13 @@
       emailIn.value = t.email || '';
       const guestBtn = el(doc, 'button', 'pe-sheet-action', mode === 'confirm' ? 'Confirm traveler' : 'Use this traveler');
       guestBtn.type = 'submit';
-      const emailReason = el(doc, 'div', 'pe-sheet-reason');
-      emailReason.id = 'peEmailReason';
+      const travelerReason = el(doc, 'div', 'pe-sheet-reason');
+      travelerReason.id = 'peTravelerReason';
+      travelerReason.setAttribute('role', 'status');
+      travelerReason.setAttribute('aria-live', 'polite');
+      travelerReason.setAttribute('aria-atomic', 'true');
       form.appendChild(nameIn); form.appendChild(phoneIn); form.appendChild(emailIn);
-      form.appendChild(emailReason);
+      form.appendChild(travelerReason);
       form.appendChild(guestBtn);
       panel.appendChild(form);
 
@@ -822,9 +830,26 @@
       };
       if (typeof doc.addEventListener === 'function') doc.addEventListener('keydown', sheetKeyHandler);
       doc.body.appendChild(overlay);
-      sheet = { overlay, panel, nameIn, phoneIn, emailIn, emailReason, guestBtn, selfBtn, cancel };
+      sheet = { overlay, panel, nameIn, phoneIn, emailIn, travelerReason, guestBtn, selfBtn, cancel };
       const first = canSelf ? selfBtn : nameIn;
       if (first && typeof first.focus === 'function') first.focus();
+
+      const travelerInputs = [nameIn, phoneIn, emailIn];
+      const clearTravelerValidation = () => {
+        travelerReason.textContent = '';
+        for (const input of travelerInputs) {
+          input.removeAttribute('aria-invalid');
+          input.removeAttribute('aria-describedby');
+        }
+      };
+      const refuseTraveler = (input, message) => {
+        clearTravelerValidation();
+        input.setAttribute('aria-invalid', 'true');
+        input.setAttribute('aria-describedby', travelerReason.id);
+        travelerReason.textContent = message;
+        input.focus();
+      };
+      for (const input of travelerInputs) input.addEventListener('input', clearTravelerValidation);
 
       const finish = (next) => {
         closeSheet();
@@ -863,14 +888,15 @@
         const name = normText(nameIn.value);
         const phone = normText(phoneIn.value);
         const email = normText(emailIn.value);
-        if (!name || !phone) return;
+        if (!name) { refuseTraveler(nameIn, COPY.travelerNameRequired); return; }
+        if (!phone) { refuseTraveler(phoneIn, COPY.travelerPhoneRequired); return; }
         // no-stale-email rule: a blank guest email is allowed ONLY when the
         // snapshot email is already null.
         if (!email && snapshot.traveler && snapshot.traveler.email) {
-          emailReason.textContent = COPY.staleEmail;
+          refuseTraveler(emailIn, COPY.staleEmail);
           return;
         }
-        emailReason.textContent = '';
+        clearTravelerValidation();
         if (mode === 'confirm' && name === normText(t.name) && phone === normText(t.phone) &&
             email === normText(t.email || '')) {
           // Confirmed without change: record the key and let Save continue.
@@ -1179,9 +1205,15 @@
           if (gen !== generation || !ok) return;
           const after = freezeAttempt();
           if (after && before && after.intentKey === before.intentKey &&
-              after.travelerKey === before.travelerKey && after.vehicleKey === before.vehicleKey &&
-              after.finalCents === before.finalCents) {
-            await postAttempt(after, gen);
+              after.travelerKey === before.travelerKey && after.vehicleKey === before.vehicleKey) {
+            if (after.finalCents === before.finalCents) {
+              await postAttempt(after, gen);
+              return;
+            }
+            // The replacement is fresh and bound to the unchanged ride intent.
+            // Preserve it for the passenger's confirming tap instead of buying
+            // the same quote for a third time.
+            setReason(COPY.priceChanged, true);
             return;
           }
         }

@@ -458,7 +458,44 @@ async function check(name, fn) {
     const form = sheet.find((n) => n.tagName === 'FORM')[0];
     form.dispatch('submit');
     assert.ok(sheet.textContent.includes(COPY.staleEmail));
+    const reason = sheet.find((n) => n.id === 'peTravelerReason')[0];
+    assert.strictEqual(reason.getAttribute('role'), 'status');
+    assert.strictEqual(reason.getAttribute('aria-live'), 'polite');
+    assert.strictEqual(inputs[2].getAttribute('aria-invalid'), 'true');
+    assert.strictEqual(inputs[2].getAttribute('aria-describedby'), 'peTravelerReason');
+    assert.strictEqual(h.doc.activeElement, inputs[2], 'the refused email receives focus');
     assert.strictEqual(h.card._draft().traveler.name, 'Gina Guest', 'the draft did not change');
+  });
+
+  await check('traveler sheet: blank required name or phone gives an associated live result and focuses the first invalid field', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    const sheet = sheetOf(h);
+    const inputs = sheet.find((n) => n.tagName === 'INPUT');
+    const form = sheet.find((n) => n.tagName === 'FORM')[0];
+    const reason = sheet.find((n) => n.id === 'peTravelerReason')[0];
+    inputs[0].value = '   ';
+    inputs[1].value = '   ';
+    form.dispatch('submit');
+    assert.strictEqual(reason.textContent, COPY.travelerNameRequired);
+    assert.strictEqual(reason.getAttribute('role'), 'status');
+    assert.strictEqual(reason.getAttribute('aria-live'), 'polite');
+    assert.strictEqual(inputs[0].getAttribute('aria-invalid'), 'true');
+    assert.strictEqual(inputs[0].getAttribute('aria-describedby'), 'peTravelerReason');
+    assert.strictEqual(h.doc.activeElement, inputs[0]);
+    assert.strictEqual(h.card._draft().traveler.name, 'Gina Guest', 'nothing was applied');
+
+    inputs[0].value = 'Gina Guest';
+    inputs[0].dispatch('input');
+    assert.strictEqual(reason.textContent, '', 'editing clears the prior result');
+    assert.strictEqual(inputs[0].getAttribute('aria-invalid'), undefined);
+    form.dispatch('submit');
+    assert.strictEqual(reason.textContent, COPY.travelerPhoneRequired);
+    assert.strictEqual(inputs[1].getAttribute('aria-invalid'), 'true');
+    assert.strictEqual(inputs[1].getAttribute('aria-describedby'), 'peTravelerReason');
+    assert.strictEqual(h.doc.activeElement, inputs[1]);
+    await h.flush();   // let any leaked debounce fire before counting
+    assert.strictEqual(h.calls.quotes.length, 0, 'invalid traveler data never reaches pricing');
   });
 
   await check('a changed traveler needs ONE value-bound confirmation at Save; an unchanged traveler saves in one tap', async () => {
@@ -1067,6 +1104,68 @@ async function check(name, fn) {
     assert.strictEqual(h.calls.quotes.length, 4, 'third tap: refresh first');
     assert.strictEqual(h.calls.posts.length, 2, 'then exactly one POST on the fresh token');
     assert.ok(h.calls.editSaved, 'saved');
+  });
+
+  await check('#4 writer requote + changed fresh price: review once, then confirm with that quote — no third paid quote', async () => {
+    const h = harness({ script: [
+      { status: 200, body: quoteResponse() },
+      { status: 200, body: quoteResponse({ cents: { tesla: 9000, escalade: 18900, sprinter: 22000 } }) }
+    ] });
+    h.app._postScript = [
+      { status: 409, body: { error: 'quote_expired', requote: true } },
+      { status: 200, body: { success: true, bookingId: BID, tripId: 'LM-GUEST', detailsVersion: 4 } }
+    ];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 2, 'initial quote + one writer-requested refresh');
+    assert.strictEqual(h.calls.posts.length, 1, 'the changed price waits for review');
+    assert.ok(h.card._held().expiresAt > Date.now(), 'the fresh changed-price quote stays usable');
+    assert.strictEqual(h.ui.save.textContent, COPY.saveIdle, 'the next tap can save this fresh quote');
+    assert.strictEqual(h.ui.reason.textContent, COPY.priceChanged);
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 2, 'confirmation buys no redundant third quote');
+    assert.strictEqual(h.calls.posts.length, 2);
+    assert.strictEqual(h.calls.posts[1].body.price, 189);
+    assert.strictEqual(h.calls.posts[1].body.quoteToken, 'tok-escalade-18900');
+    assert.ok(h.calls.editSaved, 'the reviewed fresh quote saved');
+  });
+
+  await check('#4 writer requote whose refresh adopts a DIFFERENT canonical identity: never auto-resubmitted, the never-reviewed replacement is expired, the next tap owns the refresh', async () => {
+    // The identity guard on the requote branch is load-bearing: without it a
+    // token bound to an identity the passenger never reviewed would be
+    // auto-POSTed. Canonical place-id adoption inside the refresh is the one
+    // way identity can move while every control is inert.
+    const h = harness({ script: [
+      { status: 200, body: quoteResponse() },
+      { status: 200, body: quoteResponse({ placeId: 'ChIJ_other' }) }
+    ] });
+    h.app._postScript = [{ status: 409, body: { error: 'quote_expired', requote: true } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.card._draft().route.canonicalPlaceId, 'ChIJ_other', 'the refresh adopted the replacement identity');
+    assert.strictEqual(h.calls.quotes.length, 2);
+    assert.strictEqual(h.calls.posts.length, 1, 'no auto-resubmit across an identity change');
+    assert.strictEqual(h.card._held().expiresAt, 0, 'the never-reviewed replacement is expired');
+    assert.strictEqual(h.ui.save.textContent, COPY.saveRefresh, 'the next explicit tap owns the refresh');
+    assert.strictEqual(h.calls.editSaved, null);
+  });
+
+  await check('#4 repeated writer requote: the refreshed token is expired after the bounded auto-resubmit is also refused', async () => {
+    const h = harness({ script: [
+      { status: 200, body: quoteResponse() },
+      { status: 200, body: quoteResponse() }
+    ] });
+    h.app._postScript = [
+      { status: 409, body: { error: 'quote_expired', requote: true } },
+      { status: 409, body: { error: 'quote_expired', requote: true } }
+    ];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 2, 'only the sanctioned refresh ran');
+    assert.strictEqual(h.calls.posts.length, 2, 'one bounded auto-resubmit, then stop');
+    assert.strictEqual(h.card._held().expiresAt, 0, 'the twice-refused token cannot be reused');
+    assert.strictEqual(h.ui.save.textContent, COPY.saveRefresh);
+    assert.strictEqual(h.calls.editSaved, null);
   });
 
   await check('#4 MUTATION: not expiring the held quote on requote leaves Save reading "Save changes" over the rejected token — the executed pin refuses it', async () => {

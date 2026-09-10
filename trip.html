@@ -816,6 +816,14 @@
                 waBtn.href = `https://wa.me/${DRIVER.phone}?text=${encodeURIComponent(hello)}`;
                 waBtn.textContent = `💬 Message ${DRIVER.name} on WhatsApp`;
             }
+            // A same-status poll may add or remove chauffeur contact while a
+            // lifecycle notice is already open. Keep that visible guidance
+            // truthful without making the passenger tap Manage ride again.
+            const lifecycleNotice = $('lifecycleNotice');
+            if (!lifecycleNotice.classList.contains('hidden')) {
+                const nextCopy = lifecycleNoticeCopy(presentationStatus, showWa);
+                if (lifecycleNotice.textContent !== nextCopy) lifecycleNotice.textContent = nextCopy;
+            }
 
             $('supportText').textContent = `Trip ${b.trip_id || ''} · Questions? Call or text us: ${SUPPORT_PHONE}`;
 
@@ -1134,6 +1142,10 @@
             arrived: `Your chauffeur has arrived and is waiting for you. Their direct contact isn't available on this page — to coordinate the meet-up, call or text LinkMia: ${SUPPORT_PHONE}.`,
             in_progress: `Your ride is in progress. Your chauffeur's direct contact isn't available on this page — for anything about this ride, call or text LinkMia: ${SUPPORT_PHONE}.`
         });
+        function lifecycleNoticeCopy(phase, hasContact) {
+            const table = hasContact ? LIFECYCLE_NOTICES : LIFECYCLE_NOTICES_NO_CONTACT;
+            return table[phase] || table.confirmed;
+        }
 
         function loadScript(src) {
             return new Promise((resolve, reject) => {
@@ -1441,9 +1453,8 @@
                 // button is hidden (no valid driver phone — never another
                 // person's number) the copy must not send the passenger to a
                 // control that is not there; it points at LinkMia instead.
-                const contactHidden = $('waBtn').classList.contains('hidden');
-                const table = contactHidden ? LIFECYCLE_NOTICES_NO_CONTACT : LIFECYCLE_NOTICES;
-                el.textContent = table[phase] || table.confirmed;
+                const hasContact = !$('waBtn').classList.contains('hidden');
+                el.textContent = lifecycleNoticeCopy(phase, hasContact);
                 el.classList.remove('hidden');
                 el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 return;
