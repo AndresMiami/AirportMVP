@@ -33,6 +33,7 @@ function setTime(h, date = '2026-12-24', time = '19:15') {
 }
 
 // ---- a fake DOM small enough to read, big enough to execute the card ----
+let ACTIVE_EL = null;
 class FakeEl {
   constructor(tag) {
     this.tagName = tag.toUpperCase();
@@ -65,13 +66,23 @@ class FakeEl {
   addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); }
   dispatch(t, ev = {}) { let out; (this.listeners[t] || []).forEach((fn) => { out = fn({ preventDefault() {}, ...ev }); }); return out; }
   click() { return this.disabled ? undefined : this.dispatch('click'); }
-  focus() { this.focused = true; }
+  // A disabled control is not focusable in a browser — the fake refuses too.
+  focus() { if (this.disabled) return; this.focused = true; ACTIVE_EL = this; }
   find(pred, out = []) { for (const c of this.children) { if (pred(c)) out.push(c); c.find(pred, out); } return out; }
 }
 class TextNode { constructor(t) { this.textContent = String(t); this.children = []; this.parentNode = null; } find() { return []; } }
 function makeDoc() {
   const body = new FakeEl('body');
-  return { body, createElement: (t) => new FakeEl(t), createTextNode: (t) => new TextNode(t) };
+  const listeners = {};
+  ACTIVE_EL = null;
+  return {
+    body, createElement: (t) => new FakeEl(t), createTextNode: (t) => new TextNode(t),
+    get activeElement() { return ACTIVE_EL; },
+    addEventListener(t, fn) { (listeners[t] = listeners[t] || []).push(fn); },
+    removeEventListener(t, fn) { listeners[t] = (listeners[t] || []).filter((f) => f !== fn); },
+    dispatch(t, ev = {}) { for (const fn of [...(listeners[t] || [])]) fn({ preventDefault() {}, ...ev }); },
+    listenerCount: (t) => (listeners[t] || []).length
+  };
 }
 
 // ---- fixtures ----
@@ -124,7 +135,7 @@ function quoteResponse({ placeId = 'ChIJ_stored', cents = { tesla: 9000, escalad
 function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', phone: '+1 786 509 3955', email: 'andres@example.com', ambassador: false }, script = [], factory = createPendingEditCard } = {}) {
   const doc = makeDoc();
   const calls = { quotes: [], posts: [], hydrations: 0, editSaved: null, handoff: null, closed: null, mounted: null,
-    stored: [], cleared: [], offered: [] };
+    stored: [], storedEnvelopes: [], cleared: [], offered: [], seq: [] };
   const timers = [];
   let timerId = 0;
   const responses = script.slice();
@@ -158,15 +169,17 @@ function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', 
     unresolvedEnvelopeBlocks: async () => false,
     // Recorded, not no-ops: the exact operation stored and cleared is asserted
     // (Codex seq:234 #5 — a silent clear hid the clear-before-classify order).
-    storePendingEnvelope: (env) => { calls.stored.push(env.operationId); return true; },
-    clearPendingEnvelope: (id) => { calls.cleared.push(id); },
-    offerPendingEnvelope: (subject) => { calls.offered.push(subject); },
+    storePendingEnvelope: (env) => { calls.stored.push(env.operationId); calls.storedEnvelopes.push(env); calls.seq.push(`store:${env.operationId}`); return true; },
+    clearPendingEnvelope: (id) => { calls.cleared.push(id); calls.seq.push(`clear:${id}`); },
+    offerPendingEnvelope: (subject) => { calls.offered.push(subject); calls.seq.push(`offer:${subject}`); },
     newOperationId: () => '11111111-2222-4333-8444-555555555555',
     reloadOutdated: () => { calls.reload = true; },
     submitEnvelope: async (url, bodyString) => {
       calls.posts.push({ url, body: JSON.parse(bodyString) });
+      calls.seq.push('post');
       const next = app._postScript && app._postScript.length ? app._postScript.shift()
         : { status: 200, body: { success: true, bookingId: BID, tripId: 'LM-GUEST', detailsVersion: 4 } };
+      if (next.definitive === false) return { definitive: false };
       return { definitive: true, response: { ok: next.status < 400, status: next.status }, result: next.body };
     }
   };
@@ -948,13 +961,13 @@ async function check(name, fn) {
 
   await check('#2 PASSENGER-only and TRAVELER-only edits keep the stored airport label too (dropoff mode: dropoff = stored " Palm Beach ", untrimmed)', async () => {
     const route = { ...guestEscaladeDto().route, bookingMode: 'dropoff', airportCode: 'PBI',
-      pickupLabel: '4441 Collins Ave', dropoffLabel: ' Palm Beach ' };
+      pickupLabel: '4441 Collins Ave', dropoffLabel: 'Palm Beach' };
     const a = harness({ dto: guestEscaladeDto({ route }) });
     a.ui.paxEdit.click(); a.ui.paxPlus.click(); await a.flush();
     a.ui.save.click(); await a.flush();
     assert.strictEqual(a.calls.posts.length, 1);
     assert.strictEqual(a.calls.posts[0].body.pickup, '4441 Collins Ave');
-    assert.strictEqual(a.calls.posts[0].body.dropoff, ' Palm Beach ', 'verbatim stored text');
+    assert.strictEqual(a.calls.posts[0].body.dropoff, 'Palm Beach', 'verbatim stored text');
     assert.strictEqual(a.calls.posts[0].body.passengers, 4);
     const b = harness({ dto: guestEscaladeDto({ route }) });
     b.ui.travelerEdit.click();
@@ -965,7 +978,7 @@ async function check(name, fn) {
     sheetOf(b).find((n) => n.textContent === 'Travel myself')[0].click();
     await tap; await b.flush();
     assert.strictEqual(b.calls.posts.length, 1);
-    assert.strictEqual(b.calls.posts[0].body.dropoff, ' Palm Beach ');
+    assert.strictEqual(b.calls.posts[0].body.dropoff, 'Palm Beach');
     assert.strictEqual(b.calls.posts[0].body.pickup, '4441 Collins Ave');
   });
 
@@ -1109,7 +1122,7 @@ async function check(name, fn) {
     assert.strictEqual(panel.find((n) => n.tagName === 'H3')[0].id, 'peSheetTitle', 'the name resolves to the visible title');
     const selfBtn = panel.find((n) => n.textContent === 'Travel myself')[0];
     assert.strictEqual(selfBtn.focused, true, 'focus entered the first usable control');
-    panel.dispatch('keydown', { key: 'Escape' });
+    h.doc.dispatch('keydown', { key: 'Escape' });   // document-level, wherever focus sits
     await h.flush();
     assert.strictEqual(h.card._sheetOpen(), false, 'Escape closed the sheet');
     assert.strictEqual(h.card._draft().traveler.name, 'Gina Guest', 'nothing changed');
@@ -1131,12 +1144,12 @@ async function check(name, fn) {
     const tap = h.ui.save.click();
     await new Promise((r) => setImmediate(r));
     const panel = sheetOf(h).find((n) => n.getAttribute('role') === 'dialog')[0];
-    panel.dispatch('keydown', { key: 'Escape' });
+    h.doc.dispatch('keydown', { key: 'Escape' });   // document-level, wherever focus sits
     await tap; await h.flush();
     assert.strictEqual(h.calls.posts.length, 0, 'not confirmed → nothing posted');
     assert.strictEqual(h.card._sheetOpen(), false);
-    assert.strictEqual(h.ui.save.focused, true, 'focus back on Save');
     assert.strictEqual(h.ui.save.disabled, false, 'a new tap re-confirms');
+    assert.strictEqual(h.doc.activeElement, h.ui.save, 'focus lands on Save once the chain has released it (a disabled control cannot take focus)');
     assert.strictEqual(h.card._draft().traveler.name, 'Andres Booker', 'the pending self selection is kept in the draft');
   });
 
@@ -1148,6 +1161,181 @@ async function check(name, fn) {
     assert.strictEqual(h.ui.vehicleOptions.getAttribute('role'), 'radiogroup');
     assert.strictEqual(h.ui.vehicleOptions.getAttribute('aria-label'), 'Vehicle');
     assert.strictEqual(h.ui.vehicleToggle.textContent, 'Change vehicle', 'already contextual; toggles to Hide options');
+  });
+
+
+  // ===== second verification pass (adversarial refuters on 8cb3382) =====
+
+  await check('#2 a TIME-only edit in DROPOFF mode round-trips the production-shaped stored airport label ("Palm Beach")', async () => {
+    const route = { ...guestEscaladeDto().route, bookingMode: 'dropoff', airportCode: 'PBI',
+      pickupLabel: '4441 Collins Ave', dropoffLabel: 'Palm Beach' };
+    const h = harness({ dto: guestEscaladeDto({ route }) });
+    assert.strictEqual(h.ui.routeText.textContent, '4441 Collins Ave → Palm Beach');
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.posts.length, 1);
+    assert.strictEqual(h.calls.posts[0].body.pickup, '4441 Collins Ave');
+    assert.strictEqual(h.calls.posts[0].body.dropoff, 'Palm Beach');
+    assert.strictEqual(h.calls.posts[0].body.dateTime, '2026-12-25T00:15:00.000Z');
+  });
+
+  await check('#3 every structural / per-vehicle rule of the edit validator is EXECUTED: each hostile quote shape is refused as incomplete with zero POSTs', async () => {
+    const hostile = [
+      ['vehicle ok is not boolean', (q) => { q.quote.vehicles.escalade.ok = 'yes'; }],
+      ['ok vehicle without a token', (q) => { delete q.quote.vehicles.escalade.token; }],
+      ['ok vehicle with a non-integer price', (q) => { q.quote.vehicles.escalade.finalCents = 169.5; }],
+      ['ok vehicle with a negative price', (q) => { q.quote.vehicles.escalade.finalCents = -1; }],
+      ['ok vehicle with an unparseable expiry', (q) => { q.quote.vehicles.escalade.expiresAt = 'soon'; }],
+      ['vehiclesOk disagrees with the entries', (q) => { q.quote.vehiclesOk = 2; }],
+      ['bookable disagrees with the entries', (q) => { q.quote.bookable = false; }],
+      ['route minutes not an integer', (q) => { q.quote.route.minutes = 30.5; }],
+      ['route milesTenths negative', (q) => { q.quote.route.milesTenths = -1; }],
+      ['missing pricingVersion', (q) => { delete q.quote.pricingVersion; }],
+      ['intent is an array', (q) => { q.quote.intent = []; }],
+      ['vehicles is an array', (q) => { q.quote.vehicles = []; }],
+      ['a vehicle entry that is null', (q) => { q.quote.vehicles.tesla = null; }]
+    ];
+    for (const [label, mutate] of hostile) {
+      const q = quoteResponse(); mutate(q);
+      const h = harness({ script: [{ status: 200, body: q }] });
+      setTime(h); await h.flush();
+      assert.strictEqual(h.calls.quotes.length, 1, `${label}: one call`);
+      assert.strictEqual(h.ui.status.textContent, COPY.quoteUnavailable, `${label}: refused as incomplete`);
+      assert.strictEqual(h.ui.save.disabled, true, `${label}: Save unavailable`);
+      h.ui.save.click(); await h.flush();
+      assert.strictEqual(h.calls.posts.length, 0, `${label}: nothing posted`);
+    }
+    // and an EMPTY hydrated card can never be satisfied (the expected set is empty)
+    const empty = harness({ dto: guestEscaladeDto({ vehicles: [] }), script: [{ status: 200, body: quoteResponse({ keys: [] }) }] });
+    setTime(empty); await empty.flush();
+    assert.strictEqual(empty.ui.save.disabled, true, 'empty card: Save unavailable');
+    assert.strictEqual(empty.calls.posts.length, 0);
+  });
+
+  await check('#3 MUTATIONS: dropping any one structural rule of the edit validator lets a hostile quote through — the executed matrix catches each', async () => {
+    const rules = [
+      ["typeof v.ok !== 'boolean'", 'vehicle ok is not boolean', (q) => { q.quote.vehicles.escalade.ok = 'yes'; }],
+      ["typeof v.token !== 'string' || !v.token ||", 'ok vehicle without a token', (q) => { delete q.quote.vehicles.escalade.token; }],
+      ['quote.vehiclesOk === vehiclesOk &&', 'vehiclesOk disagrees', (q) => { q.quote.vehiclesOk = 2; }],
+      ["!Number.isFinite(Date.parse(v.expiresAt || ''))", 'unparseable expiry', (q) => { q.quote.vehicles.escalade.expiresAt = 'soon'; }]
+    ];
+    for (const [fragment, label, mutate] of rules) {
+      const fnStart = CARD_SRC.indexOf('function editQuoteIsComplete(quote) {');
+      const fnEnd = CARD_SRC.indexOf('\n    }\n', fnStart);
+      const fn = CARD_SRC.slice(fnStart, fnEnd);
+      assert.ok(fn.includes(fragment), `${label}: rule fragment present in editQuoteIsComplete`);
+      let mutantFn;
+      if (fragment === "typeof v.ok !== 'boolean'") mutantFn = fn.replace("if (!v || typeof v !== 'object' || typeof v.ok !== 'boolean') return false;", "if (!v || typeof v !== 'object') return false;");
+      else if (fragment.startsWith('typeof v.token')) mutantFn = fn.replace("typeof v.token !== 'string' || !v.token ||\n", '');
+      else if (fragment.startsWith('quote.vehiclesOk')) mutantFn = fn.replace('return quote.vehiclesOk === vehiclesOk && quote.bookable === (vehiclesOk > 0);', 'return quote.bookable === (vehiclesOk > 0);');
+      else mutantFn = fn.replace(" ||\n          !Number.isFinite(Date.parse(v.expiresAt || ''))) return false;", ') return false;');
+      assert.notStrictEqual(mutantFn, fn, `${label}: the mutant differs`);
+      const mutant = loadCardSource(CARD_SRC.slice(0, fnStart) + mutantFn + CARD_SRC.slice(fnEnd));
+      const q = quoteResponse(); mutate(q);
+      const h = harness({ factory: mutant.createPendingEditCard, script: [{ status: 200, body: q }] });
+      setTime(h); await h.flush();
+      assert.notStrictEqual(h.ui.status.textContent, COPY.quoteUnavailable, `${label}: the mutant ACCEPTS the hostile quote — which the executed matrix above refuses`);
+    }
+  });
+
+  await check('#5 ORDER: the envelope is stored, THEN the writer is called, THEN exactly that operation is cleared — and the stored envelope carries the full host contract', async () => {
+    const h = harness();
+    h.app._postScript = [{ status: 400, body: { error: 'pickup_time_elapsed' } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    const id = '11111111-2222-4333-8444-555555555555';
+    assert.deepStrictEqual(h.calls.seq, [`store:${id}`, 'post', `clear:${id}`], 'store → post → clear, in that order');
+    const env = h.calls.storedEnvelopes[0];
+    assert.strictEqual(env.kind, 'edit');
+    assert.strictEqual(env.bookingId, BID);
+    assert.strictEqual(env.authSubject, 'auth-a');
+    assert.ok(Number.isFinite(env.createdAt), 'createdAt is a finite instant');
+    assert.strictEqual(JSON.parse(env.bodyString).operationId, id, 'the operation id travels INSIDE the serialized body');
+    assert.strictEqual(env.operationId, id);
+  });
+
+  await check('#5 MUTATION: relocating the clear to BEFORE the writer call is caught by the ordered sequence, not just by a source anchor', async () => {
+    const store = "      if (!app.storePendingEnvelope(envelope)) { setReason(COPY.notSaved, true); return; }\n";
+    const clear = "      app.clearPendingEnvelope(operationId);\n";
+    assert.strictEqual(CARD_SRC.split(store).length - 1, 1); assert.strictEqual(CARD_SRC.split(clear).length - 1, 1);
+    const mutant = loadCardSource(CARD_SRC.replace(clear, '').replace(store, store + clear));
+    const h = harness({ factory: mutant.createPendingEditCard });
+    h.app._postScript = [{ status: 400, body: { error: 'pickup_time_elapsed' } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    const id = '11111111-2222-4333-8444-555555555555';
+    assert.deepStrictEqual(h.calls.seq, [`store:${id}`, `clear:${id}`, 'post'], 'the mutant clears before posting — the ordered pin above refuses it');
+  });
+
+  await check('#5 NON-DEFINITIVE: an unknown writer result keeps the envelope (never cleared), offers it for recovery under the auth subject, and tells the passenger to use Check again', async () => {
+    const h = harness();
+    h.app._postScript = [{ definitive: false }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    const id = '11111111-2222-4333-8444-555555555555';
+    assert.deepStrictEqual(h.calls.seq, [`store:${id}`, 'post', 'offer:auth-a'], 'store → post → offer; no clear');
+    assert.deepStrictEqual(h.calls.cleared, []);
+    assert.strictEqual(h.card.isOpen(), true, 'the draft stays');
+    assert.ok(h.ui.reason.textContent.includes('Check again'), 'honest copy: use Check again');
+    assert.strictEqual(h.calls.editSaved, null);
+  });
+
+  await check('A11Y: the traveler dialog CONTAINS keyboard focus — the card behind it is inert/aria-hidden, Tab and Shift+Tab cycle inside the panel, Escape works at document level, and everything is restored on close', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    assert.strictEqual(h.calls.mounted.getAttribute('aria-hidden'), 'true', 'the card is hidden from assistive tech while the sheet is open');
+    assert.strictEqual(h.calls.mounted.inert, true, 'and inert');
+    assert.strictEqual(h.doc.listenerCount('keydown'), 1, 'one document-level key handler');
+    const panel = sheetOf(h).find((n) => n.getAttribute('role') === 'dialog')[0];
+    const selfBtn = panel.find((n) => n.textContent === 'Travel myself')[0];
+    const inputs = panel.find((n) => n.tagName === 'INPUT');
+    const back = panel.find((n) => n.textContent === 'Back')[0];
+    assert.strictEqual(h.doc.activeElement, selfBtn, 'focus entered the first usable control');
+    h.doc.dispatch('keydown', { key: 'Tab' });
+    assert.strictEqual(h.doc.activeElement, inputs[0], 'Tab → traveler name');
+    h.doc.dispatch('keydown', { key: 'Tab', shiftKey: true });
+    assert.strictEqual(h.doc.activeElement, selfBtn, 'Shift+Tab → back to Travel myself');
+    h.doc.dispatch('keydown', { key: 'Tab', shiftKey: true });
+    assert.strictEqual(h.doc.activeElement, back, 'Shift+Tab from the first control wraps to Back');
+    h.doc.dispatch('keydown', { key: 'Tab' });
+    assert.strictEqual(h.doc.activeElement, selfBtn, 'Tab from Back wraps to the first control');
+    // focus that escaped the panel (e.g. a pointer) is pulled back in on the next Tab
+    ACTIVE_EL = h.ui.routeChange;
+    h.doc.dispatch('keydown', { key: 'Tab' });
+    assert.strictEqual(h.doc.activeElement, selfBtn, 'Tab from outside the panel lands on its first control');
+    h.doc.dispatch('keydown', { key: 'Escape' });
+    await h.flush();
+    assert.strictEqual(h.card._sheetOpen(), false, 'document-level Escape closes the sheet');
+    assert.strictEqual(h.calls.mounted.getAttribute('aria-hidden'), undefined, 'aria-hidden removed');
+    assert.strictEqual(h.calls.mounted.inert, false, 'inert cleared');
+    assert.strictEqual(h.doc.listenerCount('keydown'), 0, 'the key handler is removed');
+    assert.strictEqual(h.doc.activeElement, h.ui.travelerEdit, 'focus returned to the opener (enabled in edit mode)');
+    assert.strictEqual(h.calls.quotes.length, 0);
+  });
+
+  await check('A11Y: confirm-sheet closes return focus to Save only once the chain has re-enabled it (self tap → Save proceeds → success closes the card; Escape → Save focused)', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();
+    await h.flush();
+    const tap = h.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.ui.save.disabled, true, 'Save is disabled for the life of the claimed chain');
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();
+    assert.notStrictEqual(h.doc.activeElement, h.ui.save, 'a disabled Save cannot take focus at close time');
+    await tap; await h.flush();
+    assert.strictEqual(h.calls.posts.length, 1, 'the save went through');
+    assert.strictEqual(h.card.isOpen(), false, 'success closed the card — no focus juggling on a torn-down card');
+  });
+
+  await check('A11Y: an elapsed refusal inside the chain focuses the time input only after the chain re-enables it', async () => {
+    const h = harness();
+    h.app._postScript = [{ status: 400, body: { error: 'pickup_time_elapsed' } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.ui.timeInput.disabled, false, 'the chain has ended');
+    assert.strictEqual(h.doc.activeElement, h.ui.timeInput, 'focus landed on the time input once it was enabled');
+    assert.strictEqual(h.ui.reason.textContent, COPY.elapsed);
   });
 
   console.log(`\n  ${failed ? `${failed} CHECK(S) FAILED` : `ALL ${passed} CHECKS PASS`}\n`);

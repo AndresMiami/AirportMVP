@@ -383,8 +383,10 @@
       elapsedRefusal = true;
       held = null;
       quoteState = 'idle';
+      // Inside a save chain the time input is disabled until the chain ends;
+      // the focus lands on the render that re-enables it.
+      if (ui && ui.timeInput) requestFocus(ui.timeInput);
       render();
-      if (ui && ui.timeInput && typeof ui.timeInput.focus === 'function') ui.timeInput.focus();
     }
 
     // ---- lifecycle handoffs ------------------------------------------------
@@ -431,6 +433,7 @@
 
     function close() {
       generation++;
+      pendingReturnFocus = null;
       closeSheet(true);
       clearT(quoteTimer);
       quoteTimer = null;
@@ -715,6 +718,18 @@
     let sheet = null;
     let sheetDone = null;   // the active sheet's continuation, settled exactly once
     let sheetReturnFocus = null;   // the control that opened the sheet; focus goes back to it
+    let sheetKeyHandler = null;    // document-level Escape / Tab containment while the sheet is open
+    // Focus that must land on a control which is DISABLED right now (Save
+    // during the claimed chain, the time input inside a chain): the render
+    // that re-enables it is the moment it can receive focus (a disabled
+    // control is not focusable in a browser), so the target waits here.
+    let pendingReturnFocus = null;
+    function requestFocus(target) {
+      if (!target || typeof target.focus !== 'function') return;
+      if (target.disabled || chainBusy()) { pendingReturnFocus = target; return; }
+      pendingReturnFocus = null;
+      target.focus();
+    }
     function openTravelerSheet(mode, onDone) {
       if (sheet) closeSheet(true);
       sheetDone = typeof onDone === 'function' ? onDone : null;
@@ -776,18 +791,38 @@
       cancel.type = 'button';
       panel.appendChild(cancel);
       overlay.appendChild(panel);
-      // Minimum complete dialog behaviour: Escape leaves exactly like Back
-      // (nothing changes, the continuation settles as not-confirmed) and focus
-      // enters the first usable control; closeSheet returns it to the opener.
-      panel.addEventListener('keydown', (e) => {
-        if (!e || e.key !== 'Escape') return;
-        if (typeof e.preventDefault === 'function') e.preventDefault();
-        closeSheet();
-        render();
-        if (onDone) onDone(false);
-      });
+      // Minimum complete modal behaviour: the card behind the sheet is inert
+      // and hidden from assistive tech; Escape (DOCUMENT-level, so it works
+      // wherever focus sits) leaves exactly like Back — nothing changes, the
+      // continuation settles as not-confirmed; Tab / Shift+Tab cycle inside
+      // the panel's enabled controls; focus enters the first usable control
+      // and closeSheet hands it back to the opener.
+      if (mount) { mount.setAttribute('aria-hidden', 'true'); mount.inert = true; }
+      const focusables = () => [selfBtn, nameIn, phoneIn, emailIn, guestBtn, cancel]
+        .filter((c) => c && !c.disabled && typeof c.focus === 'function');
+      sheetKeyHandler = (e) => {
+        if (!e || !sheet) return;
+        if (e.key === 'Escape') {
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          closeSheet();
+          render();
+          if (onDone) onDone(false);
+          return;
+        }
+        if (e.key === 'Tab') {
+          const ring = focusables();
+          if (!ring.length) return;
+          if (typeof e.preventDefault === 'function') e.preventDefault();
+          const i = ring.indexOf(doc.activeElement);
+          const next = i === -1
+            ? (e.shiftKey ? ring[ring.length - 1] : ring[0])
+            : ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length];
+          next.focus();
+        }
+      };
+      if (typeof doc.addEventListener === 'function') doc.addEventListener('keydown', sheetKeyHandler);
       doc.body.appendChild(overlay);
-      sheet = { overlay, panel, nameIn, phoneIn, emailIn, emailReason, guestBtn, selfBtn };
+      sheet = { overlay, panel, nameIn, phoneIn, emailIn, emailReason, guestBtn, selfBtn, cancel };
       const first = canSelf ? selfBtn : nameIn;
       if (first && typeof first.focus === 'function') first.focus();
 
@@ -860,12 +895,15 @@
       if (sheet && sheet.overlay && sheet.overlay.parentNode) sheet.overlay.parentNode.removeChild(sheet.overlay);
       const wasOpen = !!sheet;
       sheet = null;
+      if (sheetKeyHandler && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', sheetKeyHandler);
+      sheetKeyHandler = null;
+      if (mount) { mount.removeAttribute('aria-hidden'); mount.inert = false; }
       // Focus returns to the opener on a passenger-driven close (Back, Escape,
-      // a choice); an external teardown (handoff, Discard, rehydration) is
-      // closing the whole card and juggles no focus.
-      if (wasOpen && !cancelled && mount && sheetReturnFocus && typeof sheetReturnFocus.focus === 'function') {
-        sheetReturnFocus.focus();
-      }
+      // a choice) — deferred until that control is enabled again (Save stays
+      // disabled for the rest of a claimed chain); an external teardown
+      // (handoff, Discard, rehydration) is closing the whole card and juggles
+      // no focus.
+      if (wasOpen && !cancelled && mount && sheetReturnFocus) requestFocus(sheetReturnFocus);
       sheetReturnFocus = null;
       if (cancelled && sheetDone) { const f = sheetDone; sheetDone = null; f(false); }
     }
@@ -1295,6 +1333,11 @@
       ui.paxPlus.disabled = busy || draft.passengers >= max;
       for (const b of ui.timeChoice.children || []) if (b && 'disabled' in b) b.disabled = busy;
       for (const r of ui.vehicleOptions.children || []) if (r && 'disabled' in r) r.disabled = busy || r.disabled;
+      if (pendingReturnFocus && !busy && !pendingReturnFocus.disabled) {
+        const target = pendingReturnFocus;
+        pendingReturnFocus = null;
+        target.focus();
+      }
     }
 
     function beforeAfter(field, sel) {

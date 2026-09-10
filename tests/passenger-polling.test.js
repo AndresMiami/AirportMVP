@@ -555,6 +555,27 @@ function check(name, fn) {
     }
   }
 
+  // The same phases when the sheet has NO chauffeur contact to offer (the
+  // assigned driver's phone is missing/invalid, so the WhatsApp button is
+  // hidden): the tap must not send the passenger to a control that is not
+  // there — it names LinkMia's own line instead.
+  for (const status of ['confirmed', 'arrived']) {
+    const row = { ...pendingBooking, status, pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() };
+    const sheet = createHarness([response(200, { booking: row, driver: { name: 'Carlos M.', phone: null } })]);
+    await sheet.settle();
+    check(`lifecycle tap — ${status} with NO driver contact: the notice names LinkMia's line, never a hidden WhatsApp button`, () => {
+      assert.ok(sheet.element('waBtn').classList.contains('hidden'), 'precondition: the WhatsApp button is hidden');
+      const expected = sheet.evaluate(`LIFECYCLE_NOTICES_NO_CONTACT.${status}`);
+      assert.ok(typeof expected === 'string' && expected.length > 0);
+      sheet.element('backBtn').click();
+      const notice = sheet.element('lifecycleNotice');
+      assert.ok(!notice.classList.contains('hidden'));
+      assert.strictEqual(notice.textContent, expected);
+      assert.doesNotMatch(expected, /WhatsApp/, 'no reference to a control that is not on the sheet');
+      assert.match(expected, /\+1 \(786\) 509-3955/, 'the channel that IS on the sheet');
+    });
+  }
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {
   console.error('\nFAIL:', error.stack || error.message);

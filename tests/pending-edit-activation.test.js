@@ -115,7 +115,11 @@ async function check(name, fn) {
     assert.ok(trip.includes('id="backBtn">Manage ride</button>'), 'the static markup carries the stable name too');
     // the contextual CTA lives INSIDE Manage ride, keyed by phase
     for (const k of ['confirmed', 'on_the_way', 'arrived', 'in_progress']) assert.match(trip, new RegExp(`LIFECYCLE_NOTICES = Object\\.freeze\\(\\{[\\s\\S]*?${k}:`));
-    assert.match(trip, /el\.textContent = LIFECYCLE_NOTICES\[phase\] \|\| LIFECYCLE_NOTICES\.confirmed;/);
+    assert.match(trip, /const table = contactHidden \? LIFECYCLE_NOTICES_NO_CONTACT : LIFECYCLE_NOTICES;/, 'the notice table follows the sheet as rendered: a hidden WhatsApp button selects the LinkMia-line variant');
+    assert.match(trip, /el\.textContent = table\[phase\] \|\| table\.confirmed;/, 'the notice is keyed by phase from the selected table');
+    for (const key of ['confirmed', 'on_the_way', 'arrived', 'in_progress']) {
+      assert.ok(new RegExp(`LIFECYCLE_NOTICES_NO_CONTACT = Object\\.freeze\\(\\{[\\s\\S]*?\\b${key}:`).test(trip), `no-contact variant defined for ${key}`);
+    }
     // and the editable card names the same destination
     const card = fs.readFileSync(path.join(repoRoot, 'js/pending-edit-card.js'), 'utf8');
     assert.ok(card.includes("mount.setAttribute('aria-label', 'Manage ride');") && card.includes('`Manage ride ${ctx.tripCode || \'\'}`'), 'card ARIA label and title say Manage ride');

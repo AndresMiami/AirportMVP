@@ -6,8 +6,10 @@
 //      non-editable row or an invalid stored row must cost ZERO rate-card
 //      resolver calls, and every post-authentication failure that is not a
 //      typed 400/404/409 answers ONE fixed body that leaks nothing;
-//   2. PR-A is dark for PASSENGERS — no page loads the new model, no
-//      precached asset changes, and no cache name moves.
+//   2. HISTORICAL (PR-A): the model was dark for passengers. Under PR-B the
+//      booking page loads it, both modules are precached under their EXACT
+//      requested URLs, and the cache names sit on the PR-B rung (30/7) — the
+//      "PR-B — activation pins" section below owns those facts.
 //
 // Run: node tests/pending-edit-hydration.test.js
 
@@ -967,8 +969,8 @@ async function check(name, fn) {
     const stored = { ...DTO.route, pickupLabel: 'Miami International' };
     assert.strictEqual(a.projectRoute(stored).origin.label, 'Miami International', 'pickup mode: origin = stored airport label');
     assert.strictEqual(a.projectRoute(stored).destination.label, '4441 Collins Ave');
-    const storedDrop = { ...DTO.route, bookingMode: 'dropoff', airportCode: 'PBI', pickupLabel: '4441 Collins Ave', dropoffLabel: ' Palm Beach ' };
-    assert.strictEqual(a.projectRoute(storedDrop).destination.label, ' Palm Beach ', 'dropoff mode: destination = stored label, verbatim and untrimmed');
+    const storedDrop = { ...DTO.route, bookingMode: 'dropoff', airportCode: 'PBI', pickupLabel: '4441 Collins Ave', dropoffLabel: 'Palm Beach' };
+    assert.strictEqual(a.projectRoute(storedDrop).destination.label, 'Palm Beach', 'dropoff mode: destination = the stored label, verbatim');
     assert.strictEqual(a.projectRoute(storedDrop).origin.label, '4441 Collins Ave');
     assert.strictEqual(a.projectRoute({ ...DTO.route, pickupLabel: '' }).origin.label, 'MIA', 'the code is only the fallback');
     const withLabel = a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', airportLabel: 'Fort Lauderdale', address: { placeId: 'p', label: 'L' } });
