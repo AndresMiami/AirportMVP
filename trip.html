@@ -744,12 +744,12 @@
             // invalidates an open quote: the terms the passenger was
             // reviewing no longer describe the ride (e.g. confirmed →
             // on_the_way). The next tap fetches fresh terms.
-            // PR-B lifecycle presentation. The label follows the passenger's
-            // JOB at this moment, not an error state: a ride nobody has
-            // accepted is still theirs to edit (at EVERY hour — T-3h belongs
-            // to the driver's departure window, never to passenger editing);
-            // once a chauffeur is committed the honest action is managing,
-            // not editing; once they are driving it is coordinating.
+            // PR-B lifecycle presentation: the passenger's DESTINATION is
+            // stable — "Manage ride" from Pending through Arrived; only a ride
+            // in progress reads "Coordinate with your chauffeur". A pending ride
+            // is editable at EVERY hour (T-3h is the driver's departure window,
+            // never a passenger gate); what each later phase supports travels
+            // in the INTERNAL dispatch and the notice rendered INSIDE the sheet.
             //
             // presentationStatus is for DISPLAY ONLY. The raw status stays
             // authoritative for polling, cancellation eligibility and every
@@ -1116,12 +1116,13 @@
         let lastPresentationStatus = null;
         // The contextual CTA INSIDE "Manage ride", by presentation phase.
         // Honest, status-bounded copy: it names what this moment supports and
-        // points at the controls that already exist on the sheet.
+        // points at the WhatsApp message button BY NAME, never by position
+        // (that button renders ABOVE this notice on the sheet).
         const LIFECYCLE_NOTICES = Object.freeze({
-            confirmed: 'Your chauffeur is confirmed and your ride stays exactly as booked. You can message them directly below.',
-            on_the_way: 'Your chauffeur is on the way and your ride stays exactly as booked. Use the message button below to coordinate the pickup.',
-            arrived: 'Your chauffeur has arrived and is waiting for you. Use the message button below to coordinate the meet-up.',
-            in_progress: 'Your ride is in progress. Use the message button below to coordinate directly with your chauffeur.'
+            confirmed: 'Your chauffeur is confirmed and your ride stays exactly as booked. You can message your chauffeur directly on WhatsApp.',
+            on_the_way: 'Your chauffeur is on the way and your ride stays exactly as booked. Use the WhatsApp message button to coordinate the pickup.',
+            arrived: 'Your chauffeur has arrived and is waiting for you. Use the WhatsApp message button to coordinate the meet-up.',
+            in_progress: 'Your ride is in progress. Use the WhatsApp message button to coordinate directly with your chauffeur.'
         });
 
         function loadScript(src) {

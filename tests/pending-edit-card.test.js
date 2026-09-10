@@ -16,6 +16,21 @@ const assert = require('assert');
 const repoRoot = path.resolve(__dirname, '..');
 const MODEL = require(path.join(repoRoot, 'js/pending-edit-model.js'));
 const { createPendingEditCard, COPY } = require(path.join(repoRoot, 'js/pending-edit-card.js'));
+const CARD_SRC = fs.readFileSync(path.join(repoRoot, 'js/pending-edit-card.js'), 'utf8');
+// Loads a (mutated) copy of the card module through its own UMD wrapper, so a
+// source mutant is EXECUTED by the same harness rather than pinned as text.
+function loadCardSource(src) {
+  const m = { exports: {} };
+  new Function('module', 'exports', src)(m, m.exports);
+  return m.exports;
+}
+const VEHICLE_TESLA = { key: 'tesla', name: 'Tesla Model Y', passengerCapacity: 4, bagCapacity: 4 };
+const VEHICLE_ESCALADE = { key: 'escalade', name: 'Cadillac Escalade', passengerCapacity: 7, bagCapacity: 8 };
+function sheetOf(h) { return h.doc.body.children[h.doc.body.children.length - 1]; }
+function setTime(h, date = '2026-12-24', time = '19:15') {
+  h.ui.dateInput.value = date; h.ui.timeInput.value = time;
+  h.ui.timeInput.dispatch('change');
+}
 
 // ---- a fake DOM small enough to read, big enough to execute the card ----
 class FakeEl {
@@ -84,10 +99,10 @@ function guestEscaladeDto(over = {}) {
     ...over
   };
 }
-function quoteResponse({ placeId = 'ChIJ_stored', cents = { tesla: 9000, escalade: 16900, sprinter: 22000 }, ttlMs = 15 * 60000 } = {}) {
+function quoteResponse({ placeId = 'ChIJ_stored', cents = { tesla: 9000, escalade: 16900, sprinter: 22000 }, ttlMs = 15 * 60000, keys = ['escalade', 'sprinter', 'tesla'] } = {}) {
   const expiresAt = new Date(Date.now() + ttlMs).toISOString();
   const vehicles = {};
-  for (const k of ['escalade', 'sprinter', 'tesla']) {
+  for (const k of keys) {
     vehicles[k] = { ok: true, vehicleName: k, finalCents: cents[k], token: `tok-${k}-${cents[k]}`, expiresAt };
   }
   // PRODUCTION-SHAPED echo (quote-ride.js:563-577) PLUS hostile extras. The
@@ -102,28 +117,14 @@ function quoteResponse({ placeId = 'ChIJ_stored', cents = { tesla: 9000, escalad
       operationId: 'server-overwrite', bookingId: 'server-booking', expectedDetailsVersion: 999,
       customerName: 'Server Person', phone: '+1 000 000 0000', price: 1, vehicleKey: 'tesla', quoteToken: 'server-token' },
     route: { milesTenths: 120, minutes: 30 },
-    pricingVersion: 'v-test', vehicles, vehiclesOk: 3, bookable: true } };
-}
-
-function serverQuoteIsComplete(q) {
-  if (!q || !q.intent || !q.intent.placeId || !q.intent.airportCode || !q.route ||
-      !Number.isSafeInteger(q.route.milesTenths) || !Number.isSafeInteger(q.route.minutes) ||
-      typeof q.pricingVersion !== 'string' || !q.vehicles) return false;
-  const keys = Object.keys(q.vehicles).sort();
-  if (keys.join() !== 'escalade,sprinter,tesla') return false;
-  let ok = 0;
-  for (const v of Object.values(q.vehicles)) {
-    if (typeof v.ok !== 'boolean') return false;
-    if (!v.ok) continue; ok++;
-    if (!v.token || !Number.isSafeInteger(v.finalCents) || !Number.isFinite(Date.parse(v.expiresAt))) return false;
-  }
-  return q.vehiclesOk === ok && q.bookable === (ok > 0);
+    pricingVersion: 'v-test', vehicles, vehiclesOk: keys.length, bookable: keys.length > 0 } };
 }
 
 // ---- harness ----
-function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', phone: '+1 786 509 3955', email: 'andres@example.com', ambassador: false }, script = [] } = {}) {
+function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', phone: '+1 786 509 3955', email: 'andres@example.com', ambassador: false }, script = [], factory = createPendingEditCard } = {}) {
   const doc = makeDoc();
-  const calls = { quotes: [], posts: [], hydrations: 0, editSaved: null, handoff: null, closed: null, mounted: null };
+  const calls = { quotes: [], posts: [], hydrations: 0, editSaved: null, handoff: null, closed: null, mounted: null,
+    stored: [], cleared: [], offered: [] };
   const timers = [];
   let timerId = 0;
   const responses = script.slice();
@@ -134,7 +135,6 @@ function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', 
   };
   const app = {
     quoteFlowActive: () => true,
-    serverQuoteIsComplete,
     mountEditCard: (node) => { calls.mounted = node; doc.body.appendChild(node); },
     // Mirrors the HOST's airport editor: it receives the opaque route plus
     // the adapter's projections and builds its own temporary draft.
@@ -143,6 +143,9 @@ function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', 
       const mode = (q && q.mode) || 'dropoff';
       app._er = { input, cbs, routeDraft: {
         mode, airport: q ? q.airportCode : null,
+        // mirrors indexMVP enterEditRouteMode: the STORED airport-side label
+        // seeds the draft; an airport tap replaces it with the host's name
+        airportLabel: p ? (mode === 'dropoff' ? p.destination.label : p.origin.label) : '',
         address: { label: p ? (mode === 'dropoff' ? p.origin.label : p.destination.label) : '',
           placeId: q ? q.placeId : null, coordinates: r.addressCoordinates || null,
           attributions: r.addressAttributions || [] } } };
@@ -153,9 +156,11 @@ function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', 
     failClosedFromEdit: (m) => { calls.failClosed = m; },
     fetchRideSnapshot: async () => { calls.hydrations++; return app._nextSnapshot || null; },
     unresolvedEnvelopeBlocks: async () => false,
-    storePendingEnvelope: () => true,
-    clearPendingEnvelope: () => {},
-    offerPendingEnvelope: () => {},
+    // Recorded, not no-ops: the exact operation stored and cleared is asserted
+    // (Codex seq:234 #5 — a silent clear hid the clear-before-classify order).
+    storePendingEnvelope: (env) => { calls.stored.push(env.operationId); return true; },
+    clearPendingEnvelope: (id) => { calls.cleared.push(id); },
+    offerPendingEnvelope: (subject) => { calls.offered.push(subject); },
     newOperationId: () => '11111111-2222-4333-8444-555555555555',
     reloadOutdated: () => { calls.reload = true; },
     submitEnvelope: async (url, bodyString) => {
@@ -165,7 +170,7 @@ function harness({ dto = guestEscaladeDto(), account = { name: 'Andres Booker', 
       return { definitive: true, response: { ok: next.status < 400, status: next.status }, result: next.body };
     }
   };
-  const card = createPendingEditCard({
+  const card = factory({
     model: MODEL, document: doc, fetch: fetchImpl,
     getSession: async () => ({ access_token: 'tok', user: { id: 'auth-a', email: 'andres@example.com' } }),
     app, accountIdentity: () => account,
@@ -875,6 +880,274 @@ async function check(name, fn) {
     h.ui.paxEdit.dispatch('click');   // reaches the handler despite disabled
     assert.strictEqual(h.ui.paxStepper.hidden, true, 'the disclosure handler refuses too');
     release(); await tap; await h.flush();
+  });
+
+
+  // ===== Codex seq:234 corrections — executed =====
+
+  await check('#1 guest → self: tapping "Travel myself" AGAIN in the confirm sheet records the value-bound key and the save COMPLETES (one POST, account traveler)', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();
+    await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 1, 'the traveler change is priced');
+    const tap = h.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.card._sheetOpen(), true, 'the value-bound confirmation opened');
+    assert.ok(sheetOf(h).textContent.includes('Confirm the traveler'));
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();   // the obvious tap
+    await tap; await h.flush();
+    assert.strictEqual(h.card._sheetOpen(), false, 'the sheet closed');
+    assert.strictEqual(h.calls.posts.length, 1, 'exactly one writer POST');
+    assert.strictEqual(h.calls.posts[0].body.customerName, 'Andres Booker');
+    assert.strictEqual(h.calls.posts[0].body.email, 'andres@example.com');
+    assert.ok(h.calls.editSaved, 'the save completed');
+  });
+
+  await check('#1 guest → self: submitting the prefilled confirm FORM completes the same save (both confirm paths land)', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();
+    await h.flush();
+    const tap = h.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    sheetOf(h).find((n) => n.tagName === 'FORM')[0].dispatch('submit');
+    await tap; await h.flush();
+    assert.strictEqual(h.calls.posts.length, 1);
+    assert.strictEqual(h.calls.posts[0].body.customerName, 'Andres Booker');
+    assert.ok(h.calls.editSaved);
+  });
+
+  await check('#1 confirm sheet: choosing a DIFFERENT traveler inside confirmation is a change — the chain ends without a POST and the next tap re-confirms', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();
+    await h.flush();
+    const tap = h.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    const inputs = sheetOf(h).find((n) => n.tagName === 'INPUT');
+    inputs[0].value = 'Someone Else'; inputs[1].value = '+1 305 555 0002'; inputs[2].value = 'x@example.com';
+    sheetOf(h).find((n) => n.tagName === 'FORM')[0].dispatch('submit');
+    await tap; await h.flush();
+    assert.strictEqual(h.calls.posts.length, 0, 'a change inside confirmation never posts');
+    assert.strictEqual(h.card._draft().traveler.name, 'Someone Else');
+    assert.strictEqual(h.card.isOpen(), true);
+  });
+
+  await check('#2 a TIME-only edit round-trips the stored airport label byte for byte (pickup mode: pickup = stored "Miami International")', async () => {
+    const dto = guestEscaladeDto({ route: { ...guestEscaladeDto().route, pickupLabel: 'Miami International' } });
+    const h = harness({ dto });
+    assert.strictEqual(h.ui.routeText.textContent, 'Miami International → 4441 Collins Ave', 'the stored label is what the passenger reads');
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.posts.length, 1);
+    assert.strictEqual(h.calls.posts[0].body.pickup, 'Miami International', 'never rewritten to the bare code');
+    assert.strictEqual(h.calls.posts[0].body.dropoff, '4441 Collins Ave');
+    assert.strictEqual(h.calls.posts[0].body.dateTime, '2026-12-25T00:15:00.000Z');
+  });
+
+  await check('#2 PASSENGER-only and TRAVELER-only edits keep the stored airport label too (dropoff mode: dropoff = stored " Palm Beach ", untrimmed)', async () => {
+    const route = { ...guestEscaladeDto().route, bookingMode: 'dropoff', airportCode: 'PBI',
+      pickupLabel: '4441 Collins Ave', dropoffLabel: ' Palm Beach ' };
+    const a = harness({ dto: guestEscaladeDto({ route }) });
+    a.ui.paxEdit.click(); a.ui.paxPlus.click(); await a.flush();
+    a.ui.save.click(); await a.flush();
+    assert.strictEqual(a.calls.posts.length, 1);
+    assert.strictEqual(a.calls.posts[0].body.pickup, '4441 Collins Ave');
+    assert.strictEqual(a.calls.posts[0].body.dropoff, ' Palm Beach ', 'verbatim stored text');
+    assert.strictEqual(a.calls.posts[0].body.passengers, 4);
+    const b = harness({ dto: guestEscaladeDto({ route }) });
+    b.ui.travelerEdit.click();
+    sheetOf(b).find((n) => n.textContent === 'Travel myself')[0].click();
+    await b.flush();
+    const tap = b.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    sheetOf(b).find((n) => n.textContent === 'Travel myself')[0].click();
+    await tap; await b.flush();
+    assert.strictEqual(b.calls.posts.length, 1);
+    assert.strictEqual(b.calls.posts[0].body.dropoff, ' Palm Beach ');
+    assert.strictEqual(b.calls.posts[0].body.pickup, '4441 Collins Ave');
+  });
+
+  await check('#2 Where: an ADDRESS-only Done keeps the seeded stored airport label; a changed AIRPORT carries the host\'s display name', async () => {
+    const dto = guestEscaladeDto({ route: { ...guestEscaladeDto().route, pickupLabel: 'Miami International' } });
+    // the quote echoes the NEW canonical id (a 'ChIJ_stored' echo would collapse
+    // the draft back to the snapshot tuple — the identity-equal restore rule)
+    const a = harness({ dto, script: [{ status: 200, body: quoteResponse({ placeId: 'ChIJ_new' }) }] });
+    a.ui.routeChange.click();
+    assert.strictEqual(a.app._er.routeDraft.airportLabel, 'Miami International', 'the editor draft is seeded with the stored label');
+    a.app._er.cbs.onDone({ ...a.app._er.routeDraft,
+      address: { label: 'New hotel, Miami Beach', placeId: 'ChIJ_new', coordinates: null, attributions: [] } });
+    await a.flush();
+    assert.strictEqual(a.calls.quotes.length, 1);
+    a.ui.save.click(); await a.flush();
+    assert.strictEqual(a.calls.posts.length, 1);
+    assert.strictEqual(a.calls.posts[0].body.pickup, 'Miami International', 'address-only change: the airport label is untouched');
+    assert.strictEqual(a.calls.posts[0].body.dropoff, 'New hotel, Miami Beach');
+    const b = harness({ dto });
+    b.ui.routeChange.click();
+    b.app._er.cbs.onDone({ ...b.app._er.routeDraft, airport: 'FLL', airportLabel: 'Fort Lauderdale' });
+    await b.flush();
+    b.ui.save.click(); await b.flush();
+    assert.strictEqual(b.calls.posts.length, 1);
+    assert.strictEqual(b.calls.posts[0].body.pickup, 'Fort Lauderdale', 'the new airport is stored under the same display name create uses');
+    assert.strictEqual(b.calls.posts[0].body.dropoff, '4441 Collins Ave');
+  });
+
+  await check('#3 a ONE-vehicle hydrated card quotes and saves: the expected key set is the DTO\'s own, not create\'s three', async () => {
+    const dto = guestEscaladeDto({ vehicles: [VEHICLE_ESCALADE] });
+    const h = harness({ dto, script: [{ status: 200, body: quoteResponse({ keys: ['escalade'] }) }] });
+    setTime(h); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 1);
+    assert.strictEqual(h.ui.status.hidden, true, 'no incomplete refusal');
+    assert.strictEqual(h.ui.save.disabled, false);
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.posts.length, 1);
+    assert.strictEqual(h.calls.posts[0].body.vehicle, 'Cadillac Escalade');
+    assert.strictEqual(h.calls.posts[0].body.price, 169);
+    assert.ok(h.calls.editSaved);
+  });
+
+  await check('#3 a PARTIAL two-vehicle card saves; a quote whose keys differ from the hydrated card (either direction) is refused as incomplete — typed copy, Save unavailable, zero POSTs', async () => {
+    const two = harness({ dto: guestEscaladeDto({ vehicles: [VEHICLE_TESLA, VEHICLE_ESCALADE] }),
+      script: [{ status: 200, body: quoteResponse({ keys: ['escalade', 'tesla'] }) }] });
+    setTime(two); await two.flush();
+    two.ui.save.click(); await two.flush();
+    assert.strictEqual(two.calls.posts.length, 1, 'partial card: saved');
+    for (const [label, dto, keys] of [
+      ['three-vehicle card, one-key quote', guestEscaladeDto(), ['escalade']],
+      ['one-vehicle card, three-key quote', guestEscaladeDto({ vehicles: [VEHICLE_ESCALADE] }), ['escalade', 'sprinter', 'tesla']],
+      ['two-vehicle card, a different pair', guestEscaladeDto({ vehicles: [VEHICLE_TESLA, VEHICLE_ESCALADE] }), ['escalade', 'sprinter']]
+    ]) {
+      const h = harness({ dto, script: [{ status: 200, body: quoteResponse({ keys }) }] });
+      setTime(h); await h.flush();
+      assert.strictEqual(h.calls.quotes.length, 1, `${label}: one call`);
+      assert.strictEqual(h.ui.status.hidden, false, `${label}: refused`);
+      assert.strictEqual(h.ui.status.textContent, COPY.quoteUnavailable, `${label}: typed incomplete copy`);
+      assert.strictEqual(h.ui.save.disabled, true, `${label}: Save unavailable`);
+      h.ui.save.click(); await h.flush();
+      assert.strictEqual(h.calls.posts.length, 0, `${label}: nothing posted`);
+    }
+  });
+
+  await check('#4 a writer requote whose refresh FAILS expires the held quote at once: Save reads "Refresh and Save"; a second tap refreshes FIRST and posts nothing while the refresh still fails; a later good refresh posts exactly once', async () => {
+    const h = harness({ script: [
+      { status: 200, body: quoteResponse() },
+      { status: 502, body: { error: 'upstream' } },   // the sanctioned quiet refresh
+      { status: 502, body: { error: 'upstream' } },   // the second tap's refresh
+      { status: 200, body: quoteResponse() }          // the third tap's refresh
+    ] });
+    h.app._postScript = [{ status: 409, body: { error: 'quote_expired', requote: true } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.posts.length, 1);
+    assert.strictEqual(h.calls.quotes.length, 2);
+    assert.strictEqual(h.card._held().expiresAt, 0, 'the refused token is expired the instant requote arrives');
+    assert.strictEqual(h.ui.save.textContent, COPY.saveRefresh, 'never "Save changes" over a token the server rejected');
+    assert.strictEqual(h.ui.save.disabled, false, 'the passenger can still act');
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 3, 'the second tap refreshed first');
+    assert.strictEqual(h.calls.posts.length, 1, 'and posted NOTHING while the refresh still fails');
+    assert.strictEqual(h.calls.editSaved, null);
+    assert.strictEqual(h.ui.save.textContent, COPY.saveRefresh);
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 4, 'third tap: refresh first');
+    assert.strictEqual(h.calls.posts.length, 2, 'then exactly one POST on the fresh token');
+    assert.ok(h.calls.editSaved, 'saved');
+  });
+
+  await check('#4 MUTATION: not expiring the held quote on requote leaves Save reading "Save changes" over the rejected token — the executed pin refuses it', async () => {
+    const anchor = "        if (held) held.expiresAt = 0;\n        if (!resubmitUsedThisTap && !refreshUsedThisTap) {";
+    assert.strictEqual(CARD_SRC.split(anchor).length - 1, 1, 'expire-on-requote anchor is unique');
+    const mutant = loadCardSource(CARD_SRC.replace(anchor, "        if (!resubmitUsedThisTap && !refreshUsedThisTap) {"));
+    const h = harness({ factory: mutant.createPendingEditCard, script: [
+      { status: 200, body: quoteResponse() }, { status: 502, body: { error: 'upstream' } }, { status: 502, body: { error: 'upstream' } }
+    ] });
+    h.app._postScript = [{ status: 409, body: { error: 'quote_expired', requote: true } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.ui.save.textContent, COPY.saveIdle, 'the mutant shows "Save changes" over the rejected token');
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.posts.length, 2, 'and re-posts the rejected token without refreshing — exactly the wasted writer call the fix removes');
+  });
+
+  await check('#5 pickup_time_elapsed: the envelope is STORED then CLEARED for exactly this operation before the refusal is classified; nothing is offered for recovery; the whole draft is preserved (quote state excepted)', async () => {
+    const h = harness();
+    h.app._postScript = [{ status: 400, body: { error: 'pickup_time_elapsed' } }];
+    setTime(h); await h.flush();
+    const before = JSON.stringify(h.card._draft());
+    h.ui.save.click(); await h.flush();
+    assert.deepStrictEqual(h.calls.stored, ['11111111-2222-4333-8444-555555555555'], 'exactly one envelope stored');
+    assert.deepStrictEqual(h.calls.cleared, ['11111111-2222-4333-8444-555555555555'], 'the SAME operation cleared, exactly once, before the elapsed branch');
+    assert.deepStrictEqual(h.calls.offered, [], 'a definitive refusal offers no recovery card');
+    assert.strictEqual(JSON.stringify(h.card._draft()), before, 'the complete draft is untouched');
+    assert.strictEqual(h.card._held(), null, 'the quote state is the one thing that changes');
+    assert.strictEqual(h.ui.reason.textContent, COPY.elapsed);
+    assert.strictEqual(h.ui.save.disabled, true);
+  });
+
+  await check('#5 MUTATION: an early elapsed return BEFORE the clear leaves the envelope stored — the exact-clear pin refuses it', async () => {
+    const anchor = "      app.clearPendingEnvelope(operationId);\n      const { response, result } = out;\n";
+    assert.strictEqual(CARD_SRC.split(anchor).length - 1, 1, 'clear-before-classify anchor is unique');
+    const mutant = loadCardSource(CARD_SRC.replace(anchor,
+      "      const { response, result } = out;\n      if (response.status === 400 && result && result.error === 'pickup_time_elapsed') { markElapsed(); return; }\n      app.clearPendingEnvelope(operationId);\n"));
+    const h = harness({ factory: mutant.createPendingEditCard });
+    h.app._postScript = [{ status: 400, body: { error: 'pickup_time_elapsed' } }];
+    setTime(h); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.deepStrictEqual(h.calls.stored, ['11111111-2222-4333-8444-555555555555']);
+    assert.deepStrictEqual(h.calls.cleared, [], 'the mutant never clears — a stale envelope would then gate every later Book/Save');
+  });
+
+  await check('A11Y: the traveler dialog has an accessible name, focus enters its first usable control, Escape leaves like Back (nothing changes, zero quotes) and focus returns to the opener', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    const panel = sheetOf(h).find((n) => n.getAttribute('role') === 'dialog')[0];
+    assert.ok(panel, 'role=dialog');
+    assert.strictEqual(panel.getAttribute('aria-modal'), 'true');
+    assert.strictEqual(panel.getAttribute('aria-labelledby'), 'peSheetTitle');
+    assert.strictEqual(panel.find((n) => n.tagName === 'H3')[0].id, 'peSheetTitle', 'the name resolves to the visible title');
+    const selfBtn = panel.find((n) => n.textContent === 'Travel myself')[0];
+    assert.strictEqual(selfBtn.focused, true, 'focus entered the first usable control');
+    panel.dispatch('keydown', { key: 'Escape' });
+    await h.flush();
+    assert.strictEqual(h.card._sheetOpen(), false, 'Escape closed the sheet');
+    assert.strictEqual(h.card._draft().traveler.name, 'Gina Guest', 'nothing changed');
+    assert.strictEqual(h.calls.quotes.length, 0, 'Escape buys nothing');
+    assert.strictEqual(h.ui.travelerEdit.focused, true, 'focus returned to the opener');
+    // an account that cannot travel itself: focus enters the name field instead
+    const amb = harness({ account: { name: 'Amb', phone: '+1 786 000 0000', email: 'a@example.com', ambassador: true } });
+    amb.ui.travelerEdit.click();
+    const p2 = sheetOf(amb).find((n) => n.getAttribute('role') === 'dialog')[0];
+    assert.strictEqual(p2.find((n) => n.textContent === 'Travel myself')[0].disabled, true);
+    assert.strictEqual(p2.find((n) => n.tagName === 'INPUT')[0].focused, true, 'focus enters the traveler name field');
+  });
+
+  await check('A11Y: Escape inside the value-bound CONFIRM sheet ends the save chain without a POST, returns focus to Save, and Save stays available for a new tap', async () => {
+    const h = harness();
+    h.ui.travelerEdit.click();
+    sheetOf(h).find((n) => n.textContent === 'Travel myself')[0].click();
+    await h.flush();
+    const tap = h.ui.save.click();
+    await new Promise((r) => setImmediate(r));
+    const panel = sheetOf(h).find((n) => n.getAttribute('role') === 'dialog')[0];
+    panel.dispatch('keydown', { key: 'Escape' });
+    await tap; await h.flush();
+    assert.strictEqual(h.calls.posts.length, 0, 'not confirmed → nothing posted');
+    assert.strictEqual(h.card._sheetOpen(), false);
+    assert.strictEqual(h.ui.save.focused, true, 'focus back on Save');
+    assert.strictEqual(h.ui.save.disabled, false, 'a new tap re-confirms');
+    assert.strictEqual(h.card._draft().traveler.name, 'Andres Booker', 'the pending self selection is kept in the draft');
+  });
+
+  await check('A11Y: repeated Change/Edit controls and the vehicle radiogroup carry contextual accessible names', async () => {
+    const h = harness();
+    assert.strictEqual(h.ui.routeChange.getAttribute('aria-label'), 'Change route');
+    assert.strictEqual(h.ui.paxEdit.getAttribute('aria-label'), 'Edit passenger count');
+    assert.strictEqual(h.ui.travelerEdit.getAttribute('aria-label'), 'Edit traveler');
+    assert.strictEqual(h.ui.vehicleOptions.getAttribute('role'), 'radiogroup');
+    assert.strictEqual(h.ui.vehicleOptions.getAttribute('aria-label'), 'Vehicle');
+    assert.strictEqual(h.ui.vehicleToggle.textContent, 'Change vehicle', 'already contextual; toggles to Hide options');
   });
 
   console.log(`\n  ${failed ? `${failed} CHECK(S) FAILED` : `ALL ${passed} CHECKS PASS`}\n`);

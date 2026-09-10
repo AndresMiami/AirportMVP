@@ -2842,15 +2842,23 @@ check('EDIT-ROUTE MODE: typing a new address clears the temporary tuple and disa
   // builds the airport-specific temporary draft itself (Codex seq:193 #5).
   app.enterEditRouteMode({
     route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
-    projection: { origin: { label: 'MIA', placeId: null, attributions: [] },
+    projection: { origin: { label: 'Miami International', placeId: null, attributions: [] },
       destination: { label: '4441 Collins Ave', placeId: 'ChIJ_old', attributions: [] } },
     quoteIntent: { mode: 'pickup', airportCode: 'MIA', placeId: 'ChIJ_old' }
   }, { onDone: (d) => { done = d; }, onBack: () => {} });
   assert.strictEqual(app.editRouteDoneEnabled(), true, 'the untouched old tuple is complete');
+  // Codex seq:234 #2: the STORED airport-side label seeds the draft byte for
+  // byte, so an address-only or direction-only Done never re-synthesizes it.
+  assert.strictEqual(app._editRoute.routeDraft.airportLabel, 'Miami International', 'seeded from the stored projection');
+  app.onModeTap('dropoff');
+  assert.strictEqual(app._editRoute.routeDraft.airportLabel, 'Miami International', 'a direction change keeps the stored label');
+  app.onModeTap('pickup');
 
-  // (a) airport-only edit with the box never touched keeps the address tuple
+  // (a) airport-only edit with the box never touched keeps the address tuple;
+  //     the display label becomes the host's name for the NEW airport
   app.onAirportTap('FLL');
   assert.strictEqual(app._editRoute.routeDraft.address.placeId, 'ChIJ_old', 'preserved');
+  assert.strictEqual(app._editRoute.routeDraft.airportLabel, app.getAirportName('FLL'), 'the tapped airport carries its display name');
   assert.strictEqual(app.editRouteDoneEnabled(), true);
 
   // (b) the FIRST keystroke clears only the temporary tuple and disables Done
@@ -2874,9 +2882,9 @@ check('EDIT-ROUTE MODE: typing a new address clears the temporary tuple and disa
   const backBtn = controls.children[2];
   assert.strictEqual(doneBtn.disabled, false);
   doneBtn.listeners.click[0]();
-  assert.deepStrictEqual(done, { mode: 'pickup', airport: 'FLL',
+  assert.deepStrictEqual(done, { mode: 'pickup', airport: 'FLL', airportLabel: 'Fort Lauderdale',
     address: { label: '123 New St', placeId: 'ChIJ_new', coordinates: { lat: 25.7, lng: -80.1 }, attributions: [] } },
-    'Done delivers exactly the temporary tuple, whole');
+    'Done delivers exactly the temporary tuple, whole (airportLabel included)');
   assert.strictEqual(app._editRoute, null);
   assert.strictEqual((app.els.addressInput.listeners.input || []).length, 0,
     'the input listener is removed on exit, so the create flow is untouched');

@@ -54,8 +54,12 @@ const STATIC_CACHE_URLS = [
   '/api-config.js',
   '/maps-loader.js',
   '/datetime-utils.js',
-  '/js/pending-edit-model.js',
-  '/js/pending-edit-card.js',
+  // indexMVP requests these two as ./js/<name>.js?v=1. The fetch fallbacks
+  // below call caches.match(request) WITHOUT ignoreSearch, so the precache
+  // key must be the EXACT requested URL, query included -- an unversioned
+  // entry is stored but can never serve the page's actual request.
+  '/js/pending-edit-model.js?v=1',
+  '/js/pending-edit-card.js?v=1',
   '/pricing.js',
   '/supabase.js',
   '/vehicle-carousel-standalone.html',

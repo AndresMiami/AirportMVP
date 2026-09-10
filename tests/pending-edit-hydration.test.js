@@ -14,6 +14,7 @@
 const path = require('path');
 const fs = require('fs');
 const assert = require('assert');
+const vm = require('vm');
 
 process.env.SUPABASE_URL = 'https://example.supabase.co';
 process.env.SUPABASE_SERVICE_KEY = 'service-key';
@@ -580,11 +581,36 @@ async function check(name, fn) {
   // numbers, and the edit entry point hydrates.
   console.log('\nPR-B — activation pins\n');
 
+  // Both PR-B modules are requested by indexMVP with a cache-busting query
+  // (./js/<name>.js?v=N). The SW's cacheFirst/networkFirst fallbacks call
+  // caches.match(request) WITHOUT ignoreSearch, so a precache entry can serve
+  // that request ONLY when its URL — query included — is byte-identical to
+  // the src the page asks for. Derive the expected literal FROM THE PAGE and
+  // pin it exactly; the earlier basename pin accepted an unversioned entry
+  // that was stored on install yet never served anything (reviewer P2).
+  function assertPrecachedExactly(basename, idx, sw) {
+    const m = idx.match(new RegExp(`<script src="\\./js/${basename}\\.js(\\?v=\\d+)?"`));
+    assert.ok(m, `indexMVP must load ./js/${basename}.js`);
+    const query = m[1] || '';
+    const literal = `'/js/${basename}.js${query}'`;
+    const listStart = sw.indexOf('const STATIC_CACHE_URLS = [');
+    assert.ok(listStart >= 0, 'STATIC_CACHE_URLS is declared');
+    const list = sw.slice(listStart, sw.indexOf('];', listStart));
+    assert.ok(list.includes(literal), `${literal} must be in STATIC_CACHE_URLS — the EXACT URL the page requests`);
+    if (query) {
+      assert.ok(!sw.includes(`'/js/${basename}.js'`),
+        `a stale unversioned '/js/${basename}.js' entry must not remain anywhere in the SW`);
+    }
+    const entries = sw.match(new RegExp(`'/js/${basename}\\.js(\\?[^']*)?'`, 'g')) || [];
+    assert.deepStrictEqual(entries, [literal], `exactly one ${basename} precache entry, and it is the requested URL`);
+    return literal;
+  }
+
   await check('the model is loaded by the booking page and precached', async () => {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
-    assert.ok(sw.includes("'/js/pending-edit-model.js'"), 'must be in STATIC_CACHE_URLS');
     const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
     assert.ok(/<script src="\.\/js\/pending-edit-model\.js/.test(idx), 'indexMVP must load it');
+    assertPrecachedExactly('pending-edit-model', idx, sw);
     // It stays out of every OTHER page: nothing else has an editor.
     for (const page of ['trip.html', 'driver.html', 'index.html', 'login.html']) {
       const html = fs.readFileSync(path.join(repoRoot, page), 'utf8');
@@ -650,9 +676,79 @@ async function check(name, fn) {
     const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
     assert.ok(idx.includes('update-pending-booking?id='), 'wires the hydration GET');
     assert.ok(idx.includes('this.editCard().open(dto'), 'hands the snapshot to the review card');
-    assert.ok(sw.includes("'/js/pending-edit-card.js'"), 'the card module is precached too');
+    assertPrecachedExactly('pending-edit-card', idx, sw); // the card module is precached too
     assert.ok(!idx.includes('Re-enter your trip details'),
       'the re-enter-everything instruction is gone — that was the defect');
+  });
+
+  await check('EXECUTED: the real fetch fallback serves the page\'s versioned request from the precache — the pre-fix unversioned entry never could', async () => {
+    const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+    const swSource = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
+    const ORIGIN = 'https://linkmia.com';
+    // Drive the real worker: run its install handler against a fake Cache
+    // Storage keyed on the FULL URL (the Cache API's default — no
+    // ignoreSearch), take the network away, then ask for the page's src.
+    const driveWorker = async (source, pathWithQuery) => {
+      const listeners = {};
+      const stores = new Map();
+      const keyOf = (req) => new URL(typeof req === 'string' ? req : req.url, ORIGIN).href;
+      const context = vm.createContext({
+        self: {
+          location: { origin: ORIGIN },
+          clients: { claim: async () => {} },
+          skipWaiting: async () => {},
+          addEventListener(type, fn) { listeners[type] = fn; }
+        },
+        caches: {
+          open: async (name) => {
+            if (!stores.has(name)) stores.set(name, new Map());
+            const store = stores.get(name);
+            return {
+              add: async (url) => { store.set(keyOf(url), { precached: url }); },
+              put: async (req, res) => { store.set(keyOf(req), res); },
+              delete: async (req) => store.delete(keyOf(req))
+            };
+          },
+          keys: async () => [...stores.keys()],
+          match: async (req) => {
+            const key = keyOf(req);
+            for (const store of stores.values()) if (store.has(key)) return store.get(key);
+            return null;
+          },
+          delete: async (name) => stores.delete(name)
+        },
+        fetch: async () => { throw new Error('offline'); },
+        URL,
+        Response: class FakeResponse { constructor(body, init) { this.body = body; this.status = init && init.status; } },
+        console: { log() {}, warn() {}, error() {} }
+      });
+      vm.runInContext(source, context, { filename: 'service-worker.js' });
+      let installing = null;
+      listeners.install({ waitUntil(p) { installing = p; } });
+      await installing;
+      let responding = null;
+      listeners.fetch({
+        request: { method: 'GET', url: `${ORIGIN}${pathWithQuery}`, mode: 'same-origin' },
+        respondWith(p) { responding = p; }
+      });
+      assert.ok(responding, 'the worker must intercept a same-origin script request');
+      return responding;
+    };
+    for (const basename of ['pending-edit-model', 'pending-edit-card']) {
+      const m = idx.match(new RegExp(`<script src="\\./js/${basename}\\.js(\\?v=\\d+)?"`));
+      assert.ok(m && m[1], `${basename} is requested with a cache-busting query`);
+      const requested = `/js/${basename}.js${m[1]}`;
+      // Fixed worker: the precache answers the exact request with the network down.
+      assert.deepStrictEqual(await driveWorker(swSource, requested), { precached: requested },
+        `${requested} must be served from the precache offline`);
+      // Pre-fix worker (identical source, the query stripped from the list
+      // entry): the entry is stored on install, yet the request falls all the
+      // way through to the 408 error response — the P2 defect, reproduced.
+      const preFix = swSource.replace(`'${requested}'`, `'/js/${basename}.js'`);
+      assert.notStrictEqual(preFix, swSource, 'the pre-fix source differs only in the list entry');
+      const miss = await driveWorker(preFix, requested);
+      assert.strictEqual(miss && miss.status, 408, 'an unversioned precache entry never serves the versioned request');
+    }
   });
 
   // ============ the dark model ============
@@ -864,6 +960,26 @@ async function check(name, fn) {
     const dropoff = a.projectRoute(dropoffRoute);
     assert.strictEqual(dropoff.origin.label, '4441 Collins Ave');
     assert.strictEqual(dropoff.destination.label, 'MIA');
+  });
+
+  await check('projectRoute projects the STORED airport-side label byte for byte (the code only when the tuple carries none); fromRouteDraft honours the host\'s airportLabel and falls back to the code', async () => {
+    const a = MODEL.adapterFor('airport_transfer_v1');
+    const stored = { ...DTO.route, pickupLabel: 'Miami International' };
+    assert.strictEqual(a.projectRoute(stored).origin.label, 'Miami International', 'pickup mode: origin = stored airport label');
+    assert.strictEqual(a.projectRoute(stored).destination.label, '4441 Collins Ave');
+    const storedDrop = { ...DTO.route, bookingMode: 'dropoff', airportCode: 'PBI', pickupLabel: '4441 Collins Ave', dropoffLabel: ' Palm Beach ' };
+    assert.strictEqual(a.projectRoute(storedDrop).destination.label, ' Palm Beach ', 'dropoff mode: destination = stored label, verbatim and untrimmed');
+    assert.strictEqual(a.projectRoute(storedDrop).origin.label, '4441 Collins Ave');
+    assert.strictEqual(a.projectRoute({ ...DTO.route, pickupLabel: '' }).origin.label, 'MIA', 'the code is only the fallback');
+    const withLabel = a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', airportLabel: 'Fort Lauderdale', address: { placeId: 'p', label: 'L' } });
+    assert.strictEqual(withLabel.pickupLabel, 'Fort Lauderdale');
+    assert.strictEqual(withLabel.dropoffLabel, 'L');
+    const dropLabel = a.fromRouteDraft({ mode: 'dropoff', airport: 'PBI', airportLabel: 'Palm Beach', address: { placeId: 'p', label: 'L' } });
+    assert.strictEqual(dropLabel.pickupLabel, 'L');
+    assert.strictEqual(dropLabel.dropoffLabel, 'Palm Beach');
+    assert.strictEqual(a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', airportLabel: '   ', address: { placeId: 'p', label: 'L' } }).pickupLabel, 'FLL', 'a blank label falls back to the code');
+    assert.strictEqual(a.fromRouteDraft({ mode: 'pickup', airport: 'FLL', address: { placeId: 'p', label: 'L' } }).pickupLabel, 'FLL', 'no label → the code');
+    assert.strictEqual(a.routeIdentity(withLabel), a.routeIdentity({ ...withLabel, pickupLabel: 'FLL' }), 'labels stay OUT of identity');
   });
 
   await check('the legacy kind projects labels, is ALWAYS incomplete, and can never be quoted', async () => {

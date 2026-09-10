@@ -1168,9 +1168,19 @@
                 const addressLabel = projection
                     ? (mode === 'dropoff' ? projection.origin.label : projection.destination.label)
                     : '';
+                // The airport-side DISPLAY label travels with the draft: seeded from
+                // the stored projection so an address-only or direction-only Done
+                // keeps the stored text byte for byte, and replaced by
+                // getAirportName only when the passenger taps a different airport
+                // (the same name create stores). Codex seq:234 #2.
+                const storedAirportLabel = projection
+                    ? (mode === 'dropoff' ? projection.destination.label : projection.origin.label)
+                    : '';
                 const routeDraft = {
                     mode,
                     airport: intent?.airportCode || null,
+                    airportLabel: storedAirportLabel ||
+                        (intent?.airportCode ? this.getAirportName(intent.airportCode) : ''),
                     address: {
                         label: addressLabel || '',
                         placeId: intent?.placeId || null,
@@ -1338,6 +1348,7 @@
                     const d = this._editRoute.routeDraft;
                     if (d.mode === 'dropoff' && !(d.address && d.address.placeId)) return;
                     d.airport = code;   // airport/direction-only Done preserves the address tuple
+                    d.airportLabel = this.getAirportName(code);
                     this.renderEditRouteWhere();
                     return;
                 }

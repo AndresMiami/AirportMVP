@@ -1,5 +1,16 @@
-// Pending edit frontend wiring — verifies that Edit ride reuses the booking
-// form, preserves identity, and never returns to cancel-and-recreate.
+// Pending edit frontend wiring. The LIVE pending-edit surface under PR-B is
+// the review card (js/pending-edit-card.js), EXECUTED with a fake DOM and
+// injected fetch in tests/pending-edit-card.test.js; indexMVP's
+// requestServerQuote refuses inside an edit session (`if (this.pendingEdit)
+// return;`). This suite does two things only: (a) it asserts the trip-sheet
+// ENTRY rules by source pins (Manage ride label, pending-only edit action,
+// intent handoff, intent consumption/clearing, driver Accept's version echo,
+// the SW eviction floor), and (b) it pins the RETAINED but RETIRED
+// booking-form edit lane (confirmBooking's isEditing/editContext branches,
+// still present in indexMVP.html) ONLY so its guards stay intact until the
+// recorded cleanup PR deletes the lane — see CLAUDE.md "Known gaps / next
+// up". Those retired-lane checks pass because dead code remains; they are
+// NOT proof of the live card and must never be read as such.
 //
 // Run: node tests/pending-ride-editing-frontend.test.js
 
@@ -47,7 +58,7 @@ check('booking form clearly enters guarded edit mode', () => {
   assert.ok(booking.includes('Loading your ride…'));
 });
 
-check('edit preserves trip identity and calls only the in-place endpoint', () => {
+check('RETIRED form lane (pinned until cleanup): edit preserves trip identity and calls only the in-place endpoint', () => {
   assert.ok(booking.includes("? (editContext.tripCode || currentActiveBooking?.trip_id || '')"));
   assert.ok(booking.includes('apiPayload.bookingId = editContext.bookingId'));
   assert.ok(booking.includes('apiPayload.expectedDetailsVersion = editContext.detailsVersion'));
@@ -55,7 +66,7 @@ check('edit preserves trip identity and calls only the in-place endpoint', () =>
   assert.ok(!booking.includes("const cancelResponse = await fetch('/api/booking-status'"));
 });
 
-check('an edit never writes provisional local success before the server commits', () => {
+check('RETIRED form lane (pinned until cleanup): an edit never writes provisional local success before the server commits', () => {
   const guardedWrite = booking.indexOf('if (!isEditing) {\n                        localStorage.setItem(`trip_${tripId}`');
   // PR-2's recovery card also names the edit endpoint, earlier in the file —
   // anchor to the submit that FOLLOWS the guarded provisional write.
@@ -63,13 +74,13 @@ check('an edit never writes provisional local success before the server commits'
   assert.ok(guardedWrite >= 0 && request > guardedWrite);
 });
 
-check('conflict and failure preserve server truth instead of pretending success', () => {
+check('RETIRED form lane (pinned until cleanup): conflict and failure preserve server truth instead of pretending success', () => {
   assert.ok(booking.includes('This ride changed while you were editing. Your changes were not applied.'));
   assert.ok(booking.includes('Changes not saved. Your original ride is unchanged.'));
   assert.ok(booking.includes("isEditing ? 'Changes not saved' : 'Booking not submitted'"));
 });
 
-check('time changes recalculate route-aware vehicle pricing before save', () => {
+check('booking-form time changes recalculate route-aware vehicle pricing (live create-flow handler; the form-lane Save it once preceded is retired)', () => {
   const updateDateTime = booking.indexOf('updateDateTime() {');
   const nextMethod = booking.indexOf('\n            showTimeWarning()', updateDateTime);
   const block = booking.slice(updateDateTime, nextMethod);

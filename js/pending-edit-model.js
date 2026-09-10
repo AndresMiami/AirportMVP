@@ -99,14 +99,22 @@
     const label = normText(routeDraft.address.label);
     if (!label) return null;
     const coords = routeDraft.address.coordinates;
+    // The airport-side label is the HOST's display text when the editor
+    // supplies one (routeDraft.airportLabel: seeded from the stored
+    // projection, replaced by the host's airport name only on an airport
+    // tap), never a label re-synthesized from the code. The code is the
+    // fallback for a draft that carries no display label.
+    const airportLabel = nonEmptyString(normText(routeDraft.airportLabel))
+      ? routeDraft.airportLabel
+      : routeDraft.airport;
     return {
       kind: 'airport_transfer_v1',
       authority: 'canonical',
       bookingMode: mode,
       airportCode: routeDraft.airport,
       canonicalPlaceId: routeDraft.address.placeId,
-      pickupLabel: mode === 'pickup' ? routeDraft.airport : label,
-      dropoffLabel: mode === 'pickup' ? label : routeDraft.airport,
+      pickupLabel: mode === 'pickup' ? airportLabel : label,
+      dropoffLabel: mode === 'pickup' ? label : airportLabel,
       addressCoordinates: coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)
         ? { lat: coords.lat, lng: coords.lng }
         : null,
@@ -120,7 +128,19 @@
     kind: 'airport_transfer_v1',
 
     projectRoute(route) {
-      const airport = { label: route.airportCode, placeId: null, attributions: [] };
+      // The airport side projects the STORED label byte for byte (what
+      // create persisted, e.g. "Miami International"): the card writes this
+      // projection back on every save, so a time-only edit must round-trip
+      // the stored text exactly. Synthesizing the label from the code here
+      // silently rewrote pickup/dropoff_location on unchanged routes (Codex
+      // seq:234 #2). The code is only the fallback for a tuple whose
+      // airport side carries no label.
+      const storedAirportLabel = route.bookingMode === 'pickup' ? route.pickupLabel : route.dropoffLabel;
+      const airport = {
+        label: nonEmptyString(storedAirportLabel) ? storedAirportLabel : route.airportCode,
+        placeId: null,
+        attributions: []
+      };
       const address = {
         label: route.bookingMode === 'pickup' ? route.dropoffLabel : route.pickupLabel,
         placeId: route.canonicalPlaceId,

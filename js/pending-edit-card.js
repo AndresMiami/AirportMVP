@@ -1,4 +1,5 @@
-// PR-B — the Manage Ride / Edit Ride REVIEW CARD (plan v8.6 §3C, §3E).
+// PR-B — the Manage Ride REVIEW CARD (plan v8.6 §3C, §3E); the passenger's
+// one stable destination from Pending through Arrived (editing while pending).
 //
 // One screen, one place, and it is the review. The snapshot the server hands
 // back through the hydration GET becomes the draft; the draft is the ONLY
@@ -204,6 +205,40 @@
       return (snapshot.vehicles || []).find((v) => v.key === key) || null;
     }
 
+    // A quote response is complete for THIS edit when it prices exactly the
+    // vehicles the hydrated snapshot exposes. Hydration permits any nonempty
+    // canonical subset of the rate card (update-pending-booking.js
+    // projectVehicles) and quote-ride prices exactly the configured keys, so
+    // the expected key set is the DTO's own — never create's fixed three
+    // (Codex seq:234 #3). Structure and per-vehicle rules mirror the create
+    // validator so the two surfaces refuse the same broken shapes.
+    function editQuoteIsComplete(quote) {
+      // The intent echo is handed to the ADAPTER (adoptCanonicalPlaceId);
+      // this generic card requires only that it exists as an object.
+      if (!quote || typeof quote !== 'object' ||
+        !quote.intent || typeof quote.intent !== 'object' || Array.isArray(quote.intent) ||
+        !quote.route || typeof quote.route !== 'object' ||
+        !Number.isSafeInteger(quote.route.milesTenths) || quote.route.milesTenths < 0 ||
+        !Number.isSafeInteger(quote.route.minutes) || quote.route.minutes < 0 ||
+        typeof quote.pricingVersion !== 'string' || !quote.pricingVersion ||
+        !quote.vehicles || typeof quote.vehicles !== 'object' || Array.isArray(quote.vehicles)) return false;
+      const expected = ((snapshot && snapshot.vehicles) || []).map((v) => v.key).sort();
+      const actual = Object.keys(quote.vehicles).sort();
+      if (expected.length === 0 || actual.length !== expected.length ||
+        actual.some((key, i) => key !== expected[i])) return false;
+      let vehiclesOk = 0;
+      for (const key of actual) {
+        const v = quote.vehicles[key];
+        if (!v || typeof v !== 'object' || typeof v.ok !== 'boolean') return false;
+        if (!v.ok) continue;
+        vehiclesOk++;
+        if (typeof v.token !== 'string' || !v.token ||
+          !Number.isSafeInteger(v.finalCents) || v.finalCents < 0 ||
+          !Number.isFinite(Date.parse(v.expiresAt || ''))) return false;
+      }
+      return quote.vehiclesOk === vehiclesOk && quote.bookable === (vehiclesOk > 0);
+    }
+
     // ---- paid surface ------------------------------------------------------
     // The ONE predicate that permits a paid quote from this surface.
     function quoteSurfaceActive() {
@@ -290,7 +325,7 @@
         }
 
         const quote = payload && payload.quote;
-        if (!app.serverQuoteIsComplete(quote)) {
+        if (!editQuoteIsComplete(quote)) {
           quoteState = 'error';
           quoteError = { retryable: false, code: 'incomplete' };
           render();
@@ -424,6 +459,7 @@
       ui.routeText = el(doc, 'div', 'pe-line-text');
       ui.routeChange = el(doc, 'button', 'pe-change', 'Change');
       ui.routeChange.type = 'button';
+      ui.routeChange.setAttribute('aria-label', 'Change route');
       ui.routeChange.addEventListener('click', openWhere);
       ui.routeLine.appendChild(ui.routeText);
       ui.routeLine.appendChild(ui.routeChange);
@@ -466,6 +502,7 @@
       ui.vehicleLine.appendChild(ui.vehicleToggle);
       ui.vehicleOptions = el(doc, 'div', 'pe-vehicle-options');
       ui.vehicleOptions.setAttribute('role', 'radiogroup');
+      ui.vehicleOptions.setAttribute('aria-label', 'Vehicle');
       mount.appendChild(ui.vehicleLine);
       mount.appendChild(ui.vehicleOptions);
 
@@ -474,6 +511,7 @@
       ui.paxText = el(doc, 'div', 'pe-line-text');
       ui.paxEdit = el(doc, 'button', 'pe-change', 'Edit');
       ui.paxEdit.type = 'button';
+      ui.paxEdit.setAttribute('aria-label', 'Edit passenger count');
       ui.paxStepper = el(doc, 'div', 'pe-stepper');
       ui.paxMinus = el(doc, 'button', 'pe-step', '−');
       ui.paxMinus.type = 'button';
@@ -499,6 +537,7 @@
       ui.travelerText = el(doc, 'div', 'pe-line-text');
       ui.travelerEdit = el(doc, 'button', 'pe-change', 'Edit');
       ui.travelerEdit.type = 'button';
+      ui.travelerEdit.setAttribute('aria-label', 'Edit traveler');
       ui.travelerEdit.addEventListener('click', () => { if (!chainBusy()) openTravelerSheet('edit'); });
       ui.travelerLine.appendChild(ui.travelerText);
       ui.travelerLine.appendChild(ui.travelerEdit);
@@ -675,9 +714,11 @@
     // ---- traveler sheet (edit-scoped; never the create singleton) --------
     let sheet = null;
     let sheetDone = null;   // the active sheet's continuation, settled exactly once
+    let sheetReturnFocus = null;   // the control that opened the sheet; focus goes back to it
     function openTravelerSheet(mode, onDone) {
       if (sheet) closeSheet(true);
       sheetDone = typeof onDone === 'function' ? onDone : null;
+      sheetReturnFocus = ui ? (mode === 'confirm' ? ui.save : ui.travelerEdit) : null;
       onDone = (ok) => { const f = sheetDone; sheetDone = null; if (f) f(ok); };
       const account = accountIdentity() || {};
       const accountEmail = normText(account.email);
@@ -691,6 +732,8 @@
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
       const title = el(doc, 'h3', 'pe-sheet-title', mode === 'confirm' ? 'Confirm the traveler' : 'Who is traveling?');
+      title.id = 'peSheetTitle';
+      panel.setAttribute('aria-labelledby', 'peSheetTitle');
       panel.appendChild(title);
 
       const selfBtn = el(doc, 'button', 'pe-sheet-option', 'Travel myself');
@@ -733,8 +776,20 @@
       cancel.type = 'button';
       panel.appendChild(cancel);
       overlay.appendChild(panel);
+      // Minimum complete dialog behaviour: Escape leaves exactly like Back
+      // (nothing changes, the continuation settles as not-confirmed) and focus
+      // enters the first usable control; closeSheet returns it to the opener.
+      panel.addEventListener('keydown', (e) => {
+        if (!e || e.key !== 'Escape') return;
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        closeSheet();
+        render();
+        if (onDone) onDone(false);
+      });
       doc.body.appendChild(overlay);
-      sheet = { overlay, nameIn, phoneIn, emailIn, emailReason, guestBtn };
+      sheet = { overlay, panel, nameIn, phoneIn, emailIn, emailReason, guestBtn, selfBtn };
+      const first = canSelf ? selfBtn : nameIn;
+      if (first && typeof first.focus === 'function') first.focus();
 
       const finish = (next) => {
         closeSheet();
@@ -750,10 +805,23 @@
 
       selfBtn.addEventListener('click', () => {
         if (!canSelf) return;
-        finish({
+        const next = {
           traveler: { name: normText(account.name), phone: normText(account.phone), email: accountEmail },
           booker: null   // self → the booker pair is CLEARED (the builder handles the wire rule)
-        });
+        };
+        // Confirming an UNCHANGED self selection records the value-bound key
+        // and lets Save continue — the same outcome as submitting the
+        // prefilled form. Routing this tap through finish() cleared the key
+        // and ended the save chain silently (Codex seq:234 #1).
+        if (mode === 'confirm' &&
+            model.travelerKey(next.traveler, next.booker) === model.travelerKey(draft.traveler, draft.booker)) {
+          travelerConfirmedKey = model.travelerKey(draft.traveler, draft.booker);
+          closeSheet();
+          render();
+          if (onDone) onDone(true);
+          return;
+        }
+        finish(next);
       });
       form.addEventListener('submit', (e) => {
         if (e && typeof e.preventDefault === 'function') e.preventDefault();
@@ -790,7 +858,15 @@
     // must never leave the dialog on screen or a Save await hanging.
     function closeSheet(cancelled) {
       if (sheet && sheet.overlay && sheet.overlay.parentNode) sheet.overlay.parentNode.removeChild(sheet.overlay);
+      const wasOpen = !!sheet;
       sheet = null;
+      // Focus returns to the opener on a passenger-driven close (Back, Escape,
+      // a choice); an external teardown (handoff, Discard, rehydration) is
+      // closing the whole card and juggles no focus.
+      if (wasOpen && !cancelled && mount && sheetReturnFocus && typeof sheetReturnFocus.focus === 'function') {
+        sheetReturnFocus.focus();
+      }
+      sheetReturnFocus = null;
       if (cancelled && sheetDone) { const f = sheetDone; sheetDone = null; f(false); }
     }
 
@@ -1051,6 +1127,12 @@
       if (response.status === 428 && result && result.reload === true) { app.reloadOutdated(); return; }
 
       if (result && result.requote === true) {
+        // The writer has REFUSED this token: whatever the local TTL says, the
+        // held quote is dead from this instant. Expire it BEFORE the refresh,
+        // so a failed refresh can never leave Save reading "Save changes" over
+        // a token the server already rejected — the next tap refreshes first
+        // and posts nothing while the refresh keeps failing (Codex seq:234 #4).
+        if (held) held.expiresAt = 0;
         if (!resubmitUsedThisTap && !refreshUsedThisTap) {
           resubmitUsedThisTap = true;
           refreshUsedThisTap = true;
