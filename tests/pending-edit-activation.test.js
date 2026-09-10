@@ -126,7 +126,8 @@ async function check(name, fn) {
       '@keyframes editSheetFadeIn { from { opacity: 0; } to { opacity: 1; } }',
       'border-bottom: 1px solid #3A3A3C; background: #2C2C2E; position: sticky; top: 0; z-index: 10;',
       '.edit-sheet-content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }',
-      '.edit-sheet-panel { border-radius: 0; max-width: 100%; height: 100vh; max-height: 100vh; }'
+      '.edit-sheet-panel { max-width: 100%; height: auto; max-height: 92vh; }',
+      '.edit-sheet-content .pe-line { background: #1C1C1E;'
     ]) assert.ok(idx.includes(rule), `sheet CSS carries the modal value: ${rule.slice(0, 60)}`);
     assert.ok(idx.includes("setTimeout(() => {\n                    overlay.classList.add('active');"), 'append, then .active a tick later — the sibling modals\' open choreography');
     assert.ok(idx.includes("sheet.overlay.classList.remove('active');\n                setTimeout(() => sheet.overlay.remove(), 300);"), 'close = drop .active, remove after 300ms');
@@ -198,8 +199,8 @@ async function check(name, fn) {
     assert.match(indexMvp, /<script src="\.\/js\/pending-edit-model\.js/);
     const sw = read('service-worker.js');
     assert.ok(sw.includes("'/js/pending-edit-model.js?v=1'"));
-    assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.34'/);
-    assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v11'/);
+    assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.35'/);
+    assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v12'/);
   });
 
   console.log(`\n  ${failed ? `${failed} CHECK(S) FAILED` : `ALL ${passed} CHECKS PASS`}\n`);

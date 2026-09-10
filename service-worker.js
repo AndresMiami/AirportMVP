@@ -29,6 +29,8 @@
 // it to v7.
 // v1.3.34: Manage ride sheet — the precached booking page changed (the
 // review card now opens as a bottom sheet); runtime bumps WITH it to v11.
+// v1.3.35: review-card styling inside the sheet + "Start your journey" on
+// the booking page's start button; runtime bumps WITH it to v12.
 // The complete ladder (plan v8.6 §3D — every rung distinct, none ever
 // reused):
 //   v1.3.28 / runtime-v5   PR-T release (shipped 2026-09-09)
@@ -37,16 +39,17 @@
 //   v1.3.31 / runtime-v8   PR-B-only forward rollback — burned unused by the 34/11 release (a reserved rung must sit ABOVE the shipped pair)
 //   v1.3.32 / runtime-v9   Browser-flag rollback — burned unused by the 34/11 release
 //   v1.3.33 / runtime-v10  Emergency R1 code revert — burned unused by the 34/11 release
-//   v1.3.34 / runtime-v11  Manage ride sheet release — THIS tree
-//   v1.3.35 / runtime-v12  PR-B-only forward rollback (reserved)
-//   v1.3.36 / runtime-v13  Browser-flag rollback (SERVER_QUOTE_ENABLED false) (reserved)
-//   v1.3.37 / runtime-v14  Emergency R1 code revert (reserved)
+//   v1.3.34 / runtime-v11  Manage ride sheet release (shipped 2026-09-10, PR #96)
+//   v1.3.35 / runtime-v12  Card styling + start-button copy release — THIS tree (the 35/12 PR-B forward rollback reservation was burned unused by it)
+//   v1.3.36 / runtime-v13  PR-B-only forward rollback (reserved)
+//   v1.3.37 / runtime-v14  Browser-flag rollback (SERVER_QUOTE_ENABLED false) (reserved)
+//   v1.3.38 / runtime-v15  Emergency R1 code revert (reserved)
 // (or the next never-used pairs resolved at execution if main has moved).
-const CACHE_NAME = 'linkmia-v1.3.34';
+const CACHE_NAME = 'linkmia-v1.3.35';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v11';
+const RUNTIME_CACHE = 'linkmia-runtime-v12';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
