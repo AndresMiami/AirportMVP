@@ -684,11 +684,16 @@ the old published deploy online but freezes every subsequent production build.
     versioned URLs the page requests (`/js/pending-edit-*.js?v=1` — an
     unversioned entry never served; executed against the real worker in
     pending-edit-hydration). Bounded follow-ups in the same round: the
-    traveler dialog is named (`aria-labelledby`), focus enters its first
-    usable control, Escape leaves like Back and focus returns to the
-    opener; Change/Edit controls and the vehicle radiogroup carry
+    traveler dialog is named (`aria-labelledby`), the card behind it is
+    inert/aria-hidden, Tab/Shift+Tab cycle inside it, Escape works at
+    document level and leaves like Back, focus enters its first usable
+    control and returns to the opener once that control is enabled again
+    (deferred past the claimed save chain — a disabled Save cannot take
+    focus); Change/Edit controls and the vehicle radiogroup carry
     contextual names; the lifecycle notices name the WhatsApp message
-    button by what it is (it renders ABOVE the notice — no "below");
+    button by what it is (it renders ABOVE the notice — no "below") and
+    switch to a LinkMia-line variant when the sheet has no chauffeur
+    contact to offer (hidden WhatsApp button);
     docs/BROWSER-FLAG-ACTIVATION.md records 019 as installed; the retired
     booking-form edit lane is pinned as RETIRED only (its deletion is the
     recorded cleanup under Known gaps). The three-vehicle CREATE validator
