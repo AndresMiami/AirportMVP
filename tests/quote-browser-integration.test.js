@@ -401,7 +401,7 @@ console.log('\nPR 3C-2B2 — server quote browser integration\n');
 // ============ the rollout flag ============
 check('STATIC: the committed candidate default is ON — server quoting ONCE this release deploys', () => {
   assert.ok(/const SERVER_QUOTE_ENABLED = true;/.test(appBlock),
-    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + SW v1.3.37 + runtime v14 — the plan v8.6 §3D browser-flag rung; the pairs between belong to PR-T and PR-B and are burned once shipped)');
+    'the committed candidate must carry SERVER_QUOTE_ENABLED = true (forward rollback = false + the next unused cache pair, nothing pre-assigned; the pairs between belong to PR-T and PR-B and are burned once shipped)');
 });
 
 check('DISABLED: no quote request is made and pricing.js still drives the carousel', async () => {

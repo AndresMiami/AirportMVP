@@ -244,9 +244,9 @@ anything else aborts and a human must look. After a rollback, the forward
 path is 018 again, then 019 (019 accepts only a reviewed 018 pair). The sequence, each step separately
 and explicitly authorized, is `docs/R1-MIGRATION-RUNBOOK.md`'s: HOLD DARK →
 CODE FIRST (fresh cache rung, drain in-flight requests) → SQL SECOND (this
-checksum-matched artifact) → post-rollback verification. Its rung facts are
-the plan v8.6 §3D ladder: browser-flag rollback `v1.3.37`/`v14`, emergency R1
-revert `v1.3.38`/`v15`.
+checksum-matched artifact) → post-rollback verification. Its rung fact:
+any rollback takes the next unused cache pair when executed
+(service-worker.js history is the single source; nothing pre-assigned).
 
 ## Known residuals (recorded 2026-09-09, accepted for this release)
 

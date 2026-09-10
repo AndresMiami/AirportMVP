@@ -27,10 +27,12 @@ name):
 | Browser-flag rollback — burned unused by the 34/11 release | `linkmia-v1.3.32` | `linkmia-runtime-v9` |
 | Emergency R1 code revert — burned unused by the 34/11 release | `linkmia-v1.3.33` | `linkmia-runtime-v10` |
 | Manage ride sheet release (the review card opens as a bottom sheet) — shipped 2026-09-10 (PR #96) | `linkmia-v1.3.34` | `linkmia-runtime-v11` |
-| Card styling + "Start your journey" release (the 35/12 PR-B forward-rollback reservation burned unused) | `linkmia-v1.3.35` | `linkmia-runtime-v12` |
-| PR-B-only forward rollback (reserved)           | `linkmia-v1.3.36` | `linkmia-runtime-v13` |
-| Browser-flag rollback (reserved)                | `linkmia-v1.3.37` | `linkmia-runtime-v14` |
-| Emergency R1 code revert (reserved)             | `linkmia-v1.3.38` | `linkmia-runtime-v15` |
+| Card styling + "Start your journey" release — shipped 2026-09-10 (PR #97) | `linkmia-v1.3.35` | `linkmia-runtime-v12` |
+
+Nothing is assigned ahead of time any more (simplified 2026-09-10): every
+release or rollback takes the NEXT UNUSED pair when it is executed, appends
+its history line in `service-worker.js`, and the single derived check in
+`tests/pending-edit-hydration` enforces the rest.
 
 ## What the activation PR changes — and nothing else
 
@@ -135,32 +137,24 @@ name by an earlier deployment (exactly the v1.3.26 collision this release
 sidestepped). The rollback is therefore a new commit, exactly:
 
 1. `indexMVP.html`: `SERVER_QUOTE_ENABLED` true → false.
-2. `service-worker.js`: `CACHE_NAME` → `'linkmia-v1.3.37'` (the reserved
-   browser-flag rung; v1.3.28–v1.3.35 belong to PR-T, PR-B, the Manage ride
-   sheet and the card styling per plan v8.6 §3D, and every reserved rung sits
-   above the shipped pair).
-3. `service-worker.js`: `RUNTIME_CACHE` → `'linkmia-runtime-v14'`.
-4. Test updates mirroring the same sites this PR touched: in the
-   ship-state check, flip the REGEX EXPECTATION back to false AND rewrite
-   the check TITLE and assert MESSAGE to say the default ships false
-   (rolled back) — a passing check whose title still announces "the
-   activation" is a lie the next reader inherits. That regex literal
-   appears exactly once; do NOT touch the quoted replacement strings
-   inside makeContext, which must remain the two-way true/false pair.
-   Then EVERY cache pin — PR-T widened the set beyond the original four:
-   the static pins in `tests/quote-ride`, `google-policy-readiness` and
-   `maps-direct-loader`, the runtime pin in `quote-ride`, the rung check in
-   `tests/pending-edit-hydration` (`v1.3.35` / `runtime-v12` today), and that
-   suite's burned-rung INVENTORY assertions, which pin this document's
-   rollback-rung table row and rollback steps, the R1 runbook steps, the
-   CLAUDE.md ladder, the flag-site comment, the `:399` message and the SW
-   ladder comment (once the rollback ships, that table row stops being
-   "reserved" and the inventory assertions move with it). Run the repo-wide
-   burned-rung pin and let it list every site. The
-   two-way harness normalization itself needs NO change — that is why it
-   exists, and the ROLLBACK/DISABLED checks (legacy fare computed, posted,
-   re-priced on route change, and submitted) keep the flag-off path
-   genuinely proven either way.
+2. `service-worker.js`: `CACHE_NAME` → the next unused version (one above the
+   current constant) and `RUNTIME_CACHE` → the next unused runtime number, in
+   the same edit; append the pair's history line in that file. Nothing is
+   assigned ahead of time: the derived check in `tests/pending-edit-hydration`
+   refuses any number above the current pair anywhere in the repo and any
+   bump without its history line.
+3. (folded into step 2 — both constants move together.)
+4. Test updates: in the ship-state check, flip the REGEX EXPECTATION back to
+   false AND rewrite the check TITLE and assert MESSAGE to say the default
+   ships false (rolled back) — a passing check whose title still announces
+   "the activation" is a lie the next reader inherits. That regex literal
+   appears exactly once; do NOT touch the quoted replacement strings inside
+   makeContext, which must remain the two-way true/false pair. The cache
+   pins are generic (no literal numbers), so nothing else moves. The two-way
+   harness normalization itself needs NO change — that is why it exists, and
+   the ROLLBACK/DISABLED checks (legacy fare computed, posted, re-priced on
+   route change, and submitted) keep the flag-off path genuinely proven
+   either way.
 
 THE ROLLBACK IS NOT INSTANT for everyone, in two ways to expect and not
 treat as an incident:

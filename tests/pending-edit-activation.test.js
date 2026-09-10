@@ -199,8 +199,8 @@ async function check(name, fn) {
     assert.match(indexMvp, /<script src="\.\/js\/pending-edit-model\.js/);
     const sw = read('service-worker.js');
     assert.ok(sw.includes("'/js/pending-edit-model.js?v=1'"));
-    assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.35'/);
-    assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v12'/);
+    assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.\d+'/);
+    assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v\d+'/);   // the pair itself: pending-edit-hydration's ladder check
   });
 
   console.log(`\n  ${failed ? `${failed} CHECK(S) FAILED` : `ALL ${passed} CHECKS PASS`}\n`);
