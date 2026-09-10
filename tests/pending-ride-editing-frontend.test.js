@@ -17,12 +17,12 @@ const sw = read('service-worker.js');
 let passed = 0;
 function check(name, fn) { fn(); passed++; console.log('✓ ' + name); }
 
-check('pending action is labeled Edit ride, not Go back', () => {
-  assert.ok(trip.includes('id="backBtn">✏️ Edit ride</button>'));
+check('pending action is labeled Manage ride (the stable passenger destination), not Go back', () => {
+  assert.ok(trip.includes('id="backBtn">Manage ride</button>'));
   assert.ok(!trip.includes('id="backBtn">← Go back</button>'));
 });
 
-check('Edit ride is exposed only while status is pending', () => {
+check('the EDITABLE Manage ride entry (dataset.action=edit) is exposed only while status is pending', () => {
   assert.ok(trip.includes("const isPending = b.status === 'pending'"));
   // PR-B replaced the single hidden-toggle with the lifecycle ladder. The
   // guarantee is unchanged and now stronger: the EDIT action exists only on

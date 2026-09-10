@@ -413,7 +413,7 @@
     function buildDom() {
       mount = el(doc, 'section', 'pending-edit-card');
       mount.id = 'pendingEditCard';
-      mount.setAttribute('aria-label', 'Edit ride');
+      mount.setAttribute('aria-label', 'Manage ride');
 
       ui = {};
       ui.title = el(doc, 'h2', 'pe-title');
@@ -1113,7 +1113,7 @@
       const a = adapter();
       const cmp = comparison();
 
-      ui.title.textContent = `Edit ride ${ctx.tripCode || ''}`.trim();
+      ui.title.textContent = `Manage ride ${ctx.tripCode || ''}`.trim();
 
       // route — the adapter's projection only. A route with no quotable
       // intent (every legacy row) is shown "as booked" until a fresh

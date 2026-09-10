@@ -497,6 +497,30 @@ function check(name, fn) {
     assert.strictEqual(assignedDelay, 60000, 'polling cadence reads the RAW status (unknown → default 60s)');
   });
 
+  // PR-B naming (Andres 2026-09-10; Codex seq:231/232): the destination is
+  // "Manage ride" from Pending through Arrived; only a ride in progress reads
+  // "Coordinate with your chauffeur". The INTERNAL dispatch (dataset.action +
+  // dataset.phase) keeps every status-bounded behaviour. Executed against
+  // the real trip sheet, one status per harness.
+  const labelCases = [
+    ['pending', 'Manage ride', 'edit'],
+    ['confirmed', 'Manage ride', 'manage'],
+    ['on_the_way', 'Manage ride', 'coordinate'],
+    ['arrived', 'Manage ride', 'coordinate'],
+    ['in_progress', 'Coordinate with your chauffeur', 'coordinate'],
+  ];
+  for (const [status, label, action] of labelCases) {
+    const row = { ...pendingBooking, status, pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() };
+    const sheet = createHarness([response(200, { booking: row, driver })]);
+    await sheet.settle();
+    check(`lifecycle destination — ${status}: "${label}", internal action ${action}, phase ${status}`, () => {
+      assert.strictEqual(sheet.element('backBtn').textContent, label);
+      assert.strictEqual(sheet.element('backBtn').dataset.action, action);
+      assert.strictEqual(sheet.element('backBtn').dataset.phase, status);
+      assert.ok(!sheet.element('backBtn').classList.contains('hidden'), 'the destination is offered');
+    });
+  }
+
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {
   console.error('\nFAIL:', error.stack || error.message);

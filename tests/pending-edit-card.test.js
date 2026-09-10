@@ -9,6 +9,7 @@
 // an Escalade. This suite runs the REAL card module with injected fetch,
 // session, timers and a fake DOM, and asserts the bytes that would be POSTed.
 
+const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
@@ -513,6 +514,30 @@ async function check(name, fn) {
     assert.strictEqual(h.calls.quotes.length, 2, 'the initial quote + one quiet refresh');
     assert.strictEqual(h.calls.posts.length, 2, 'one auto-resubmit');
     assert.ok(h.calls.editSaved, 'the resubmit succeeded');
+  });
+
+  await check('requote from the writer, quiet re-quote answers 502: ONE POST, no auto-resubmit, the card stays open with its CAS and the draft; the card never touches browser storage', async () => {
+    const h = harness({ script: [
+      { status: 200, body: quoteResponse() },
+      { status: 502, body: { error: 'upstream' } }
+    ] });
+    h.app._postScript = [{ status: 409, body: { error: 'quote_expired', requote: true } }];
+    h.ui.dateInput.value = '2026-12-24'; h.ui.timeInput.value = '19:15';
+    h.ui.timeInput.dispatch('change'); await h.flush();
+    h.ui.save.click(); await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 2, 'the initial quote + ONE quiet refresh');
+    assert.strictEqual(h.calls.posts.length, 1, 'a failed re-quote buys no resubmit');
+    assert.strictEqual(h.calls.posts[0].url, '/api/update-pending-booking');
+    assert.strictEqual(h.calls.posts[0].body.expectedDetailsVersion, guestEscaladeDto().detailsVersion, 'the captured CAS is what was sent');
+    assert.strictEqual(h.calls.editSaved, null, 'nothing was saved');
+    assert.strictEqual(h.card.isOpen(), true, 'the edit session stays open');
+    assert.strictEqual(h.card._draft().pickupAt, '2026-12-25T00:15:00.000Z', 'the draft is preserved');
+    assert.strictEqual(h.ui.status.hidden, false, 'the failed refresh is reported on the status line');
+    assert.ok(h.ui.status.textContent.startsWith(COPY.quoteFailed), 'typed copy, never raw server text');
+    assert.ok(h.ui.status.children.some((c) => c.tagName === 'BUTTON' && c.textContent === 'Try again'), 'an upstream failure stays retryable');
+    assert.strictEqual(h.ui.reason.textContent, '', 'no sticky reason is invented for a transient failure');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'pending-edit-card.js'), 'utf8');
+    assert.ok(!src.includes('localStorage') && !src.includes('sessionStorage'), 'the existing ride\'s trip_ record survives by construction');
   });
 
   await check('expired-but-complete: Save reads "Refresh and Save"; a changed total STOPS for review', async () => {

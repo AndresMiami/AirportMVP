@@ -108,10 +108,18 @@ async function check(name, fn) {
 
   console.log('\nPR-B — SOURCE: the trip-sheet lifecycle ladder\n');
 
-  await check('SOURCE: the label follows the passenger job at each status', async () => {
-    assert.match(trip, /lifecycleBtn\.textContent = '✏️ Edit ride';/);
-    assert.match(trip, /lifecycleBtn\.textContent = 'Manage ride';/);
-    assert.match(trip, /lifecycleBtn\.textContent = 'Coordinate with your chauffeur';/);
+  await check('SOURCE: the passenger destination is STABLE — "Manage ride" from Pending through Arrived; only a ride in progress reads Coordinate', async () => {
+    assert.strictEqual((trip.match(/lifecycleBtn\.textContent = 'Manage ride';/g) || []).length, 3, 'pending, confirmed, on_the_way/arrived branches');
+    assert.strictEqual((trip.match(/lifecycleBtn\.textContent = 'Coordinate with your chauffeur';/g) || []).length, 1, 'in_progress only');
+    assert.ok(!trip.includes("lifecycleBtn.textContent = '✏️ Edit ride'"), 'the destination is never renamed to Edit ride');
+    assert.ok(trip.includes('id="backBtn">Manage ride</button>'), 'the static markup carries the stable name too');
+    // the contextual CTA lives INSIDE Manage ride, keyed by phase
+    for (const k of ['confirmed', 'on_the_way', 'arrived', 'in_progress']) assert.match(trip, new RegExp(`LIFECYCLE_NOTICES = Object\\.freeze\\(\\{[\\s\\S]*?${k}:`));
+    assert.match(trip, /el\.textContent = LIFECYCLE_NOTICES\[phase\] \|\| LIFECYCLE_NOTICES\.confirmed;/);
+    // and the editable card names the same destination
+    const card = fs.readFileSync(path.join(repoRoot, 'js/pending-edit-card.js'), 'utf8');
+    assert.ok(card.includes("mount.setAttribute('aria-label', 'Manage ride');") && card.includes('`Manage ride ${ctx.tripCode || \'\'}`'), 'card ARIA label and title say Manage ride');
+    assert.ok(!card.includes("'Edit ride'") && !card.includes('`Edit ride'), 'the card never says Edit ride');
   });
 
   await check('SOURCE: only PENDING gets the editor', async () => {
@@ -135,25 +143,11 @@ async function check(name, fn) {
       'no time gate may sit in the lifecycle ladder');
   });
 
-  await check('REPO-WIDE: no file names a burned or reassigned rung as the NEXT rollback (plan v8.6 §3D)', async () => {
-    // v1.3.28/v5 and v1.3.29/v6 now belong to PR-T. Any line that names them
-    // must be the ladder INVENTORY (it says so with "PR-T"); a rollback
-    // instruction pointing at them is the stale instruction that must never
-    // return. The flag-site comment must point at the reserved 32/9 rung.
-    const { execSync } = require('child_process');
-    const files = execSync('git ls-files -co --exclude-standard', { cwd: repoRoot, encoding: 'utf8' })
-      .split('\n').filter((f) => /\.(js|html|md|yml|toml)$/.test(f) && !f.startsWith('node_modules/'));
-    const stale = [];
-    for (const f of files) {
-      const text = fs.readFileSync(path.join(repoRoot, f), 'utf8').split('\n');
-      text.forEach((line, i) => {
-        if (/1\.3\.2[89]\b|runtime[- ]v[56]\b/.test(line) && !/PR-T/.test(line)) stale.push(`${f}:${i + 1}`);
-      });
-    }
-    assert.deepStrictEqual(stale, [], 'stale rung references: ' + stale.join(', '));
-    assert.match(indexMvp, /bump CACHE_NAME to v1\.3\.32 AND[\s\S]{0,40}?RUNTIME_CACHE to v9/,
-      'the flag-site rollback instruction names the reserved browser-flag rung');
-  });
+  // The repo-wide burned-rung rule (no file may name a rung at or below the
+  // shipped pair as next/reserved/rollback; inventory sites pinned) lives in
+  // tests/pending-edit-hydration.test.js since PR-T; the cruder scan this
+  // suite carried while parked ("every 28/29 mention must say PR-T") is
+  // superseded and removed.
 
   await check('SOURCE: the model is loaded and both cache rungs moved', async () => {
     assert.match(indexMvp, /<script src="\.\/js\/pending-edit-model\.js/);
