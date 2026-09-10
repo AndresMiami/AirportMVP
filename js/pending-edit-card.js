@@ -469,8 +469,10 @@
       ui.routeLine.appendChild(ui.routeText);
       ui.routeLine.appendChild(ui.routeChange);
       ui.routeAttribution = el(doc, 'div', 'pe-attribution-slot');
+      // The Google credit belongs to the route it describes: inside the row,
+      // on its own (wrapped) line — still always visible.
+      ui.routeLine.appendChild(ui.routeAttribution);
       mount.appendChild(ui.routeLine);
-      mount.appendChild(ui.routeAttribution);
 
       // 2. Time (America/New_York controller)
       ui.timeLine = el(doc, 'div', 'pe-line pe-time');
@@ -500,6 +502,11 @@
       // 3. Vehicle (collapsed)
       ui.vehicleLine = el(doc, 'div', 'pe-line pe-vehicle');
       ui.vehicleText = el(doc, 'div', 'pe-line-text');
+      // name + price as two lines (the price is what the passenger scans for)
+      ui.vehicleName = el(doc, 'div', 'pe-vehicle-name');
+      ui.vehiclePrice = el(doc, 'div', 'pe-vehicle-price');
+      ui.vehicleText.appendChild(ui.vehicleName);
+      ui.vehicleText.appendChild(ui.vehiclePrice);
       ui.vehicleToggle = el(doc, 'button', 'pe-change', 'Change vehicle');
       ui.vehicleToggle.type = 'button';
       ui.vehicleToggle.addEventListener('click', toggleVehicles);
@@ -1291,10 +1298,13 @@
       const label = current ? current.name : draft.vehicle.name;
       const changedVehicle = cmp.changed.includes('vehicle');
       const sel = selectedVehicleEntry();
+      ui.vehicleName.textContent = label;
       if (!cmp.changed.length || !sel) {
-        ui.vehicleText.textContent = `${label} · Current ride ${money(snapshot.bookedPriceCents)}`;
+        ui.vehiclePrice.textContent = `Current ride ${money(snapshot.bookedPriceCents)}`;
+        ui.vehiclePrice.className = 'pe-vehicle-price';
       } else {
-        ui.vehicleText.textContent = `${label} · Updated total ${money(sel.finalCents)}`;
+        ui.vehiclePrice.textContent = `Updated total ${money(sel.finalCents)}`;
+        ui.vehiclePrice.className = 'pe-vehicle-price pe-updated';
       }
       ui.vehicleToggle.textContent = vehiclesOpen ? 'Hide options' : 'Change vehicle';
       renderVehicleOptions(cmp);

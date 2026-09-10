@@ -802,9 +802,43 @@
         .edit-sheet-content .pe-title { display: none; }
         .edit-sheet-loading { padding: 24px 20px; color: #C7C7CC; font-size: 15px; }
         @media (max-width: 480px) {
-            .edit-sheet-panel { border-radius: 0; max-width: 100%; height: 100vh; max-height: 100vh; }
-            .edit-sheet-header { padding: 16px 20px; border-radius: 0; }
+            .edit-sheet-panel { max-width: 100%; height: auto; max-height: 92vh; }
+            .edit-sheet-header { padding: 16px 20px; }
         }
+        /* Inside the sheet the panel is already #2C2C2E, so the rows take the
+           page background (#1C1C1E) to read as grouped fields; secondary
+           actions are plain brand-orange text (the gradient stays Save's);
+           the pickup inputs get their own line; the price is its own bold
+           line (green once a change repriced it); the changes box carries a
+           green bar; the sheet hugs its content. Theme tokens unchanged. */
+        .edit-sheet-content .pending-edit-card { padding: 8px 20px calc(24px + env(safe-area-inset-bottom, 0px)); }
+        .edit-sheet-content .pe-line { background: #1C1C1E; border: 1px solid rgba(255,255,255,0.06); margin: 10px 0;
+            padding: 14px 16px; font-size: 15px; flex-wrap: wrap; }
+        .edit-sheet-content .pe-line-text { line-height: 1.45; }
+        .edit-sheet-content .pe-readonly { color: #C7C7CC; font-size: 14px; }
+        .edit-sheet-content .pe-change { border: none; padding: 6px 2px; font-size: 14px; }
+        .edit-sheet-content .pe-change:hover { text-decoration: underline; }
+        .edit-sheet-content .pe-route .pe-attribution-slot { flex: 1 1 100%; padding: 0; }
+        .edit-sheet-content .pe-attribution { padding: 6px 0 0; font-size: 11px; color: #C7C7CC; text-align: right; }
+        .edit-sheet-content .pe-time .pe-line-text { flex: 1 1 100%; }
+        .edit-sheet-content .pe-date, .edit-sheet-content .pe-time-input { flex: 1 1 140px; min-width: 0; height: 44px;
+            border-radius: 10px; padding: 0 10px; font-size: 15px; box-sizing: border-box; }
+        .edit-sheet-content .pe-time-choice { padding: 0; }
+        .edit-sheet-content .pe-vehicle .pe-line-text { display: flex; flex-direction: column; gap: 2px; }
+        .edit-sheet-content .pe-vehicle-price { font-weight: 700; font-size: 16px; }
+        .edit-sheet-content .pe-vehicle-price.pe-updated { color: #32D74B; }
+        .edit-sheet-content .pe-vehicle-options { padding: 0 0 6px; }
+        .edit-sheet-content .pe-vehicle-option { background: #1C1C1E; }
+        .edit-sheet-content .pe-stepper { padding: 4px 16px 10px; }
+        .edit-sheet-content .pe-step, .edit-sheet-content .pe-choice { background: #1C1C1E; }
+        .edit-sheet-content .pe-changes { margin: 10px 0 0; padding: 10px 14px; border-left: 3px solid #32D74B;
+            background: rgba(50, 215, 75, 0.08); border-radius: 10px; }
+        .edit-sheet-content .pe-changes:empty { display: none; }
+        .edit-sheet-content .pe-save { margin-top: 16px; }
+        .edit-sheet-content .pe-save:disabled { color: #fff; }
+        .edit-sheet-content .pe-reason { text-align: center; padding: 10px 0 0; }
+        .edit-sheet-content .pe-actions { padding: 16px 0 0; text-align: center; }
+        .edit-sheet-content .pe-secondary { text-decoration: none; padding: 12px; font-size: 14px; width: 100%; }
         .pe-sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 10000;
             display: flex; justify-content: center; align-items: flex-end; }
         .pe-sheet-panel { width: 100%; max-width: 576px; background: #2C2C2E; border-radius: 20px 20px 0 0;
