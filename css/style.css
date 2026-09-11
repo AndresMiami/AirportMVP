@@ -1924,3 +1924,138 @@ select:focus-visible {
         -webkit-overflow-scrolling: touch;
     }
 }
+
+/* =====================================================================
+   Unified booking card (2026-09-11).
+   When the booking is open, the card IS the screen: the header rows, then
+   ONE stage region that every stage fills exactly, with that stage's own
+   action row pinned to the region's bottom — so Continue, Continue and
+   Book land in the same spot on every stage and the page never scrolls.
+   Vehicle fits by letting its map take whatever height is left.
+   Geometry only: every stage keeps its own nodes and handlers. The legal
+   and sign-out pills sit in a slim strip the card reserves at its bottom.
+   ===================================================================== */
+:root {
+    --page-pad: var(--space-lg);
+    --card-footer-h: 56px;
+}
+@media (max-width: 480px) {
+    :root { --page-pad: var(--space-md); }
+}
+
+.app-container {
+    min-height: 100vh;
+    min-height: 100dvh;          /* the visible screen, iOS toolbars included */
+}
+
+.booking-container.active {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 2 * var(--page-pad));
+    height: calc(100dvh - 2 * var(--page-pad));
+    padding-bottom: var(--card-footer-h);
+}
+
+.booking-container.active > .progress-bar,
+.booking-container.active > .summary-bar { flex: none; }
+
+/* the one stage region: every panel stretches to exactly its height */
+.booking-container.active > .panels-wrapper {
+    flex: 1 1 0;
+    min-height: 0;
+    align-items: stretch;
+}
+
+.booking-container.active .panel {
+    min-height: 0;
+    height: auto;
+    background: transparent;      /* one surface: the card's */
+    box-shadow: none;
+}
+
+.booking-container.active .panel-content { min-height: 0; }
+
+.booking-container.active .schedule-section {
+    flex: none;
+    background: transparent;
+}
+
+/* Vehicle fits the region: the map absorbs the leftover height; the
+   content under it keeps its natural size with Book at the very bottom.
+   One 10px rhythm replaces the stacked gaps + row margins, and a fixed
+   content padding makes Book and the calendar line up with the other
+   stages' action edges. */
+.booking-container.active #vehiclePanel {
+    min-height: 0;
+    background: transparent;
+    overflow-y: auto;             /* scrolls only if the stack cannot fit */
+}
+
+.booking-container.active #vehiclePanel .map-section {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 120px;
+    max-height: none;
+}
+
+.booking-container.active #vehiclePanel .content-section {
+    flex: none;
+    min-height: 0;
+    gap: 10px;
+    padding: 12px 12px 0;
+    background: transparent;
+}
+
+.booking-container.active #vehiclePanel .controls-row { margin-bottom: 0; }
+.booking-container.active #vehicle-carousel-frame { margin-bottom: 0; }
+
+/* Book sits where Continue sits on the other stages; on a screen too
+   short for the whole stack it stays pinned to the panel's bottom while
+   the rows above scroll beneath it. */
+.booking-container.active #vehiclePanel .schedule-section {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    width: auto;                  /* width:100% would cancel the -12px bleed */
+    margin: 0 -12px;
+    background: transparent;
+}
+.booking-container.active #vehiclePanel .book-btn {
+    min-height: 52px;
+    padding: 8px 12px;            /* two text lines in the same 52px box as Continue */
+}
+@media (min-width: 321px) {
+    .booking-container.active #vehiclePanel .schedule-section { padding-right: 80px; }
+    .booking-container.active #vehiclePanel .calendar-button-mobile { top: 12px; right: 20px; }
+}
+@media (max-height: 600px) {
+    /* only where the rows can scroll beneath the pinned Book row */
+    .booking-container.active #vehiclePanel .schedule-section { background: #28282A; }
+}
+
+/* Short screens (iPhone SE class): a shorter carousel frame and a tighter
+   Where stack keep every stage inside the card. */
+@media (max-height: 700px) {
+    .booking-container.active #vehicle-carousel-frame { height: 180px !important; min-height: 160px; }
+    .booking-container.active #vehiclePanel .content-section { gap: 8px; }
+    .booking-container.active #vehiclePanel .map-section { min-height: 96px; }
+    .booking-container.active .mode-selector { margin-bottom: var(--space-sm); }
+    .booking-container.active #wherePanel .panel-content { padding-top: var(--space-sm); }
+    /* When's content carries an inline 20px top padding */
+    .booking-container.active #whenPanel .panel-content { padding-top: var(--space-sm) !important; }
+}
+
+/* the pills live in the card's bottom strip while the booking is open */
+body:has(.booking-container.active) .app-legal-nav {
+    left: calc(max(0px, (100vw - 576px) / 2) + var(--page-pad) + 12px);
+    bottom: calc(var(--page-pad) + 9px);
+}
+body:has(.booking-container.active) #userHeader {
+    right: calc(max(0px, (100vw - 576px) / 2) + var(--page-pad) + 12px) !important;
+    bottom: calc(var(--page-pad) + 9px) !important;
+}
+
+/* a hidden create-flow button really hides (the route editor hides
+   Continue; .continue-btn's display:flex used to beat [hidden]) */
+.continue-btn[hidden],
+.book-btn[hidden] { display: none; }
