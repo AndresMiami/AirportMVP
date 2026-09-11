@@ -189,7 +189,6 @@ button {
 }
 
 .booking-container.active {
-    display: block;
     animation: fadeIn var(--transition-slow) ease;
 }
 
@@ -390,9 +389,6 @@ button {
     display: flex;
     flex-direction: column;
     position: relative;
-    background: linear-gradient(135deg, var(--panel-bg) 0%, #28282A 100%);
-    box-shadow: var(--shadow-lg);
-    overflow: visible; /* Changed from hidden to allow autocomplete dropdown to show */
 }
 
 .panel-content {
@@ -402,24 +398,11 @@ button {
     padding-bottom: 0;
 }
 
-/* Add this right after to override for vehiclePanel specifically */
-#vehiclePanel .panel-content {
-    overflow: visible;
-}
-
 .panel h2 {
     font-size: 17px;
     font-weight: var(--font-semibold);
     margin-bottom: var(--space-md);
     color: var(--text-primary);
-}
-
-/* panel-actions removed - buttons moved to schedule-section for consistency */
-/* Legacy panel-actions styles kept for reference only */
-.panel-actions {
-    display: none; /* Deprecated - use schedule-section instead */
-    align-items: center;
-    justify-content: center;
 }
 
 /* Mode Selector */
@@ -577,6 +560,7 @@ button {
 
 /* Flow Connectors */
 .flow-connector {
+    position: relative;          /* the arrow scrolls with the Where content */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -698,11 +682,6 @@ button {
 }
 
 .route-attribution.visible { display: block; }
-
-.panel-actions .arrival-info {
-    margin-top: 0;
-    margin-bottom: var(--space-sm);
-}
 
 /* ============================================
    5. DATE & TIME COMPONENTS
@@ -1061,12 +1040,6 @@ button.back-btn:active { transform: scale(0.95); }
 /* ============================================
    7. VEHICLE SELECTION PANEL
    ============================================ */
-.map-section {
-    height: min(380px, 45vh);
-    background: linear-gradient(135deg, #E8F5E9 0%, #B8E6B8 100%);
-    position: relative;
-}
-
 /* Vehicle Panel Layout */
 #vehiclePanel .map-section {
     height: 35vh;
@@ -1123,14 +1096,6 @@ button.back-btn:active { transform: scale(0.95); }
     display: inline-flex;
     align-items: center;
     gap: 4px;
-}
-
-.content-section {
-    padding: 24px 20px;
-    background: var(--panel-bg);
-    min-height: calc(100vh - 320px);
-    display: flex;
-    flex-direction: column;
 }
 
 
@@ -1416,65 +1381,6 @@ select:focus-visible {
     -webkit-tap-highlight-color: transparent;
 }
 
-/* Bottom Navigation Bar */
-.bottom-nav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    background: var(--panel-bg);
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-around;
-    padding: var(--space-sm) 0;
-    z-index: 1000;
-    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-}
-
-.bottom-nav-item {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 11px;
-    font-weight: 500;
-    transition: all var(--transition-base);
-    cursor: pointer;
-    padding: var(--space-xs);
-}
-
-.bottom-nav-item:hover {
-    color: var(--primary);
-}
-
-.bottom-nav-item.active {
-    color: var(--primary);
-}
-
-.bottom-nav-item svg,
-.bottom-nav-item img {
-    width: 24px;
-    height: 24px;
-    opacity: 0.8;
-    transition: opacity var(--transition-base);
-}
-
-.bottom-nav-item:hover svg,
-.bottom-nav-item:hover img,
-.bottom-nav-item.active svg,
-.bottom-nav-item.active img {
-    opacity: 1;
-}
-
-.booking-container {
-    padding-bottom: 60px; /* Make room for bottom nav */
-}
 
 /* ============================================
    11. RESPONSIVE BREAKPOINTS
@@ -1669,55 +1575,12 @@ select:focus-visible {
 }
 
 @media (max-height: 700px) {
-    #vehiclePanel .map-section {
-        height: 25vh;  /* Even smaller on short screens */
-        max-height: 180px;
-    }
-
-    /* Carousel wrapper styles moved to vehicle-carousel-standalone.html */
-
-    #vehiclePanel .content-section {
-        padding: 10px;
-        gap: 10px;
-    }
-
-    /* .vehicle-info padding managed in vehicle-carousel-standalone.html */
-
-    .control-button,
-    .payment-method-mobile,
-    .promo-button-mobile {
+    .control-button {
         padding: 6px 8px;
         font-size: 12px;
         min-height: 32px;
         height: 32px;
         gap: 4px;
-    }
-
-    #vehiclePanel .panel-actions {
-        padding: 10px;
-    }
-
-    #vehiclePanel .book-btn {
-        min-height: 48px;
-    }
-
-    .calendar-button-mobile {
-        width: 48px;
-        height: 48px;
-    }
-}
-
-@media (min-height: 800px) {
-    #vehiclePanel .map-section {
-        height: 35vh;  /* Can be slightly larger on tall screens */
-        max-height: 300px;
-    }
-
-    /* Carousel wrapper styles moved to vehicle-carousel-standalone.html */
-
-    #vehiclePanel .content-section {
-        padding: 16px;
-        gap: 16px;
     }
 }
 
@@ -1756,44 +1619,16 @@ select:focus-visible {
    12. MOBILE OPTIMIZATIONS (Copilot Recommendations)
    ============================================ */
 
-/* Dynamic viewport height support for modern browsers */
-@supports (height: 100dvh) {
-    .panel {
-        min-height: 100dvh; /* Dynamic viewport height */
-    }
-    
-    #vehiclePanel {
-        min-height: 100dvh;
-    }
-}
-
-/* Fixed carousel iframe height to prevent layout shifts */
+/* the carousel frame's height lives in the unified booking card block */
 #vehicle-carousel-frame {
-    height: 210px;
-    max-height: 220px;
-    min-height: 180px;
     flex-shrink: 0;
-    margin-bottom: 16px;
     position: relative;
     z-index: 1;  /* Ensure badges render above container boundaries */
-}
-
-@media (max-width: 430px) {
-    #vehicle-carousel-frame {
-        height: 180px;
-        min-height: 160px;
-    }
 }
 
 /* ============================================
    MOBILE LAYOUT FIXES - Button Alignment & Viewport Constraints
    ============================================ */
-
-/* Button alignment fix */
-#vehiclePanel .schedule-section {
-    position: relative;
-    padding-right: 60px;
-}
 
 #vehiclePanel .book-btn {
     width: 100%;
@@ -1822,16 +1657,6 @@ select:focus-visible {
     border-color: rgba(255, 255, 255, 0.3);
 }
 
-/* Remove viewport constraints */
-@supports (height: 100dvh) {
-    .panel { 
-        min-height: auto; 
-    }
-    #vehiclePanel { 
-        min-height: auto;
-    }
-}
-
 /* Alternative: Stack buttons on very small screens */
 @media (max-width: 320px) {
     #vehiclePanel .schedule-section {
@@ -1847,45 +1672,6 @@ select:focus-visible {
     }
 }
 
-/* Ensure no layout constraints on containers */
-.app-container,
-.booking-container,
-.panels-wrapper {
-    height: auto;
-    min-height: 0;
-}
-
-/* ============================================
-   13. IPHONE PORTRAIT MODE FIX
-   ============================================ */
-
-/* iPhone portrait-specific fix for price badge cutoff */
-@media only screen and (max-width: 430px) and (orientation: portrait) {
-    
-    /* Fix overflow hierarchy for portrait mode */
-    #vehiclePanel .content-section {
-        overflow: visible !important;  /* Don't clip children */
-        min-height: 0;
-    }
-    
-    /* Ensure carousel gets enough height in portrait */
-    #vehicle-carousel-frame {
-        height: 220px !important;  /* Extra space for price badge */
-        flex-shrink: 0;
-    }
-    
-    /* Fix base content-section min-height for mobile */
-    .content-section {
-        min-height: auto !important;  /* Remove forced min-height */
-    }
-    
-    /* Ensure parent handles scrolling */
-    #vehiclePanel {
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-}
-
 /* =====================================================================
    Unified booking card (2026-09-11).
    When the booking is open, the card IS the screen: the header rows, then
@@ -1897,6 +1683,9 @@ select:focus-visible {
    and sign-out pills step aside while the booking is open (Terms, Privacy
    and Sign out live in the traveler sheet), so the actions sit at the
    card's very bottom.
+   This block is the single source of the card's geometry: the older layers
+   that used to fight it (a 60px nav padding, a portrait !important block,
+   a self-cancelling dvh pair, fixed carousel heights) were deleted.
    ===================================================================== */
 :root {
     --page-pad: var(--space-lg);
@@ -1915,7 +1704,7 @@ select:focus-visible {
     flex-direction: column;
     height: calc(100vh - 2 * var(--page-pad));
     height: calc(100dvh - 2 * var(--page-pad));
-    padding-bottom: 0;           /* the older 60px "bottom nav" room is not needed */
+    padding-bottom: 0;           /* nothing is reserved under the actions */
 }
 
 .booking-container.active > .progress-bar,
@@ -1975,10 +1764,11 @@ select:focus-visible {
    two 42px peek gutters and shows a 3:2 photo edge to edge; 20px of room
    sits around it (vehicle-carousel-standalone.html sizes the card from the
    frame's own width and height, so the two always agree). Capped for wide
-   screens, floored for the narrowest. */
+   screens and at 38% of the screen height (a landscape phone keeps its
+   map), floored for the narrowest. */
 .booking-container.active #vehicle-carousel-mount { margin: 0 -12px; }
 .booking-container.active #vehicle-carousel-frame {
-    height: clamp(150px, calc((min(100vw, 576px) - 2 * var(--page-pad) - 84px) / 1.5 + 20px), 300px) !important;
+    height: clamp(120px, min(calc((min(100vw, 576px) - 2 * var(--page-pad) - 84px) / 1.5 + 20px), 38dvh), 300px);
     min-height: 0;
     max-height: none;
     margin-bottom: 0;
@@ -2008,24 +1798,52 @@ select:focus-visible {
     .booking-container.active #vehiclePanel .schedule-section { background: #28282A; }
 }
 
-/* Short screens (iPhone SE class): a shorter carousel frame and a tighter
-   Where stack keep every stage inside the card. */
+/* When's top padding (it used to be an inline style on the element) */
+.booking-container.active #whenPanel .panel-content { padding-top: 20px; }
+
+/* Short screens (iPhone SE class): a tighter Where and When stack keep
+   every stage inside the card. */
 @media (max-height: 700px) {
     .booking-container.active #vehiclePanel .content-section { gap: 8px; }
     .booking-container.active #vehiclePanel .map-section { min-height: 96px; }
     .booking-container.active .mode-selector { margin-bottom: var(--space-sm); }
     .booking-container.active #wherePanel .panel-content { padding-top: var(--space-sm); }
-    /* When's content carries an inline 20px top padding */
-    .booking-container.active #whenPanel .panel-content { padding-top: var(--space-sm) !important; }
+    .booking-container.active #whenPanel .panel-content { padding-top: var(--space-sm); }
 }
 
 /* the pills step aside while the booking is open: Terms, Privacy and Sign
    out live at the bottom of the traveler sheet; the landing screen keeps
-   them */
+   them. The install button too: it is shown with an inline display (hence
+   !important) and would otherwise sit on Book. */
 body:has(.booking-container.active) .app-legal-nav,
-body:has(.booking-container.active) #userHeader { display: none !important; }
+body:has(.booking-container.active) #userHeader,
+body:has(.booking-container.active) #installPWA { display: none !important; }
 
 /* a hidden create-flow button really hides (the route editor hides
    Continue; .continue-btn's display:flex used to beat [hidden]) */
 .continue-btn[hidden],
-.book-btn[hidden] { display: none; }
+.book-btn[hidden],
+#vehiclePanel .book-btn[hidden] { display: none; }   /* Book's own display rule must not beat [hidden] */
+
+/* Address suggestions stay inside the card: never taller than 40% of the
+   screen (the list scrolls within itself and the Google footer stays),
+   and on phones in Arriving mode, where the address is the last step,
+   they open upward, above the field and above the keyboard. Tablets and
+   desktops keep the downward list: their airport tiles sit in one row,
+   so the field is high and the room is below it. The Manage ride route
+   editor sets the same mode button. Container-side only: autocomplete.js
+   is untouched. */
+.booking-container.active #autocompleteDropdown { max-height: min(300px, 40dvh); }
+@media (max-width: 480px), (max-height: 500px) {
+    .booking-container.active #wherePanel:has(.mode-btn[data-mode="pickup"].active) #autocompleteDropdown {
+        top: auto;
+        bottom: 100%;
+        margin-top: 0;
+        margin-bottom: var(--space-xs);
+    }
+}
+
+/* When: an empty time note (no route estimate yet) and a dismissed time
+   warning take no space */
+.booking-container.active .time-note:empty,
+.booking-container.active .time-warning:not(.visible) { display: none; }

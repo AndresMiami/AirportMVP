@@ -4,8 +4,8 @@
 // pins the rules that produce it; the rendered proof (every stage fits the
 // screen, the three actions share one spot at the card's bottom, the cars
 // fill the carousel)
-// is measured in a real browser at 390x844, 375x667, 430x932, 320x568 and
-// 1280x800 and recorded in the PR. What it guards against: a card that
+// is measured in a real browser at 390x844, 375x667, 430x932, 320x568,
+// 1280x800, 932x430, 667x375 and 768x1024 and recorded in the PR. What it guards against: a card that
 // stops being the screen, a stage region that goes back to the tallest
 // panel's height, a Vehicle stage that stops fitting, a viewport-fixed
 // action dock, or an action node leaving its own panel.
@@ -86,7 +86,7 @@ check('the three action nodes stay in their own panels — no viewport-fixed doc
 });
 
 check('the legal and sign-out pills step aside while the booking is open; Terms, Privacy and Sign out live in the traveler sheet', () => {
-  assert.match(block, /body:has\(\.booking-container\.active\) \.app-legal-nav,\s*body:has\(\.booking-container\.active\) #userHeader \{ display: none !important; \}/, 'hidden only while the card is open');
+  assert.match(block, /body:has\(\.booking-container\.active\) \.app-legal-nav,\s*body:has\(\.booking-container\.active\) #userHeader,\s*body:has\(\.booking-container\.active\) #installPWA \{ display: none !important; \}/, 'hidden only while the card is open, the install button included');
   assert.ok(html.includes('<a href="/terms">Terms</a>') && html.includes('onclick="logout()"'), 'the landing screen keeps its pills');
   const pm = fs.readFileSync(path.join(root, 'js/passenger-modal.js'), 'utf8');
   const foot = pm.slice(pm.indexOf('<div class="passenger-account-footer">'), pm.indexOf('<!-- Add Guest Modal -->'));
@@ -97,7 +97,7 @@ check('the legal and sign-out pills step aside while the booking is open; Terms,
 check('the cars fill the carousel: the frame spans the stage and takes the height its 3:2 cards need; each card is sized from the frame, the photo edge to edge', () => {
   assert.match(rule('.booking-container.active #vehicle-carousel-mount'), /margin: 0 -12px;/, 'edge to edge across the stage');
   const frame = rule('.booking-container.active #vehicle-carousel-frame');
-  assert.match(frame, /height: clamp\(150px, calc\(\(min\(100vw, 576px\) - 2 \* var\(--page-pad\) - 84px\) \/ 1\.5 \+ 20px\), 300px\) !important;/, 'the stage width sets the height (528px at desktop, measured); beats the inline 220px and the older fixed rules');
+  assert.match(frame, /height: clamp\(120px, min\(calc\(\(min\(100vw, 576px\) - 2 \* var\(--page-pad\) - 84px\) \/ 1\.5 \+ 20px\), 38dvh\), 300px\);/, 'the stage width sets the height (528px at desktop, measured), never more than 38% of the screen height');
   assert.match(frame, /max-height: none;/);
   const car = fs.readFileSync(path.join(root, 'vehicle-carousel-standalone.html'), 'utf8');
   assert.match(car, /flex: 0 0 min\(calc\(100vw - 84px\), calc\(\(100vh - 20px\) \* 1\.5\)\);/, 'the same 84px of gutters and 20px of room as the frame formula');
@@ -127,7 +127,7 @@ check('the map carries no time badges (the pickup time lives on When and the Boo
 });
 
 check('a hidden create-flow button really hides (the route editor hides Continue)', () => {
-  assert.match(block, /\.continue-btn\[hidden\],\s*\.book-btn\[hidden\] \{ display: none; \}/);
+  assert.match(block, /\.continue-btn\[hidden\],\s*\.book-btn\[hidden\],\s*#vehiclePanel \.book-btn\[hidden\] \{ display: none; \}/, "Book's own #vehiclePanel display rule cannot beat [hidden]");
 });
 
 check('Vehicle keeps ONE control row — Traveler | Payment — above the carousel; notes and promo left the Vehicle page', () => {
@@ -165,6 +165,44 @@ check('the promo sheet never shows, promises or computes a discount — any well
   assert.match(promo, /getDiscountForCode\(\) \{\s*return null;/);
   assert.match(promo, /calculateDiscountedPrice\(originalPrice\) \{\s*return originalPrice;/);
   assert.ok(html.includes('js/promotion-modal.js?v=2'), 'phones fetch the honest sheet');
+});
+
+check('one source for the card geometry: the older layers that fought the unified block are gone', () => {
+  const legacy = [
+    [/\.bottom-nav/, 'the bottom-nav block'],
+    [/padding-bottom: 60px/, 'the 60px bottom-nav room'],
+    [/@supports \(height: 100dvh\)/, 'the self-cancelling dvh pair'],
+    [/IPHONE PORTRAIT MODE FIX/, 'the portrait !important block'],
+    [/min-height: calc\(100vh - 320px\)/, 'the generic content-section height'],
+    [/Ensure no layout constraints on containers/, 'the height:auto reset'],
+    [/\.panel-actions/, 'the retired panel-actions rules'],
+    [/@media \(min-height: 800px\)/, 'the tall-screen map and content rules'],
+  ];
+  for (const [re, what] of legacy) assert.ok(!re.test(css), `${what} is gone`);
+  const frameHeights = css.split('}').filter((r) => /#vehicle-carousel-frame\s*\{/.test(r) && /(^|[^-])height:/.test(r.slice(r.indexOf('{'))));
+  assert.strictEqual(frameHeights.length, 1, 'exactly one rule sizes the carousel frame');
+  assert.ok(frameHeights[0].includes('.booking-container.active #vehicle-carousel-frame'), 'and it is the unified one');
+  assert.ok(!/!important/.test(rule('.booking-container.active #vehicle-carousel-frame')), 'without !important');
+  const loader = html.slice(html.indexOf("iframe.id = 'vehicle-carousel-frame';"), html.indexOf("iframe.setAttribute('scrolling', 'no');"));
+  assert.ok(loader.length > 0 && !/height:/.test(loader), 'the carousel loader sets no inline height');
+  assert.ok(!html.includes('<div class="panel-content" style='), 'no inline panel padding');
+  assert.match(rule('.booking-container.active #whenPanel .panel-content'), /padding-top: 20px;/, "When's top padding lives in the block");
+});
+
+check('address suggestions stay inside the card: capped at 40% of the screen, and on phones in Arriving mode they open upward above the field', () => {
+  assert.match(rule('.booking-container.active #autocompleteDropdown'), /max-height: min\(300px, 40dvh\);/);
+  assert.match(block, /@media \(max-width: 480px\), \(max-height: 500px\) \{\s*\.booking-container\.active #wherePanel:has\(\.mode-btn\[data-mode="pickup"\]\.active\) #autocompleteDropdown \{/, 'phones only (portrait or landscape): tablets and desktops keep the downward list, which has the room there');
+  const up = rule('.booking-container.active #wherePanel:has(.mode-btn[data-mode="pickup"].active) #autocompleteDropdown');
+  assert.match(up, /top: auto;/);
+  assert.match(up, /bottom: 100%;/);
+  const at = html.indexOf('updateStepOrder(isDropoff) {');
+  assert.match(html.slice(at, at + 300), /addressStep\.style\.order = isDropoff \? '1' : '3';/, 'Arriving mode puts the address step last, which is what the upward rule assumes');
+  assert.ok(html.includes("btn.classList.toggle('active', btn.dataset.mode === d.mode)") && html.includes('this.updateStepOrder(isDropoff);'), 'the Manage ride route editor sets the same mode button and order');
+  assert.match(css.slice(css.indexOf('.flow-connector {')), /^\.flow-connector \{\s*position: relative;/, 'the arrow scrolls with the Where content');
+});
+
+check('When: an empty time note and a dismissed time warning take no space', () => {
+  assert.match(block, /\.booking-container\.active \.time-note:empty,\s*\.booking-container\.active \.time-warning:not\(\.visible\) \{ display: none; \}/);
 });
 
 console.log(`\n  ALL ${passed} CHECKS PASS\n`);
