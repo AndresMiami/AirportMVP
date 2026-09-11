@@ -1737,22 +1737,27 @@ body:has(.booking-container.active) .app-legal-nav,
 body:has(.booking-container.active) #userHeader,
 body:has(.booking-container.active) #installPWA { display: none !important; }
 
-/* Moving between stages: the strip jumps to the next stage and that stage
-   rises into place with the bottom sheets' timing (the traveler sheet:
-   0.3s ease-out), so every step of the flow moves the same way. The
-   navigation is unchanged: the rise keys on the strip's existing
-   show-when / show-vehicle classes. Reduced motion turns it off. */
+/* Moving between stages tells the two steps apart. Planning your ride
+   (Where, When) rises into place with the bottom sheets' timing (the
+   traveler sheet: 0.3s ease-out); choosing your ride is the next step, so
+   the strip swipes sideways to Vehicle, as it always did. Going back to
+   When or Where rises (the page cannot tell forward from back, and the
+   navigation stays unchanged: both motions key on the strip's existing
+   show-when / show-vehicle classes). Reduced motion turns both off. */
 @keyframes stageRise {
     from { transform: translateY(48px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
 }
 .booking-container.active > .panels-wrapper:not(.show-when):not(.show-vehicle) > #wherePanel,
-.booking-container.active > .panels-wrapper.show-when > #whenPanel,
-.booking-container.active > .panels-wrapper.show-vehicle > #vehiclePanel {
+.booking-container.active > .panels-wrapper.show-when > #whenPanel {
     animation: stageRise 0.3s ease-out;
+}
+.booking-container.active > .panels-wrapper.show-vehicle {
+    transition: transform var(--transition-slower);
 }
 @media (prefers-reduced-motion: reduce) {
     .booking-container.active > .panels-wrapper > .panel { animation: none; }
+    .booking-container.active > .panels-wrapper.show-vehicle { transition: none; }
 }
 
 /* One header: the progress dots and the Back / route / Edit row share the
