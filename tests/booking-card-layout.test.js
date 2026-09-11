@@ -64,8 +64,8 @@ check('Book shares Continue\'s box and edges, and stays pinned to the panel bott
   assert.match(row, /position: sticky;/);
   assert.match(row, /bottom: 0;/);
   assert.match(row, /width: auto;/, 'width:100% would cancel the bleed');
-  assert.match(row, /margin: 0 -12px;/, 'bleeds out of the 12px content padding to the stage edges');
-  assert.match(rule('.booking-container.active #vehiclePanel .content-section'), /padding: 12px 12px 0;/, 'the bleed matches the content padding');
+  assert.match(row, /margin: 0 calc\(-1 \* var\(--card-pad-x\)\);/, 'bleeds out of the content padding to the stage edges');
+  assert.match(rule('.booking-container.active #vehiclePanel .content-section'), /padding: 12px var\(--card-pad-x\) 0;/, 'the bleed matches the content padding');
   const book = rule('.booking-container.active #vehiclePanel .book-btn');
   assert.match(book, /min-height: 52px;/);
   assert.match(book, /padding: 8px 12px;/);
@@ -95,7 +95,7 @@ check('the legal and sign-out pills step aside while the booking is open; Terms,
 });
 
 check('the cars fill the carousel: the frame spans the stage and takes the height its 3:2 cards need; each card is sized from the frame, the photo edge to edge', () => {
-  assert.match(rule('.booking-container.active #vehicle-carousel-mount'), /margin: 0 -12px;/, 'edge to edge across the stage');
+  assert.match(rule('.booking-container.active #vehicle-carousel-mount'), /margin: 0 calc\(-1 \* var\(--card-pad-x\)\);/, 'edge to edge across the stage');
   const frame = rule('.booking-container.active #vehicle-carousel-frame');
   assert.match(frame, /height: clamp\(120px, min\(calc\(\(min\(100vw, 576px\) - 2 \* var\(--page-pad\) - 84px\) \/ 1\.5 \+ 20px\), 38dvh\), 300px\);/, 'the stage width sets the height (528px at desktop, measured), never more than 38% of the screen height');
   assert.match(frame, /max-height: none;/);
@@ -107,23 +107,9 @@ check('the cars fill the carousel: the frame spans the stage and takes the heigh
   assert.ok(!/calc\(100vw - 100px\)|calc\(100vw - 120px\)|height: 200px;/.test(car), 'the old fixed widths and height are gone');
 });
 
-check('the map carries no time badges (the pickup time lives on When and the Book button) and still labels the airport', () => {
-  assert.ok(!/mapPickupTime|mapArrivalTime|mapPickupPeriod|arrival-time|pickup-time|time-period/.test(html), 'no time badge markup or code');
-  assert.ok(!/\.arrival-time|\.pickup-time|\.time-period/.test(css), 'no time badge styles');
-  const at = html.indexOf('updateMapBadges() {');
-  assert.ok(at > 0, 'updateMapBadges exists');
-  const open = html.indexOf('{', at);
-  let depth = 0, end = -1;
-  for (let i = open; i < html.length; i++) {
-    if (html[i] === '{') depth++;
-    else if (html[i] === '}' && --depth === 0) { end = i; break; }
-  }
-  const self = {
-    state: { dateTime: { time: new Date(2026, 8, 11, 1, 45).toISOString() }, route: { duration: 32 }, locations: { airport: { code: 'mia' } } },
-    els: { mapLocationText: { textContent: '' } },
-  };
-  new Function(html.slice(open + 1, end)).call(self);
-  assert.strictEqual(self.els.mapLocationText.textContent, '📍 MIA', 'the airport label still updates');
+check('the map carries no badges: the route and its markers only (the header already names the airport)', () => {
+  assert.ok(!/mapPickupTime|mapArrivalTime|mapPickupPeriod|mapLocationText|updateMapBadges|dropoff-label|map-time-badge/.test(html), 'no badge markup or code');
+  assert.ok(!/\.arrival-time|\.pickup-time|\.time-period|dropoff-label|map-time-badge/.test(css), 'no badge styles');
 });
 
 check('a hidden create-flow button really hides (the route editor hides Continue)', () => {
@@ -201,8 +187,30 @@ check('address suggestions stay inside the card: capped at 40% of the screen, an
   assert.match(css.slice(css.indexOf('.flow-connector {')), /^\.flow-connector \{\s*position: relative;/, 'the arrow scrolls with the Where content');
 });
 
-check('When: an empty time note and a dismissed time warning take no space', () => {
-  assert.match(block, /\.booking-container\.active \.time-note:empty,\s*\.booking-container\.active \.time-warning:not\(\.visible\) \{ display: none; \}/);
+check('When: one estimate line (the time note repeated it and stays hidden) and a dismissed time warning takes no space', () => {
+  assert.match(block, /\.booking-container\.active \.time-note,\s*\.booking-container\.active \.time-warning:not\(\.visible\) \{ display: none; \}/);
+});
+
+check('one card, one style: every control shares the tokens, one selected look, one label style, one header', () => {
+  const cssRule = (sel) => { const i = css.indexOf('\n' + sel + ' {'); assert.ok(i >= 0, `rule missing: ${sel}`); return css.slice(i, css.indexOf('}', i)); };
+  for (const t of ['--card-pad-x: 20px;', '--surface-control:', '--line:', '--r-control: 12px;', '--selected-bg:']) assert.ok(block.includes(t), `token ${t}`);
+  for (const sel of ['.mode-btn', '.address-input', '.airport-option', '.date-btn', '.time-select', '.flight-input', '.control-button', '#vehiclePanel .calendar-button-mobile']) {
+    const r = cssRule(sel);
+    assert.ok(r.includes('var(--surface-control)') && r.includes('1px solid var(--line)') && r.includes('var(--r-control)'), `${sel} uses the control tokens`);
+  }
+  for (const sel of ['.mode-btn.active', '.airport-option.selected', '.date-btn.active']) {
+    const r = cssRule(sel);
+    assert.ok(r.includes('var(--selected-bg)') && r.includes('border-color: var(--primary)'), `${sel} is the one selected look`);
+  }
+  assert.ok(!/background|border/.test(cssRule('.mode-selector')), 'the mode switch has no outer frame');
+  assert.ok(!/\.time-section h3/.test(css) && css.includes('.section-label,\n#airportTitle {'), 'one label style on Where and When');
+  assert.ok(!/background|border:/.test(cssRule('.arrival-info')), 'the arrival estimate is a line, not a box');
+  assert.ok(cssRule('.progress-bar').includes('background: transparent;') && cssRule('.summary-bar').includes('background: transparent;'), 'the header rows share the card surface');
+  assert.match(block, /\.booking-container\.active > \.progress-bar:has\(\+ \.summary-bar\.visible\) \{\s*border-bottom-color: transparent;/, 'one divider under the header');
+  assert.ok(!/\nbutton\.back-btn \{/.test(css) && css.includes('\n.panel > button.back-btn,\n.map-section > button.back-btn {'), 'the round back-button rule is scoped to in-panel buttons, so header Back and Edit match');
+  assert.ok(html.includes("let bg = 'transparent', border = 'transparent'"), '"Getting current prices" is a plain line');
+  const car = fs.readFileSync(path.join(root, 'vehicle-carousel-standalone.html'), 'utf8');
+  assert.match(car, /\.vehicle-popular-badge \{[^}]*font-size: 10px;/, 'the popular tag is a small corner tag');
 });
 
 console.log(`\n  ALL ${passed} CHECKS PASS\n`);

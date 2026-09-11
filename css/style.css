@@ -197,9 +197,9 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 10px var(--space-lg);
-    background: var(--panel-bg);
-    border-bottom: 1px solid var(--border);
+    padding: 10px var(--card-pad-x);
+    background: transparent;
+    border-bottom: 1px solid var(--line);
 }
 
 .progress-step {
@@ -258,28 +258,9 @@ button {
 /* Summary Bar - Compact Version */
 .summary-bar {
     display: none;
-    padding: 8px var(--space-lg);
-    background: var(--background);
-    border-bottom: 1px solid var(--border);
-}
-
-/* Mobile optimization - Keep desktop-like compact layout */
-@media (max-width: 430px) { /* iPhone 14 Pro Max and smaller */
-    .summary-bar {
-        padding: 6px 12px;
-    }
-}
-
-@media (max-width: 390px) { /* iPhone 14/13/12 Pro */
-    .summary-bar {
-        padding: 5px 10px;
-    }
-}
-
-@media (max-width: 375px) { /* iPhone SE, older models */
-    .summary-bar {
-        padding: 4px 8px;
-    }
+    padding: 0 var(--card-pad-x) 10px;
+    background: transparent;
+    border-bottom: 1px solid var(--line);
 }
 
 .summary-bar.visible { display: block; }
@@ -299,8 +280,8 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--surface-control);
+    border: 1px solid var(--line);
     border-radius: var(--radius-full);
     font-size: var(--font-sm);
     font-weight: var(--font-medium);
@@ -349,8 +330,8 @@ button {
     height: 30px;
     padding: 6px 12px;
     min-width: 50px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--surface-control);
+    border: 1px solid var(--line);
     border-radius: var(--radius-full);
     font-size: var(--font-sm);
     font-weight: var(--font-medium);
@@ -393,7 +374,7 @@ button {
 
 .panel-content {
     flex: 1;
-    padding: var(--space-md) var(--space-lg);
+    padding: var(--space-md) var(--card-pad-x);
     overflow-y: auto;
     padding-bottom: 0;
 }
@@ -408,19 +389,16 @@ button {
 /* Mode Selector */
 .mode-selector {
     display: flex;
-    gap: var(--space-xs);
-    background: rgba(255, 149, 0, 0.08);
-    padding: var(--space-xs);
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(255, 149, 0, 0.2);
+    gap: var(--space-sm);
     margin-bottom: var(--space-lg);
-    border: 1px solid var(--border);
 }
 
 .mode-btn {
     flex: 1;
     padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-md);
+    border-radius: var(--r-control);
+    background: var(--surface-control);
+    border: 1px solid var(--line);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -433,9 +411,9 @@ button {
 
 .mode-btn:hover { color: var(--text-primary); }
 .mode-btn.active {
-    background: rgba(255, 149, 0, 0.15);
+    background: var(--selected-bg);
+    border-color: var(--primary);
     color: var(--primary);
-    box-shadow: 0 0 0 1px rgba(255, 149, 0, 0.3);
 }
 
 .mode-icon { font-size: var(--font-xl); }
@@ -497,9 +475,9 @@ button {
 .address-input {
     width: 100%;
     padding: var(--space-md) var(--space-md);
-    background: rgba(255, 255, 255, 0.03);
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-md);
+    background: var(--surface-control);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
     font-size: var(--font-base);
     color: var(--text-primary);
     transition: all var(--transition-base);
@@ -598,10 +576,10 @@ button {
 
 .airport-option {
     padding: var(--space-sm) var(--space-md);
-    border: 2px solid var(--border);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
     text-align: center;
-    background: var(--surface);
+    background: var(--surface-control);
     transition: all var(--transition-base);
 }
 
@@ -614,8 +592,7 @@ button {
 
 .airport-option.selected {
     border-color: var(--primary);
-    background: rgba(255, 149, 0, 0.12);
-    box-shadow: 0 0 0 1px rgba(255, 149, 0, 0.3);
+    background: var(--selected-bg);
 }
 
 .airport-option:disabled {
@@ -641,11 +618,7 @@ button {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    background: var(--background);
-    padding: 8px 12px;
-    border-radius: var(--radius-md);
     margin-top: var(--space-md);
-    border: 1px solid var(--border);
 }
 
 .arrival-icon {
@@ -701,19 +674,12 @@ button {
     gap: var(--space-sm);
 }
 
-.date-section h3,
-.time-section h3,
-.flight-section h3 {
-    font-size: var(--font-lg);
-    font-weight: var(--font-semibold);
-    margin-bottom: var(--space-md);
-    color: var(--text-primary);
-}
 
 /* Compact section labels for space efficiency */
-.section-label {
-    font-size: 14px;
-    font-weight: var(--font-medium);
+.section-label,
+#airportTitle {
+    font-size: 13px;
+    font-weight: var(--font-semibold);
     margin-bottom: var(--space-sm);
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -725,15 +691,14 @@ button {
     display: flex;
     gap: 6px;
     margin-bottom: var(--space-sm);
-    padding: 0 var(--space-xs);
 }
 
 .date-btn {
     flex: 1;
     padding: 10px 8px;
-    border: 2px solid rgba(255, 255, 255, 0.08);
-    border-radius: var(--radius-xl);
-    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface-control);
     cursor: pointer;
     transition: all var(--transition-slow);
     text-align: center;
@@ -743,10 +708,9 @@ button {
 }
 
 .date-btn.active {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    background: var(--selected-bg);
     border-color: var(--primary);
-    color: var(--white);
-    box-shadow: 0 4px 12px rgba(255, 149, 0, 0.3);
+    color: var(--primary);
 }
 
 .date-btn:hover:not(.active) {
@@ -869,9 +833,9 @@ button {
 
 .time-select {
     padding: 8px var(--space-md);
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface-control);
     font-size: var(--font-base);
     color: var(--text-primary);
     font-weight: var(--font-semibold);
@@ -940,9 +904,9 @@ button {
 .flight-input {
     width: 100%;
     padding: 10px var(--space-md);
-    background: rgba(255, 255, 255, 0.03);
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-md);
+    background: var(--surface-control);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
     color: var(--text-primary);
     font-size: var(--font-base);
     transition: all var(--transition-base);
@@ -992,7 +956,8 @@ button {
     transform: none;
 }
 
-button.back-btn {
+.panel > button.back-btn,
+.map-section > button.back-btn {
     position: absolute;
     top: var(--space-lg);
     left: var(--space-lg);
@@ -1020,7 +985,8 @@ button.back-btn {
     display: none;
 }
 
-button.back-btn:hover {
+.panel > button.back-btn:hover,
+.map-section > button.back-btn:hover {
     background: rgba(255, 149, 0, 0.2) !important;
     border-color: var(--primary);
     box-shadow: 0 6px 16px rgba(255, 149, 0, 0.25);
@@ -1028,7 +994,8 @@ button.back-btn:hover {
     color: var(--white);
 }
 
-button.back-btn:active { transform: scale(0.95); }
+.panel > button.back-btn:active,
+.map-section > button.back-btn:active { transform: scale(0.95); }
 
 .back-btn svg,
 .continue-btn svg,
@@ -1067,36 +1034,7 @@ button.back-btn:active { transform: scale(0.95); }
 /* Scroll indicator removed - was blocking content */
 
 /* Map Time Badges */
-.map-time-badge {
-    position: absolute;
-    background: rgba(26, 26, 28, 0.9);
-    backdrop-filter: blur(10px);
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-full);
-    border: 1px solid rgba(255, 149, 0, 0.2);
-    font-weight: 600;
-    font-size: 14px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    transition: all var(--transition-base);
-    color: var(--text-primary);
-}
 
-.dropoff-label {
-    top: 80px;
-    left: 16px;
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
-    padding: 6px 12px;
-    border-radius: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(8px);
-    font-weight: 500;
-    font-size: 12px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
 
 
 /* ============================================
@@ -1119,9 +1057,9 @@ button.back-btn:active { transform: scale(0.95); }
     align-items: center;
     gap: 6px;
     padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
+    background: var(--surface-control);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
     font-size: 13px;
     font-weight: 500;
     color: var(--text-primary);
@@ -1407,35 +1345,9 @@ select:focus-visible {
     height: 100%;
 }
 
-#vehiclePanel .map-time-badge {
-    position: absolute;
-    background: var(--surface);
-    padding: 8px 14px;
-    border-radius: 24px;
-    font-weight: 600;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-    z-index: 5;
-}
 
-#vehiclePanel .dropoff-label {
-    top: 80px;
-    left: 16px;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 6px 12px;
-    border-radius: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(8px);
-    font-size: 12px;
-    font-weight: 500;
-}
 
 /* Hide on very small screens */
-@media (max-width: 350px) {
-    #vehiclePanel .dropoff-label {
-        display: none;
-    }
-}
 
 #vehiclePanel h2 {
     display: none;
@@ -1564,7 +1476,8 @@ select:focus-visible {
 
     .time-input-group { flex-wrap: wrap; }
 
-    .back-btn {
+    .panel > .back-btn,
+    .map-section > .back-btn {
         top: var(--space-md);
         left: var(--space-md);
         font-size: var(--font-sm);
@@ -1640,9 +1553,9 @@ select:focus-visible {
     top: 0;
     width: 52px;
     height: 52px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-radius: 12px;
+    background: var(--surface-control);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
     font-size: 20px;
     display: flex;
     align-items: center;
@@ -1689,6 +1602,12 @@ select:focus-visible {
    ===================================================================== */
 :root {
     --page-pad: var(--space-lg);
+    /* one card, one style: every stage shares these */
+    --card-pad-x: 20px;                            /* one side edge: header, content, actions */
+    --surface-control: rgba(255, 255, 255, 0.04);  /* every tappable box */
+    --line: rgba(255, 255, 255, 0.12);             /* every outline and divider */
+    --r-control: 12px;
+    --selected-bg: rgba(255, 149, 0, 0.12);        /* selected = this tint + an orange outline */
 }
 @media (max-width: 480px) {
     :root { --page-pad: var(--space-md); }
@@ -1753,7 +1672,7 @@ select:focus-visible {
     flex: none;
     min-height: 0;
     gap: 10px;
-    padding: 12px 12px 0;
+    padding: 12px var(--card-pad-x) 0;
     background: transparent;
 }
 
@@ -1766,7 +1685,7 @@ select:focus-visible {
    frame's own width and height, so the two always agree). Capped for wide
    screens and at 38% of the screen height (a landscape phone keeps its
    map), floored for the narrowest. */
-.booking-container.active #vehicle-carousel-mount { margin: 0 -12px; }
+.booking-container.active #vehicle-carousel-mount { margin: 0 calc(-1 * var(--card-pad-x)); }
 .booking-container.active #vehicle-carousel-frame {
     height: clamp(120px, min(calc((min(100vw, 576px) - 2 * var(--page-pad) - 84px) / 1.5 + 20px), 38dvh), 300px);
     min-height: 0;
@@ -1781,8 +1700,8 @@ select:focus-visible {
     position: sticky;
     bottom: 0;
     z-index: 2;
-    width: auto;                  /* width:100% would cancel the -12px bleed */
-    margin: 0 -12px;
+    width: auto;                  /* width:100% would cancel the bleed */
+    margin: 0 calc(-1 * var(--card-pad-x));
     background: transparent;
 }
 .booking-container.active #vehiclePanel .book-btn {
@@ -1819,6 +1738,13 @@ body:has(.booking-container.active) .app-legal-nav,
 body:has(.booking-container.active) #userHeader,
 body:has(.booking-container.active) #installPWA { display: none !important; }
 
+/* One header: the progress dots and the Back / route / Edit row share the
+   card's surface and a single divider under the last visible row */
+.booking-container.active > .progress-bar:has(+ .summary-bar.visible) {
+    border-bottom-color: transparent;
+    padding-bottom: 6px;
+}
+
 /* a hidden create-flow button really hides (the route editor hides
    Continue; .continue-btn's display:flex used to beat [hidden]) */
 .continue-btn[hidden],
@@ -1843,7 +1769,8 @@ body:has(.booking-container.active) #installPWA { display: none !important; }
     }
 }
 
-/* When: an empty time note (no route estimate yet) and a dismissed time
-   warning take no space */
-.booking-container.active .time-note:empty,
+/* When: one estimate line. The time note repeated the arrival line under
+   the date and time, so it stays hidden; a dismissed time warning takes
+   no space */
+.booking-container.active .time-note,
 .booking-container.active .time-warning:not(.visible) { display: none; }
