@@ -122,4 +122,15 @@ check('pickup notes open from the traveler sheet and the promo from the payment 
   assert.strictEqual((pay.match(/id="paymentPromoRow"/g) || []).length, 1, 'exactly one promo row');
 });
 
+check('the promo sheet never shows, promises or computes a discount — any well-formed code is saved with the booking for LinkMia to review', () => {
+  const promo = fs.readFileSync(path.join(root, 'js/promotion-modal.js'), 'utf8');
+  assert.ok(!/FIRST10|AIRPORT20|WEEKEND15|SAVE25|VIP30/.test(promo), 'no hard-coded discount codes');
+  assert.ok(!/type: 'percentage'|type: 'fixed'/.test(promo), 'no client-side discount table');
+  assert.ok(!/apply a discount/.test(promo), 'no discount promise');
+  assert.ok(promo.includes("It doesn't change the price shown"), 'says the price is unchanged');
+  assert.match(promo, /getDiscountForCode\(\) \{\s*return null;/);
+  assert.match(promo, /calculateDiscountedPrice\(originalPrice\) \{\s*return originalPrice;/);
+  assert.ok(html.includes('js/promotion-modal.js?v=2'), 'phones fetch the honest sheet');
+});
+
 console.log(`\n  ALL ${passed} CHECKS PASS\n`);

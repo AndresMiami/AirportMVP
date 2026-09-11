@@ -425,7 +425,7 @@ class PromotionModal {
                     </div>
                     
                     <div class="promo-modal-scrollable-content">
-                        <p class="promo-modal-subtitle">Enter a promotion code to apply a discount to your booking.</p>
+                        <p class="promo-modal-subtitle">Add a promo code and it's saved with your booking for LinkMia to review. It doesn't change the price shown.</p>
                         
                         <!-- Applied Promo Display -->
                         <div id="appliedPromoCard" class="promo-applied-card">
@@ -467,24 +467,6 @@ class PromotionModal {
                             </div>
                         </div>
                         
-                        <!-- Available Promotions (Optional) -->
-                        <div class="promo-available-section">
-                            <div class="promo-available-title">Available Promotions</div>
-                            <div class="promo-available-list">
-                                <div class="promo-available-item" onclick="PromotionModal.getInstance().applyQuickPromo('FIRST10')">
-                                    <div class="promo-available-code">FIRST10</div>
-                                    <div class="promo-available-desc">10% off your first ride</div>
-                                </div>
-                                <div class="promo-available-item" onclick="PromotionModal.getInstance().applyQuickPromo('AIRPORT20')">
-                                    <div class="promo-available-code">AIRPORT20</div>
-                                    <div class="promo-available-desc">$20 off airport transfers</div>
-                                </div>
-                                <div class="promo-available-item" onclick="PromotionModal.getInstance().applyQuickPromo('WEEKEND15')">
-                                    <div class="promo-available-code">WEEKEND15</div>
-                                    <div class="promo-available-desc">15% off weekend bookings</div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -565,7 +547,7 @@ class PromotionModal {
             this.discount = this.getDiscountForCode(code);
             
             input.classList.add('valid');
-            this.showStatusMessage('Promotion applied successfully!', 'success');
+            this.showStatusMessage('Promo code saved with your booking', 'success');
             this.showAppliedPromo();
             this.updatePromotionButton();
             
@@ -600,38 +582,20 @@ class PromotionModal {
         }
     }
 
-    // Validate promo code (simulated)
+    // Promo codes are NOT applied to the price: the server owns the price
+    // (signed quote → stored booking), and server-side promo pricing does not
+    // exist yet. A code is only checked for shape and saved with the booking
+    // (promo_code) for LinkMia to review. No simulated validation, no
+    // client-side discount table — nothing here may ever claim a discount.
     async validatePromoCode(code) {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Simulated validation
-        const validCodes = {
-            'FIRST10': { type: 'percentage', value: 10, description: '10% off your first ride' },
-            'AIRPORT20': { type: 'fixed', value: 20, description: '$20 off airport transfers' },
-            'WEEKEND15': { type: 'percentage', value: 15, description: '15% off weekend bookings' },
-            'SAVE25': { type: 'fixed', value: 25, description: '$25 off your booking' },
-            'VIP30': { type: 'percentage', value: 30, description: '30% VIP discount' }
-        };
-        
-        if (!validCodes[code]) {
-            throw new Error('Invalid or expired promotion code');
+        if (!/^[A-Z0-9-]{3,20}$/.test(code)) {
+            throw new Error('Use 3–20 letters, numbers or dashes');
         }
-        
-        return validCodes[code];
+        return true;
     }
 
-    // Get discount details for code
-    getDiscountForCode(code) {
-        const discounts = {
-            'FIRST10': { type: 'percentage', value: 10, description: '10% off your first ride' },
-            'AIRPORT20': { type: 'fixed', value: 20, description: '$20 off airport transfers' },
-            'WEEKEND15': { type: 'percentage', value: 15, description: '15% off weekend bookings' },
-            'SAVE25': { type: 'fixed', value: 25, description: '$25 off your booking' },
-            'VIP30': { type: 'percentage', value: 30, description: '30% VIP discount' }
-        };
-        
-        return discounts[code] || null;
+    getDiscountForCode() {
+        return null;
     }
 
     // Show applied promo
@@ -640,18 +604,12 @@ class PromotionModal {
         const codeEl = document.getElementById('appliedPromoCode');
         const amountEl = document.getElementById('promoDiscountAmount');
         const descEl = document.getElementById('promoDiscountDesc');
-        
-        if (!card || !this.promoCode || !this.discount) return;
-        
+
+        if (!card || !this.promoCode) return;
+
         codeEl.textContent = this.promoCode;
-        
-        if (this.discount.type === 'percentage') {
-            amountEl.textContent = `-${this.discount.value}%`;
-        } else {
-            amountEl.textContent = `-$${this.discount.value}`;
-        }
-        
-        descEl.textContent = this.discount.description;
+        if (amountEl) { amountEl.textContent = ''; amountEl.style.display = 'none'; }
+        if (descEl) descEl.textContent = 'Saved with your booking — it doesn\'t change the price shown';
         card.classList.add('show');
     }
 
@@ -733,13 +691,7 @@ class PromotionModal {
 
     // Calculate discounted price
     calculateDiscountedPrice(originalPrice) {
-        if (!this.discount) return originalPrice;
-        
-        if (this.discount.type === 'percentage') {
-            return originalPrice * (1 - this.discount.value / 100);
-        } else {
-            return Math.max(0, originalPrice - this.discount.value);
-        }
+        return originalPrice;   // no client-side discounts: the server owns the price
     }
 
     // Attach event listeners
