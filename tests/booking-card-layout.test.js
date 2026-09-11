@@ -96,4 +96,41 @@ check('a hidden create-flow button really hides (the route editor hides Continue
   assert.match(block, /\.continue-btn\[hidden\],\s*\.book-btn\[hidden\] \{ display: none; \}/);
 });
 
+check('Vehicle keeps ONE control row — Traveler | Payment — above the carousel; notes and promo left the Vehicle page', () => {
+  const v = html.slice(html.indexOf('id="vehiclePanel"'), html.indexOf('id="bookBtn"'));
+  assert.strictEqual((v.match(/class="controls-row[^"]*"/g) || []).length, 1, 'exactly one control row');
+  const t = v.indexOf('passenger-select'), pay = v.indexOf('payment-method'), car = v.indexOf('vehicle-carousel-mount');
+  assert.ok(t > 0 && t < pay && pay < car, 'Traveler, then Payment, then the carousel');
+  assert.ok(!/add-notes|promo-button|payment-controls/.test(v), 'no notes or promo buttons on the Vehicle page');
+});
+
+check('pickup notes open from the traveler sheet and the promo from the payment sheet, each on top of its parent, feeding the same booking state', () => {
+  const pm = fs.readFileSync(path.join(root, 'js/passenger-modal.js'), 'utf8');
+  const pay = fs.readFileSync(path.join(root, 'js/payment-modal.js'), 'utf8');
+  assert.ok(pm.includes('onclick="PassengerModal.getInstance().openPickupNotes()"') && pm.includes('PickupNoteModal.getInstance().open();'));
+  assert.ok(pay.includes('onclick="PaymentModal.getInstance().openPromotion()"') && pay.includes('PromotionModal.getInstance().open();'));
+  assert.match(pm, /#pickupNotesModal \{ z-index: 10000; \}/, 'notes sheet above the traveler sheet');
+  assert.match(pay, /#promotionModal \{ z-index: 10000; \}/, 'promo sheet above the payment sheet (it sits earlier in the page)');
+  assert.ok(pm.includes("window.addEventListener('pickupNotesChanged', () => PassengerModal.getInstance().updateNotesRow());"));
+  assert.ok(pay.includes("window.addEventListener('promotionChanged', () => PaymentModal.getInstance().updatePromoRow());"));
+  assert.ok(html.includes('window.airportApp.state.pickupNotes = notesData;') && html.includes('window.airportApp.state.promoCode = promoData?.code || null;'), 'the booking reads the same state as before');
+  assert.ok(html.includes('js/passenger-modal.js?v=4') && html.includes('js/payment-modal.js?v=2'), 'phones fetch the changed modals');
+  // the promo row must show whether or not a card is saved: it sits after both the empty state and the card list
+  const content = pay.slice(pay.indexOf('<div class="payment-modal-content">'), pay.indexOf('<!-- Add Payment Method Modal -->'));
+  const promoAt = content.indexOf('id="paymentPromoRow"');
+  assert.ok(promoAt > content.indexOf('id="emptyState"') && promoAt > content.indexOf('id="continueBtnList"'), 'promo row sits after both the empty state and the card list');
+  assert.strictEqual((pay.match(/id="paymentPromoRow"/g) || []).length, 1, 'exactly one promo row');
+});
+
+check('the promo sheet never shows, promises or computes a discount — any well-formed code is saved with the booking for LinkMia to review', () => {
+  const promo = fs.readFileSync(path.join(root, 'js/promotion-modal.js'), 'utf8');
+  assert.ok(!/FIRST10|AIRPORT20|WEEKEND15|SAVE25|VIP30/.test(promo), 'no hard-coded discount codes');
+  assert.ok(!/type: 'percentage'|type: 'fixed'/.test(promo), 'no client-side discount table');
+  assert.ok(!/apply a discount/.test(promo), 'no discount promise');
+  assert.ok(promo.includes("It doesn't change the price shown"), 'says the price is unchanged');
+  assert.match(promo, /getDiscountForCode\(\) \{\s*return null;/);
+  assert.match(promo, /calculateDiscountedPrice\(originalPrice\) \{\s*return originalPrice;/);
+  assert.ok(html.includes('js/promotion-modal.js?v=2'), 'phones fetch the honest sheet');
+});
+
 console.log(`\n  ALL ${passed} CHECKS PASS\n`);

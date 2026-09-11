@@ -288,15 +288,18 @@
                     
                     <div class="content-section">
                         <!-- Passenger and Notes Controls -->
+                        <!-- ONE row: who travels (pickup notes live in that sheet) and
+                             how they pay (the promo code lives in that sheet) -->
                         <div class="controls-row">
                             <button class="control-button passenger-select" onclick="PassengerModal.getInstance().open()">
                                 <span class="control-icon">👤</span>
                                 <span class="control-text">For myself</span>
                                 <span class="dropdown-arrow">▼</span>
                             </button>
-                            <button class="control-button add-notes" onclick="PickupNoteModal.getInstance().open()">
-                                <span class="control-icon">➕</span>
-                                <span class="control-text">Add pickup notes</span>
+                            <button class="control-button payment-method" onclick="PaymentModal.getInstance().open()">
+                                <span class="control-icon">💳</span>
+                                <span class="control-text">Visa •••• 1187</span>
+                                <span class="dropdown-arrow">▼</span>
                             </button>
                         </div>
                         
@@ -304,19 +307,6 @@
                         <div class="vehicle-display-mobile">
                             <!-- Mount point for standalone carousel component -->
                             <div id="vehicle-carousel-mount"></div>
-                        </div>
-                        
-                        <!-- Payment and Promotion Controls - Moved right after vehicle carousel -->
-                        <div class="controls-row payment-controls">
-                            <button class="control-button payment-method" onclick="PaymentModal.getInstance().open()">
-                                <span class="control-icon">💳</span>
-                                <span class="control-text">Visa •••• 1187</span>
-                                <span class="dropdown-arrow">▼</span>
-                            </button>
-                            <button class="control-button promo-button" onclick="PromotionModal.getInstance().open()">
-                                <span class="control-icon">🎫</span>
-                                <span class="control-text">Add promotion</span>
-                            </button>
                         </div>
                         
                         <!-- Schedule Section - Moved up from panel-actions -->
@@ -861,10 +851,10 @@
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
     <script src="./js/pending-edit-card.js?v=1"></script>
-    <script src="./js/passenger-modal.js?v=3"></script>
+    <script src="./js/passenger-modal.js?v=4"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
-    <script src="./js/promotion-modal.js?v=1"></script>
-    <script src="./js/payment-modal.js?v=1"></script>
+    <script src="./js/promotion-modal.js?v=2"></script>
+    <script src="./js/payment-modal.js?v=2"></script>
 
     <!-- Main Application Scripts -->
     <!-- Autocomplete will be loaded lazily when needed -->
