@@ -1108,20 +1108,6 @@ button.back-btn:active { transform: scale(0.95); }
     color: var(--text-primary);
 }
 
-.arrival-time {
-    top: var(--space-xl);
-    right: var(--space-xl);
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-}
-
-.pickup-time {
-    bottom: 80px;
-    left: 30px;
-    color: var(--text-primary);
-}
-
 .dropoff-label {
     top: 80px;
     left: 16px;
@@ -1525,31 +1511,6 @@ select:focus-visible {
     z-index: 5;
 }
 
-#vehiclePanel .arrival-time {
-    top: calc(env(safe-area-inset-top, 20px) + 10px);
-    right: 16px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 16px;
-}
-
-#vehiclePanel .pickup-time {
-    bottom: 60px;
-    left: 16px;
-    background: #1a1a1a;
-    color: white;
-    font-size: 18px;
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-}
-
-.time-period {
-    font-size: 14px;
-    opacity: 0.9;
-}
-
 #vehiclePanel .dropoff-label {
     top: 80px;
     left: 16px;
@@ -1933,11 +1894,12 @@ select:focus-visible {
    Book land in the same spot on every stage and the page never scrolls.
    Vehicle fits by letting its map take whatever height is left.
    Geometry only: every stage keeps its own nodes and handlers. The legal
-   and sign-out pills sit in a slim strip the card reserves at its bottom.
+   and sign-out pills step aside while the booking is open (Terms, Privacy
+   and Sign out live in the traveler sheet), so the actions sit at the
+   card's very bottom.
    ===================================================================== */
 :root {
     --page-pad: var(--space-lg);
-    --card-footer-h: 56px;
 }
 @media (max-width: 480px) {
     :root { --page-pad: var(--space-md); }
@@ -1953,7 +1915,7 @@ select:focus-visible {
     flex-direction: column;
     height: calc(100vh - 2 * var(--page-pad));
     height: calc(100dvh - 2 * var(--page-pad));
-    padding-bottom: var(--card-footer-h);
+    padding-bottom: 0;           /* the older 60px "bottom nav" room is not needed */
 }
 
 .booking-container.active > .progress-bar,
@@ -2007,7 +1969,20 @@ select:focus-visible {
 }
 
 .booking-container.active #vehiclePanel .controls-row { margin-bottom: 0; }
-.booking-container.active #vehicle-carousel-frame { margin-bottom: 0; }
+
+/* The cars fill the width: the carousel frame spans the stage edge to edge
+   and takes the height its cards need. Each card is the stage width less
+   two 42px peek gutters and shows a 3:2 photo edge to edge; 20px of room
+   sits around it (vehicle-carousel-standalone.html sizes the card from the
+   frame's own width and height, so the two always agree). Capped for wide
+   screens, floored for the narrowest. */
+.booking-container.active #vehicle-carousel-mount { margin: 0 -12px; }
+.booking-container.active #vehicle-carousel-frame {
+    height: clamp(150px, calc((min(100vw, 576px) - 2 * var(--page-pad) - 84px) / 1.5 + 20px), 300px) !important;
+    min-height: 0;
+    max-height: none;
+    margin-bottom: 0;
+}
 
 /* Book sits where Continue sits on the other stages; on a screen too
    short for the whole stack it stays pinned to the panel's bottom while
@@ -2036,7 +2011,6 @@ select:focus-visible {
 /* Short screens (iPhone SE class): a shorter carousel frame and a tighter
    Where stack keep every stage inside the card. */
 @media (max-height: 700px) {
-    .booking-container.active #vehicle-carousel-frame { height: 180px !important; min-height: 160px; }
     .booking-container.active #vehiclePanel .content-section { gap: 8px; }
     .booking-container.active #vehiclePanel .map-section { min-height: 96px; }
     .booking-container.active .mode-selector { margin-bottom: var(--space-sm); }
@@ -2045,15 +2019,11 @@ select:focus-visible {
     .booking-container.active #whenPanel .panel-content { padding-top: var(--space-sm) !important; }
 }
 
-/* the pills live in the card's bottom strip while the booking is open */
-body:has(.booking-container.active) .app-legal-nav {
-    left: calc(max(0px, (100vw - 576px) / 2) + var(--page-pad) + 12px);
-    bottom: calc(var(--page-pad) + 9px);
-}
-body:has(.booking-container.active) #userHeader {
-    right: calc(max(0px, (100vw - 576px) / 2) + var(--page-pad) + 12px) !important;
-    bottom: calc(var(--page-pad) + 9px) !important;
-}
+/* the pills step aside while the booking is open: Terms, Privacy and Sign
+   out live at the bottom of the traveler sheet; the landing screen keeps
+   them */
+body:has(.booking-container.active) .app-legal-nav,
+body:has(.booking-container.active) #userHeader { display: none !important; }
 
 /* a hidden create-flow button really hides (the route editor hides
    Continue; .continue-btn's display:flex used to beat [hidden]) */

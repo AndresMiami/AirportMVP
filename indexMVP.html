@@ -273,14 +273,6 @@
                         
                         <button class="back-btn" id="vehicleBackBtn">←</button>
                         
-                        <div class="map-time-badge arrival-time">
-                            <span>📍</span>
-                            <span id="mapArrivalTime">4:30</span>
-                        </div>
-                        <div class="map-time-badge pickup-time">
-                            <span id="mapPickupTime">5:59</span>
-                            <span class="time-period">PM</span>
-                        </div>
                         <div class="map-time-badge dropoff-label">
                             <span id="mapLocationText">📍 MIA</span>
                         </div>
@@ -851,7 +843,7 @@
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
     <script src="./js/pending-edit-card.js?v=1"></script>
-    <script src="./js/passenger-modal.js?v=4"></script>
+    <script src="./js/passenger-modal.js?v=5"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=2"></script>
     <script src="./js/payment-modal.js?v=2"></script>
@@ -1045,7 +1037,7 @@
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
                     'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap',
-                    'mapArrivalTime', 'mapPickupTime', 'mapLocationText'
+                    'mapLocationText'
                 ];
                 
                 let foundElements = 0;
@@ -1925,22 +1917,9 @@
             }
             
             updateMapBadges() {
-                if (this.state.dateTime.time) {
-                    const pickupTime = new Date(this.state.dateTime.time);
-                    const arrivalTime = new Date(pickupTime.getTime() + (this.state.route.duration || 45) * 60 * 1000);
-                    
-                    const formatTime = (date) => {
-                        const hours = date.getHours();
-                        const minutes = date.getMinutes();
-                        const isPM = hours >= 12;
-                        const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
-                        return `${displayHours}:${minutes.toString().padStart(2, '0')}`;
-                    };
-                    
-                    this.els.mapPickupTime.textContent = formatTime(pickupTime);
-                    this.els.mapArrivalTime.textContent = formatTime(arrivalTime);
-                }
-                
+                // The map shows the route and the airport only: the pickup time
+                // lives on the When screen and the Book button (time badges
+                // removed 2026-09-11).
                 if (this.state.locations.airport) {
                     // Show airport code instead of full name for compact display
                     const airportCode = this.state.locations.airport.code.toUpperCase();

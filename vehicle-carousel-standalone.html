@@ -13,9 +13,13 @@
         }
 
         /* Main carousel container */
+        /* no default body margin: the frame's 20px of room is explicit below */
+        body { margin: 0; }
+
         .vehicle-carousel-component {
             position: relative;
             width: 100%;
+            padding: 8px 0 12px; /* the 20px of room around the cards (see the track height) */
             overflow: hidden;
             background: transparent;
             contain: layout style paint; /* Isolates rendering */
@@ -32,7 +36,7 @@
             scrollbar-width: none;
             -ms-overflow-style: none;
             /* Critical: Padding creates the peek effect */
-            padding: 0 30px;
+            padding: 0 42px; /* half the peek gutters: the first and last cards can center */
             touch-action: pan-x; /* Optimize touch scrolling */
             overscroll-behavior-x: contain; /* Prevent scroll chaining */
         }
@@ -44,16 +48,17 @@
         /* Track containing all vehicles */
         .carousel-vehicle-track {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             align-items: stretch;
-            height: 200px; /* Consistent height that fits in 220px iframe */
+            height: calc(100vh - 20px); /* fills the frame the parent sizes, with 20px of room */
         }
 
         /* Individual vehicle card - seamless design */
         .vehicle-carousel-card {
-            flex: 0 0 min(375px, calc(100vw - 60px)); /* Max 375px width, responsive on smaller screens */
-            min-width: min(375px, calc(100vw - 60px));
-            max-width: 375px; /* Enforce maximum width */
+            /* the frame width less two 42px peek gutters, never wider than a
+               3:2 photo at the track's height: the photo fills the card */
+            flex: 0 0 min(calc(100vw - 84px), calc((100vh - 20px) * 1.5));
+            min-width: 0;
             scroll-snap-align: center;
             scroll-snap-stop: always;
             position: relative;
@@ -105,7 +110,7 @@
             height: 100%;
             border-radius: 16px;
             overflow: hidden;
-            padding: 10px; /* Subtle padding to prevent edge touching */
+            padding: 0; /* the photo fills the card edge to edge */
             background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%); /* Gradient for professional look */
         }
 
@@ -127,10 +132,8 @@
         }
 
         /* Hover effect for images */
-        .vehicle-carousel-card:hover .vehicle-carousel-image,
-        .vehicle-carousel-card.active .vehicle-carousel-image {
-            transform: scale(1.05);
-        }
+        /* no zoom on the photo: it fills the card edge to edge, so a zoom
+           would crop it */
 
         /* Price badge - floating design */
         .vehicle-price-tag {
@@ -223,15 +226,6 @@
         /* Mobile specific adjustments */
         @media (max-width: 430px) {
             
-            .carousel-scroll-wrapper {
-                padding: 0 25px; /* Slightly less padding on small screens */
-            }
-            
-            .vehicle-carousel-card {
-                flex: 0 0 calc(100vw - 100px); /* Increased peek space for mobile */
-                min-width: calc(100vw - 100px);
-            }
-            
             .vehicle-price-tag {
                 font-size: 18px;
                 padding: 6px 14px;
@@ -240,24 +234,7 @@
             }
         }
 
-        /* Standard mobile */
-        @media (max-width: 480px) {
-            /* Height now consistent at 200px */
-        }
-
-        /* Tablet */
-        @media (min-width: 481px) and (max-width: 768px) {
-            .carousel-scroll-wrapper {
-                padding: 0 60px;
-            }
-            
-            .vehicle-carousel-card {
-                flex: 0 0 calc(100vw - 120px);
-                min-width: calc(100vw - 120px);
-            }
-        }
-
-        /* Height-responsive adjustments removed - now using consistent 200px */
+        /* card width and height come from the frame at every size (see the track and card rules) */
 
         /* Desktop */
         @media (min-width: 769px) {
