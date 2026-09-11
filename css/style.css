@@ -392,7 +392,8 @@ button {
     margin-bottom: var(--space-lg);
 }
 
-.mode-btn {
+.mode-btn,
+.basis-btn {
     flex: 1;
     padding: var(--space-sm) var(--space-md);
     border-radius: var(--r-control);
@@ -408,8 +409,10 @@ button {
     font-size: var(--font-sm);
 }
 
-.mode-btn:hover { color: var(--text-primary); }
-.mode-btn.active {
+.mode-btn:hover,
+.basis-btn:hover { color: var(--text-primary); }
+.mode-btn.active,
+.basis-btn.active {
     background: var(--selected-bg);
     border-color: var(--primary);
     color: var(--primary);
@@ -900,6 +903,19 @@ button {
 /* Flight Input */
 .flight-section { margin-top: var(--space-md); }
 
+/* When: the flight (Blacklane-style). Arriving passengers choose how the
+   pickup is set; the flight number is saved with the booking. */
+.when-basis { display: flex; gap: var(--space-sm); margin-bottom: var(--space-md); }
+.when-basis[hidden],
+.flight-offset[hidden] { display: none; }
+.basis-btn { min-height: 44px; }
+label.section-label { display: block; }
+.section-label-note { color: var(--text-secondary); font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.flight-help { margin: 6px 2px 0; font-size: 13px; line-height: 1.4; color: var(--text-secondary); }
+.flight-help:empty { display: none; }
+.flight-offset { margin-top: var(--space-md); }
+.flight-offset-select { width: 100%; text-align: left; text-align-last: left; }
+
 .flight-input {
     width: 100%;
     padding: 10px var(--space-md);
@@ -1312,6 +1328,7 @@ select:focus-visible {
 .airport-option, 
 .date-btn,
 .mode-btn,
+.basis-btn,
 .calendar-day,
 .time-select {
     touch-action: manipulation;

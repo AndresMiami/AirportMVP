@@ -189,6 +189,12 @@
                     </button>
                     
                     <div class="panel-content">
+                        <!-- Arriving at the airport: set the pickup by the flight's landing or by a time -->
+                        <div class="when-basis" id="whenBasis" role="group" aria-label="How to set your pickup" hidden>
+                            <button type="button" class="basis-btn active" data-basis="arrival" aria-pressed="true">By flight arrival</button>
+                            <button type="button" class="basis-btn" data-basis="time" aria-pressed="false">By time</button>
+                        </div>
+
                         <!-- Date Selection moved up, label removed -->
                         <div class="date-section">
                             <div class="date-selection">
@@ -219,7 +225,7 @@
                         
                         <!-- Time Selection -->
                         <div class="time-section">
-                            <h3 class="section-label">Time</h3>
+                            <h3 class="section-label" id="timeLabel">Pickup time</h3>
                             <div class="time-selector">
                                 <div class="time-input-group">
                                     <select id="hourSelect" class="time-select"></select>
@@ -234,14 +240,24 @@
                             </div>
                         </div>
 
-                        <!-- Flight Number Input -->
+                        <!-- Flight number: saved with the booking; the chauffeur checks the flight -->
                         <div class="flight-section" id="flightSection">
-                            <h3 class="section-label">Flight Information <span style="color: var(--text-secondary); font-weight: 400; font-size: 12px;">(Optional)</span></h3>
-                            <input type="text" 
-                                   id="flightInput" 
-                                   class="flight-input"
-                                   placeholder="Enter flight number (e.g., AA123)"
-                                   autocomplete="off">
+                            <label class="section-label" for="flightInput" id="flightLabel">Flight number <span class="section-label-note">(optional)</span></label>
+                            <input type="text" id="flightInput" class="flight-input" placeholder="e.g. AA 1234" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10" aria-describedby="flightHelp">
+                            <p class="flight-help" id="flightHelp">Your chauffeur checks your flight before your ride.</p>
+                        </div>
+
+                        <!-- By flight arrival: the pickup follows the landing time -->
+                        <div class="flight-offset" id="flightOffsetSection" hidden>
+                            <label class="section-label" for="flightOffsetSelect">Pickup time</label>
+                            <select id="flightOffsetSelect" class="time-select flight-offset-select">
+                                <option value="0">When my flight lands</option>
+                                <option value="15" selected>15 minutes after landing</option>
+                                <option value="30">30 minutes after landing</option>
+                                <option value="45">45 minutes after landing</option>
+                                <option value="60">60 minutes after landing</option>
+                            </select>
+                            <p class="flight-help" id="flightPickupNote"></p>
                         </div>
                         
                         <!-- Trip Info moved here from panel-actions -->
@@ -840,7 +856,7 @@
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
     <script src="./js/pending-edit-card.js?v=1"></script>
-    <script src="./js/passenger-modal.js?v=5"></script>
+    <script src="./js/passenger-modal.js?v=6"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=2"></script>
     <script src="./js/payment-modal.js?v=2"></script>
@@ -913,6 +929,8 @@
                         seq: 0            // guards against a stale response landing
                     },
                     flight: '',
+                    flightBasis: 'arrival',   // arriving: 'arrival' (by flight) | 'time'
+                    flightOffset: 15,         // minutes after landing
                     vehicle: {
                         selected: null,
                         pricing: null
@@ -1031,6 +1049,7 @@
                     'hourSelect', 'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
                     'backBtn', 'summaryBackBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
                     'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration', 'routeAttribution',
+                    'whenBasis', 'timeLabel', 'flightLabel', 'flightHelp', 'flightOffsetSection', 'flightOffsetSelect', 'flightPickupNote',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
                     'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap'
@@ -1051,6 +1070,7 @@
                 this.els.airportOptions = document.querySelectorAll('.airport-option');
                 this.els.progressSteps = document.querySelectorAll('.progress-step');
                 this.els.dateBtns = document.querySelectorAll('.date-btn');
+                this.els.basisBtns = document.querySelectorAll('.basis-btn');
                 // this.els.vehicleCards = document.querySelectorAll('.vehicle-card'); // Now in iframe
                 
                 debug.info(`Cached ${foundElements}/${elementIds.length} elements`);
@@ -1163,6 +1183,12 @@
                 
                 this.els.flightInput?.addEventListener('input', (e) => {
                     this.state.flight = e.target.value;
+                    this.renderWhenFlight();
+                });
+                this.els.basisBtns?.forEach(btn => btn.addEventListener('click', () => this.setFlightBasis(btn.dataset.basis)));
+                this.els.flightOffsetSelect?.addEventListener('change', (e) => {
+                    this.state.flightOffset = parseInt(e.target.value, 10) || 0;
+                    this.updateDateTime();
                 });
             }
             
@@ -1458,6 +1484,9 @@
 
             setMode(mode) {
                 this.state.mode = mode;
+                this.state.flight = '';
+                this.state.flightBasis = 'arrival';
+                if (this.els.flightInput) this.els.flightInput.value = '';
                 
                 this.els.modeBtns.forEach(btn => {
                     btn.classList.toggle('active', btn.dataset.mode === mode);
@@ -1465,6 +1494,7 @@
                 
                 this.updateStepOrder(mode === 'dropoff');
                 this.resetSelections();
+                if (this.state.dateTime && this.state.dateTime.time) this.updateDateTime();   // the pickup follows the new basis
             }
             
             updateStepOrder(isDropoff) {
@@ -1490,7 +1520,7 @@
                 
                 this.updateAirportStepState();
                 
-                this.els.flightSection.style.display = this.state.mode === 'pickup' ? 'block' : 'none';
+                this.renderWhenFlight();
             }
             
             updateAirportStepState() {
@@ -2110,6 +2140,85 @@
                 this.updateDateTime();
             }
             
+            // ---- When: the flight (Blacklane-style setup; no live tracking yet) ----
+            // Arriving at the airport: "By flight arrival" sets the pickup from
+            // the landing time the passenger enters plus the chosen offset, and
+            // needs a flight number; "By time" is a plain curb time. Going to
+            // the airport: a plain pickup time plus an optional flight number.
+            pickupByFlight() {
+                return this.state.mode === 'pickup' && this.state.flightBasis === 'arrival';
+            }
+
+            // "aa123", "AA 1234", "b6-1234", "AAL123" become "AA 123" style; else null
+            normalizeFlightNumber(raw) {
+                const compact = String(raw || '').toUpperCase().replace(/[\s-]/g, '');
+                const m = compact.match(/^([A-Z][A-Z0-9]|[0-9][A-Z]|[A-Z]{3})(\d{1,4}[A-Z]?)$/);
+                return m ? `${m[1]} ${m[2]}` : null;
+            }
+
+            flightRequiredAndMissing() {
+                return this.pickupByFlight() && !this.normalizeFlightNumber(this.state.flight);
+            }
+
+            setFlightBasis(basis) {
+                if (basis !== 'arrival' && basis !== 'time') return;
+                this.state.flightBasis = basis;
+                this.renderWhenFlight();
+                if (this.state.dateTime && this.state.dateTime.time) this.updateDateTime();
+            }
+
+            renderWhenFlight() {
+                const arriving = this.state.mode === 'pickup';
+                const byFlight = this.pickupByFlight();
+                if (this.els.whenBasis) this.els.whenBasis.hidden = !arriving;
+                this.els.basisBtns?.forEach(btn => {
+                    const on = btn.dataset.basis === this.state.flightBasis;
+                    btn.classList.toggle('active', on);
+                    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+                });
+                if (this.els.timeLabel) this.els.timeLabel.textContent = byFlight ? 'Your flight lands at' : 'Pickup time';
+                // arriving by time: no flight field (as in Blacklane); otherwise it shows
+                if (this.els.flightSection) this.els.flightSection.style.display = (arriving && !byFlight) ? 'none' : 'block';
+                if (this.els.flightLabel) {
+                    this.els.flightLabel.innerHTML = byFlight
+                        ? 'Flight number'
+                        : 'Flight number <span class="section-label-note">(optional)</span>';
+                }
+                if (this.els.flightHelp) {
+                    this.els.flightHelp.textContent = byFlight
+                        ? 'Your chauffeur checks your flight and meets you after you land.'
+                        : 'Your chauffeur checks your flight before your ride.';
+                }
+                if (this.els.flightOffsetSection) this.els.flightOffsetSection.hidden = !byFlight;
+                this.updateWhenContinue();
+            }
+
+            // By flight arrival needs a flight number before Vehicle
+            updateWhenContinue() {
+                if (this.els.vehicleSelectionBtn) this.els.vehicleSelectionBtn.disabled = this.flightRequiredAndMissing();
+            }
+
+            // What the booking stores about the flight. The flight number comes
+            // from When (it used to be the notes sheet's invoice reference). The
+            // reference and, for a flight-timed pickup, the landing and offset
+            // travel in the notes, so the chauffeur sees them after accepting.
+            flightFieldsForSubmit(submitState, notes) {
+                const n = notes || {};
+                const byFlight = submitState.mode === 'pickup' && submitState.flightBasis === 'arrival';
+                const arrivingByTime = submitState.mode === 'pickup' && !byFlight;
+                const flightNumber = arrivingByTime ? null : this.normalizeFlightNumber(submitState.flight);
+                const lines = [];
+                if (n.chauffeurNotes) lines.push(n.chauffeurNotes);
+                if (byFlight && submitState.landing) {
+                    const t = new Date(submitState.landing).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                    lines.push(submitState.flightOffset
+                        ? `Pickup ${submitState.flightOffset} min after the flight lands (scheduled landing ${t}).`
+                        : `Pickup when the flight lands (scheduled landing ${t}).`);
+                }
+                if (n.referenceCode) lines.push(`Reference: ${n.referenceCode}`);
+                return { flightNumber: flightNumber || null, notes: lines.join('\n') };
+            }
+
             updateDateTime() {
                 const hours = parseInt(this.els.hourSelect.value);
                 const minutes = parseInt(this.els.minuteSelect.value);
@@ -2147,6 +2256,21 @@
                     this.hideTimeWarning();
                 }
                 document.getElementById('pickupElapsedNotice')?.remove();   // PR-T: a new pick clears it
+
+                // By flight arrival: the pickers set the landing; the pickup
+                // follows it by the chosen offset. Everything after this screen
+                // still reads one pickup time (state.dateTime.time).
+                let landing = null;
+                if (this.pickupByFlight()) {
+                    landing = new Date(date);
+                    date.setTime(date.getTime() + (this.state.flightOffset || 0) * 60000);
+                }
+                this.state.dateTime.landing = landing;
+                if (this.els.flightPickupNote) {
+                    this.els.flightPickupNote.textContent = landing
+                        ? `Your pickup: ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+                        : '';
+                }
                 
                 const prevPickup = this.state.dateTime.time
                     ? new Date(this.state.dateTime.time).getTime() : null;
@@ -4220,7 +4344,11 @@
                     promoCode: this.state.promoCode,
                     routeDuration: this.state.route?.duration ?? null,
                     addressLabel: this.state.locations.address?.address || '',
-                    airportLabel: this.state.locations.airport?.name || ''
+                    airportLabel: this.state.locations.airport?.name || '',
+                    flight: this.state.flight,
+                    flightBasis: this.state.flightBasis,
+                    flightOffset: this.state.flightOffset,
+                    landing: this.state.dateTime?.landing || null
                 };
 
                 const bookingData = {
@@ -4323,6 +4451,7 @@
 
                     // customerName/phone = the traveling passenger (who the driver meets);
                     // bookerName/bookerPhone = who made the booking, when different
+                    const flightFields = this.flightFieldsForSubmit(submitState, bookingData.passenger?.notes);
                     const apiPayload = {
                             customerName: bookingData.passenger?.name || bookingData.booker?.name || 'Guest',
                             phone: bookingData.passenger?.phone || bookingData.booker?.phone || '',
@@ -4339,10 +4468,10 @@
                             tripId: tripId,
                             bags: bookingData.vehicle?.bags || 0,
                             paymentMethod: bookingData.payment?.method || 'cash',
-                            notes: bookingData.passenger?.notes?.chauffeurNotes || '',
+                            notes: flightFields.notes,
                             pickupSign: bookingData.passenger?.notes?.pickupSign || null,
                             promoCode: bookingData.payment?.promo || null,
-                            flightNumber: bookingData.passenger?.notes?.referenceCode || null,
+                            flightNumber: flightFields.flightNumber,
                             refCode: getStoredRefCode()
                         };
 

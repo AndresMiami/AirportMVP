@@ -134,7 +134,7 @@ check('pickup notes open from the traveler sheet and the promo from the payment 
   assert.ok(pm.includes("window.addEventListener('pickupNotesChanged', () => PassengerModal.getInstance().updateNotesRow());"));
   assert.ok(pay.includes("window.addEventListener('promotionChanged', () => PaymentModal.getInstance().updatePromoRow());"));
   assert.ok(html.includes('window.airportApp.state.pickupNotes = notesData;') && html.includes('window.airportApp.state.promoCode = promoData?.code || null;'), 'the booking reads the same state as before');
-  assert.ok(html.includes('js/passenger-modal.js?v=5') && html.includes('js/payment-modal.js?v=2'), 'phones fetch the changed modals');
+  assert.ok(html.includes('js/passenger-modal.js?v=6') && html.includes('js/payment-modal.js?v=2'), 'phones fetch the changed modals');
   // the promo row must show whether or not a card is saved: it sits after both the empty state and the card list
   const content = pay.slice(pay.indexOf('<div class="payment-modal-content">'), pay.indexOf('<!-- Add Payment Method Modal -->'));
   const promoAt = content.indexOf('id="paymentPromoRow"');
@@ -194,11 +194,11 @@ check('When: one estimate line (the time note repeated it and stays hidden) and 
 check('one card, one style: every control shares the tokens, one selected look, one label style, one header', () => {
   const cssRule = (sel) => { const i = css.indexOf('\n' + sel + ' {'); assert.ok(i >= 0, `rule missing: ${sel}`); return css.slice(i, css.indexOf('}', i)); };
   for (const t of ['--card-pad-x: 20px;', '--surface-control:', '--line:', '--r-control: 12px;', '--selected-bg:']) assert.ok(block.includes(t), `token ${t}`);
-  for (const sel of ['.mode-btn', '.address-input', '.airport-option', '.date-btn', '.time-select', '.flight-input', '.control-button', '#vehiclePanel .calendar-button-mobile']) {
+  for (const sel of ['.basis-btn', '.address-input', '.airport-option', '.date-btn', '.time-select', '.flight-input', '.control-button', '#vehiclePanel .calendar-button-mobile']) {
     const r = cssRule(sel);
     assert.ok(r.includes('var(--surface-control)') && r.includes('1px solid var(--line)') && r.includes('var(--r-control)'), `${sel} uses the control tokens`);
   }
-  for (const sel of ['.mode-btn.active', '.airport-option.selected', '.date-btn.active']) {
+  for (const sel of ['.basis-btn.active', '.airport-option.selected', '.date-btn.active']) {
     const r = cssRule(sel);
     assert.ok(r.includes('var(--selected-bg)') && r.includes('border-color: var(--primary)'), `${sel} is the one selected look`);
   }
