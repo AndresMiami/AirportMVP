@@ -2852,21 +2852,10 @@ function sheetContext({ snapshot = SHEET_DTO, deferGet = false } = {}) {
     focus() {}, value: '', hidden: false, parentElement: makeEl('div')
   });
   const mk = () => withHost(makeEl('div'));
-  const whereActionSlot = Object.assign(mk(), { dataset: { panelAction: 'where' }, hidden: false });
-  const whenActionSlot = Object.assign(mk(), { dataset: { panelAction: 'when' }, hidden: true });
-  const vehicleActionSlot = Object.assign(mk(), { dataset: { panelAction: 'vehicle' }, hidden: true });
-  whereActionSlot.classList.add('active');
-  const continueBtn = mk();
-  continueBtn.parentElement = whereActionSlot;
-  whereActionSlot.appendChild(continueBtn);
-  const bookingActionDock = Object.assign(mk(), { dataset: { panel: 'where' } });
-  bookingActionDock.append(whereActionSlot, whenActionSlot, vehicleActionSlot);
   Object.assign(app.els, {
     panelsWrapper: mk(), summaryBar: mk(), bookingContainer: mk(), startSearchBtn: Object.assign(mk(), { style: {} }),
     progressLine: mk(), addressInput: withHost(makeEl('input')), addressStep: mk(), airportStep: mk(), flowConnector: mk(),
-    airportTitle: mk(), addressTitle: mk(), flightSection: mk(), continueBtn,
-    bookingActionDock,
-    actionSlots: [whereActionSlot, whenActionSlot, vehicleActionSlot],
+    airportTitle: mk(), addressTitle: mk(), flightSection: mk(), continueBtn: mk(),
     modeBtns: [Object.assign(mk(), { dataset: { mode: 'pickup' } }), Object.assign(mk(), { dataset: { mode: 'dropoff' } })],
     airportOptions: ['MIA', 'FLL', 'PBI'].map((c) => Object.assign(mk(), { dataset: { airport: c } })),
   });
@@ -2924,9 +2913,6 @@ check('MANAGE RIDE SHEET: a route change parks the sheet and activates the booki
   await s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
   s.runTimers();
   const overlay = s.overlay();
-  assert.notStrictEqual(overlay.hidden, true, 'the Manage ride sheet starts visible');
-  assert.ok(s.app.els.panelsWrapper.classList.contains('hidden-for-edit'),
-    'the panel strip and adjacent dock start suppressed beneath the sheet');
   s.app.enterEditRouteMode({
     route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
     projection: { origin: { label: 'Miami International', placeId: null, attributions: [] },
@@ -2935,24 +2921,9 @@ check('MANAGE RIDE SHEET: a route change parks the sheet and activates the booki
   }, { onDone: () => {}, onBack: () => {} });
   assert.strictEqual(overlay.hidden, true, 'the sheet is parked while the Where screen is up');
   assert.ok(s.app.els.bookingContainer.classList.contains('active'), 'the booking form activates only for the route change');
-  assert.ok(!s.app.els.panelsWrapper.classList.contains('hidden-for-edit'),
-    'the dock becomes available only while the Where route editor is visible');
-  assert.deepStrictEqual(
-    s.app.els.actionSlots.map((slot) => [slot.hidden, slot.classList.contains('active')]),
-    [[false, true], [true, false], [true, false]],
-    'route editing activates only the existing Where dock slot'
-  );
-  assert.strictEqual(s.app.els.continueBtn.hidden, true,
-    'the create-flow Continue is hidden while Use this route owns the slot');
   const controls = s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
-  assert.strictEqual(controls.parent, s.app.els.actionSlots[0],
-    'Use this route is mounted into the existing Where dock slot');
-  assert.strictEqual(controls.children[0].textContent, 'Use this route');
   controls.children[2].listeners.click[0]();   // Back
   assert.strictEqual(overlay.hidden, false, 'Back brings the sheet back');
-  assert.strictEqual(s.app.els.continueBtn.hidden, false, 'Back restores the create-flow Continue node');
-  assert.ok(s.app.els.panelsWrapper.classList.contains('hidden-for-edit'),
-    'the panel strip and adjacent dock are suppressed again under Manage ride');
   assert.ok(s.app.els.bookingContainer.classList.contains('active'), 'still active until the edit ends');
   const close = findIn(overlay, (n) => n.className === 'edit-sheet-close');
   assert.strictEqual(close.getAttribute('aria-label'), 'Close without saving');
@@ -2965,29 +2936,6 @@ check('MANAGE RIDE SHEET: a route change parks the sheet and activates the booki
   assert.ok(!s.app.els.bookingContainer.classList.contains('active'), 'the landing state is restored under the trip sheet');
   assert.strictEqual(s.app.els.startSearchBtn.style.display, '', 'the Start button is back');
   assert.strictEqual(s.app.pendingEdit, null);
-});
-
-check('MANAGE RIDE SHEET route edit: Done (Use this route) removes #editRouteControls, restores Continue, hands the tuple to the card and re-suppresses the dock under the sheet — the pills\' hide rule keys on that element', async () => {
-  const s = sheetContext();
-  await s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
-  s.runTimers();
-  let delivered = null;
-  s.app.enterEditRouteMode({
-    route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
-    projection: { origin: { label: 'Miami International', placeId: null, attributions: [] },
-      destination: { label: '4441 Collins Ave', placeId: 'ChIJ_s', attributions: [] } },
-    quoteIntent: { mode: 'pickup', airportCode: 'MIA', placeId: 'ChIJ_s' }
-  }, { onDone: (d) => { delivered = d; }, onBack: () => {} });
-  const controls = s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
-  assert.ok(controls, 'the editor owns the dock slot (the CSS hide rule\'s precondition holds)');
-  assert.strictEqual(s.app.editRouteDoneEnabled(), true, 'the restored tuple is complete');
-  s.byId.editRouteControls = controls;   // the real DOM resolves it by id; exitEditRouteMode removes it that way
-  controls.children[0].listeners.click[0]();   // Done = Use this route
-  assert.ok(delivered && delivered.address.placeId === 'ChIJ_s', 'Done hands the tuple to the card');
-  assert.ok(!s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls'), '#editRouteControls is gone → the pills return');
-  assert.strictEqual(s.app.els.continueBtn.hidden, false, 'Continue restored');
-  assert.strictEqual(s.overlay().hidden, false, 'the sheet is back');
-  assert.ok(s.app.els.panelsWrapper.classList.contains('hidden-for-edit'), 'the strip and dock are suppressed under the sheet again');
 });
 
 check('MANAGE RIDE SHEET: ✕ during hydration ends the session — the trip sheet returns and the late snapshot mounts nothing; ✕ is inert while a save chain is claimed', async () => {
