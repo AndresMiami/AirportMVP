@@ -356,8 +356,7 @@ button {
 
 /* Panel System */
 .panels-wrapper {
-    display: flex;
-    transition: transform var(--transition-slower);
+    display: flex;                /* the strip jumps; the arriving stage rises (see the booking card block) */
 }
 
 .panels-wrapper.show-when { transform: translateX(-100%); }
@@ -1737,6 +1736,24 @@ select:focus-visible {
 body:has(.booking-container.active) .app-legal-nav,
 body:has(.booking-container.active) #userHeader,
 body:has(.booking-container.active) #installPWA { display: none !important; }
+
+/* Moving between stages: the strip jumps to the next stage and that stage
+   rises into place with the bottom sheets' timing (the traveler sheet:
+   0.3s ease-out), so every step of the flow moves the same way. The
+   navigation is unchanged: the rise keys on the strip's existing
+   show-when / show-vehicle classes. Reduced motion turns it off. */
+@keyframes stageRise {
+    from { transform: translateY(48px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+.booking-container.active > .panels-wrapper:not(.show-when):not(.show-vehicle) > #wherePanel,
+.booking-container.active > .panels-wrapper.show-when > #whenPanel,
+.booking-container.active > .panels-wrapper.show-vehicle > #vehiclePanel {
+    animation: stageRise 0.3s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    .booking-container.active > .panels-wrapper > .panel { animation: none; }
+}
 
 /* One header: the progress dots and the Back / route / Edit row share the
    card's surface and a single divider under the last visible row */
