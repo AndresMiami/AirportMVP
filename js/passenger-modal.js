@@ -411,6 +411,31 @@ class PassengerModal {
                 .passenger-notes-title { font-size: 16px; font-weight: 500; }
                 .passenger-notes-status { font-size: 13px; color: #8E8E93; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 .passenger-notes-status.has-notes { color: #32D74B; }
+                /* account + legal footer (moved here from the booking card) */
+                .passenger-account-footer {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                    margin-top: 20px;
+                    padding-top: 16px;
+                    border-top: 1px solid #3A3A3C;
+                }
+                .passenger-legal { display: flex; align-items: center; gap: 7px; color: #8E8E93; font-size: 13px; }
+                .passenger-legal a { color: #D1D1D6; text-underline-offset: 2px; }
+                .passenger-signout-btn {
+                    background: transparent;
+                    color: #8E8E93;
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    padding: 8px 14px;
+                    border-radius: 20px;
+                    font-family: inherit;
+                    font-size: 13px;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+                .passenger-legal a:focus-visible,
+                .passenger-signout-btn:focus-visible { outline: 2px solid #FF9933; outline-offset: 2px; }
                 /* the notes sheet always opens ON TOP of this one */
                 #pickupNotesModal { z-index: 10000; }
             </style>
@@ -500,6 +525,17 @@ class PassengerModal {
                                     Continue to Booking
                                 </button>
                             </form>
+                        </div>
+
+                        <!-- Account + legal live here: they left the booking card so the
+                             card's actions can sit at its bottom (2026-09-11). -->
+                        <div class="passenger-account-footer">
+                            <nav class="passenger-legal" aria-label="Legal">
+                                <a href="/terms">Terms</a>
+                                <span aria-hidden="true">·</span>
+                                <a href="/privacy">Privacy</a>
+                            </nav>
+                            <button type="button" class="passenger-signout-btn" id="passengerSignOutBtn" onclick="window.logout && window.logout()">Sign out</button>
                         </div>
                     </div>
                 </div>

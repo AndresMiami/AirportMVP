@@ -2,7 +2,8 @@
 //
 // The card's behaviour is layout, which node cannot compute, so this suite
 // pins the rules that produce it; the rendered proof (every stage fits the
-// screen, the three actions share one spot, the pills sit inside the card)
+// screen, the three actions share one spot at the card's bottom, the cars
+// fill the carousel)
 // is measured in a real browser at 390x844, 375x667, 430x932, 320x568 and
 // 1280x800 and recorded in the PR. What it guards against: a card that
 // stops being the screen, a stage region that goes back to the tallest
@@ -30,13 +31,14 @@ const rule = (selector) => {
 
 console.log('\nUnified booking card — source pins\n');
 
-check('the card IS the screen: a flex column exactly the visible height, with the pill strip reserved at its bottom', () => {
+check('the card IS the screen: a flex column exactly the visible height, with nothing reserved under its actions', () => {
   assert.ok(block.length > 200, 'the unified-card block exists');
   const card = rule('.booking-container.active');
   assert.match(card, /display: flex;/);
   assert.match(card, /flex-direction: column;/);
   assert.match(card, /height: calc\(100vh - 2 \* var\(--page-pad\)\);\s*height: calc\(100dvh - 2 \* var\(--page-pad\)\);/, '100dvh with a 100vh fallback');
-  assert.match(card, /padding-bottom: var\(--card-footer-h\);/);
+  assert.match(card, /padding-bottom: 0;/, 'nothing under the actions: not the pill strip, not the older 60px bottom-nav room');
+  assert.ok(!/--card-footer-h/.test(css), 'the pill strip is gone');
   assert.match(rule('.app-container'), /min-height: 100dvh;/, 'the page is the visible screen, not the large viewport');
 });
 
@@ -83,13 +85,45 @@ check('the three action nodes stay in their own panels — no viewport-fixed doc
   assert.ok(!/\.schedule-section[^{]*\{[^}]*position:\s*fixed/.test(css), 'no action row fixed to the viewport');
 });
 
-check('the legal and sign-out pills sit inside the card\'s bottom strip while the booking is open', () => {
-  const legal = rule('body:has(.booking-container.active) .app-legal-nav');
-  assert.match(legal, /left: calc\(max\(0px, \(100vw - 576px\) \/ 2\) \+ var\(--page-pad\) \+ 12px\);/);
-  assert.match(legal, /bottom: calc\(var\(--page-pad\) \+ 9px\);/);
-  const out = rule('body:has(.booking-container.active) #userHeader');
-  assert.match(out, /right: calc\(max\(0px, \(100vw - 576px\) \/ 2\) \+ var\(--page-pad\) \+ 12px\) !important;/, 'beats the pill\'s inline style');
-  assert.match(out, /bottom: calc\(var\(--page-pad\) \+ 9px\) !important;/);
+check('the legal and sign-out pills step aside while the booking is open; Terms, Privacy and Sign out live in the traveler sheet', () => {
+  assert.match(block, /body:has\(\.booking-container\.active\) \.app-legal-nav,\s*body:has\(\.booking-container\.active\) #userHeader \{ display: none !important; \}/, 'hidden only while the card is open');
+  assert.ok(html.includes('<a href="/terms">Terms</a>') && html.includes('onclick="logout()"'), 'the landing screen keeps its pills');
+  const pm = fs.readFileSync(path.join(root, 'js/passenger-modal.js'), 'utf8');
+  const foot = pm.slice(pm.indexOf('<div class="passenger-account-footer">'), pm.indexOf('<!-- Add Guest Modal -->'));
+  assert.ok(pm.includes('<div class="passenger-account-footer">') && foot.includes('href="/terms"') && foot.includes('href="/privacy"'), 'Terms and Privacy in the traveler sheet');
+  assert.ok(foot.includes('onclick="window.logout && window.logout()"'), 'Sign out runs the page\'s own logout, which clears the pending envelope first');
+});
+
+check('the cars fill the carousel: the frame spans the stage and takes the height its 3:2 cards need; each card is sized from the frame, the photo edge to edge', () => {
+  assert.match(rule('.booking-container.active #vehicle-carousel-mount'), /margin: 0 -12px;/, 'edge to edge across the stage');
+  const frame = rule('.booking-container.active #vehicle-carousel-frame');
+  assert.match(frame, /height: clamp\(150px, calc\(\(min\(100vw, 576px\) - 2 \* var\(--page-pad\) - 84px\) \/ 1\.5 \+ 20px\), 300px\) !important;/, 'the stage width sets the height (528px at desktop, measured); beats the inline 220px and the older fixed rules');
+  assert.match(frame, /max-height: none;/);
+  const car = fs.readFileSync(path.join(root, 'vehicle-carousel-standalone.html'), 'utf8');
+  assert.match(car, /flex: 0 0 min\(calc\(100vw - 84px\), calc\(\(100vh - 20px\) \* 1\.5\)\);/, 'the same 84px of gutters and 20px of room as the frame formula');
+  assert.match(car, /height: calc\(100vh - 20px\);/, 'the track fills the frame');
+  assert.match(car, /padding: 0 42px;/, 'half the gutters: the first and last cards can center');
+  assert.match(car, /\.vehicle-image-wrapper \{[^}]*padding: 0;/, 'no dark border around the photo');
+  assert.ok(!/calc\(100vw - 100px\)|calc\(100vw - 120px\)|height: 200px;/.test(car), 'the old fixed widths and height are gone');
+});
+
+check('the map carries no time badges (the pickup time lives on When and the Book button) and still labels the airport', () => {
+  assert.ok(!/mapPickupTime|mapArrivalTime|mapPickupPeriod|arrival-time|pickup-time|time-period/.test(html), 'no time badge markup or code');
+  assert.ok(!/\.arrival-time|\.pickup-time|\.time-period/.test(css), 'no time badge styles');
+  const at = html.indexOf('updateMapBadges() {');
+  assert.ok(at > 0, 'updateMapBadges exists');
+  const open = html.indexOf('{', at);
+  let depth = 0, end = -1;
+  for (let i = open; i < html.length; i++) {
+    if (html[i] === '{') depth++;
+    else if (html[i] === '}' && --depth === 0) { end = i; break; }
+  }
+  const self = {
+    state: { dateTime: { time: new Date(2026, 8, 11, 1, 45).toISOString() }, route: { duration: 32 }, locations: { airport: { code: 'mia' } } },
+    els: { mapLocationText: { textContent: '' } },
+  };
+  new Function(html.slice(open + 1, end)).call(self);
+  assert.strictEqual(self.els.mapLocationText.textContent, '📍 MIA', 'the airport label still updates');
 });
 
 check('a hidden create-flow button really hides (the route editor hides Continue)', () => {
@@ -114,7 +148,7 @@ check('pickup notes open from the traveler sheet and the promo from the payment 
   assert.ok(pm.includes("window.addEventListener('pickupNotesChanged', () => PassengerModal.getInstance().updateNotesRow());"));
   assert.ok(pay.includes("window.addEventListener('promotionChanged', () => PaymentModal.getInstance().updatePromoRow());"));
   assert.ok(html.includes('window.airportApp.state.pickupNotes = notesData;') && html.includes('window.airportApp.state.promoCode = promoData?.code || null;'), 'the booking reads the same state as before');
-  assert.ok(html.includes('js/passenger-modal.js?v=4') && html.includes('js/payment-modal.js?v=2'), 'phones fetch the changed modals');
+  assert.ok(html.includes('js/passenger-modal.js?v=5') && html.includes('js/payment-modal.js?v=2'), 'phones fetch the changed modals');
   // the promo row must show whether or not a card is saved: it sits after both the empty state and the card list
   const content = pay.slice(pay.indexOf('<div class="payment-modal-content">'), pay.indexOf('<!-- Add Payment Method Modal -->'));
   const promoAt = content.indexOf('id="paymentPromoRow"');

@@ -45,7 +45,8 @@
 //   v1.3.38 / runtime-v15  Quiet When + two-stage shell + fixed action dock (shipped 2026-09-11, PR #100; reverted)
 //   v1.3.39 / runtime-v16  Revert of PR #100 — the PR #99 booking page under a fresh pair (shipped 2026-09-11, PR #101)
 //   v1.3.40 / runtime-v17  Unified booking card — every stage fits the screen, actions in one spot (shipped 2026-09-11, PR #102)
-//   v1.3.41 / runtime-v18  Vehicle: one Traveler | Payment row — notes in the traveler sheet, promo in the payment sheet — THIS tree
+//   v1.3.41 / runtime-v18  Vehicle: one Traveler | Payment row — notes in the traveler sheet, promo in the payment sheet (shipped 2026-09-11, PR #103)
+//   v1.3.42 / runtime-v19  Booking card: pills step aside (Terms/Privacy/Sign out in the traveler sheet), actions at the card's bottom, cars fill the carousel — THIS tree
 // RULE (plan v8.6 §3D, simplified 2026-09-10): cache names only ever move
 // FORWARD and both caches move together. Any release OR rollback takes the
 // NEXT UNUSED pair — one above the constants below — chosen when it is
@@ -53,11 +54,11 @@
 // of time anywhere; tests/pending-edit-hydration derives the only check
 // (no number above the current pair in the repo, history line present,
 // forward-only versus main, both caches together).
-const CACHE_NAME = 'linkmia-v1.3.41';
+const CACHE_NAME = 'linkmia-v1.3.42';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v18';
+const RUNTIME_CACHE = 'linkmia-runtime-v19';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
