@@ -193,12 +193,13 @@ button {
     animation: fadeIn var(--transition-slow) ease;
 }
 
-/* Progress Bar - Ultra Minimal Uber Style */
+/* Two passenger-facing stages. Internal panels remain where/when/vehicle. */
 .progress-bar {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 10px var(--space-lg);
+    gap: 10px;
+    padding: 12px var(--space-lg);
     background: var(--panel-bg);
     border-bottom: 1px solid var(--border);
 }
@@ -206,39 +207,46 @@ button {
 .progress-step {
     display: flex;
     align-items: center;
+    gap: 7px;
     transition: all var(--transition-base);
 }
 
-/* Hide labels for minimal design */
 .step-label {
-    display: none;
+    display: inline;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: var(--font-semibold);
+    white-space: nowrap;
 }
 
-/* Minimal dot style instead of numbers */
 .step-number {
-    width: 8px;
-    height: 8px;
+    width: 24px;
+    height: 24px;
     border-radius: var(--radius-full);
     background: var(--border);
-    font-size: 0;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: var(--font-bold);
     transition: all var(--transition-base);
 }
 
 .progress-step.active .step-number {
     background: var(--primary);
-    width: 10px;
-    height: 10px;
+    color: var(--white);
 }
 
-.progress-step.completed .step-number {
-    background: var(--success);
-}
+.progress-step.active .step-label { color: var(--text-primary); }
+.progress-step.completed .step-number { background: var(--success); color: var(--white); }
+.progress-step.completed .step-label { color: var(--success); }
 
 .progress-line {
-    width: 40px;
-    height: 1px;
+    flex: 1;
+    max-width: 64px;
+    height: 2px;
     background: var(--border);
-    margin: 0 8px;
     position: relative;
     overflow: hidden;
 }
@@ -284,6 +292,19 @@ button {
 }
 
 .summary-bar.visible { display: block; }
+
+.summary-bar.compact .summary-content { justify-content: flex-start; }
+.summary-bar.compact .summary-value,
+.summary-bar.compact .edit-btn { display: none; }
+.summary-bar.compact .back-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 0;
+}
+.summary-back-icon { display: none; font-size: 20px; line-height: 1; }
+.summary-bar.compact .summary-back-icon { display: inline; }
+.summary-bar.compact .summary-back-label { display: none; }
 
 .summary-content {
     display: flex;
@@ -377,6 +398,7 @@ button {
 /* Panel System */
 .panels-wrapper {
     display: flex;
+    align-items: flex-start;
     transition: transform var(--transition-slower);
 }
 
@@ -400,6 +422,11 @@ button {
     padding: var(--space-md) var(--space-lg);
     overflow-y: auto;
     padding-bottom: 0;
+}
+
+#whenPanel .when-content {
+    padding-top: 20px;
+    padding-bottom: 8px;
 }
 
 /* Add this right after to override for vehiclePanel specifically */
@@ -1486,8 +1513,8 @@ select:focus-visible {
     opacity: 1;
 }
 
-.booking-container {
-    padding-bottom: 60px; /* Make room for bottom nav */
+.booking-container.active {
+    padding-bottom: calc(138px + env(safe-area-inset-bottom));
 }
 
 /* ============================================
@@ -1576,7 +1603,27 @@ select:focus-visible {
 
 /* Panel actions removed - no longer used */
 
-/* Schedule section - consistent action buttons for all panels */
+/* One viewport-stable dock, preserving the three original button nodes. */
+.booking-action-dock {
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    z-index: 850;
+    display: none;
+    width: min(calc(100% - 32px), 544px);
+    transform: translateX(-50%);
+    padding: 10px 20px max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: rgba(28, 28, 30, 0.97);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(14px);
+}
+
+.booking-container.active > .booking-action-dock { display: block; }
+.booking-container.active > .panels-wrapper.hidden-for-edit + .booking-action-dock { display: none; }
+.continue-btn[hidden],
+.book-btn[hidden] { display: none; }
+
 .schedule-section {
     display: flex;
     gap: 8px;
@@ -1587,7 +1634,25 @@ select:focus-visible {
     background: var(--panel-bg);
 }
 
-#vehiclePanel .book-btn {
+.booking-action-dock .booking-action-slot {
+    display: none;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+}
+
+.booking-action-dock .booking-action-slot.active { display: flex; }
+
+body:has(.booking-container.active) .app-legal-nav {
+    bottom: calc(82px + max(12px, env(safe-area-inset-bottom)));
+}
+
+body:has(.booking-container.active) #userHeader {
+    bottom: calc(80px + max(12px, env(safe-area-inset-bottom))) !important;
+}
+
+#vehiclePanel .book-btn,
+.vehicle-action-slot .book-btn {
     flex: 1;
     background: #DC2626;
     color: white;
@@ -1604,12 +1669,14 @@ select:focus-visible {
     transition: all 0.2s;
 }
 
-#vehiclePanel .book-btn:hover {
+#vehiclePanel .book-btn:hover,
+.vehicle-action-slot .book-btn:hover {
     background: #B91C1C;
     transform: translateY(-1px);
 }
 
-#vehiclePanel .book-btn:active {
+#vehiclePanel .book-btn:active,
+.vehicle-action-slot .book-btn:active {
     transform: scale(0.98);
 }
 
@@ -1674,7 +1741,7 @@ select:focus-visible {
     
     .summary-bar .back-btn,
     .summary-bar .edit-btn {
-        height: 26px;
+        height: 44px;
         padding: 0 10px;
         min-width: auto;
         font-size: 12px;
@@ -1829,7 +1896,7 @@ select:focus-visible {
    ============================================ */
 
 /* Button alignment fix */
-#vehiclePanel .schedule-section {
+.booking-action-dock .vehicle-action-slot {
     position: relative;
     padding-right: 60px;
 }
@@ -1838,7 +1905,8 @@ select:focus-visible {
     width: 100%;
 }
 
-#vehiclePanel .calendar-button-mobile {
+#vehiclePanel .calendar-button-mobile,
+.vehicle-action-slot .calendar-button-mobile {
     position: absolute;
     right: 0;
     top: 0;
@@ -1856,7 +1924,8 @@ select:focus-visible {
     flex-shrink: 0;
 }
 
-#vehiclePanel .calendar-button-mobile:hover {
+#vehiclePanel .calendar-button-mobile:hover,
+.vehicle-action-slot .calendar-button-mobile:hover {
     background: rgba(255, 255, 255, 0.15);
     border-color: rgba(255, 255, 255, 0.3);
 }
@@ -1873,13 +1942,14 @@ select:focus-visible {
 
 /* Alternative: Stack buttons on very small screens */
 @media (max-width: 320px) {
-    #vehiclePanel .schedule-section {
+    .booking-action-dock .vehicle-action-slot {
         flex-direction: column;
         padding-right: 0;
         gap: 8px;
     }
     
-    #vehiclePanel .calendar-button-mobile {
+    #vehiclePanel .calendar-button-mobile,
+    .vehicle-action-slot .calendar-button-mobile {
         position: static;
         width: 100%;
         height: 44px;
