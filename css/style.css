@@ -1624,6 +1624,14 @@ select:focus-visible {
 .continue-btn[hidden],
 .book-btn[hidden] { display: none; }
 
+/* While the passenger is changing the route, the route editor's Use this
+   route / Back column owns the dock (139px tall) and the fixed pills' one-row
+   offsets would land on it. They are secondary during that brief task: hide
+   both, body-scoped because the pills live outside the booking container;
+   Back and Done remove #editRouteControls, so they return by themselves. */
+body:has(.booking-container.active #editRouteControls) .app-legal-nav,
+body:has(.booking-container.active #editRouteControls) #userHeader { display: none; }
+
 .schedule-section {
     display: flex;
     gap: 8px;

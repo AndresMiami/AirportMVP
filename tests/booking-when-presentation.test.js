@@ -280,6 +280,18 @@ check('one external dock contains the three original, unique action nodes', () =
   assert.match(dock.text, /data-panel-action="vehicle"[\s\S]*?id="bookBtn"/);
 });
 
+check('while the route editor owns the dock, both fixed pills are hidden by a body-scoped rule and return with the editor (Back/Done remove #editRouteControls)', () => {
+  const css = fs.readFileSync(path.join(root, 'css/style.css'), 'utf8');
+  assert.match(css, /body:has\(\.booking-container\.active #editRouteControls\) \.app-legal-nav,\s*body:has\(\.booking-container\.active #editRouteControls\) #userHeader \{ display: none; \}/,
+    'both pills hide only while #editRouteControls exists inside the active container');
+  assert.ok(!/#editRouteControls[^{]*\{[^}]*position: fixed/.test(css), 'no competing fixed positioning for the editor');
+  // precondition of the selector: the editor mounts into the dock, and the dock is inside the container
+  const html = fs.readFileSync(path.join(root, 'indexMVP.html'), 'utf8');
+  const containerStart = html.indexOf('class="booking-container"'); const containerEnd = html.indexOf('<!-- One stable action position');
+  assert.ok(containerStart >= 0 && containerEnd > containerStart, 'the dock markup sits after the strip inside the booking container');
+  assert.ok(appBlock.includes("this.els.continueBtn.parentElement?.appendChild(controls);"), 'Use this route mounts into the Continue slot, i.e. the dock');
+});
+
 check('dock CSS pins safe-area reachability, edit-card hiding, and the 44px Back target', () => {
   assert.match(css, /\.booking-action-dock\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?bottom:\s*0;/);
   assert.match(css, /\.booking-action-dock\s*\{[\s\S]*?env\(safe-area-inset-bottom\)/);

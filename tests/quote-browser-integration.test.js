@@ -2967,6 +2967,29 @@ check('MANAGE RIDE SHEET: a route change parks the sheet and activates the booki
   assert.strictEqual(s.app.pendingEdit, null);
 });
 
+check('MANAGE RIDE SHEET route edit: Done (Use this route) removes #editRouteControls, restores Continue, hands the tuple to the card and re-suppresses the dock under the sheet — the pills\' hide rule keys on that element', async () => {
+  const s = sheetContext();
+  await s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
+  s.runTimers();
+  let delivered = null;
+  s.app.enterEditRouteMode({
+    route: { kind: 'airport_transfer_v1', addressCoordinates: null, addressAttributions: [] },
+    projection: { origin: { label: 'Miami International', placeId: null, attributions: [] },
+      destination: { label: '4441 Collins Ave', placeId: 'ChIJ_s', attributions: [] } },
+    quoteIntent: { mode: 'pickup', airportCode: 'MIA', placeId: 'ChIJ_s' }
+  }, { onDone: (d) => { delivered = d; }, onBack: () => {} });
+  const controls = s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
+  assert.ok(controls, 'the editor owns the dock slot (the CSS hide rule\'s precondition holds)');
+  assert.strictEqual(s.app.editRouteDoneEnabled(), true, 'the restored tuple is complete');
+  s.byId.editRouteControls = controls;   // the real DOM resolves it by id; exitEditRouteMode removes it that way
+  controls.children[0].listeners.click[0]();   // Done = Use this route
+  assert.ok(delivered && delivered.address.placeId === 'ChIJ_s', 'Done hands the tuple to the card');
+  assert.ok(!s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls'), '#editRouteControls is gone → the pills return');
+  assert.strictEqual(s.app.els.continueBtn.hidden, false, 'Continue restored');
+  assert.strictEqual(s.overlay().hidden, false, 'the sheet is back');
+  assert.ok(s.app.els.panelsWrapper.classList.contains('hidden-for-edit'), 'the strip and dock are suppressed under the sheet again');
+});
+
 check('MANAGE RIDE SHEET: ✕ during hydration ends the session — the trip sheet returns and the late snapshot mounts nothing; ✕ is inert while a save chain is claimed', async () => {
   const s = sheetContext({ deferGet: true });
   const p = s.app.beginPendingEdit({ bookingId: SHEET_BID, tripCode: 'LM-SHEET', detailsVersion: 3 });
