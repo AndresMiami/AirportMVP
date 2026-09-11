@@ -213,4 +213,15 @@ check('one card, one style: every control shares the tokens, one selected look, 
   assert.match(car, /\.vehicle-popular-badge \{[^}]*font-size: 10px;/, 'the popular tag is a small corner tag');
 });
 
+check('moving between stages: no sideways slide; the arriving stage rises with the bottom sheets\' timing, keyed on the existing stage classes', () => {
+  const strip = css.slice(css.indexOf('\n.panels-wrapper {'), css.indexOf('}', css.indexOf('\n.panels-wrapper {')));
+  assert.ok(strip.length > 0 && !/transition/.test(strip), 'the strip no longer animates sideways');
+  assert.match(block, /@keyframes stageRise \{\s*from \{ transform: translateY\(48px\); opacity: 0; \}\s*to \{ transform: translateY\(0\); opacity: 1; \}\s*\}/);
+  assert.match(block, /\.panels-wrapper:not\(\.show-when\):not\(\.show-vehicle\) > #wherePanel,\s*\.booking-container\.active > \.panels-wrapper\.show-when > #whenPanel,\s*\.booking-container\.active > \.panels-wrapper\.show-vehicle > #vehiclePanel \{\s*animation: stageRise 0\.3s ease-out;/, 'each stage rises when the navigation shows it');
+  const pm = fs.readFileSync(path.join(root, 'js/passenger-modal.js'), 'utf8');
+  assert.ok(pm.includes('animation: slideUp 0.3s ease-out;'), 'the same timing as the traveler sheet');
+  assert.match(block, /@media \(prefers-reduced-motion: reduce\) \{\s*\.booking-container\.active > \.panels-wrapper > \.panel \{ animation: none; \}/, 'reduced motion: no animation');
+  assert.ok(html.includes("this.els.panelsWrapper.classList.add('show-when');") && html.includes("this.els.panelsWrapper.classList.add('show-vehicle');"), 'the navigation still sets the classes the rise keys on');
+});
+
 console.log(`\n  ALL ${passed} CHECKS PASS\n`);
