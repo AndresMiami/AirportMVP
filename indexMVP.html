@@ -67,20 +67,15 @@
         <!-- Main Booking Container -->
         <div class="booking-container" id="bookingContainer">
             <!-- Progress Bar -->
-            <div class="progress-bar">
-                <div class="progress-step active" data-step="where">
+            <div class="progress-bar" aria-label="Booking progress">
+                <div class="progress-step active" data-stage="plan" aria-current="step">
                     <span class="step-number">1</span>
-                    <span class="step-label">Where</span>
+                    <span class="step-label">Plan your ride</span>
                 </div>
                 <div class="progress-line" id="progressLine"></div>
-                <div class="progress-step" data-step="when">
+                <div class="progress-step" data-stage="ride">
                     <span class="step-number">2</span>
-                    <span class="step-label">When</span>
-                </div>
-                <div class="progress-line" id="progressLine2"></div>
-                <div class="progress-step" data-step="vehicle">
-                    <span class="step-number">3</span>
-                    <span class="step-label">Vehicle</span>
+                    <span class="step-label">Choose a ride</span>
                 </div>
             </div>
             
@@ -88,7 +83,10 @@
             <div class="summary-bar" id="summaryBar">
                 <div class="summary-content">
                     <!-- Back button moved here -->
-                    <button class="back-btn" id="summaryBackBtn" type="button" aria-label="Go back">Back</button>
+                    <button class="back-btn" id="summaryBackBtn" type="button" aria-label="Go back">
+                        <span class="summary-back-icon" aria-hidden="true">←</span>
+                        <span class="summary-back-label">Back</span>
+                    </button>
                     
                     <!-- Centered route text -->
                     <span class="summary-value" id="routeSummaryText"></span>
@@ -167,16 +165,6 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Continue button moved to content-section for consistent alignment -->
-                    <div class="schedule-section">
-                        <button class="continue-btn" id="continueBtn" disabled>
-                            Continue to Date & Time
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M9 18l6-6-6-6"/>
-                            </svg>
-                        </button>
-                    </div>
                 </div>
                 
                 <!-- WHEN Panel -->
@@ -188,7 +176,7 @@
                         <span>Back</span>
                     </button>
                     
-                    <div class="panel-content" style="padding-top: 20px;">
+                    <div class="panel-content when-content">
                         <!-- Date Selection moved up, label removed -->
                         <div class="date-section">
                             <div class="date-selection">
@@ -219,8 +207,7 @@
                         
                         <!-- Time Selection -->
                         <div class="time-section">
-                            <h3 class="section-label">Time</h3>
-                            <div class="time-selector">
+                            <div class="time-selector" role="group" aria-label="Pickup time">
                                 <div class="time-input-group">
                                     <select id="hourSelect" class="time-select"></select>
                                     <span class="time-separator">:</span>
@@ -234,17 +221,8 @@
                             </div>
                         </div>
 
-                        <!-- Flight Number Input -->
-                        <div class="flight-section" id="flightSection">
-                            <h3 class="section-label">Flight Information <span style="color: var(--text-secondary); font-weight: 400; font-size: 12px;">(Optional)</span></h3>
-                            <input type="text" 
-                                   id="flightInput" 
-                                   class="flight-input"
-                                   placeholder="Enter flight number (e.g., AA123)"
-                                   autocomplete="off">
-                        </div>
-                        
-                        <!-- Trip Info moved here from panel-actions -->
+                        <!-- Existing route estimate intentionally retained.
+                             Correcting its calculation is a separate PR. -->
                         <div class="arrival-info">
                             <div class="arrival-icon">📍</div>
                             <div class="arrival-details">
@@ -253,16 +231,6 @@
                                 <div class="route-attribution" id="routeAttribution" translate="no">Google Maps</div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Continue button moved to content-section for consistent alignment -->
-                    <div class="schedule-section">
-                        <button class="continue-btn" id="vehicleSelectionBtn">
-                            Continue to Vehicle Selection
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M9 18l6-6-6-6"/>
-                            </svg>
-                        </button>
                     </div>
                 </div>
 
@@ -318,16 +286,35 @@
                                 <span class="control-text">Add promotion</span>
                             </button>
                         </div>
-                        
-                        <!-- Schedule Section - Moved up from panel-actions -->
-                        <div class="schedule-section">
-                            <button class="book-btn" id="bookBtn">
-                                <span class="btn-main-text">Schedule ride</span>
-                                <span class="btn-sub-text">Wed, Jul 23, 2025 · 9:32 PM</span>
-                            </button>
-                            <button class="calendar-button-mobile" onclick="modifyDateTime()">📅</button>
-                        </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- One stable action position; the original button nodes and
+                 handlers move here unchanged, one slot visible at a time. -->
+            <div class="booking-action-dock" id="bookingActionDock" data-panel="where">
+                <div class="schedule-section booking-action-slot active" data-panel-action="where">
+                    <button class="continue-btn" id="continueBtn" disabled>
+                        Continue to Date & Time
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18l6-6-6-6"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="schedule-section booking-action-slot" data-panel-action="when" hidden>
+                    <button class="continue-btn" id="vehicleSelectionBtn">
+                        Continue to choose a ride
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18l6-6-6-6"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="schedule-section booking-action-slot vehicle-action-slot" data-panel-action="vehicle" hidden>
+                    <button class="book-btn" id="bookBtn">
+                        <span class="btn-main-text">Schedule ride</span>
+                        <span class="btn-sub-text">Wed, Jul 23, 2025 · 9:32 PM</span>
+                    </button>
+                    <button class="calendar-button-mobile" onclick="modifyDateTime()" aria-label="Change date and time">📅</button>
                 </div>
             </div>
         </div>
@@ -1045,13 +1032,13 @@
             
             cacheElements() {
                 const elementIds = [
-                    'startSearchBtn', 'bookingContainer', 'panelsWrapper', 'progressLine', 'progressLine2',
+                    'startSearchBtn', 'bookingContainer', 'panelsWrapper', 'progressLine', 'bookingActionDock',
                     'summaryBar', 'addressInput', 'addressLoading', 'autocompleteDropdown',
                     'addressStep', 'airportStep', 
                     'airportBadge', 'airportTitle', 'flowConnector',
                     'hourSelect', 'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
                     'backBtn', 'summaryBackBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
-                    'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration', 'routeAttribution',
+                    'arrivalTitle', 'tripDuration', 'routeAttribution',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
                     'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap',
@@ -1072,6 +1059,7 @@
                 this.els.modeBtns = document.querySelectorAll('.mode-btn');
                 this.els.airportOptions = document.querySelectorAll('.airport-option');
                 this.els.progressSteps = document.querySelectorAll('.progress-step');
+                this.els.actionSlots = document.querySelectorAll('[data-panel-action]');
                 this.els.dateBtns = document.querySelectorAll('.date-btn');
                 // this.els.vehicleCards = document.querySelectorAll('.vehicle-card'); // Now in iframe
                 
@@ -1182,10 +1170,6 @@
                 this.els.editRouteBtn?.addEventListener('click', () => this.navigateToPanel('where'));
                 
                 // Vehicle card clicks now handled via iframe postMessage
-                
-                this.els.flightInput?.addEventListener('input', (e) => {
-                    this.state.flight = e.target.value;
-                });
             }
             
             startBooking() {
@@ -1204,6 +1188,7 @@
                     
                     this.els.startSearchBtn.style.display = 'none';
                     this.els.bookingContainer.classList.add('active');
+                    this.updateActionDock(this.state.ui.currentPanel || 'where');
                     
                     setTimeout(() => {
                         if (this.state.mode === 'dropoff') {
@@ -1269,7 +1254,10 @@
                 document.getElementById('pendingEditCard')?.setAttribute('hidden', '');
                 this.els.progressLine?.classList.remove('active');
                 this.els.summaryBar?.classList.remove('visible');
+                this.els.summaryBar?.classList.remove('compact');
                 this.state.ui.currentPanel = 'where';
+                this.updateProgressSteps('where');
+                this.updateActionDock('where');
                 this.autocomplete?.invalidateRawCapture?.();
                 this.autocomplete?.clearValidation?.();
                 if (this.els.addressInput) this.els.addressInput.value = '';   // EMPTY search box
@@ -1511,8 +1499,6 @@
                 }
                 
                 this.updateAirportStepState();
-                
-                this.els.flightSection.style.display = this.state.mode === 'pickup' ? 'block' : 'none';
             }
             
             updateAirportStepState() {
@@ -1859,12 +1845,15 @@
                 
                 this.els.panelsWrapper.classList.remove('show-when', 'show-vehicle');
                 this.els.progressLine.classList.remove('active');
-                this.els.summaryBar.classList.remove('visible');
+                this.els.summaryBar.classList.remove('visible', 'compact');
+                this.els.summaryBackBtn?.setAttribute(
+                    'aria-label',
+                    panel === 'vehicle' ? 'Back to date and time' : 'Back to route'
+                );
                 
                 if (panel === 'when') {
                     this.els.panelsWrapper.classList.add('show-when');
-                    this.els.progressLine.classList.add('active');
-                    this.els.summaryBar.classList.add('visible');
+                    this.els.summaryBar.classList.add('visible', 'compact');
                     this.updateProgressSteps('when');
                     this.updateSummary();
                 } else if (panel === 'vehicle') {
@@ -1882,11 +1871,21 @@
                 }
                 
                 this.state.ui.currentPanel = panel;
+                this.updateActionDock(panel);
 
                 // Requested only once the passenger is actually on the Vehicle
                 // step, and only after currentPanel is set so scheduleQuote's
                 // stage gate agrees with this call.
                 if (panel === 'vehicle' && this.quoteFlowActive()) this.requestServerQuote();
+            }
+
+            updateActionDock(panel) {
+                if (this.els.bookingActionDock) this.els.bookingActionDock.dataset.panel = panel;
+                this.els.actionSlots?.forEach(slot => {
+                    const active = slot.dataset.panelAction === panel;
+                    slot.hidden = !active;
+                    slot.classList.toggle('active', active);
+                });
             }
             
             goBackFromSummary() {
@@ -1902,22 +1901,18 @@
             }
             
             updateProgressSteps(activeStep) {
-                this.els.progressSteps.forEach(step => {
-                    const stepName = step.dataset.step;
-                    step.classList.toggle('active', stepName === activeStep);
-                    step.classList.toggle('completed', 
-                        (activeStep === 'when' && stepName === 'where') ||
-                        (activeStep === 'vehicle' && (stepName === 'where' || stepName === 'when')));
+                const activeStage = activeStep === 'vehicle' ? 'ride' : 'plan';
+                this.els.progressSteps?.forEach(step => {
+                    const stepStage = step.dataset.stage;
+                    const active = stepStage === activeStage;
+                    step.classList.toggle('active', active);
+                    step.classList.toggle('completed', activeStage === 'ride' && stepStage === 'plan');
+                    if (active) step.setAttribute('aria-current', 'step');
+                    else step.removeAttribute('aria-current');
                 });
                 
-                // Update progress lines
                 if (this.els.progressLine) {
-                    this.els.progressLine.classList.toggle('active', 
-                        activeStep === 'when' || activeStep === 'vehicle');
-                }
-                if (this.els.progressLine2) {
-                    this.els.progressLine2.classList.toggle('active', 
-                        activeStep === 'vehicle');
+                    this.els.progressLine.classList.toggle('active', activeStage === 'ride');
                 }
             }
             
