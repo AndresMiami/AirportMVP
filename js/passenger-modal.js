@@ -389,6 +389,30 @@ class PassengerModal {
                         padding: 20px;
                     }
                 }
+                /* Pickup notes row (notes moved here from the Vehicle page) */
+                .passenger-notes-row {
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                    margin-top: 12px;
+                    padding: 16px;
+                    background: #3A3A3C;
+                    border: 2px solid #48484A;
+                    border-radius: 12px;
+                    color: #FFFFFF;
+                    text-align: left;
+                    font-family: inherit;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+                .passenger-notes-row:hover { background: #48484A; border-color: #5A5A5C; }
+                .passenger-notes-icon { font-size: 18px; margin-right: 12px; }
+                .passenger-notes-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+                .passenger-notes-title { font-size: 16px; font-weight: 500; }
+                .passenger-notes-status { font-size: 13px; color: #8E8E93; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                .passenger-notes-status.has-notes { color: #32D74B; }
+                /* the notes sheet always opens ON TOP of this one */
+                #pickupNotesModal { z-index: 10000; }
             </style>
         `;
         
@@ -422,6 +446,17 @@ class PassengerModal {
                                 <span class="passenger-option-arrow">›</span>
                             </button>
                         </div>
+
+                        <!-- Pickup notes live with the traveler: the sign name, the
+                             flight number and instructions all describe this pickup. -->
+                        <button type="button" class="passenger-notes-row" id="passengerNotesRow" onclick="PassengerModal.getInstance().openPickupNotes()">
+                            <span class="passenger-notes-icon">📝</span>
+                            <span class="passenger-notes-text">
+                                <span class="passenger-notes-title">Pickup notes</span>
+                                <span class="passenger-notes-status" id="passengerNotesStatus">Sign, flight number, instructions</span>
+                            </span>
+                            <span class="passenger-option-arrow">›</span>
+                        </button>
 
                         <!-- For Myself Form -->
                         <div id="myselfFormSection" class="passenger-form-section">
@@ -803,8 +838,27 @@ class PassengerModal {
 
     // Update modal info (simplified - no longer showing times/location)
     updateModalInfo() {
-        // This method is now simplified since we're not showing times/location
-        // Could be used in the future if we want to add any dynamic content
+        this.updateNotesRow();
+    }
+
+    // Pickup notes open on top of this sheet; saving closes the notes sheet and
+    // leaves this one showing what was added. The booking reads the notes from
+    // PickupNoteModal exactly as before (pickupNotesChanged → state.pickupNotes).
+    openPickupNotes() {
+        if (typeof PickupNoteModal === 'undefined') return;
+        PickupNoteModal.getInstance().open();
+    }
+
+    updateNotesRow() {
+        const status = document.getElementById('passengerNotesStatus');
+        if (!status || typeof PickupNoteModal === 'undefined') return;
+        const n = PickupNoteModal.getInstance().getPickupNotesData() || {};
+        const parts = [];
+        if (n.pickupSign) parts.push('Sign: ' + n.pickupSign);
+        if (n.referenceCode) parts.push('Flight: ' + n.referenceCode);
+        if (n.chauffeurNotes) parts.push('Instructions added');
+        status.textContent = parts.length ? parts.join(' · ') : 'Sign, flight number, instructions';
+        status.classList.toggle('has-notes', parts.length > 0);
     }
 
     // Get selected passenger data
@@ -914,3 +968,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Expose for global access
 window.PassengerModal = PassengerModal;
+
+// Keep the notes row honest whenever the notes change.
+window.addEventListener('pickupNotesChanged', () => PassengerModal.getInstance().updateNotesRow());

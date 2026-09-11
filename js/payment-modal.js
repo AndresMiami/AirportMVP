@@ -610,6 +610,28 @@ class PaymentModal {
                         align-items: center;
                     }
                 }
+                /* Promotions row (promo moved here from the Vehicle page) */
+                .payment-promo-section { width: 100%; align-self: stretch; }   /* full width in either payment state */
+                .payment-promo-title { margin-top: 24px; }
+                .payment-promo-row {
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                    padding: 16px;
+                    background: #3A3A3C;
+                    border: 1px solid #48484A;
+                    border-radius: 12px;
+                    color: #FFFFFF;
+                    text-align: left;
+                    font-family: inherit;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+                .payment-promo-row:hover { background: #48484A; }
+                .payment-promo-text { flex: 1; font-size: 17px; font-weight: 500; }
+                .payment-promo-text.has-promo { color: #32D74B; }
+                /* the promo sheet always opens ON TOP of this one */
+                #promotionModal { z-index: 10000; }
             </style>
         `;
         
@@ -648,6 +670,18 @@ class PaymentModal {
                             <div id="paymentMethodsList"></div>
                             <button class="payment-continue-btn" id="continueBtnList" onclick="PaymentModal.getInstance().confirmPayment()">
                                 Continue
+                            </button>
+                        </div>
+
+                        <!-- The promo code lives with payment: it belongs to the price
+                             being paid, so it is settled before booking. Outside both
+                             the empty state and the card list, so it shows either way. -->
+                        <div class="payment-promo-section">
+                            <div class="payment-section-title payment-promo-title">Promotions</div>
+                            <button type="button" class="payment-promo-row" id="paymentPromoRow" onclick="PaymentModal.getInstance().openPromotion()">
+                                <span class="payment-option-icon">🎫</span>
+                                <span class="payment-promo-text" id="paymentPromoStatus">Add promo code</span>
+                                <span class="payment-option-arrow">›</span>
                             </button>
                         </div>
                     </div>
@@ -1286,6 +1320,22 @@ class PaymentModal {
     // Singleton pattern
     static instance = null;
     
+    // The promo sheet opens on top of this one. The booking reads the code from
+    // PromotionModal exactly as before (promotionChanged → state.promoCode).
+    openPromotion() {
+        if (typeof PromotionModal === 'undefined') return;
+        PromotionModal.getInstance().open();
+    }
+
+    updatePromoRow() {
+        const status = document.getElementById('paymentPromoStatus');
+        if (!status || typeof PromotionModal === 'undefined') return;
+        const promo = PromotionModal.getInstance().getPromoData();
+        const code = promo && promo.code;
+        status.textContent = code ? 'Promo: ' + code : 'Add promo code';
+        status.classList.toggle('has-promo', !!code);
+    }
+
     static getInstance() {
         if (!this.instance) {
             this.instance = new PaymentModal();
@@ -1301,3 +1351,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Expose for global access
 window.PaymentModal = PaymentModal;
+
+// Keep the promo row honest whenever the promotion changes.
+window.addEventListener('promotionChanged', () => PaymentModal.getInstance().updatePromoRow());
