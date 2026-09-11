@@ -273,9 +273,6 @@
                         
                         <button class="back-btn" id="vehicleBackBtn">←</button>
                         
-                        <div class="map-time-badge dropoff-label">
-                            <span id="mapLocationText">📍 MIA</span>
-                        </div>
                     </div>
                     
                     <div class="content-section">
@@ -1036,8 +1033,7 @@
                     'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration', 'routeAttribution',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
-                    'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap',
-                    'mapLocationText'
+                    'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap'
                 ];
                 
                 let foundElements = 0;
@@ -1857,7 +1853,6 @@
                     this.updateProgressSteps('vehicle');
                     this.updateSummary();
                     this.updateVehicleMap();
-                    this.updateMapBadges();
                     // Image preloading now handled by iframe carousel
                 } else {
                     this.updateProgressSteps('where');
@@ -1915,18 +1910,7 @@
                     this.els.routeSummaryText.textContent = `${from} → ${to}`;
                 }
             }
-            
-            updateMapBadges() {
-                // The map shows the route and the airport only: the pickup time
-                // lives on the When screen and the Book button (time badges
-                // removed 2026-09-11).
-                if (this.state.locations.airport) {
-                    // Show airport code instead of full name for compact display
-                    const airportCode = this.state.locations.airport.code.toUpperCase();
-                    this.els.mapLocationText.textContent = `📍 ${airportCode}`;
-                }
-            }
-            
+
             truncateText(text, maxLength = 25) {
                 const firstPart = text.split(',')[0];
                 return firstPart.length > maxLength 
@@ -2866,7 +2850,7 @@
                     panel.prepend(el);
                 }
 
-                let bg = '#2C2C2E', border = 'rgba(255,255,255,0.12)', color = '#EBEBF0', text = '';
+                let bg = 'transparent', border = 'transparent', color = '#AEAEB2', text = '';  // loading: a plain line, no box
                 let action = null;
 
                 if (q.status === 'loading') {
@@ -2880,7 +2864,8 @@
                     if (retryable) action = 'Try again';
                 }
 
-                el.style.cssText = 'margin:0 0 12px;padding:12px 14px;border-radius:12px;' +
+                const plain = bg === 'transparent';
+                el.style.cssText = (plain ? 'margin:0;padding:0 2px;' : 'margin:0 0 12px;padding:12px 14px;') + 'border-radius:12px;' +
                     `background:${bg};border:1px solid ${border};color:${color};` +
                     'font-size:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
                 el.innerHTML = '';
@@ -5212,7 +5197,7 @@
         
         window.modifyDateTime = function() {
             const calBtn = document.querySelector('.calendar-button-mobile');
-            calBtn.style.backgroundColor = '#f0f0f0';
+            calBtn.style.backgroundColor = 'rgba(255, 149, 0, 0.12)';
             setTimeout(() => {
                 calBtn.style.backgroundColor = '';
             }, 200);
