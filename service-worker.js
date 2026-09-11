@@ -49,7 +49,8 @@
 //   v1.3.42 / runtime-v19  Booking card: pills step aside (Terms/Privacy/Sign out in the traveler sheet), actions at the card's bottom, cars fill the carousel (shipped 2026-09-11, PR #104)
 //   v1.3.43 / runtime-v20  Booking card foundation: legacy layers deleted, suggestions stay in the card, landscape carousel cap (shipped 2026-09-11, PR #105)
 //   v1.3.44 / runtime-v21  One card, one style: shared control tokens, one header, fewer boxes, map without badges (shipped 2026-09-11, PR #106)
-//   v1.3.45 / runtime-v22  Stages rise into place like the bottom sheets instead of sliding sideways — THIS tree
+//   v1.3.45 / runtime-v22  Stages rise into place like the bottom sheets instead of sliding sideways (shipped 2026-09-11, PR #107)
+//   v1.3.46 / runtime-v23  Planning rises, choosing a ride swipes: the sideways swipe returns for Vehicle only — THIS tree
 // RULE (plan v8.6 §3D, simplified 2026-09-10): cache names only ever move
 // FORWARD and both caches move together. Any release OR rollback takes the
 // NEXT UNUSED pair — one above the constants below — chosen when it is
@@ -57,11 +58,11 @@
 // of time anywhere; tests/pending-edit-hydration derives the only check
 // (no number above the current pair in the repo, history line present,
 // forward-only versus main, both caches together).
-const CACHE_NAME = 'linkmia-v1.3.45';
+const CACHE_NAME = 'linkmia-v1.3.46';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v22';
+const RUNTIME_CACHE = 'linkmia-runtime-v23';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
