@@ -398,9 +398,23 @@ async function check(name, fn) {
     assert.strictEqual(r.headers['Cache-Control'], 'private, no-store');
     const dto = JSON.parse(r.body);
     assert.deepStrictEqual(Object.keys(dto).sort(), [
-      'bags', 'bookedPriceCents', 'bookingId', 'booker', 'detailsVersion', 'optional',
+      'bags', 'bookedPriceCents', 'bookingId', 'booker', 'detailsVersion', 'hasFlight', 'optional',
       'passengers', 'pickupAt', 'route', 'status', 'traveler', 'tripCode', 'vehicle', 'vehicles'
     ].sort());
+    // a BOOLEAN only: Manage ride holds the airport and direction of a
+    // flight-bearing ride, and the flight number stays on the never-list below
+    assert.strictEqual(typeof dto.hasFlight, 'boolean');
+  });
+
+  await check('hasFlight reports THAT a flight exists, never which one — Manage ride holds the airport and direction on it', async () => {
+    reset({ flight_number: 'AA 1234' });
+    const withFlight = JSON.parse((await get(BID)).body);
+    assert.strictEqual(withFlight.hasFlight, true, 'a flight-bearing ride is flagged');
+    assert.ok(!JSON.stringify(withFlight).includes('AA 1234'), 'the flight number is absent from the hydration DTO');
+    reset({ flight_number: null });
+    assert.strictEqual(JSON.parse((await get(BID)).body).hasFlight, false, 'a ride with no flight is unrestricted');
+    reset();
+    assert.strictEqual(JSON.parse((await get(BID)).body).hasFlight, false, 'absent column reads false');
   });
 
   await check('the never-list is absent from the DTO', async () => {

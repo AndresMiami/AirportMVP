@@ -378,6 +378,22 @@ async function check(name, fn) {
     assert.strictEqual(h.ui.paxPlus.disabled, true);
   });
 
+  await check('a flight-bearing ride hands only hasFlight to the route editor, so the host can hold the airport and direction', async () => {
+    const withFlight = harness({ dto: guestEscaladeDto({ hasFlight: true }) });
+    withFlight.ui.routeChange.click();
+    assert.ok(withFlight.app._er, 'the Where screen opened');
+    assert.strictEqual(withFlight.app._er.input.hasFlight, true,
+      'the editor receives only the hasFlight boolean; the number never enters the hydration DTO or card');
+    const without = harness();
+    without.ui.routeChange.click();
+    assert.strictEqual(without.app._er.input.hasFlight, false,
+      'a ride with no flight is unrestricted');
+    // this Manage Ride card deliberately omits flightNumber from its payload
+    assert.ok(!CARD_SRC.includes('flight_number'), 'no flight column in the card');
+    assert.ok(!/payload\.flightNumber/.test(CARD_SRC), 'no flightNumber in the edit payload');
+    assert.ok(!/snapshot\.flightNumber/.test(CARD_SRC), 'the card never reads a flight number');
+  });
+
   await check('a same-raw-id re-pick collapses to the COMPLETE snapshot tuple with zero quotes', async () => {
     const h = harness();
     h.ui.routeChange.click();

@@ -478,7 +478,7 @@ class PassengerModal {
                             <span class="passenger-notes-icon">📝</span>
                             <span class="passenger-notes-text">
                                 <span class="passenger-notes-title">Pickup notes</span>
-                                <span class="passenger-notes-status" id="passengerNotesStatus">Sign, flight number, instructions</span>
+                                <span class="passenger-notes-status" id="passengerNotesStatus">Sign, instructions, reference</span>
                             </span>
                             <span class="passenger-option-arrow">›</span>
                         </button>
@@ -891,9 +891,9 @@ class PassengerModal {
         const n = PickupNoteModal.getInstance().getPickupNotesData() || {};
         const parts = [];
         if (n.pickupSign) parts.push('Sign: ' + n.pickupSign);
-        if (n.referenceCode) parts.push('Flight: ' + n.referenceCode);
+        if (n.referenceCode) parts.push('Ref: ' + n.referenceCode);   // an invoice reference, not a flight
         if (n.chauffeurNotes) parts.push('Instructions added');
-        status.textContent = parts.length ? parts.join(' · ') : 'Sign, flight number, instructions';
+        status.textContent = parts.length ? parts.join(' · ') : 'Sign, instructions, reference';
         status.classList.toggle('has-notes', parts.length > 0);
     }
 

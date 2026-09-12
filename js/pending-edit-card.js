@@ -686,7 +686,11 @@
       const editorInput = {
         route: model.deepClone(draft.route),
         projection: a.projectRoute(draft.route),
-        quoteIntent: a.toQuoteIntent(draft.route)
+        quoteIntent: a.toQuoteIntent(draft.route),
+        // The current host editor uses this app-level signal to hold the
+        // airport and direction. Only the boolean enters this generic card;
+        // the flight number itself does not.
+        hasFlight: !!(snapshot && snapshot.hasFlight)
       };
       whereOpen = true;
       clearT(quoteTimer);
@@ -1164,8 +1168,9 @@
       // email: nonblank is sent; blank omitted (only legal when the snapshot
       // email is null — the gate enforced that).
       if (normText(attempt.traveler.email)) payload.email = attempt.traveler.email;
-      // NOT sent, by contract: paymentMethod, promoCode, flightNumber
-      // (preserved server-side), notes, pickupSign (read-only, decision 13).
+      // Intentionally not sent by this card: paymentMethod, promoCode,
+      // flightNumber (preserved server-side when omitted), notes and
+      // pickupSign (read-only, decision 13).
       return payload;
     }
 

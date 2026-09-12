@@ -390,7 +390,7 @@ const HYDRATION_FIELDS = [
   'route_authority', 'airport_code', 'canonical_place_id',
   'vehicle_type', 'vehicle_name', 'passengers', 'bags', 'price', 'price_cents',
   'customer_name', 'customer_phone', 'customer_email',
-  'booker_name', 'booker_phone', 'notes', 'pickup_sign'
+  'booker_name', 'booker_phone', 'notes', 'pickup_sign', 'flight_number'
 ].join(', ');
 
 async function hydrationRead(event, db, auth, headers) {
@@ -470,7 +470,14 @@ async function hydrationRead(event, db, auth, headers) {
       optional: {
         notes: row.notes || null,
         pickupSign: row.pickup_sign || null
-      }
+      },
+      // Read-only BOOLEAN: the card needs to know THAT a flight exists so
+      // Manage ride can keep the airport and direction it belongs to. The
+      // number itself stays off THIS hydration DTO (the never-list); it does
+      // still travel in the POST success projection (RESPONSE_FIELDS), which
+      // is owner-scoped. The current Manage Ride card omits flightNumber from
+      // its POST, so the stored value is preserved when the field is absent.
+      hasFlight: !!row.flight_number
     })
   };
 }
