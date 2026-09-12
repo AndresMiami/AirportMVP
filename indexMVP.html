@@ -245,6 +245,7 @@
                             <label class="section-label" for="flightInput" id="flightLabel">Flight number <span class="section-label-note">(optional)</span></label>
                             <input type="text" id="flightInput" class="flight-input" placeholder="e.g. AA 1234" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10" aria-describedby="flightHelp">
                             <p class="flight-help" id="flightHelp">Your chauffeur checks your flight before your ride.</p>
+                            <p class="flight-help flight-error" id="flightError" role="alert" hidden></p>
                         </div>
 
                         <!-- By flight arrival: the pickup follows the landing time -->
@@ -852,7 +853,7 @@
         .edit-route-reason { font-size: 13px; color: #C7C7CC; min-height: 16px; }
         .edit-route-back { background: transparent; border: none; color: #8E8E93; text-decoration: underline; font-family: inherit; padding: 8px 0; cursor: pointer; }
     </style>
-    <script src="./js/pending-edit-model.js?v=1"></script>
+    <script src="./js/pending-edit-model.js?v=2"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
     <script src="./js/pending-edit-card.js?v=1"></script>
@@ -1049,7 +1050,7 @@
                     'hourSelect', 'minuteSelect', 'ampmSelect', 'timeNote', 'continueBtn',
                     'backBtn', 'summaryBackBtn', 'bookBtn', 'editRouteBtn', 'routeSummaryText',
                     'flightInput', 'flightSection', 'arrivalTitle', 'tripDuration', 'routeAttribution',
-                    'whenBasis', 'timeLabel', 'flightLabel', 'flightHelp', 'flightOffsetSection', 'flightOffsetSelect', 'flightPickupNote',
+                    'whenBasis', 'timeLabel', 'flightLabel', 'flightHelp', 'flightError', 'flightOffsetSection', 'flightOffsetSelect', 'flightPickupNote',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
                     'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap'
@@ -1261,7 +1262,11 @@
                             ? JSON.parse(JSON.stringify(route.addressAttributions)) : []
                     }
                 };
-                this._editRoute = { routeDraft, onDone, onBack };
+                // The hold applies only to a route that ALREADY has a canonical airport.
+                // A route still missing one is incomplete: holding the airport would
+                // leave it unsavable forever.
+                this._editRoute = { routeDraft, onDone, onBack,
+                    hasFlight: !!editorInput?.hasFlight && !!routeDraft?.airport };
                 // The Where screen lives in the booking form: activate it only
                 // NOW (never at edit start) and park the sheet meanwhile.
                 if (!this.els.bookingContainer?.classList.contains('active')) {
@@ -1316,12 +1321,20 @@
                 document.getElementById('pendingEditCard')?.removeAttribute('hidden');
                 if (this._editSheet) this._editSheet.overlay.hidden = false;   // slides back up
                 if (this.els.continueBtn) this.els.continueBtn.hidden = false;
-                // Restore the create flow's own presentation from ITS state.
+                // Restore the create flow's own presentation from ITS state —
+                // including the direction buttons a flight-bearing edit held.
+                this.els.modeBtns?.forEach(btn => { btn.disabled = false; });
                 this.updateStepOrder(this.state.mode === 'dropoff');
                 this.els.airportOptions?.forEach(opt => {
                     opt.classList.toggle('selected', opt.dataset.airport === this.state.locations.airport?.code);
                 });
                 return er;
+            }
+
+            showEditRouteFlightLimit() {
+                const limit = document.getElementById('editRouteFlightLimit');
+                if (limit) { limit.hidden = false; limit.classList.add('nudge'); }
+                this.renderEditRouteWhere();
             }
 
             editRouteDoneEnabled() {
@@ -1356,6 +1369,11 @@
                 done.id = 'editRouteDone';
                 done.className = 'continue-btn';
                 done.textContent = 'Use this route';
+                const limit = document.createElement('div');
+                limit.id = 'editRouteFlightLimit';
+                limit.className = 'edit-route-reason edit-route-flight-limit';
+                limit.setAttribute('aria-live', 'polite');
+                limit.hidden = true;
                 const reason = document.createElement('div');
                 reason.id = 'editRouteReason';
                 reason.className = 'edit-route-reason';
@@ -1365,6 +1383,7 @@
                 back.id = 'editRouteBack';
                 back.className = 'edit-route-back';
                 back.textContent = 'Back';
+                controls.appendChild(limit);
                 controls.appendChild(done);
                 controls.appendChild(reason);
                 controls.appendChild(back);
@@ -1400,13 +1419,22 @@
                 const airportsOn = !isDropoff || !!(d.address && d.address.placeId);
                 this.els.airportStep?.classList.toggle('disabled', !airportsOn);
                 this.els.airportOptions?.forEach(opt => {
-                    opt.disabled = !airportsOn;
+                    opt.disabled = !airportsOn || !!er.hasFlight;
                     opt.classList.toggle('selected', opt.dataset.airport === d.airport);
                 });
                 const refLabel = document.querySelector('#editRouteReference .edit-route-reference-label');
                 if (refLabel) refLabel.textContent = d.address && d.address.label
                     ? `Current address: ${d.address.label}` : 'Current address: —';
                 const done = document.getElementById('editRouteDone');
+                const flightLocked = !!er.hasFlight;
+                this.els.modeBtns?.forEach(btn => { btn.disabled = flightLocked; });
+                const limit = document.getElementById('editRouteFlightLimit');
+                if (limit) {
+                    limit.hidden = !flightLocked;
+                    limit.textContent = flightLocked
+                        ? 'This ride has a flight. You can change the address or the time. Changing the airport or the direction is not available yet for a ride with a flight.'
+                        : '';
+                }
                 const reason = document.getElementById('editRouteReason');
                 const ok = this.editRouteDoneEnabled();
                 if (done) done.disabled = !ok;
@@ -1415,6 +1443,16 @@
 
             onModeTap(mode) {
                 if (this._editRoute) {
+                    // A booked flight belongs to one airport and one direction.
+                    // Until Manage ride can edit the flight itself, the ride
+                    // keeps both rather than silently carrying a flight that no
+                    // longer matches, or clearing one the passenger still needs.
+                    // This is an APP-LEVEL SAFETY RAIL, not a server guarantee:
+                    // the writer preserves an omitted flight while accepting a
+                    // newly signed airport, so an older open page could still
+                    // change one. Server-side flight/route compatibility belongs
+                    // to the flight-editing release.
+                    if (this._editRoute.hasFlight) { this.showEditRouteFlightLimit(); return; }
                     this._editRoute.routeDraft.mode = mode;
                     this.renderEditRouteWhere();
                     return;
@@ -1424,6 +1462,7 @@
 
             onAirportTap(code) {
                 if (this._editRoute) {
+                    if (this._editRoute.hasFlight) { this.showEditRouteFlightLimit(); return; }
                     const d = this._editRoute.routeDraft;
                     if (d.mode === 'dropoff' && !(d.address && d.address.placeId)) return;
                     d.airport = code;   // airport/direction-only Done preserves the address tuple
@@ -1864,6 +1903,12 @@
             navigateToPanel(panel) {
                 if (panel === 'when' && !this.canContinue()) return;
                 if (panel === 'vehicle' && !this.canContinue()) return;
+                // The same predicate the button shows: a disabled affordance is
+                // never the only thing between a missing flight and Vehicle.
+                if (panel === 'vehicle') {
+                    const blocked = this.flightBlockReason();
+                    if (blocked) { this.flagFlightProblem(blocked); return; }
+                }
                 
                 this.els.panelsWrapper.classList.remove('show-when', 'show-vehicle');
                 this.els.progressLine.classList.remove('active');
@@ -1955,9 +2000,10 @@
             }
             
             initializeDateSelection() {
-                const today = new Date();
-                const tomorrow = new Date(today);
-                tomorrow.setDate(today.getDate() + 1);
+                // Miami's day, not the device's: a passenger in Tokyo must see
+                // the same "Today" as the ride does.
+                const today = this.miamiDayOf() || new Date();
+                const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
                 
                 document.getElementById('todayDate').textContent = this.formatDateShort(today);
                 document.getElementById('tomorrowDate').textContent = this.formatDateShort(tomorrow);
@@ -1975,6 +2021,44 @@
                                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                 return `${months[date.getMonth()]} ${date.getDate()}`;
             }
+
+            // Keep the calendar-day carrier and its visible shortcut aligned.
+            // This never recalculates a time or navigates; callers do that once.
+            syncSelectedDate(day, referenceInstant = new Date()) {
+                const selected = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+                const today = this.miamiDayOf(referenceInstant) || new Date(referenceInstant);
+                today.setHours(0, 0, 0, 0);
+                const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+                const todayBtn = this.els.todayBtn || document.getElementById('todayBtn');
+                const tomorrowBtn = this.els.tomorrowBtn || document.getElementById('tomorrowBtn');
+                const otherBtn = this.els.otherDatesBtn || document.getElementById('otherDatesBtn');
+                const todayDate = this.els.todayDate || document.getElementById('todayDate');
+                const tomorrowDate = this.els.tomorrowDate || document.getElementById('tomorrowDate');
+                const sameDay = (a, b) => a.getFullYear() === b.getFullYear() &&
+                    a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+                if (todayDate) todayDate.textContent = this.formatDateShort(today);
+                if (tomorrowDate) tomorrowDate.textContent = this.formatDateShort(tomorrow);
+                if (todayBtn) todayBtn.dataset.date = today.toISOString();
+                if (tomorrowBtn) tomorrowBtn.dataset.date = tomorrow.toISOString();
+                [todayBtn, tomorrowBtn, otherBtn].forEach((btn) => btn?.classList.remove('active'));
+
+                let selectedBtn = otherBtn;
+                if (sameDay(selected, today)) selectedBtn = todayBtn;
+                else if (sameDay(selected, tomorrow)) selectedBtn = tomorrowBtn;
+                else if (otherBtn) {
+                    otherBtn.dataset.date = selected.toISOString();
+                    const value = otherBtn.querySelector('.date-value');
+                    if (value) value.textContent = this.formatDateShort(selected);
+                }
+                selectedBtn?.classList.add('active');
+                this.state.dateTime.date = selected;
+                if (this.calendarState) {
+                    this.calendarState.selectedDate = selected;
+                    this.calendarState.viewMonth = selected.getMonth();
+                    this.calendarState.viewYear = selected.getFullYear();
+                }
+            }
             
             populateTimeOptions() {
                 for (let i = 1; i <= 12; i++) {
@@ -1991,13 +2075,21 @@
             }
             
             setDefaultDateTime() {
+                // Miami's clock, rounded up to the next quarter hour. Rounding
+                // past midnight carries the DAY too.
                 const now = new Date();
-                let hours = now.getHours();
-                let minutes = Math.ceil(now.getMinutes() / 15) * 15;
+                const p = this.miamiPartsOf(now);
+                let day = p ? new Date(p.year, p.month - 1, p.day) : new Date(now);
+                let hours = p ? p.hour : now.getHours();
+                let minutes = Math.ceil((p ? p.minute : now.getMinutes()) / 15) * 15;
                 
                 if (minutes === 60) {
                     minutes = 0;
                     hours += 1;
+                }
+                if (hours === 24) {
+                    hours = 0;
+                    day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
                 }
                 
                 const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -2010,7 +2102,7 @@
                 this.els.minuteSelect.value = minutes;
                 this.els.ampmSelect.value = ampm;
                 
-                this.state.dateTime.date = now;
+                this.syncSelectedDate(day, now);
                 this.updateDateTime();
             }
             
@@ -2074,7 +2166,7 @@
                 const firstDay = new Date(viewYear, viewMonth, 1).getDay();
                 const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
                 
-                const today = new Date();
+                const today = this.miamiDayOf() || new Date();
                 today.setHours(0, 0, 0, 0);
                 
                 let calendarHTML = '';
@@ -2193,28 +2285,102 @@
                 this.updateWhenContinue();
             }
 
-            // By flight arrival needs a flight number before Vehicle
-            updateWhenContinue() {
-                if (this.els.vehicleSelectionBtn) this.els.vehicleSelectionBtn.disabled = this.flightRequiredAndMissing();
+            // ONE predicate for the flight rule. The button, the Vehicle
+            // transition and the final submission all ask this, so a disabled
+            // affordance is never the only thing standing in the way.
+            // 'required' by flight arrival, 'invalid' for a nonblank value that
+            // is not a flight number (never silently dropped), 'time' for a
+            // wall clock Miami does not have.
+            flightBlockReason() {
+                if (this.state.dateTime && this.state.dateTime.clockUnavailable) return 'clock';
+                if (this.state.dateTime && this.state.dateTime.timeSkipped) return 'time';
+                if (this.state.dateTime && this.state.dateTime.timeAmbiguous) return 'ambiguous';
+                const raw = String(this.state.flight || '').trim();
+                if (this.pickupByFlight()) return this.normalizeFlightNumber(raw) ? null : (raw ? 'invalid' : 'required');
+                if (this.state.mode === 'pickup') return null;   // arriving by time: no flight field
+                return raw && !this.normalizeFlightNumber(raw) ? 'invalid' : null;
             }
 
-            // What the booking stores about the flight. The flight number comes
-            // from When (it used to be the notes sheet's invoice reference). The
-            // reference and, for a flight-timed pickup, the landing and offset
-            // travel in the notes, so the chauffeur sees them after accepting.
+            flightBlockCopy(reason) {
+                if (reason === 'clock') return 'We cannot set the pickup time right now. Please reload the page and try again.';
+                if (reason === 'ambiguous') return 'Choose which of the two times you mean.';
+                if (reason === 'time') return 'That time does not exist in Miami on this date. Please choose another time.';
+                if (reason === 'invalid') return 'That does not look like a flight number. Use the airline and number, like AA 1234, or clear the field.';
+                return 'Add your flight number to continue.';
+            }
+
+            // Refusing a transition or a submission must say why and put the
+            // passenger back on the field that needs fixing.
+            flagFlightProblem(reason) {
+                if (this.els.flightError) {
+                    this.els.flightError.textContent = this.flightBlockCopy(reason);
+                    this.els.flightError.hidden = false;
+                }
+                if (reason !== 'time' && reason !== 'clock' && reason !== 'ambiguous') {
+                    this.navigateToPanel('when');
+                    this.els.flightInput?.focus?.();
+                }
+            }
+
+            updateWhenContinue() {
+                const reason = this.flightBlockReason();
+                if (this.els.vehicleSelectionBtn) this.els.vehicleSelectionBtn.disabled = !!reason;
+                if (this.els.flightError) {
+                    const show = reason === 'invalid';
+                    this.els.flightError.textContent = show ? this.flightBlockCopy('invalid') : '';
+                    this.els.flightError.hidden = !show;
+                }
+            }
+
+            // The Miami clock comes from the shared model that Manage ride
+            // already uses; this page never defines a second one.
+            miamiModel() {
+                if (typeof PendingEditModel !== 'undefined' && PendingEditModel) return PendingEditModel;
+                return (typeof window !== 'undefined' && window.PendingEditModel) || null;
+            }
+
+            // A Miami wall clock to the instants that exist: none across the
+            // spring-forward gap and two in the fall-back hour. null = model
+            // absent; the caller refuses rather than guessing from the device.
+            resolveMiamiWall(wall) {
+                const m = this.miamiModel();
+                return m && typeof m.resolveMiamiWallClock === 'function' ? m.resolveMiamiWallClock(wall) : null;
+            }
+
+            miamiPartsOf(instant) {
+                const m = this.miamiModel();
+                return m && typeof m.miamiParts === 'function' ? m.miamiParts(instant) : null;
+            }
+
+            // A local Date whose CALENDAR DAY is the Miami day, so every
+            // existing getter (labels, dataset, calendar) reads Miami without a
+            // second clock. null = the shared model is missing.
+            miamiDayOf(instant) {
+                const p = this.miamiPartsOf(instant || new Date());
+                return p ? new Date(p.year, p.month - 1, p.day) : null;
+            }
+
+            miamiClock(instant) {
+                const m = this.miamiModel();
+                const tz = (m && m.MIAMI_TZ) || 'America/New_York';
+                return new Date(instant).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz });
+            }
+
+            // What the booking stores about the flight. The structured flight
+            // comes from When; notes keep only the passenger's own words and
+            // reference, never derived landing or offset prose that can go stale.
             flightFieldsForSubmit(submitState, notes) {
                 const n = notes || {};
                 const byFlight = submitState.mode === 'pickup' && submitState.flightBasis === 'arrival';
                 const arrivingByTime = submitState.mode === 'pickup' && !byFlight;
                 const flightNumber = arrivingByTime ? null : this.normalizeFlightNumber(submitState.flight);
+                // Only the passenger's own words and their reference are
+                // stored. A derived landing sentence would go stale the moment
+                // Manage ride changed the time, and nothing could maintain it;
+                // the authoritative pickup and the structured flight number
+                // carry the meaning instead.
                 const lines = [];
                 if (n.chauffeurNotes) lines.push(n.chauffeurNotes);
-                if (byFlight && submitState.landing) {
-                    const t = new Date(submitState.landing).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-                    lines.push(submitState.flightOffset
-                        ? `Pickup ${submitState.flightOffset} min after the flight lands (scheduled landing ${t}).`
-                        : `Pickup when the flight lands (scheduled landing ${t}).`);
-                }
                 if (n.referenceCode) lines.push(`Reference: ${n.referenceCode}`);
                 return { flightNumber: flightNumber || null, notes: lines.join('\n') };
             }
@@ -2223,71 +2389,167 @@
                 const hours = parseInt(this.els.hourSelect.value);
                 const minutes = parseInt(this.els.minuteSelect.value);
                 const ampm = this.els.ampmSelect.value;
-                
-                const date = new Date(this.state.dateTime.date);
+                const day = new Date(this.state.dateTime.date);
                 let hour24 = hours;
-                
                 if (ampm === 'PM' && hours !== 12) hour24 += 12;
                 if (ampm === 'AM' && hours === 12) hour24 = 0;
-                
-                date.setHours(hour24, minutes, 0, 0);
-                
+
+                // The pickers are a MIAMI wall clock, never the device clock:
+                // flights and pickups are Miami-local by definition, and the
+                // passenger may be booking from anywhere.
+                const offsetMs = (this.pickupByFlight() ? (this.state.flightOffset || 0) : 0) * 60000;
+                const resolved = this.resolveMiamiWall({
+                    year: day.getFullYear(), month: day.getMonth() + 1, day: day.getDate(),
+                    hour: hour24, minute: minutes
+                });
+                let landingInstant;
+                const clearStoredTime = () => {
+                    this.state.dateTime.time = null;
+                    this.state.dateTime.landing = null;
+                    this.invalidateQuote('pickup time not set');
+                    if (this.els.flightPickupNote) this.els.flightPickupNote.textContent = '';
+                };
+                if (resolved === null) {
+                    // The shared Miami clock is missing. FAIL CLOSED: guessing
+                    // with the device clock is the exact corruption this pass
+                    // removed.
+                    this.state.dateTime.clockUnavailable = true;
+                    this.state.dateTime.timeSkipped = false;
+                    this.hideTimeChoice();
+                    clearStoredTime();
+                    this.showTimeWarning(this.flightBlockCopy('clock'));
+                    this.updateWhenContinue();
+                    return;
+                }
+                this.state.dateTime.clockUnavailable = false;
+                if (!resolved.length) {
+                    // Spring forward: this wall time never happens in Miami.
+                    // Refuse it; nothing is stored and the gate holds.
+                    this.state.dateTime.timeSkipped = true;
+                    this.hideTimeChoice();
+                    clearStoredTime();
+                    this.showTimeWarning(this.flightBlockCopy('time'));
+                    this.updateWhenContinue();
+                    return;
+                }
+                this.state.dateTime.timeSkipped = false;
+                if (resolved.length > 1) {
+                    // Fall back: this clock time happens TWICE. Never guess a
+                    // pickup time — ask, the way Manage ride already does.
+                    const wallKey = `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()} ${hour24}:${minutes}`;
+                    const chosen = this.state.dateTime.foldWall === wallKey
+                        ? resolved.find((r) => r.iso === this.state.dateTime.foldChoiceIso)
+                        : null;
+                    if (!chosen) {
+                        this.state.dateTime.foldWall = wallKey;
+                        this.state.dateTime.foldChoiceIso = null;
+                        this.state.dateTime.timeAmbiguous = true;
+                        this.showTimeChoice(resolved, wallKey);
+                        clearStoredTime();
+                        this.showTimeWarning(this.flightBlockCopy('ambiguous'));
+                        this.updateWhenContinue();
+                        return;
+                    }
+                    landingInstant = chosen.instant;
+                } else {
+                    landingInstant = resolved[0].instant;
+                }
+                this.state.dateTime.timeAmbiguous = false;
+                this.hideTimeChoice();
+
+                // The elapsed rule judges the PICKUP, not the landing: a flight
+                // that landed ten minutes ago still has a future pickup.
+                let pickupInstant = new Date(landingInstant.getTime() + offsetMs);
                 const now = new Date();
-                const isToday = date.toDateString() === now.toDateString();
-                
-                if (isToday && date < now) {
+                if (pickupInstant.getTime() <= now.getTime()) {
                     this.showTimeWarning();
-                    
-                    const minTime = new Date(now.getTime() + 30 * 60000);
-                    const roundedMinutes = Math.ceil(minTime.getMinutes() / 15) * 15;
-                    minTime.setMinutes(roundedMinutes);
-                    
-                    let minHours = minTime.getHours();
-                    const minAmPm = minHours >= 12 ? 'PM' : 'AM';
-                    if (minHours > 12) minHours -= 12;
-                    if (minHours === 0) minHours = 12;
-                    
-                    this.els.hourSelect.value = minHours;
-                    this.els.minuteSelect.value = minTime.getMinutes();
-                    this.els.ampmSelect.value = minAmPm;
-                    
-                    date.setHours(minTime.getHours(), minTime.getMinutes(), 0, 0);
+                    const minPickup = new Date(now.getTime() + 30 * 60000);
+                    minPickup.setSeconds(0, 0);
+                    const land = new Date(minPickup.getTime() - offsetMs);
+                    land.setSeconds(0, 0);
+                    land.setMinutes(Math.ceil(land.getMinutes() / 15) * 15);
+                    landingInstant = land;
+                    pickupInstant = new Date(landingInstant.getTime() + offsetMs);
+                    const parts = this.miamiPartsOf(landingInstant) || {
+                        year: landingInstant.getFullYear(), month: landingInstant.getMonth() + 1,
+                        day: landingInstant.getDate(), hour: landingInstant.getHours(),
+                        minute: landingInstant.getMinutes()
+                    };
+                    // The controls represent the landing wall time in flight
+                    // mode and the pickup wall time otherwise. Carry that same
+                    // calendar day into both state and the visible date button.
+                    this.syncSelectedDate(new Date(parts.year, parts.month - 1, parts.day), now);
+                    let h12 = parts.hour % 12; if (h12 === 0) h12 = 12;
+                    this.els.hourSelect.value = h12;
+                    this.els.minuteSelect.value = parts.minute;
+                    this.els.ampmSelect.value = parts.hour >= 12 ? 'PM' : 'AM';
                 } else {
                     this.hideTimeWarning();
                 }
                 document.getElementById('pickupElapsedNotice')?.remove();   // PR-T: a new pick clears it
 
-                // By flight arrival: the pickers set the landing; the pickup
-                // follows it by the chosen offset. Everything after this screen
-                // still reads one pickup time (state.dateTime.time).
-                let landing = null;
-                if (this.pickupByFlight()) {
-                    landing = new Date(date);
-                    date.setTime(date.getTime() + (this.state.flightOffset || 0) * 60000);
-                }
-                this.state.dateTime.landing = landing;
+                this.state.dateTime.landing = this.pickupByFlight() ? landingInstant : null;
                 if (this.els.flightPickupNote) {
-                    this.els.flightPickupNote.textContent = landing
-                        ? `Your pickup: ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+                    this.els.flightPickupNote.textContent = this.pickupByFlight()
+                        ? `Your pickup: ${this.miamiClock(pickupInstant)}`
                         : '';
                 }
-                
+
                 const prevPickup = this.state.dateTime.time
                     ? new Date(this.state.dateTime.time).getTime() : null;
-                this.state.dateTime.time = date;
-                if (prevPickup !== date.getTime()) this.invalidateQuote('pickup time changed');
+                this.state.dateTime.time = pickupInstant;
+                if (prevPickup !== pickupInstant.getTime()) this.invalidateQuote('pickup time changed');
                 if (this.pendingEdit && this.quoteFlowActive()) this.updateBookAvailability();
                 this.updateTimeNote();
-                // Time-of-day affects surge pricing. Recalculate the
-                // selected vehicle before either a new booking or an edit is
-                // submitted so the displayed and stored prices stay aligned.
+                // Time-of-day affects surge pricing. Recalculate the selected
+                // vehicle before either a new booking or an edit is submitted.
                 if (this.state.route.distance && this.state.route.duration) {
                     this.updateVehiclePrices();
                 }
                 this.updateBookButton();
+                this.updateWhenContinue();
             }
 
-            showTimeWarning() {
+            // The repeated fall-back hour, offered once each. Andres's copy:
+            // the passenger picks, the page never guesses.
+            showTimeChoice(candidates, wallKey) {
+                let box = document.getElementById('timeChoice');
+                if (!box) {
+                    box = document.createElement('div');
+                    box.id = 'timeChoice';
+                    box.className = 'time-choice';
+                    this.els.timeNote?.parentElement?.insertBefore(box, this.els.timeNote);
+                }
+                const clock = this.els.hourSelect.value + ':' +
+                    String(this.els.minuteSelect.value).padStart(2, '0') + ' ' + this.els.ampmSelect.value;
+                box.innerHTML = '';
+                const note = document.createElement('p');
+                note.className = 'time-choice-note';
+                note.textContent = `The clocks change that night, so ${clock} happens twice. Which one do you mean?`;
+                box.appendChild(note);
+                const words = ['before clocks change', 'after clocks change'];
+                candidates.forEach((candidate, i) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'time-choice-btn';
+                    btn.dataset.iso = candidate.iso;
+                    btn.textContent = `${i === 0 ? 'First' : 'Second'} ${clock} — ${words[i] || ''}`.trim();
+                    btn.addEventListener('click', () => {
+                        this.state.dateTime.foldWall = wallKey;
+                        this.state.dateTime.foldChoiceIso = candidate.iso;
+                        this.updateDateTime();
+                    });
+                    box.appendChild(btn);
+                });
+                box.hidden = false;
+            }
+
+            hideTimeChoice() {
+                const box = document.getElementById('timeChoice');
+                if (box) { box.hidden = true; box.innerHTML = ''; }
+            }
+
+            showTimeWarning(message) {
                 let warning = document.getElementById('timeWarning');
                 if (!warning) {
                     warning = document.createElement('div');
@@ -2295,10 +2557,14 @@
                     warning.className = 'time-warning';
                     warning.innerHTML = `
                         <span class="warning-icon">⚠️</span>
-                        <span>Please select a time at least 30 minutes from now</span>
+                        <span class="time-warning-text">Please select a time at least 30 minutes from now</span>
                     `;
                     this.els.timeNote.parentElement.insertBefore(warning, this.els.timeNote);
                 }
+                // Always set the copy: a custom message must never stick to a
+                // later, ordinary warning.
+                const text = warning.querySelector('.time-warning-text');
+                if (text) text.textContent = message || 'Please select a time at least 30 minutes from now';
                 warning.classList.add('visible');
             }
 
@@ -2330,16 +2596,19 @@
 
             updateBookButton() {
                 if (this.state.dateTime.time && this.els.bookBtn) {
+                    const tz = (this.miamiModel() && this.miamiModel().MIAMI_TZ) || 'America/New_York';
                     const dateStr = this.state.dateTime.time.toLocaleDateString('en-US', {
                         weekday: 'short',
                         month: 'short',
                         day: 'numeric',
-                        year: 'numeric'
+                        year: 'numeric',
+                        timeZone: tz
                     });
                     const timeStr = this.state.dateTime.time.toLocaleTimeString('en-US', {
                         hour: 'numeric',
                         minute: '2-digit',
-                        hour12: true
+                        hour12: true,
+                        timeZone: tz
                     });
                     
                     const bookBtnSubText = this.els.bookBtn.querySelector('.btn-sub-text');
@@ -3338,6 +3607,11 @@
             
             // Handle booking button click - open passenger modal first
             handleBookingClick() {
+                // The flight rule again, at the tap: an off-screen or keyboard
+                // reachable Book must not submit a ride whose flight is missing
+                // or malformed.
+                const flightBlocked = this.flightBlockReason();
+                if (flightBlocked) { this.flagFlightProblem(flightBlocked); return; }
                 // One submission at a time. While an envelope (or legacy
                 // POST) is in flight, quote-expiry timers and carousel events
                 // may recompute the button, but a tap must never start a
@@ -4266,6 +4540,9 @@
                 // refuses taps while it is set; the sanctioned requote
                 // auto-resubmit releases it just before recursing.
                 if (this._submitInFlight) return;
+                // Final guard before any network work.
+                const flightBlocked = this.flightBlockReason();
+                if (flightBlocked) { this.flagFlightProblem(flightBlocked); return; }
                 this._submitInFlight = true;
                 try {
                 // PR 3C-2B2 — the quote is re-checked HERE, immediately before

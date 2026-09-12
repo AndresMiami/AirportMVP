@@ -454,6 +454,7 @@
 
   return {
     AIRPORT_CODES,
+    miamiParts,
     deepFreeze,
     deepClone,
     ownProp,

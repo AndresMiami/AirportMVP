@@ -491,6 +491,61 @@ check('ROLLBACK/DISABLED: one tap submits the pricing.js fare — a plain legacy
     'the legacy POST body is JSON');
 });
 
+check('FLIGHT: one tap POSTs the When flight number and the passenger notes, with no derived landing prose', async () => {
+  const f = routedFetch({ '/api/create-booking': CREATED });
+  const { app } = makeContext({ enabled: false, fetchImpl: f });
+  app.showTripSheet = () => {};
+  app.pricingService = {
+    getAllVehicles: () => ['tesla'],
+    getVehicleConfig: () => ({ name: 'x', capacity: { passengers: 4, bags: 4 } }),
+    calculateVehiclePrice: () => ({ finalPrice: 50, breakdown: { appliedSurcharges: [] } }),
+    checkSurgePeriod: () => ({ hasSurge: false }),
+  };
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 50 });
+  // arriving, timed by the flight: the pickup instant is what create receives
+  app.state.mode = 'pickup';
+  app.state.flight = 'aa 1234';
+  app.state.flightBasis = 'arrival';
+  app.state.flightOffset = 15;
+  app.state.dateTime = { date: new Date('2026-09-20T00:00:00Z'), time: new Date('2026-09-20T18:30:00Z'), landing: new Date('2026-09-20T18:15:00Z') };
+  app.state.pickupNotes = { chauffeurNotes: 'Blue bag', pickupSign: 'PAT', referenceCode: 'ACME-7' };
+  app.updateVehiclePrices();
+  await tap(app);
+  const posts = f.to('/api/create-booking');
+  assert.strictEqual(posts.length, 1, 'the tap must POST the booking');
+  const sent = JSON.parse(posts[0].opts.body);
+  assert.strictEqual(sent.flightNumber, 'AA 1234', 'the flight comes from When, normalized');
+  assert.strictEqual(sent.notes, 'Blue bag\nReference: ACME-7', 'the passenger notes and the reference, nothing derived');
+  assert.ok(!/landing|lands/i.test(sent.notes), 'no landing sentence that Manage ride could not maintain');
+  assert.strictEqual(sent.pickupSign, 'PAT');
+  assert.strictEqual(sent.dateTime, '2026-09-20T18:30:00.000Z', 'the authoritative pickup instant');
+});
+
+check('FLIGHT: clearing a required flight refuses the submission — no POST at all', async () => {
+  const f = routedFetch({ '/api/create-booking': CREATED });
+  const { app } = makeContext({ enabled: false, fetchImpl: f });
+  app.showTripSheet = () => {};
+  app.navigateToPanel = () => {};          // the refusal returns the passenger to When
+  app.els.flightInput = Object.assign(makeEl('input'), { focus() { app.__focused = true; } });
+  app.els.flightError = makeEl('p');
+  app.pricingService = {
+    getAllVehicles: () => ['tesla'],
+    getVehicleConfig: () => ({ name: 'x', capacity: { passengers: 4, bags: 4 } }),
+    calculateVehiclePrice: () => ({ finalPrice: 50, breakdown: { appliedSurcharges: [] } }),
+    checkSurgePeriod: () => ({ hasSurge: false }),
+  };
+  app.selectVehicle({ id: 'tesla', name: 'Tesla Model Y', passengers: 4, bags: 4, price: 50 });
+  app.state.mode = 'pickup';
+  app.state.flightBasis = 'arrival';
+  app.state.flight = '';                   // reached Vehicle with a flight, then cleared it
+  app.state.flightOffset = 15;
+  app.updateVehiclePrices();
+  await tap(app);
+  assert.strictEqual(f.to('/api/create-booking').length, 0, 'a ride timed by a flight cannot be booked without one');
+  assert.strictEqual(app.els.flightError.hidden, false, 'and the passenger is told why');
+  assert.strictEqual(app.__focused, true, 'the field that needs fixing takes focus');
+});
+
 check('ROLLBACK/DISABLED: a route change re-prices through pricing.js AND the writer receives the new fare', async () => {
   // /api/quote-ride deliberately UNROUTED (any quote call throws); only the
   // writer is served, so the chain below is the real legacy tap -> POST.
@@ -2922,7 +2977,7 @@ check('MANAGE RIDE SHEET: a route change parks the sheet and activates the booki
   assert.strictEqual(overlay.hidden, true, 'the sheet is parked while the Where screen is up');
   assert.ok(s.app.els.bookingContainer.classList.contains('active'), 'the booking form activates only for the route change');
   const controls = s.app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
-  controls.children[2].listeners.click[0]();   // Back
+  controls.children.find((c) => c.id === 'editRouteBack').listeners.click[0]();   // Back
   assert.strictEqual(overlay.hidden, false, 'Back brings the sheet back');
   assert.ok(s.app.els.bookingContainer.classList.contains('active'), 'still active until the edit ends');
   const close = findIn(overlay, (n) => n.className === 'edit-sheet-close');
@@ -3026,8 +3081,8 @@ check('EDIT-ROUTE MODE: typing a new address clears the temporary tuple and disa
   //     tears the mode down (listener removed, _editRoute cleared)
   const controls = app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
   assert.ok(controls, 'the host built its Done/Back controls');
-  const doneBtn = controls.children[0];
-  const backBtn = controls.children[2];
+  const doneBtn = controls.children.find((c) => c.id === 'editRouteDone');
+  const backBtn = controls.children.find((c) => c.id === 'editRouteBack');
   assert.strictEqual(doneBtn.disabled, false);
   doneBtn.listeners.click[0]();
   assert.deepStrictEqual(done, { mode: 'pickup', airport: 'FLL', airportLabel: 'Fort Lauderdale',
@@ -3047,7 +3102,7 @@ check('EDIT-ROUTE MODE: typing a new address clears the temporary tuple and disa
   }, { onDone: (d) => { done = d; }, onBack: () => { backed = true; } });
   app.onAirportTap('PBI');
   const controls2 = app.els.continueBtn.parentElement.children.find((c) => c.id === 'editRouteControls');
-  controls2.children[2].listeners.click[0]();
+  controls2.children.find((c) => c.id === 'editRouteBack').listeners.click[0]();
   assert.strictEqual(backed, true);
   assert.strictEqual(done, null, 'Back applies nothing, even after an edit');
   assert.strictEqual(app._editRoute, null);

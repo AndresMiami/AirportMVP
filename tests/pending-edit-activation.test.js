@@ -45,8 +45,13 @@ async function check(name, fn) {
     assert.ok(!indexMvp.includes('pickupStillFuture'), 'no blocking helper on the page');
     const handlerSrc = read('backend/functions/update-pending-booking.js');
     assert.ok(!handlerSrc.includes('pickup_time_elapsed'), 'no partial guard in the edit handler');
-    // The create picker's own snap-forward stays: device time ADVISES.
-    assert.match(indexMvp, /if \(isToday && date < now\) \{[\s\S]{0,200}?showTimeWarning\(\)/);
+    // The create picker's own snap-forward stays: device time ADVISES. Since
+    // the flight pass it judges the EFFECTIVE PICKUP (landing + offset) on a
+    // Miami wall clock, never the raw picker value.
+    assert.match(indexMvp, /if \(pickupInstant\.getTime\(\) <= now\.getTime\(\)\) \{[\s\S]{0,200}?showTimeWarning\(\)/);
+    assert.ok(indexMvp.indexOf('let pickupInstant = new Date(landingInstant.getTime() + offsetMs);') <
+      indexMvp.indexOf('if (pickupInstant.getTime() <= now.getTime())'),
+      'the pickup is computed BEFORE the elapsed rule judges it');
   });
 
   await check('the card still RENDERS a typed PR-T refusal when one arrives', async () => {
@@ -103,7 +108,9 @@ async function check(name, fn) {
     // it says nothing about the edit card.
     assert.match(indexMvp, /const isPast = date < today;/);
     assert.match(indexMvp, /isPast \? 'disabled' : ''/);
-    assert.match(indexMvp, /if \(isToday && date < now\) \{[\s\S]{0,200}?showTimeWarning\(\)/);
+    // the snap forward now judges the effective pickup, resolved in Miami
+    assert.match(indexMvp, /if \(pickupInstant\.getTime\(\) <= now\.getTime\(\)\) \{[\s\S]{0,200}?showTimeWarning\(\)/);
+    assert.match(indexMvp, /resolveMiamiWallClock/, 'the wall clock is Miami, through the shared model');
   });
 
   console.log('\nPR-B — SOURCE: the trip-sheet lifecycle ladder\n');
@@ -198,7 +205,7 @@ async function check(name, fn) {
   await check('SOURCE: the model is loaded and both cache rungs moved', async () => {
     assert.match(indexMvp, /<script src="\.\/js\/pending-edit-model\.js/);
     const sw = read('service-worker.js');
-    assert.ok(sw.includes("'/js/pending-edit-model.js?v=1'"));
+    assert.ok(sw.includes("'/js/pending-edit-model.js?v=2'"));
     assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.\d+'/);
     assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v\d+'/);   // the pair itself: pending-edit-hydration's ladder check
   });

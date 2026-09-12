@@ -192,13 +192,22 @@ check('When: one estimate line (the time note repeated it and stays hidden) and 
 });
 
 check('one card, one style: every control shares the tokens, one selected look, one label style, one header', () => {
-  const cssRule = (sel) => { const i = css.indexOf('\n' + sel + ' {'); assert.ok(i >= 0, `rule missing: ${sel}`); return css.slice(i, css.indexOf('}', i)); };
+  // a selector may stand alone or head a comma list (.mode-btn,\n.basis-btn {)
+  const cssRule = (sel) => {
+    let i = -1;
+    for (const start of [`\n${sel} {`, `\n${sel},`]) {
+      const j = css.indexOf(start);
+      if (j >= 0 && (i < 0 || j < i)) i = j;
+    }
+    assert.ok(i >= 0, `rule missing: ${sel}`);
+    return css.slice(i, css.indexOf('}', i));
+  };
   for (const t of ['--card-pad-x: 20px;', '--surface-control:', '--line:', '--r-control: 12px;', '--selected-bg:']) assert.ok(block.includes(t), `token ${t}`);
-  for (const sel of ['.basis-btn', '.address-input', '.airport-option', '.date-btn', '.time-select', '.flight-input', '.control-button', '#vehiclePanel .calendar-button-mobile']) {
+  for (const sel of ['.mode-btn', '.basis-btn', '.address-input', '.airport-option', '.date-btn', '.time-select', '.flight-input', '.control-button', '#vehiclePanel .calendar-button-mobile']) {
     const r = cssRule(sel);
     assert.ok(r.includes('var(--surface-control)') && r.includes('1px solid var(--line)') && r.includes('var(--r-control)'), `${sel} uses the control tokens`);
   }
-  for (const sel of ['.basis-btn.active', '.airport-option.selected', '.date-btn.active']) {
+  for (const sel of ['.mode-btn.active', '.basis-btn.active', '.airport-option.selected', '.date-btn.active']) {
     const r = cssRule(sel);
     assert.ok(r.includes('var(--selected-bg)') && r.includes('border-color: var(--primary)'), `${sel} is the one selected look`);
   }
