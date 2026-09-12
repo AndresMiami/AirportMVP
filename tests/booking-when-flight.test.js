@@ -231,7 +231,10 @@ function makeApp(mode, basis = 'arrival', { y = 2026, m = 9, d = 20, hour = 2, m
   app.els.flightError.hidden = true;
   app.pendingEdit = null;
   app._editRoute = null;
-  for (const stub of ['showTimeWarning', 'hideTimeWarning', 'invalidateQuote', 'updateTimeNote', 'updateVehiclePrices', 'updateBookButton', 'updateBookAvailability', 'updateSummary', 'updateProgressSteps', 'updateVehicleMap', 'updateVehiclePrices']) app[stub] = () => {};
+  // updateRouteDisplay joins this list for the same reason updateTimeNote is
+  // on it: this suite drives the pickup logic, not the When panel's rendering.
+  // The arrival estimate has its own suite (booking-arrival-estimate).
+  for (const stub of ['showTimeWarning', 'hideTimeWarning', 'invalidateQuote', 'updateTimeNote', 'updateRouteDisplay', 'updateVehiclePrices', 'updateBookButton', 'updateBookAvailability', 'updateSummary', 'updateProgressSteps', 'updateVehicleMap', 'updateVehiclePrices']) app[stub] = () => {};
   app.quoteFlowActive = () => true;
   app.canContinue = () => true;
   return app;

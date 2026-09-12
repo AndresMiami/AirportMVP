@@ -54,7 +54,9 @@
 //   v1.3.47 / runtime-v24  When: the flight (Blacklane-style) — by flight arrival or by time, the flight number saved;
 //                           Miami wall clock, pickup-first elapsed rule, one flight rule at every seam (Codex seq:251)
 //   v1.3.48 / runtime-v25  Account door in the booking card — one fixed way into the traveler sheet,
-//                           where Sign out lives — THIS tree
+//                           where Sign out lives (shipped 2026-09-30, PR #115)
+//   v1.3.49 / runtime-v26  The When arrival estimate counts from the chosen pickup, in Miami time, and re-renders
+//                           when the pickup changes (the PR #109 deferral) — THIS tree
 // RULE (plan v8.6 §3D, simplified 2026-09-10): cache names only ever move
 // FORWARD and both caches move together. Any release OR rollback takes the
 // NEXT UNUSED pair — one above the constants below — chosen when it is
@@ -62,11 +64,11 @@
 // of time anywhere; tests/pending-edit-hydration derives the only check
 // (no number above the current pair in the repo, history line present,
 // forward-only versus main, both caches together).
-const CACHE_NAME = 'linkmia-v1.3.48';
+const CACHE_NAME = 'linkmia-v1.3.49';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v25';
+const RUNTIME_CACHE = 'linkmia-runtime-v26';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
