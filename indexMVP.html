@@ -1871,23 +1871,35 @@
                     return;
                 }
 
-                const now = new Date();
-                const arrivalTime = new Date(now.getTime() + this.state.route.duration * 60 * 1000);
-                const formattedArrivalTime = arrivalTime.toLocaleTimeString('en-US', {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    hour12: true
-                });
-                
                 const formattedDuration = this.formatDuration(this.state.route.duration);
-                
                 const actionText = this.state.mode === 'dropoff' ? 'Drop-off' : 'Drop off';
                 const locationText = this.state.mode === 'dropoff' ? 'airport' : 'destination';
-                
-                this.els.arrivalTitle.textContent = `${actionText} at ${locationText} approx. ${formattedArrivalTime}`;
-                this.els.tripDuration.textContent = `Estimated ride duration of ${formattedDuration}`;
-                
-                this.els.tripDuration.textContent += ' (live data)';
+
+                // The arrival is the CHOSEN PICKUP plus the drive — never `now`
+                // plus the drive. A ride booked for tomorrow night used to print
+                // an arrival a few minutes from this moment: a clock time with no
+                // relationship to the booking it sat inside. state.dateTime.time
+                // is the one pickup instant every stage after When already reads,
+                // so a flight-timed pickup (landing + offset) arrives here fully
+                // resolved and needs no special case.
+                const pickupMs = this.state.dateTime?.time
+                    ? new Date(this.state.dateTime.time).getTime()
+                    : NaN;
+
+                if (!Number.isFinite(pickupMs)) {
+                    // No pickup chosen yet. State the drive, promise no clock
+                    // time — the previous code filled this gap from `now`.
+                    this.els.arrivalTitle.textContent = `About ${formattedDuration} to the ${locationText}`;
+                    this.els.tripDuration.textContent = 'Choose a pickup time to see your arrival';
+                    this.els.routeAttribution.classList.add('visible');
+                    return;
+                }
+
+                const arrivalTime = new Date(pickupMs + this.state.route.duration * 60 * 1000);
+
+                this.els.arrivalTitle.textContent =
+                    `${actionText} at ${locationText} approx. ${this.miamiClock(arrivalTime)}`;
+                this.els.tripDuration.textContent = `Estimated ride duration of ${formattedDuration} (live data)`;
                 this.els.routeAttribution.classList.add('visible');
             }
             
@@ -2501,6 +2513,12 @@
                 if (prevPickup !== pickupInstant.getTime()) this.invalidateQuote('pickup time changed');
                 if (this.pendingEdit && this.quoteFlowActive()) this.updateBookAvailability();
                 this.updateTimeNote();
+                // The arrival estimate is now derived from the pickup, so a
+                // changed pickup has to re-render it. updateRouteDisplay used
+                // to be reachable only from calculateRoute — which is why the
+                // stale-basis bug could not correct itself by touching the
+                // clock.
+                this.updateRouteDisplay();
                 // Time-of-day affects surge pricing. Recalculate the selected
                 // vehicle before either a new booking or an edit is submitted.
                 if (this.state.route.distance && this.state.route.duration) {
@@ -2623,13 +2641,14 @@
                 
                 const pickupTime = new Date(this.state.dateTime.time);
                 const arrivalTime = new Date(pickupTime.getTime() + this.state.route.duration * 60 * 1000);
-                
-                const formatTime = (date) => date.toLocaleTimeString('en-US', {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    hour12: true
-                });
-                
+
+                // Miami wall clock, like every other scheduling surface (the
+                // convention, and what flightPickupNote already does). The
+                // device clock used to render these two, so a passenger
+                // booking from another timezone read their own hours for a
+                // ride that happens in Miami's.
+                const formatTime = (date) => this.miamiClock(date);
+
                 if (this.state.mode === 'dropoff') {
                     this.els.timeNote.innerHTML = `
                         <span>Pickup: <strong>${formatTime(pickupTime)}</strong></span>
