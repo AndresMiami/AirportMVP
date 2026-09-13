@@ -111,6 +111,36 @@
         .contact-row { font-size: 14px; margin: 8px 0; }
         .contact-row a { color: #2668d9; text-decoration: none; font-weight: 600; }
         .notes { font-size: 13px; color: #666; background: #f8f8f8; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+        /* The flight a passenger gave us. It is deliberately PROMINENT and
+           carries its own action: at one chauffeur the human IS the flight
+           monitoring, so the card's job is to make checking effortless and
+           hard to forget. "Check flight status" opens a public search -- the result is the
+           NEXT occurrence of that number, which the chauffeur cross-checks
+           against this card's Miami date and airport --
+           LinkMia holds no provider account and tracks nothing continuously,
+           and the copy must never imply otherwise. */
+        .flight-block {
+            display: flex; align-items: center; gap: 10px;
+            /* The SERVER accepts up to 80 characters here and legacy rows hold
+               invoice-style references, so the row must survive a value the
+               booking UI would never produce: it wraps rather than pushing the
+               44px target off a narrow card. */
+            flex-wrap: wrap;
+            margin: 10px 0; padding: 10px 12px;
+            background: #f8f8f8; border-radius: 8px;
+        }
+        .flight-id {
+            font-size: 15px; font-weight: 700; color: #1a1a2e; letter-spacing: 0.3px;
+            min-width: 0; overflow-wrap: anywhere;
+        }
+        .btn-flight {
+            margin-left: auto; display: inline-flex; align-items: center;
+            min-height: 44px; padding: 0 14px;
+            background: white; color: #1a1a2e;
+            border: 1.5px solid #c9c9d4; border-radius: 10px;
+            font-size: 14px; font-weight: 600; text-decoration: none;
+            white-space: nowrap;
+        }
         .btn-row { display: flex; gap: 10px; margin-top: 12px; }
         button {
             flex: 1; padding: 14px; border: none; border-radius: 12px;
@@ -1146,12 +1176,16 @@
                     <div class="route-line"></div>
                     <div class="route-point"><div class="route-marker">B</div><div class="route-text">${esc(b.dropoff_location)}</div></div>
                 </div>
+                ${b.flight_number ? `<div class="flight-block">
+                    <div class="flight-id">✈️ ${esc(b.flight_number)}</div>
+                    <a class="btn-flight" target="_blank" rel="noopener noreferrer"
+                       href="https://www.google.com/search?q=${encodeURIComponent(b.flight_number + ' flight status')}">Check flight status</a>
+                </div>` : ''}
                 <div class="meta-row">
                     <span class="price">$${b.price || 0}</span>
                     <span>🚘 ${esc(b.vehicle_name || b.vehicle_type || 'sedan')}</span>
                     <span>👥 ${b.passengers || 1}</span>
                     ${b.bags ? `<span>🧳 ${b.bags}</span>` : ''}
-                    ${b.flight_number ? `<span>✈️ ${esc(b.flight_number)}</span>` : ''}
                 </div>
                 ${b.customer_name || b.customer_phone ? `<div class="contact-row">👤 ${esc(b.customer_name)}${b.customer_phone ? ` — <a href="tel:${esc(b.customer_phone)}">${esc(b.customer_phone)}</a>` : ''}</div>` : `<div class="contact-row">👤 Passenger details shown after you accept</div>`}
                 ${b.booker_name && b.booker_name !== b.customer_name ? `<div class="contact-row">📋 Booked by ${esc(b.booker_name)}${b.booker_phone ? ` — <a href="tel:${esc(b.booker_phone)}">${esc(b.booker_phone)}</a>` : ''}</div>` : ''}

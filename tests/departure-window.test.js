@@ -518,6 +518,81 @@ async function check(name, f) {
     assert.match(driverHtml, /const DEPARTURE_WINDOW_MS = READY_BUTTON_MS;/);
   });
 
+  await check('EXECUTED: the flight row renders safely — real link, real escaping, absent without a flight', async () => {
+    // This check EXECUTES rideCard. An earlier version of it matched source
+    // strings only, and mutation-proving showed it slept through esc() being
+    // removed, the destination host being swapped, and target="_blank" being
+    // dropped. Source pins cannot see any of those; a rendered link can.
+    const escSlice = driverHtml.slice(driverHtml.indexOf('const esc ='),
+                                      driverHtml.indexOf('}[c]));') + '}[c]));'.length);
+    const cardSlice = driverHtml.slice(driverHtml.indexOf('function rideCard('),
+                                       driverHtml.indexOf('function render(bookings)'));
+    assert.ok(escSlice.includes('&amp;') && cardSlice.includes('flight-block'), 'slices extractable');
+    const ctx = vm.createContext({});
+    vm.runInContext(escSlice + "\nconst fmtWhen = () => 'Fri, Sep 18, 1:30 PM EDT';\n"
+                    + cardSlice + '\nthis.rideCard = rideCard;', ctx);
+    const base = { id: 'b1', trip_id: 'LM-1', status: 'confirmed', pickup_location: 'MIA',
+                   dropoff_location: '5540 SW 69th Pl', price: 95, passengers: 2 };
+    const hrefOf = (html) => {
+      const m = html.match(/<a class="btn-flight"[^>]*href="([^"]+)"/);
+      assert.ok(m, 'the action link is present');
+      return new URL(m[1]);
+    };
+
+    // (a) an ordinary flight: the whole destination is asserted, not just that
+    // encodeURIComponent appears somewhere in the source.
+    const html = ctx.rideCard({ ...base, flight_number: 'AA 1234' }, '', '');
+    const u = hrefOf(html);
+    assert.strictEqual(u.protocol, 'https:', 'never plain http');
+    assert.strictEqual(u.host, 'www.google.com', 'the destination host is pinned');
+    assert.strictEqual(u.pathname, '/search');
+    assert.strictEqual(u.searchParams.get('q'), 'AA 1234 flight status');
+    assert.match(html, /<a class="btn-flight"[^>]*target="_blank"/, 'opens a new tab');
+    assert.match(html, /<a class="btn-flight"[^>]*rel="noopener noreferrer"/, 'both rel tokens');
+    assert.match(html, />Check flight status<\/a>/, 'honest copy: a search, not live tracking');
+    assert.strictEqual((html.match(/flight-block/g) || []).length, 1, 'exactly one row');
+
+    // (b) no flight given: the row is absent entirely, not empty-but-present.
+    assert.ok(!ctx.rideCard(base, '', '').includes('flight-block'), 'absent without a flight');
+
+    // (c) a hostile stored value: escaped in the text, percent-encoded in the
+    // href, and the href attribute is not broken out of.
+    const evil = '"><img src=x onerror=alert(1)>';
+    const xss = ctx.rideCard({ ...base, flight_number: evil }, '', '');
+    assert.ok(!xss.includes('<img'), 'no raw element is emitted');
+    // 'onerror=alert(1)' DOES survive as inert text inside &lt;img ...&gt; —
+    // that is escaping working, not failing. The property worth asserting is
+    // that every character able to open an element or close the attribute was
+    // escaped, so assert the exact escaped form.
+    assert.ok(xss.includes('&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'),
+      'quote, gt and lt are all escaped in the visible text');
+    assert.ok(!/<\s*img/i.test(xss), 'no element-opening sequence survives');
+    const xu = hrefOf(xss);
+    assert.strictEqual(xu.host, 'www.google.com', 'the href attribute was not escaped out of');
+    assert.strictEqual(xu.searchParams.get('q'), evil + ' flight status', 'round-trips encoded');
+
+    // (d) the server accepts 80 characters; the row must take one without
+    // pushing the 44px target off a phone.
+    const long = 'REF' + 'X'.repeat(77);
+    const longHtml = ctx.rideCard({ ...base, flight_number: long }, '', '');
+    assert.strictEqual(hrefOf(longHtml).searchParams.get('q'), long + ' flight status');
+    assert.match(driverHtml, /\.flight-block \{[^}]*flex-wrap: wrap;/, 'the row wraps');
+    assert.match(driverHtml, /\.flight-id \{[^}]*min-width: 0;/, 'the identifier may shrink');
+    assert.match(driverHtml, /\.flight-id \{[^}]*overflow-wrap: anywhere;/, 'and may break mid-token');
+
+    // (e) one place only: a duplicate chip costs the prominence that makes a
+    // busy chauffeur actually check. Slice the TEMPLATE's meta row — the string
+    // 'contact-row' also names a CSS rule a thousand lines earlier, and slicing
+    // to that yields '', an assertion that passes against nothing.
+    const metaStart = html.indexOf('<div class="meta-row">');
+    const meta = html.slice(metaStart, html.indexOf('</div>', metaStart));
+    assert.ok(metaStart > 0 && meta.includes('$95'), 'the meta row was actually located');
+    assert.ok(!meta.includes('AA 1234') && !meta.includes('✈'), 'the old chip is gone');
+
+    assert.doesNotMatch(driverHtml, /Track flight|Tracking your flight|We track your/i,
+      'never imply continuous tracking we do not perform');
+  });
+
   await check('STATIC: accessible lock — AA contrast for .ready-note and an honest disabled cursor', async () => {
     assert.match(driverHtml, /\.ready-note \{[^}]*color: #9a5000;/, '#9a5000 = 5.96:1 on white, 5.52:1 on the page (AA >= 4.5)');
     assert.ok(!/\.ready-note \{[^}]*color: #cc7000/.test(driverHtml), 'the sub-AA #cc7000 must not return as the note COLOR (the CSS comment may mention it)');
