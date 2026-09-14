@@ -1,0 +1,145 @@
+/**
+ * Registry of MODEL ASSUMPTIONS.
+ *
+ * Every formula in calculations/ cites one or more of these ids. The
+ * Evidence / Assumptions screen renders this list so a reader can see
+ * exactly which conventions the numbers rest on. None of these are
+ * established scientific laws; they are working conventions chosen for
+ * the MVP and open to revision.
+ */
+export type AssumptionStatus = "convention" | "hypothesis" | "placeholder";
+
+export interface ModelAssumption {
+  id: string;
+  title: string;
+  statement: string;
+  status: AssumptionStatus;
+  /** Where the assumption is used. */
+  usedBy: string[];
+}
+
+export const ASSUMPTIONS: ModelAssumption[] = [
+  {
+    id: "A1",
+    title: "Reliable income floor",
+    statement:
+      "Floor = sum over sources of (monthly amount x reliability), where reliability is the fraction of the amount that can be counted on in a bad month. This is a judgment per source, not a measured distribution.",
+    status: "convention",
+    usedBy: ["reliableIncomeFloor", "floorRatio"],
+  },
+  {
+    id: "A2",
+    title: "Buffer months use essential expenses only",
+    statement:
+      "Buffer months = liquid reserves / essential monthly expenses. Discretionary spending is assumed to be cut first in a crisis.",
+    status: "convention",
+    usedBy: ["bufferMonths"],
+  },
+  {
+    id: "A3",
+    title: "Income concentration via HHI",
+    statement:
+      "H = sum of squared income shares. 1 = a single source, 1/n = n equal sources. Shares use gross monthly amounts.",
+    status: "convention",
+    usedBy: ["incomeConcentration"],
+  },
+  {
+    id: "A4",
+    title: "Failure correlation as largest correlated block",
+    statement:
+      "Sources sharing a correlation group are assumed to fail together. Failure correlation = the largest share of income held by one group.",
+    status: "convention",
+    usedBy: ["failureCorrelation"],
+  },
+  {
+    id: "A5",
+    title: "Share-weighted volatility and replacement latency",
+    statement:
+      "Household income volatility and replacement latency are income-share-weighted means of the per-source values.",
+    status: "convention",
+    usedBy: ["incomeVolatility", "replacementLatency"],
+  },
+  {
+    id: "A6",
+    title: "Career-capital step model",
+    statement:
+      "C(t+1) = C(t) + effortToCapitalRate x qualityOfEffort x protectedHours x persistence - switchingCost. Career capital is an index whose scale is set by the estimated effortToCapitalRate; only its direction and relative change are meaningful.",
+    status: "hypothesis",
+    usedBy: ["careerCapitalStep", "projectCareerCapital"],
+  },
+  {
+    id: "A7",
+    title: "Productive-capital step model",
+    statement:
+      "A(t+1) = A(t) + capitalConversionRate x max(0, income - expenses) + A(t) x monthlyReturnRate. Expenses include essential, discretionary and debt payments.",
+    status: "hypothesis",
+    usedBy: ["productiveCapitalStep", "projectProductiveCapital"],
+  },
+  {
+    id: "A8",
+    title: "Leverage score",
+    statement:
+      "L = (impact x controllability x durability) / (max(cost, 0.05) x max(uncertainty, 0.05)). All five factors are 0..1 ordinal judgments. Only the RANK of scores is meaningful; the magnitude is not.",
+    status: "hypothesis",
+    usedBy: ["leverageScore"],
+  },
+  {
+    id: "A9",
+    title: "Loop polarity and gain",
+    statement:
+      "A loop is reinforcing when it contains an even number of negative edges, balancing otherwise. Loop gain = product of edge strengths (0..1 judgments), not a measured elasticity.",
+    status: "convention",
+    usedBy: ["loopPolarity", "loopGain"],
+  },
+  {
+    id: "A10",
+    title: "Loop pressure index",
+    statement:
+      "Loop pressure = (geometric mean of the loop's edge strengths) x (mean normalised gap of the loop's variables that have a desired value). High pressure on a reinforcing loop means its variables currently sit far from the desired state while feeding each other. The geometric mean is used instead of the raw product so long loops are not penalised for having more edges. It is a diagnostic index, not a rate.",
+    status: "hypothesis",
+    usedBy: ["loopPressure", "compareScenario"],
+  },
+  {
+    id: "A11",
+    title: "Gap normalisation",
+    statement:
+      "Normalised gap = |desired - current| / (referenceRange.max - referenceRange.min) when a reference range exists, otherwise |desired - current| / max(|desired|, |current|). Clipped to 0..1. A desired value is read per its targetMode: a floor (at_least) already met or a ceiling (at_most) already respected counts as a closed gap.",
+    status: "convention",
+    usedBy: ["structuralGap"],
+  },
+  {
+    id: "A12",
+    title: "Directional propagation",
+    statement:
+      "A change pushes each downstream variable in the edge's direction with weight equal to the product of strengths along the path, up to a fixed depth. Only the SIGN of the resulting tendency is reported; magnitudes are not predictions.",
+    status: "hypothesis",
+    usedBy: ["propagateDirectionalPressure"],
+  },
+  {
+    id: "A13",
+    title: "Derived confidence",
+    statement:
+      "A calculated variable's confidence is the minimum confidence among its inputs.",
+    status: "convention",
+    usedBy: ["computeDerivedVariables"],
+  },
+  {
+    id: "A14",
+    title: "Feasibility is a hard filter",
+    statement:
+      "An action is infeasible if any hard constraint whose dimension the action declares is violated. Constraints on dimensions the action does not declare are reported as unverified, not as violations.",
+    status: "convention",
+    usedBy: ["checkFeasibility"],
+  },
+  {
+    id: "A15",
+    title: "Monthly hours conversion",
+    statement: "Weekly hours are converted to monthly hours with a factor of 4.33.",
+    status: "convention",
+    usedBy: ["projectCareerCapital"],
+  },
+];
+
+export const ASSUMPTION_BY_ID: Record<string, ModelAssumption> = Object.fromEntries(
+  ASSUMPTIONS.map((a) => [a.id, a]),
+);
