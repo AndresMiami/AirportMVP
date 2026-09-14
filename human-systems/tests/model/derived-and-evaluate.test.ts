@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
-import { computeDerivedVariables, DERIVED_DEFINITIONS } from "@/model/derived";
+import { computeDerivedVariables } from "@/model/derived";
+import { HOUSEHOLD_DERIVED } from "@/domains/household/derived";
 import { evaluateSystem } from "@/model/evaluate";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import { SystemModelSchema } from "@/types";
 
 describe("sample household", () => {
@@ -12,7 +15,7 @@ describe("sample household", () => {
   it("has a record for every derived definition and a definition for every derived record", () => {
     const m = createSampleHousehold();
     const derivedIds = m.variables.filter((v) => v.kind === "derived").map((v) => v.id).sort();
-    expect(derivedIds).toEqual(DERIVED_DEFINITIONS.map((d) => d.id).sort());
+    expect(derivedIds).toEqual(HOUSEHOLD_DERIVED.map((d) => d.key).sort());
   });
   it("every relationship endpoint exists and every input has evidence", () => {
     const m = createSampleHousehold();
@@ -29,7 +32,7 @@ describe("computeDerivedVariables", () => {
   it("recomputes values, stamps calculated, and never trusts a stored derived value", () => {
     const m = createSampleHousehold();
     const tampered = m.variables.map((v) => (v.id === DERIVED_IDS.floorRatio ? { ...v, currentValue: 99, sourceType: "measured" as const, confidence: 1 } : v));
-    const { variables } = computeDerivedVariables(tampered, m.incomeSources);
+    const { variables } = computeDerivedVariables(tampered, m.incomeSources, HOUSEHOLD_DERIVED, m.id);
     const fr = variables.find((v) => v.id === DERIVED_IDS.floorRatio)!;
     expect(fr.currentValue).toBeCloseTo(2970 / 3600, 9);
     expect(fr.sourceType).toBe("calculated");
@@ -37,34 +40,34 @@ describe("computeDerivedVariables", () => {
   });
   it("keeps stored desired values and notes on derived records", () => {
     const m = createSampleHousehold();
-    const { variables } = computeDerivedVariables(m.variables, m.incomeSources);
+    const { variables } = computeDerivedVariables(m.variables, m.incomeSources, HOUSEHOLD_DERIVED, m.id);
     expect(variables.find((v) => v.id === DERIVED_IDS.floorRatio)!.desiredValue).toBe(1.1);
   });
   it("A13: confidence is the minimum of inputs, 0 when a value cannot be computed", () => {
     const m = createSampleHousehold();
-    const { variables, computations } = computeDerivedVariables(m.variables, m.incomeSources);
+    const { variables, computations } = computeDerivedVariables(m.variables, m.incomeSources, HOUSEHOLD_DERIVED, m.id);
     const minSourceConf = Math.min(...m.incomeSources.map((s) => s.confidence));
     expect(variables.find((v) => v.id === DERIVED_IDS.reliableFloor)!.confidence).toBe(minSourceConf);
     // buffer months = reserves (0.95) + essentials (0.85) -> 0.85
     expect(variables.find((v) => v.id === DERIVED_IDS.bufferMonths)!.confidence).toBe(0.85);
-    const noIncome = computeDerivedVariables(m.variables, []);
+    const noIncome = computeDerivedVariables(m.variables, [], HOUSEHOLD_DERIVED, m.id);
     const ti = noIncome.variables.find((v) => v.id === DERIVED_IDS.totalIncome)!;
     expect(ti.currentValue).toBeNull();
     expect(ti.confidence).toBe(0);
-    expect(noIncome.computations.find((c) => c.definition.id === DERIVED_IDS.totalIncome)!.missingInputs).toContain("incomeSources");
+    expect(noIncome.computations.find((c) => c.definition.key === DERIVED_IDS.totalIncome)!.missingInputs).toContain("incomeSources");
     expect(computations.every((c) => c.missingInputs.length === 0)).toBe(true);
   });
   it("creates a default record when the stored model lacks a derived variable", () => {
     const m = createSampleHousehold();
     const without = m.variables.filter((v) => v.id !== DERIVED_IDS.debtBurden);
-    const { variables } = computeDerivedVariables(without, m.incomeSources);
+    const { variables } = computeDerivedVariables(without, m.incomeSources, HOUSEHOLD_DERIVED, m.id);
     const db = variables.find((v) => v.id === DERIVED_IDS.debtBurden)!;
     expect(db.currentValue).toBeCloseTo(320 / 4300, 9);
     expect(db.desiredValue).toBeNull();
   });
   it("derived values chain in definition order (surplus uses total income)", () => {
     const m = createSampleHousehold();
-    const { variables } = computeDerivedVariables(m.variables, m.incomeSources);
+    const { variables } = computeDerivedVariables(m.variables, m.incomeSources, HOUSEHOLD_DERIVED, m.id);
     expect(variables.find((v) => v.id === DERIVED_IDS.monthlySurplus)!.currentValue).toBe(4300 - 3600 - 400 - 320);
   });
 });

@@ -7,11 +7,13 @@
  * from a run.
  */
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
 import { horizonOfMonths, lagToMonths } from "@/calculations/lag";
 import { loopIdFor } from "@/calculations/graph";
 import { createSampleHousehold } from "@/data/sample-household";
 import { evaluateSystem, type EvaluatedSystem } from "@/model/evaluate";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import { LocalStorageModelRepository, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { compareScenario } from "@/scenarios/compare";
 import { ModelService } from "@/services/model-service";
@@ -109,10 +111,11 @@ function addSource(m: SystemModel, s: (typeof SOURCES)[number]): SystemModel {
 
 function addInput(
   m: SystemModel,
-  spec: { id: string; name: string; unit: string; value: number; confidence: number; sourceType?: "measured" | "self_reported"; range?: { min: number; max: number } },
+  spec: { id: string; name: string; unit: string; value: number; confidence: number; sourceType?: "measured" | "self_reported"; range?: { min: number; max: number }; subjectId?: string | null },
 ): SystemModel {
   return M.addVariable(m, {
     id: spec.id,
+    subjectId: spec.subjectId ?? "sys_it",
     name: spec.name,
     category: "structure",
     changeSpeed: "slow",
@@ -126,6 +129,8 @@ function addInput(
 
 function addEdge(m: SystemModel, id: string, from: string, to: string, direction: Relationship["direction"], lag: Lag): SystemModel {
   return M.addRelationship(m, {
+      kind: "causal_hypothesis",
+      participatesInDynamics: true,
     id,
     sourceVariableId: from,
     targetVariableId: to,
@@ -142,7 +147,7 @@ function derivedValue(ev: EvaluatedSystem, id: string): number | null {
 }
 
 function derivedSnapshot(ev: EvaluatedSystem): [string, number | null][] {
-  return ev.derived.map((c) => [c.definition.id, c.variable.currentValue]);
+  return ev.derived.map((c) => [c.definition.key, c.variable.currentValue]);
 }
 
 /** Expected for the whole walk: this household never enters discretionary expenses or debt payments,
@@ -206,7 +211,7 @@ describe("blank household end to end (service + repository, no React)", () => {
     m = addInput(m, { id: PROT, name: "Protected hours", unit: "hours/week", value: HOURS, confidence: 0.5, range: { min: 0, max: 20 } });
     // A derived id can never become an input: the blank model already holds its record, so the
     // "already exists" guard fires first (the "reserved" guard covers a model missing that record).
-    expect(() => M.addVariable(m, { id: DERIVED_IDS.floorRatio, name: "x", category: "structure", changeSpeed: "slow", unit: "", sourceType: "estimated", confidence: 0.5 })).toThrow(/already exists|reserved/);
+    expect(() => M.addVariable(m, { id: DERIVED_IDS.floorRatio, subjectId: "sys_it", name: "x", category: "structure", changeSpeed: "slow", unit: "", sourceType: "estimated", confidence: 0.5 })).toThrow(/calculated variable|already exists/);
     ev = evaluateSystem(m);
     expect(derivedValue(ev, DERIVED_IDS.floorRatio)).toBeCloseTo(EXPECTED_FLOOR_RATIO, 9);
     expect(derivedValue(ev, DERIVED_IDS.bufferMonths)).toBeCloseTo(EXPECTED_BUFFER_MONTHS, 9);
@@ -314,9 +319,9 @@ describe("blank household end to end (service + repository, no React)", () => {
     const expectedOpen = Object.values(expectedGaps).filter((g) => g.direction !== "none").length;
     expect(ev.gap.openCount).toBe(expectedOpen);
     expect(ev.gap.closedCount).toBe(3 - expectedOpen);
-    const expectedMeanGap = sum(Object.values(expectedGaps).map((g) => g.normalized)) / 3;
-    expect(ev.gap.meanNormalizedGap).toBeCloseTo(expectedMeanGap, 9);
-    expect(ev.gap.meanNormalizedGap!).toBeGreaterThan(0);
+    // No mean gap exists (it would be a universal score); the vector carries the per-variable values.
+    expect("meanNormalizedGap" in ev.gap).toBe(false);
+    for (const [id, g] of Object.entries(expectedGaps)) expect(ev.gap.gaps.find((x) => x.variableId === id)!.normalizedGap).toBeCloseTo(g.normalized, 9);
     // Loop pressure (A10): mean strength x mean gap over loop variables that have a gap (FP and PROT).
     const expectedBasePressure = ev.loops[0].meanStrength * ((expectedGaps[FP].normalized + expectedGaps[PROT].normalized) / 2);
     expect(ev.loops[0].pressure).toBeCloseTo(expectedBasePressure, 9);
@@ -349,7 +354,9 @@ describe("blank household end to end (service + repository, no React)", () => {
     expect(floorDelta.delta).toBeCloseTo(floorOf(scenarioSources) - EXPECTED_FLOOR, 9);
     expect(cmp.variableDeltas.find((d) => d.variableId === DERIVED_IDS.incomeConcentration)!.delta).toBeCloseTo(hhiOf(scenarioSources) - EXPECTED_HHI, 9);
     expect(cmp.variableDeltas.find((d) => d.variableId === PROT)!.scenario).toBe(HOURS + SCENARIO_HOURS_DELTA);
-    expect(cmp.meanGapAfter!).toBeLessThan(cmp.meanGapBefore!);
+    expect(cmp.gapsShrinking).toBeGreaterThanOrEqual(1);
+    expect(cmp.gapsGrowing).toBe(0);
+    expect(cmp.openGapsBefore).toBe(ev.gap.openCount);
     expect(m.variables.find((v) => v.id === PROT)!.currentValue).toBe(HOURS); // base untouched
 
     // Directional (A12): reliable_floor rises -> 1-week negative edge -> pressure down.
@@ -400,6 +407,8 @@ describe("blank household end to end (service + repository, no React)", () => {
       id: "a_evening_course",
       name: "Evening certification course",
       description: "",
+      subjectId: "p1",
+      extensions: {},
       targetVariables: [PROT, RF],
       requirements: { hoursPerWeek: 6, riskLevel: 0.7 },
       utility: { financialImprovement: 0.4, timeRequirement: -0.3 },

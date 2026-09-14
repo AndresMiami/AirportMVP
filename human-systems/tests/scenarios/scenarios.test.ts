@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import { applyScenario } from "@/scenarios/apply";
 import { classifyLoopChange, compareScenario } from "@/scenarios/compare";
 import type { Scenario } from "@/types";
@@ -68,7 +70,8 @@ describe("compareScenario", () => {
     const bm = c.variableDeltas.find((d) => d.variableId === DERIVED_IDS.bufferMonths)!;
     expect(bm.base).toBeCloseTo(2800 / 3600, 9);
     expect(bm.scenario).toBeCloseTo(12800 / 3600, 9);
-    expect(c.meanGapAfter!).toBeLessThan(c.meanGapBefore!);
+    expect(c.gapsShrinking).toBeGreaterThanOrEqual(1);
+    expect(c.gapsGrowing).toBe(0);
     const belt = c.loopDeltas.find((d) => d.loop.annotation?.name === "Belt-tightening")!;
     expect(belt.change).toBe("weakens");
     // Directional: reserves up -> financial pressure down (negative edge r07).
@@ -100,11 +103,13 @@ describe("compareScenario", () => {
     expect(c.variableDeltas.every((d) => d.delta === null || d.delta === 0)).toBe(true);
     expect(c.loopDeltas.every((d) => d.change === "unchanged")).toBe(true);
     expect(c.directional).toEqual([]);
-    expect(c.meanGapAfter).toBe(c.meanGapBefore);
+    expect(c.gapsShrinking).toBe(0);
+    expect(c.gapsGrowing).toBe(0);
+    expect(c.openGapsAfter).toBe(c.openGapsBefore);
   });
   it("projections use the requested horizon and both step models", () => {
     const c = compareScenario(createSampleHousehold(), scenario([], 6));
-    expect(c.projections.map((p) => p.label)).toEqual(["Career capital (index)", "Productive assets"]);
+    expect(c.projections.map((p) => p.label)).toEqual(["Career capital (index) — Dani", "Productive assets"]);
     expect(c.projections.every((p) => p.base.length === 7 && p.scenario.length === 7)).toBe(true);
   });
 });

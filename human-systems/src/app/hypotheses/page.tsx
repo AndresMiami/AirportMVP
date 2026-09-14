@@ -7,6 +7,7 @@
  * Every change goes through useModel().apply with a pure mutation.
  */
 import { useId, useMemo, useState, type ReactNode } from "react";
+import { NumberField } from "@/components/fields";
 import { fmtConfidence } from "@/components/format";
 import { HypothesisStatusBadge, HYPOTHESIS_STATUS_META, draftLoopStatement, loopChain, loopLabel } from "@/components/loop-list";
 import { useModel, type ModelMutation } from "@/components/model-provider";
@@ -19,11 +20,52 @@ import {
   HypothesisStatusSchema,
   type Hypothesis,
   type HypothesisKind,
+  type HypothesisReviewEntry,
   type HypothesisStatus,
+  type KillCriterion,
   type Observation,
   type Relationship,
   type Variable,
 } from "@/types";
+
+type KillComparator = NonNullable<KillCriterion["comparator"]>;
+type KillStatus = KillCriterion["status"];
+type KillReading = "triggered" | "cleared" | "unknown";
+
+/** What the add form hands the page for addKillCriterion. */
+interface KillCriterionInput {
+  statement: string;
+  variableId?: string;
+  comparator?: KillComparator;
+  threshold?: number;
+}
+
+const COMPARATORS: { value: KillComparator; label: string }[] = [
+  { value: "lt", label: "below (<)" },
+  { value: "lte", label: "at or below (≤)" },
+  { value: "gt", label: "above (>)" },
+  { value: "gte", label: "at or above (≥)" },
+];
+const COMPARATOR_SIGN: Record<KillComparator, string> = { lt: "<", lte: "≤", gt: ">", gte: "≥" };
+
+const KILL_STATUS_ACTIONS: { status: KillStatus; label: string }[] = [
+  { status: "triggered", label: "Mark triggered" },
+  { status: "cleared", label: "Mark cleared" },
+  { status: "open", label: "Reopen" },
+];
+
+const READING_TONE: Record<KillReading, string> = {
+  triggered: "bg-warn-soft text-warn",
+  cleared: "bg-desired-soft text-desired",
+  unknown: "bg-background border border-border text-muted",
+};
+
+/** ISO timestamps read as "2026-09-14 10:32"; anything else is shown as stored. */
+function fmtAt(at: string): string {
+  if (!at) return "no time recorded";
+  const m = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?/.exec(at);
+  return m ? (m[2] ? `${m[1]} ${m[2]}` : m[1]) : at;
+}
 
 /* ------------------------------------------------------------------ */
 /* Display constants                                                   */
@@ -323,13 +365,347 @@ function ObservationChips({
   );
 }
 
+/** Status buttons with an optional one-line reason; every change lands in the review log. */
+function StatusControls({
+  status,
+  disabled,
+  onSetStatus,
+  error,
+}: {
+  status: HypothesisStatus;
+  disabled: boolean;
+  /** Returns true when the change was applied (the note is then cleared). */
+  onSetStatus: (status: HypothesisStatus, note: string) => boolean;
+  error: ReactNode;
+}) {
+  const noteId = useId();
+  const [note, setNote] = useState("");
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted">Status</span>
+        {STATUS_ACTIONS.map((a) => {
+          const current = status === a.status;
+          return (
+            <button
+              key={a.status}
+              type="button"
+              className={current ? SMALL_PRESSED : SMALL}
+              aria-pressed={current}
+              disabled={current || disabled}
+              title={HYPOTHESIS_STATUS_META[a.status].meaning}
+              onClick={() => {
+                if (onSetStatus(a.status, note.trim())) setNote("");
+              }}
+            >
+              {a.label}
+            </button>
+          );
+        })}
+        <label htmlFor={noteId} className="sr-only">
+          Reason for the status change
+        </label>
+        <input
+          id={noteId}
+          type="text"
+          className="max-w-xs flex-1 min-w-[12rem]"
+          placeholder="Reason (optional, one line) — kept in the review log"
+          value={note}
+          disabled={disabled}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </div>
+      <p className="text-xs text-muted mt-1">{STATUS_LEGEND}</p>
+      {error}
+    </div>
+  );
+}
+
+function ReviewLog({ entries }: { entries: readonly HypothesisReviewEntry[] }) {
+  if (entries.length === 0) return <p className="text-xs text-muted">No status change recorded yet.</p>;
+  const newestFirst = [...entries].reverse();
+  return (
+    <ol className="space-y-1">
+      {newestFirst.map((e, i) => (
+        <li key={`${entries.length - 1 - i}-${e.at}`} className="flex flex-wrap items-baseline gap-1.5 text-xs">
+          <span className="text-muted tabular-nums">{fmtAt(e.at)}</span>
+          <HypothesisStatusBadge status={e.status} />
+          {e.note ? <span>{e.note}</span> : <span className="text-muted">no reason given</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** "What would weaken this?" — the conditions the person has said would count against the reading. */
+function DisconfirmingConditions({
+  conditions,
+  accepted,
+  disabled,
+  onAdd,
+  onRemove,
+  error,
+}: {
+  conditions: readonly string[];
+  /** An accepted reading with nothing that could weaken it is worth flagging. */
+  accepted: boolean;
+  disabled: boolean;
+  /** Returns true when the condition was recorded (the input is then cleared). */
+  onAdd: (text: string) => boolean;
+  onRemove: (index: number) => void;
+  error: ReactNode;
+}) {
+  const inputId = useId();
+  const [text, setText] = useState("");
+  const add = () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (onAdd(trimmed)) setText("");
+  };
+  return (
+    <div>
+      <div className="text-xs text-muted mb-1">What would weaken this?</div>
+      {conditions.length === 0 ? (
+        accepted ? (
+          <p className="text-sm rounded-md border border-warn bg-warn-soft px-3 py-2 text-warn" role="note">
+            No disconfirming condition recorded yet. This reading is accepted; say what would make you set it aside.
+          </p>
+        ) : (
+          <p className="text-xs text-muted">No disconfirming condition recorded yet.</p>
+        )
+      ) : (
+        <ul className="space-y-1">
+          {conditions.map((c, i) => (
+            <li key={`${i}-${c}`} className="flex items-start gap-2 rounded border border-border bg-background px-2 py-1 text-xs">
+              <span className="flex-1">{c}</span>
+              <button
+                type="button"
+                className="text-muted hover:text-neg"
+                aria-label={`Remove condition: ${truncate(c, 60)}`}
+                title="Remove condition"
+                disabled={disabled}
+                onClick={() => onRemove(i)}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label htmlFor={inputId} className="sr-only">
+          New disconfirming condition
+        </label>
+        <input
+          id={inputId}
+          type="text"
+          className="max-w-md flex-1 min-w-[14rem]"
+          placeholder="e.g. savings still fall after three months of the new income"
+          value={text}
+          disabled={disabled}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+        />
+        <button type="button" className={SMALL} disabled={disabled || text.trim().length === 0} onClick={add}>
+          Add condition
+        </button>
+      </div>
+      {error}
+    </div>
+  );
+}
+
+/** Kill criteria: decision rules the person set. The engine only reads them
+ *  against the named variable; the person records the status. */
+function KillCriteria({
+  criteria,
+  variables,
+  variableById,
+  readKill,
+  disabled,
+  onAdd,
+  onSetStatus,
+  error,
+}: {
+  criteria: readonly KillCriterion[];
+  variables: readonly Variable[];
+  variableById: ReadonlyMap<string, Variable>;
+  readKill: (criterion: KillCriterion) => KillReading;
+  disabled: boolean;
+  /** Returns true when the criterion was recorded (the form is then cleared). */
+  onAdd: (input: KillCriterionInput) => boolean;
+  onSetStatus: (criterionId: string, status: KillStatus) => void;
+  error: ReactNode;
+}) {
+  const ids = useId();
+  const [statement, setStatement] = useState("");
+  const [variableId, setVariableId] = useState("");
+  const [comparator, setComparator] = useState<KillComparator>("lt");
+  const [threshold, setThreshold] = useState<number | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const sorted = [...variables].sort((a, b) => a.name.localeCompare(b.name));
+
+  const add = () => {
+    const text = statement.trim();
+    if (!text) {
+      setLocalError("A kill criterion needs a statement.");
+      return;
+    }
+    if (variableId && threshold === null) {
+      setLocalError("Give a threshold for the chosen variable, or leave the variable empty for a plain statement.");
+      return;
+    }
+    setLocalError(null);
+    const input: KillCriterionInput = variableId ? { statement: text, variableId, comparator, threshold: threshold ?? undefined } : { statement: text };
+    if (onAdd(input)) {
+      setStatement("");
+      setVariableId("");
+      setComparator("lt");
+      setThreshold(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="text-xs text-muted mb-1">Kill criteria</div>
+      {criteria.length === 0 ? (
+        <p className="text-xs text-muted">No kill criterion set yet. A kill criterion is your own rule for when this reading should be set aside.</p>
+      ) : (
+        <ul className="space-y-2">
+          {criteria.map((k) => {
+            const reading = readKill(k);
+            const rule =
+              k.variableId && k.comparator && k.threshold !== undefined
+                ? `${nameOf(variableById, k.variableId)} ${COMPARATOR_SIGN[k.comparator]} ${k.threshold}`
+                : null;
+            return (
+              <li key={k.id} className="rounded border border-border bg-background px-2 py-1.5 text-xs">
+                <div className="flex flex-wrap items-baseline gap-1.5">
+                  <span className="text-sm">{k.statement}</span>
+                  {rule ? <span className="text-muted tabular-nums">({rule})</span> : null}
+                  <span className="text-muted font-mono">{k.id}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className={`inline-block rounded px-1.5 py-0.5 ${READING_TONE[reading]}`} title="Engine reading of the current value against the rule">
+                    reading: {reading}
+                  </span>
+                  <span className="text-muted">— the engine only reads; you decide</span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="text-muted">
+                    Your status: <span className="text-foreground">{k.status}</span>
+                  </span>
+                  {KILL_STATUS_ACTIONS.map((a) => (
+                    <button
+                      key={a.status}
+                      type="button"
+                      className={k.status === a.status ? SMALL_PRESSED : SMALL}
+                      aria-pressed={k.status === a.status}
+                      disabled={disabled || k.status === a.status}
+                      onClick={() => onSetStatus(k.id, a.status)}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="mt-2 space-y-2 rounded border border-border p-2">
+        <div className="text-xs text-muted">Add a kill criterion</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor={`${ids}-statement`} className="sr-only">
+            Statement
+          </label>
+          <input
+            id={`${ids}-statement`}
+            type="text"
+            className="max-w-md flex-1 min-w-[14rem]"
+            placeholder="Set this aside if…"
+            value={statement}
+            disabled={disabled}
+            onChange={(e) => {
+              setStatement(e.target.value);
+              setLocalError(null);
+            }}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor={`${ids}-variable`} className="text-xs text-muted">
+            Variable (optional)
+          </label>
+          <select
+            id={`${ids}-variable`}
+            className="max-w-xs"
+            value={variableId}
+            disabled={disabled}
+            onChange={(e) => {
+              setVariableId(e.target.value);
+              setLocalError(null);
+            }}
+          >
+            <option value="">none — plain statement</option>
+            {sorted.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+                {v.kind === "derived" ? " (calculated)" : ""}
+              </option>
+            ))}
+          </select>
+          {variableId ? (
+            <>
+              <label htmlFor={`${ids}-comparator`} className="sr-only">
+                Comparator
+              </label>
+              <select id={`${ids}-comparator`} value={comparator} disabled={disabled} onChange={(e) => setComparator(e.target.value as KillComparator)}>
+                {COMPARATORS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <NumberField
+                value={threshold}
+                nullable
+                className="w-28"
+                ariaLabel="Threshold"
+                onCommit={(n) => {
+                  setThreshold(n);
+                  setLocalError(null);
+                }}
+              />
+              <span className="text-xs text-muted">{variableById.get(variableId)?.unit ?? ""}</span>
+            </>
+          ) : null}
+          <button type="button" className={SMALL} disabled={disabled || statement.trim().length === 0} onClick={add}>
+            Add kill criterion
+          </button>
+        </div>
+        {localError ? (
+          <p className="text-xs text-neg" role="alert">
+            {localError}
+          </p>
+        ) : null}
+        {error}
+      </div>
+    </div>
+  );
+}
+
 function HypothesisCard({
   h,
   loop,
+  variables,
   variableById,
   relationshipById,
   observationById,
   observations,
+  readKill,
   editor,
   onEdit,
   removing,
@@ -341,16 +717,25 @@ function HypothesisCard({
   onAttach,
   onDetach,
   onSetStatus,
+  onAddCondition,
+  onRemoveCondition,
+  onAddKillCriterion,
+  onSetKillStatus,
   statusError,
+  conditionError,
+  killError,
   evidenceError,
   removeError,
 }: {
   h: Hypothesis;
   loop: EvaluatedLoop | undefined;
+  variables: readonly Variable[];
   variableById: ReadonlyMap<string, Variable>;
   relationshipById: ReadonlyMap<string, Relationship>;
   observationById: ReadonlyMap<string, Observation>;
   observations: readonly Observation[];
+  /** Engine reading of a kill criterion against the live model (readKillCriterion). */
+  readKill: (criterion: KillCriterion) => KillReading;
   /** The edit form when this hypothesis is being edited; replaces the display. */
   editor: ReactNode | null;
   onEdit: () => void;
@@ -362,8 +747,14 @@ function HypothesisCard({
   onPickObservation: (id: string) => void;
   onAttach: (role: "supporting" | "contradicting") => void;
   onDetach: (observationId: string) => void;
-  onSetStatus: (status: HypothesisStatus) => void;
+  onSetStatus: (status: HypothesisStatus, note: string) => boolean;
+  onAddCondition: (text: string) => boolean;
+  onRemoveCondition: (index: number) => void;
+  onAddKillCriterion: (input: KillCriterionInput) => boolean;
+  onSetKillStatus: (criterionId: string, status: KillStatus) => void;
   statusError: ReactNode;
+  conditionError: ReactNode;
+  killError: ReactNode;
   evidenceError: ReactNode;
   removeError: ReactNode;
 }) {
@@ -456,27 +847,36 @@ function HypothesisCard({
       ) : null}
 
       <div className="mt-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted">Status</span>
-          {STATUS_ACTIONS.map((a) => {
-            const current = h.status === a.status;
-            return (
-              <button
-                key={a.status}
-                type="button"
-                className={current ? SMALL_PRESSED : SMALL}
-                aria-pressed={current}
-                disabled={current || removing}
-                title={HYPOTHESIS_STATUS_META[a.status].meaning}
-                onClick={() => onSetStatus(a.status)}
-              >
-                {a.label}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-xs text-muted mt-1">{STATUS_LEGEND}</p>
-        {statusError}
+        <StatusControls status={h.status} disabled={removing} onSetStatus={onSetStatus} error={statusError} />
+      </div>
+
+      <div className="mt-3">
+        <div className="text-xs text-muted mb-1">Review log</div>
+        <ReviewLog entries={h.reviewLog} />
+      </div>
+
+      <div className="mt-3">
+        <DisconfirmingConditions
+          conditions={h.disconfirmingConditions}
+          accepted={h.status === "accepted"}
+          disabled={removing}
+          onAdd={onAddCondition}
+          onRemove={onRemoveCondition}
+          error={conditionError}
+        />
+      </div>
+
+      <div className="mt-3">
+        <KillCriteria
+          criteria={h.killCriteria}
+          variables={variables}
+          variableById={variableById}
+          readKill={readKill}
+          disabled={removing}
+          onAdd={onAddKillCriterion}
+          onSetStatus={onSetKillStatus}
+          error={killError}
+        />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -571,7 +971,7 @@ export default function HypothesesPage() {
   );
 
   if (!evaluated) return <Loading />;
-  const { model, loops, variableById } = evaluated;
+  const { model, loops, variables, variableById } = evaluated;
   const hypotheses = model.hypotheses;
   const observations = model.observations;
   const loopsWithoutHypothesis = loops.filter((l) => !l.hypothesis);
@@ -746,10 +1146,12 @@ export default function HypothesesPage() {
               key={h.id}
               h={h}
               loop={h.kind === "loop" && h.loopId ? loopById.get(h.loopId) : undefined}
+              variables={variables}
               variableById={variableById}
               relationshipById={relationshipById}
               observationById={observationById}
               observations={observations}
+              readKill={(k) => mutations.readKillCriterion(model, k)}
               editor={editingId === h.id ? formFor(h) : null}
               onEdit={() => {
                 clearError();
@@ -787,8 +1189,16 @@ export default function HypothesesPage() {
                 if (ok) setPicked((p) => ({ ...p, [h.id]: "" }));
               }}
               onDetach={(obsId) => run(`evidence:${h.id}`, (m) => mutations.detachObservationFromHypothesis(m, h.id, obsId))}
-              onSetStatus={(status) => run(`status:${h.id}`, (m) => mutations.setHypothesisStatus(m, h.id, status))}
+              onSetStatus={(status, note) =>
+                run(`status:${h.id}`, (m) => mutations.setHypothesisStatus(m, h.id, status, { at: new Date().toISOString(), note }))
+              }
+              onAddCondition={(text) => run(`condition:${h.id}`, (m) => mutations.addDisconfirmingCondition(m, h.id, text))}
+              onRemoveCondition={(index) => run(`condition:${h.id}`, (m) => mutations.removeDisconfirmingCondition(m, h.id, index))}
+              onAddKillCriterion={(input) => run(`kill:${h.id}`, (m) => mutations.addKillCriterion(m, h.id, input))}
+              onSetKillStatus={(criterionId, status) => run(`kill:${h.id}`, (m) => mutations.setKillCriterionStatus(m, h.id, criterionId, status))}
               statusError={errorFor(`status:${h.id}`)}
+              conditionError={errorFor(`condition:${h.id}`)}
+              killError={errorFor(`kill:${h.id}`)}
               evidenceError={errorFor(`evidence:${h.id}`)}
               removeError={errorFor(`remove:${h.id}`)}
             />

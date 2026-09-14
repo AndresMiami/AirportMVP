@@ -170,6 +170,8 @@ describe("round trips", () => {
       id: "r",
       sourceVariableId: "a",
       targetVariableId: "b",
+      kind: "causal_hypothesis",
+      participatesInDynamics: true,
       direction: "positive",
       strength: 0.5,
       lag: { value: 3, unit: "weeks" },

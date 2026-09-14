@@ -5,7 +5,9 @@
  * composes them and hands the result to `save`.
  */
 import { createSampleHousehold } from "@/data/sample-household";
+import { registerBuiltInDomains } from "@/domains";
 import { createBlankModel } from "@/model/blank";
+import { domainRegistry } from "@/model/domain";
 import type { ModelRepository, ModelSummary } from "@/repositories";
 import { SystemModelSchema, type IncomeSource, type SystemModel, type SystemType, type Variable } from "@/types";
 import * as M from "./mutations";
@@ -29,6 +31,7 @@ export class ModelService {
   ) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.newId = options.newId ?? (() => `sys_${Date.now().toString(36)}`);
+    registerBuiltInDomains();
   }
 
   /** The active model, or the first stored one, or a freshly seeded sample. */
@@ -63,8 +66,17 @@ export class ModelService {
     return m;
   }
 
-  async createBlank(input: { name: string; systemType: SystemType; location?: string; currency?: string }): Promise<SystemModel> {
-    const model = createBlankModel({ id: this.newId(), now: this.now(), ...input });
+  async createBlank(input: {
+    name: string;
+    systemType: SystemType;
+    location?: string;
+    currency?: string;
+    domainId?: string;
+    domainVersion?: number;
+  }): Promise<SystemModel> {
+    const { domainId = "household", domainVersion, ...rest } = input;
+    const domain = domainRegistry.require(domainId, domainVersion);
+    const model = createBlankModel({ id: this.newId(), now: this.now(), domain, ...rest });
     await this.repo.save(model);
     await this.repo.setActiveId(model.id);
     return model;

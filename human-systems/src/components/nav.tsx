@@ -11,6 +11,7 @@ const LINKS: { href: string; label: string; group?: string }[] = [
   { href: "/constraints", label: "Constraints" },
   { href: "/observations", label: "Observations" },
   { href: "/hypotheses", label: "Hypotheses" },
+  { href: "/events", label: "Events" },
   { href: "/attractor", label: "Current attractor" },
   { href: "/desired", label: "Desired state" },
   { href: "/gap", label: "Structural gap" },

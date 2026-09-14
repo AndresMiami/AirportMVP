@@ -15,7 +15,7 @@
  * the continuous value; they are never the canonical representation.
  */
 import { z } from "zod";
-import { EdgeDirectionSchema, LagSchema, SourceTypeSchema, TargetModeSchema, unitInterval } from "./primitives";
+import { EdgeDirectionSchema, LagSchema, SourceTypeSchema, SubjectIdSchema, TargetModeSchema, unitInterval } from "./primitives";
 
 /* ------------------------------------------------------------------ */
 /* Definitions (how a signature is computed)                           */
@@ -31,7 +31,9 @@ export const InputTransformSchema = z.discriminatedUnion("kind", [
 export type InputTransform = z.infer<typeof InputTransformSchema>;
 
 export const DimensionInputSchema = z.object({
-  variableId: z.string().min(1),
+  /** Definition key, resolved for the signature's subject (or the system
+   *  for system-scope dimensions). */
+  variableKey: z.string().min(1),
   transform: InputTransformSchema,
   /** true when a HIGHER raw value means a WEAKER structural position
    *  (e.g. income concentration); the normalized value is 1 - t(value). */
@@ -61,6 +63,8 @@ export const SignatureDimensionDefinitionSchema = z.object({
    *  position. Inputs already encode their own direction via `invert`;
    *  this is the reading of the dimension as a whole. */
   targetDirection: z.enum(["higher"]).default("higher"),
+  /** system: reads household keys; member: reads the subject member's keys. */
+  subjectScope: z.enum(["system", "member"]).default("system"),
   inputs: z.array(DimensionInputSchema).min(1),
   aggregation: AggregationSchema.default("weighted_mean"),
   /** Minimum number of KNOWN inputs before a value is computed at all. */
@@ -80,6 +84,8 @@ export const SignatureDefinitionSchema = z.object({
   /** Which system types this definition is meant for. */
   domain: z.enum(["individual", "household", "organization", "country"]),
   version: z.number().int().min(1),
+  /** experimental: thresholds and weights are unreviewed conventions. */
+  maturity: z.enum(["experimental", "reviewed"]).default("experimental"),
   description: z.string().default(""),
   dimensions: z.array(SignatureDimensionDefinitionSchema).min(1),
 });
@@ -97,7 +103,9 @@ export type BandState = z.infer<typeof BandStateSchema>;
 
 /** Provenance of one contributing variable at snapshot time. */
 export const ContributionSchema = z.object({
-  variableId: z.string(),
+  /** The variable that was resolved for this input (null when none exists). */
+  variableId: z.string().nullable(),
+  variableKey: z.string(),
   name: z.string(),
   unit: z.string(),
   /** Raw value used (null = unknown; NEVER substituted with 0). */
@@ -219,6 +227,8 @@ export const SIGNATURE_SCHEMA_VERSION = 1;
 export const StructuralSignatureSchema = z.object({
   id: z.string().min(1),
   systemId: z.string().min(1),
+  /** The subject this signature describes: the system id or a member id. */
+  subjectId: SubjectIdSchema,
   createdAt: z.string(),
   schemaVersion: z.literal(SIGNATURE_SCHEMA_VERSION),
   /** Which definition (and version) produced it. */

@@ -1,10 +1,11 @@
 /**
- * A blank system: profile only, the standard derived-variable records
- * (so ratios appear as soon as inputs exist), no relationships, no
- * interpretations of any kind. Nothing here is specific to any person.
+ * A blank system under a domain definition: profile only, the domain's
+ * derived-variable records (so ratios appear as soon as inputs exist), no
+ * relationships, no interpretations of any kind.
  */
 import { SystemModelSchema, type SystemModel, type SystemType } from "@/types";
-import { DERIVED_DEFINITIONS, defaultDerivedVariable } from "./derived";
+import { defaultDerivedVariable } from "./derived";
+import type { DomainDefinition } from "./domain";
 
 export interface BlankModelOptions {
   id: string;
@@ -12,14 +13,17 @@ export interface BlankModelOptions {
   systemType: SystemType;
   /** ISO timestamp; passed in so the factory stays pure. */
   now: string;
+  domain: DomainDefinition;
   location?: string;
   currency?: string;
 }
 
 export function createBlankModel(opts: BlankModelOptions): SystemModel {
   return SystemModelSchema.parse({
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: opts.id,
+    domainDefinitionId: opts.domain.id,
+    domainDefinitionVersion: opts.domain.version,
     profile: {
       name: opts.name,
       systemType: opts.systemType,
@@ -28,14 +32,16 @@ export function createBlankModel(opts: BlankModelOptions): SystemModel {
       location: opts.location ?? "",
       currency: opts.currency ?? "USD",
     },
-    variables: DERIVED_DEFINITIONS.map(defaultDerivedVariable),
+    variables: opts.domain.derived.map((d) => defaultDerivedVariable(d, opts.id)),
     incomeSources: [],
     relationships: [],
+    events: [],
     loopAnnotations: {},
     constraints: [],
     actions: [],
     observations: [],
     hypotheses: [],
+    signatures: [],
     currentAttractor: { summary: "", recurringOutcomes: [], sourceType: "self_reported", confidence: 0.5 },
     desiredAttractor: { summary: "", recurringOutcomes: [], sourceType: "self_reported", confidence: 0.5 },
     createdAt: opts.now,

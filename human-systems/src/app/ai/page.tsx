@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import { MockAiProvider } from "@/ai/mock-provider";
 import { ANALYSIS_SYSTEM_PROMPT } from "@/ai/prompt";
@@ -6,16 +7,12 @@ import type { AiAnalysis } from "@/ai/schema";
 import { formatLag } from "@/calculations/lag";
 import { useModel } from "@/components/model-provider";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader } from "@/components/ui";
-import type { Variable } from "@/types";
+import * as mutations from "@/services/mutations";
 
 const provider = new MockAiProvider();
 
-function slug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-}
-
 export default function AiPage() {
-  const { evaluated, replaceModel } = useModel();
+  const { evaluated, apply, lastError, clearError } = useModel();
   const [text, setText] = useState(
     "My brother works four days per week and spends much of his free time sleeping or playing games, but he has saved $10,000 over 18 months toward buying a car.",
   );
@@ -40,23 +37,20 @@ export default function AiPage() {
     else setAnalysis(r.analysis);
   };
 
+  /** Approved candidates enter through the same mutation as the Variables
+   *  form. The AI never assigns a subject: every approved variable is
+   *  created UNASSIGNED (subjectId null, key derived from its name) and
+   *  feeds no calculation until a person assigns it on the Variables page. */
   const addApproved = () => {
     if (!analysis) return;
-    const existing = new Set(model.variables.map((v) => v.id));
-    const created: Variable[] = [];
-    analysis.candidate_variables.forEach((c, i) => {
-      if (!approved.has(i)) return;
-      let id = `ai_${slug(c.name)}`;
-      let n = 2;
-      while (existing.has(id)) id = `ai_${slug(c.name)}_${n++}`;
-      existing.add(id);
-      created.push({
-        id,
+    const inputs: mutations.VariableInput[] = analysis.candidate_variables
+      .filter((_, i) => approved.has(i))
+      .map((c) => ({
         name: c.name,
+        subjectId: null,
         description: c.description,
         category: c.category,
         changeSpeed: c.changeSpeed,
-        kind: "input",
         currentValue: c.statedValue,
         desiredValue: null,
         targetMode: "exact",
@@ -71,11 +65,13 @@ export default function AiPage() {
         durability: 0.5,
         estimatedCostToChange: 0.5,
         notes: "Approved from AI analysis; review the judgments before relying on them.",
-      });
-    });
-    if (created.length === 0) return;
-    replaceModel({ ...model, variables: [...model.variables, ...created] });
-    setAdded(created.map((v) => v.name));
+      }));
+    if (inputs.length === 0) return;
+    // One mutation for the whole batch: either every approved variable is
+    // added or none is, and a refusal names the one that could not be.
+    const ok = apply((m) => inputs.reduce((acc, input) => mutations.addVariable(acc, input), m));
+    if (!ok) return;
+    setAdded(inputs.map((v) => v.name));
     setApproved(new Set());
   };
 
@@ -166,12 +162,31 @@ export default function AiPage() {
                 ))}
               </tbody>
             </table>
-            <div className="mt-3 flex items-center gap-3">
-              <button className="rounded bg-desired text-white px-3 py-1.5 text-sm disabled:opacity-50" disabled={approved.size === 0} onClick={addApproved}>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                className="rounded bg-desired text-white px-3 py-1.5 text-sm disabled:opacity-50"
+                disabled={approved.size === 0}
+                onClick={() => {
+                  clearError();
+                  addApproved();
+                }}
+              >
                 Add {approved.size} approved to the model
               </button>
               {added.length > 0 ? <span className="text-xs text-desired">Added: {added.join(", ")}</span> : null}
+              {lastError ? (
+                <span className="text-xs text-neg" role="alert">
+                  {lastError}
+                </span>
+              ) : null}
             </div>
+            <p className="text-xs text-muted mt-2">
+              Approved variables are created with no subject (the AI never decides whose a variable is) and feed no calculation until one is assigned on the{" "}
+              <Link href="/variables" className="underline">
+                Variables
+              </Link>{" "}
+              page.
+            </p>
           </Card>
           <div className="grid gap-4 md:grid-cols-2">
             <Card title="Candidate relationships (not yet importable)">

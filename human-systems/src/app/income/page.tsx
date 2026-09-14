@@ -6,10 +6,11 @@ import { fmtValue } from "@/components/format";
 import { ConfirmButton } from "@/components/system-switcher";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge, Stat } from "@/components/ui";
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
-import { DERIVED_IDS } from "@/model/ids";
+import { DERIVED_IDS } from "@/domains/household/keys";
 import { incomeShares } from "@/calculations/household";
+import { resolveVariable } from "@/model/domain";
 import * as mutations from "@/services/mutations";
-import { SourceTypeSchema, type SourceType } from "@/types";
+import { SourceTypeSchema, type Member, type SourceType } from "@/types";
 
 const SUMMARY = [
   DERIVED_IDS.totalIncome,
@@ -23,8 +24,20 @@ const SUMMARY = [
 const BTN_PRIMARY = "rounded bg-accent text-white px-3 py-1.5 text-sm disabled:opacity-50";
 const SOURCE_TYPES = SourceTypeSchema.options;
 
-/** Sentinel select value meaning "type the earner below". */
-const OTHER_EARNER = "__other__";
+/** Select value meaning "not attributed to any member" (stored as null). */
+const UNASSIGNED = "";
+
+function memberOptionLabel(m: Member): string {
+  return m.status === "archived" ? `${m.label} (archived)` : m.label;
+}
+
+function UnassignedTag() {
+  return (
+    <span className="inline-block rounded px-1.5 py-0.5 text-xs bg-warn-soft text-warn" title="No member is recorded as the earner.">
+      unassigned
+    </span>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Add form: drafts are strings so half-typed numbers never reach the  */
@@ -33,7 +46,8 @@ const OTHER_EARNER = "__other__";
 
 interface IncomeDraft {
   name: string;
-  earner: string;
+  /** "" = unassigned; otherwise a member id. */
+  earnerId: string;
   monthlyAmount: string;
   reliability: string;
   volatility: string;
@@ -47,7 +61,7 @@ interface IncomeDraft {
 
 const EMPTY_DRAFT: IncomeDraft = {
   name: "",
-  earner: "",
+  earnerId: UNASSIGNED,
   monthlyAmount: "",
   reliability: "",
   volatility: "",
@@ -131,12 +145,21 @@ export default function IncomePage() {
   );
 
   if (!evaluated) return <Loading />;
-  const { model, variableById } = evaluated;
+  const { model } = evaluated;
+  const members = model.profile.members;
+  const memberById = new Map(members.map((m) => [m.id, m]));
   const shares = new Map(incomeShares(model.incomeSources).map((s) => [s.id, s.share]));
-  const memberLabels = model.profile.members.map((m) => m.label).filter((l) => l.trim().length > 0);
   const existingGroups = Array.from(new Set(model.incomeSources.map((s) => s.correlationGroup))).sort();
-  const earnerSelect = draft.earner === "" ? "" : memberLabels.includes(draft.earner) ? draft.earner : OTHER_EARNER;
-  const showEarnerText = memberLabels.length === 0 || earnerSelect === OTHER_EARNER;
+  const earnerLabel = (earnerId: string | null, fallback: string) => {
+    if (earnerId === null) return fallback;
+    const m = memberById.get(earnerId);
+    return m ? memberOptionLabel(m) : `unknown member (${earnerId})`;
+  };
+
+  const setEarner = (id: string, value: string) => {
+    const earnerId = value === UNASSIGNED ? null : value;
+    inlineEdit(id, { id, earnerId, earner: earnerId === null ? "" : (memberById.get(earnerId)?.label ?? "") });
+  };
 
   const submit = () => {
     const name = draft.name.trim();
@@ -156,10 +179,12 @@ export default function IncomePage() {
     setFormError(null);
     const evidenceText = draft.evidenceText.trim();
     const sourceType = draft.sourceType;
+    const earnerId = draft.earnerId === UNASSIGNED ? null : draft.earnerId;
     const ok = commit("income:add", (m) =>
       mutations.addIncomeSource(m, {
         name,
-        earner: draft.earner.trim(),
+        earnerId,
+        earner: earnerId === null ? "" : (memberById.get(earnerId)?.label ?? ""),
         monthlyAmount: monthlyAmount.value,
         reliability: reliability.value,
         volatility: volatility.value,
@@ -185,7 +210,7 @@ export default function IncomePage() {
     <div>
       <PageHeader
         title="Income sources"
-        lede="Each source carries its own reliability, volatility and failure group. The household-level numbers below are calculated from this list, never entered directly."
+        lede="Each source carries its own reliability, volatility and failure group, and names the member who earns it. The household-level numbers below are calculated from this list, never entered directly."
       />
       <Card title={`Sources (${model.incomeSources.length})`}>
         {model.incomeSources.length === 0 ? (
@@ -214,7 +239,29 @@ export default function IncomePage() {
                       <div className="font-medium">{s.name}</div>
                       {s.notes ? <div className="text-xs text-muted">{s.notes}</div> : null}
                     </td>
-                    <td>{s.earner}</td>
+                    <td>
+                      <div className="flex flex-col gap-1 items-start">
+                        <div className="text-xs flex flex-wrap items-center gap-1">
+                          {s.earnerId === null ? (
+                            <>
+                              <UnassignedTag />
+                              {s.earner ? <span className="text-muted">{s.earner}</span> : null}
+                            </>
+                          ) : (
+                            <span>{earnerLabel(s.earnerId, "")}</span>
+                          )}
+                        </div>
+                        <select aria-label={`Earner of ${s.name}`} className="text-xs" value={s.earnerId ?? UNASSIGNED} onChange={(e) => setEarner(s.id, e.target.value)}>
+                          <option value={UNASSIGNED}>unassigned</option>
+                          {members.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {memberOptionLabel(m)}
+                            </option>
+                          ))}
+                          {s.earnerId !== null && !memberById.has(s.earnerId) ? <option value={s.earnerId}>{earnerLabel(s.earnerId, "")}</option> : null}
+                        </select>
+                      </div>
+                    </td>
                     <td>
                       <NumberField
                         value={s.monthlyAmount}
@@ -295,41 +342,19 @@ export default function IncomePage() {
               />
             </Field>
 
-            <Field id={`${ids}-earner${memberLabels.length > 0 ? "-select" : ""}`} label="Earner" hint="Optional. A member label or any text.">
-              <div className="flex flex-col gap-1">
-                {memberLabels.length > 0 ? (
-                  <select
-                    id={`${ids}-earner-select`}
-                    className="w-full"
-                    value={earnerSelect}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === OTHER_EARNER) edit({ earner: memberLabels.includes(draft.earner) ? "" : draft.earner });
-                      else edit({ earner: v });
-                    }}
-                  >
-                    <option value="">(not specified)</option>
-                    {memberLabels.map((l) => (
-                      <option key={l} value={l}>
-                        {l}
-                      </option>
-                    ))}
-                    <option value={OTHER_EARNER}>Other (type below)</option>
-                  </select>
-                ) : null}
-                {showEarnerText ? (
-                  <input
-                    id={`${ids}-earner`}
-                    type="text"
-                    className="w-full"
-                    aria-label="Earner, free text"
-                    placeholder={memberLabels.length === 0 ? "e.g. Adult 1 (no members recorded yet)" : "Earner"}
-                    value={memberLabels.includes(draft.earner) ? "" : draft.earner}
-                    onChange={(e) => edit({ earner: e.target.value })}
-                    onKeyDown={onEnter}
-                  />
-                ) : null}
-              </div>
+            <Field
+              id={`${ids}-earner`}
+              label="Earner"
+              hint={members.length === 0 ? "No members recorded in the profile yet; add one there to attribute the source." : "The member who earns it; leave unassigned when not yet known."}
+            >
+              <select id={`${ids}-earner`} className="w-full" value={draft.earnerId} onChange={(e) => edit({ earnerId: e.target.value })}>
+                <option value={UNASSIGNED}>unassigned</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {memberOptionLabel(m)}
+                  </option>
+                ))}
+              </select>
             </Field>
 
             <Field id={`${ids}-amount`} label="Monthly amount">
@@ -469,10 +494,10 @@ export default function IncomePage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-4">
-        {SUMMARY.map((id) => {
-          const v = variableById.get(id);
+        {SUMMARY.map((key) => {
+          const v = resolveVariable(evaluated.variables, model.id, { key, subjectId: null });
           if (!v) return null;
-          return <Stat key={id} label={v.name} value={fmtValue(v.currentValue, v.unit)} sub={`calculated · ${Math.round(v.confidence * 100)}% conf. (min of inputs)`} />;
+          return <Stat key={key} label={v.name} value={fmtValue(v.currentValue, v.unit)} sub={`calculated · ${Math.round(v.confidence * 100)}% conf. (min of inputs)`} />;
         })}
       </div>
       <div className="mt-4">

@@ -1,8 +1,11 @@
 "use client";
 /**
  * Simple SVG network: nodes on a circle grouped by category, curved
- * directed edges. Positive edges are solid blue, negative are dashed amber,
- * disabled edges are thin, gray and dotted. Each edge carries a small lag
+ * directed edges. Positive edges are solid blue, negative are dashed amber.
+ * Edges that are enabled but take no part in dynamics (unclassified,
+ * association, constraint, or definitional not opted in) are thin, grey
+ * and finely dotted; disabled edges are thin, lighter gray and dotted with
+ * a longer gap. Each edge carries a small lag
  * label at its midpoint (omitted when the lag is immediate). Highlighted
  * edge ids are drawn thicker; everything else fades.
  *
@@ -31,6 +34,8 @@ const COLOR = {
   positive: "#2f5d8a",
   negative: "#9a6b1f",
   disabled: "#9aa3ad",
+  /** Enabled but not part of dynamics: darker than disabled, still neutral. */
+  nonDynamics: "#6b7580",
   ink: "#1f2933",
   muted: "#5f6b7a",
   isolated: "#b8c0c9",
@@ -178,6 +183,9 @@ export function NetworkDiagram({
           <marker id="arrow-off" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill={COLOR.disabled} />
           </marker>
+          <marker id="arrow-nd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill={COLOR.nonDynamics} />
+          </marker>
         </defs>
         {edges.map(({ r, d, lx, ly }) => {
           const selected = selectedEdgeId === r.id;
@@ -185,14 +193,18 @@ export function NetworkDiagram({
           const faded = anyHighlight && !hl;
           const neg = r.direction === "negative";
           const off = !r.enabled;
-          const stroke = off ? COLOR.disabled : neg ? COLOR.negative : COLOR.positive;
-          const width = off ? 1 : selected ? 3.5 : hl ? 3 : 1 + r.strength * 1.5;
-          const dash = off ? "2 3" : neg ? "6 4" : undefined;
-          const opacity = faded ? 0.15 : off ? 0.45 : 0.85;
-          const marker = off ? "arrow-off" : neg ? "arrow-neg" : "arrow-pos";
+          // Enabled but excluded from loops/propagation by its kind or opt-in.
+          const outside = !off && !r.participatesInDynamics;
+          const stroke = off ? COLOR.disabled : outside ? COLOR.nonDynamics : neg ? COLOR.negative : COLOR.positive;
+          const width = off || outside ? 1 : selected ? 3.5 : hl ? 3 : 1 + r.strength * 1.5;
+          const dash = off ? "2 3" : outside ? "1 2.5" : neg ? "6 4" : undefined;
+          const opacity = faded ? 0.15 : off ? 0.45 : outside ? 0.6 : 0.85;
+          const marker = off ? "arrow-off" : outside ? "arrow-nd" : neg ? "arrow-neg" : "arrow-pos";
           const clickable = Boolean(onEdgeClick);
           const lagText = showLagLabels && r.lag.value > 0 ? formatLag(r.lag) : null;
-          const describe = `${nameOf(r.sourceVariableId)} → ${nameOf(r.targetVariableId)}: ${r.direction}, strength ${r.strength} (model judgment), lag ${formatLag(r.lag)}${off ? ", disabled" : ""}`;
+          const kindLabel = r.kind.replace("_", " ");
+          const describe = `${nameOf(r.sourceVariableId)} → ${nameOf(r.targetVariableId)}: ${r.direction}, strength ${r.strength} (model judgment), lag ${formatLag(r.lag)}${off ? ", disabled" : outside ? `, ${kindLabel} — not part of dynamics` : ""}`;
+          const tooltip = outside ? `${kindLabel} — not part of dynamics\n${describe}` : describe;
           const handle = clickable ? () => onEdgeClick!(r.id) : undefined;
           return (
             <g
@@ -206,7 +218,7 @@ export function NetworkDiagram({
               aria-pressed={clickable ? selected : undefined}
               style={{ cursor: clickable ? "pointer" : "default", outline: "none" }}
             >
-              <title>{`${describe}${r.explanation ? `\n${r.explanation}` : ""}`}</title>
+              <title>{`${tooltip}${r.explanation ? `\n${r.explanation}` : ""}`}</title>
               {selected ? <path d={d} fill="none" stroke={COLOR.ink} strokeWidth={width + 6} opacity={0.18} /> : null}
               <path d={d} fill="none" stroke={stroke} strokeWidth={width} strokeDasharray={dash} markerEnd={`url(#${marker})`} />
               {/* Wide invisible stroke so thin edges are easy to click. */}
@@ -218,7 +230,7 @@ export function NetworkDiagram({
                   textAnchor="middle"
                   fontSize="9.5"
                   fontWeight={selected ? 600 : 400}
-                  fill={off ? COLOR.muted : stroke}
+                  fill={off || outside ? COLOR.muted : stroke}
                   stroke="#ffffff"
                   strokeWidth={3}
                   paintOrder="stroke"
@@ -288,7 +300,10 @@ export function NetworkDiagram({
           <span className="inline-block w-6 border-t-2 border-dashed border-warn align-middle mr-1" /> negative (opposite direction)
         </span>
         <span>
-          <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.disabled }} /> disabled (kept, excluded from loops)
+          <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.nonDynamics }} /> not in dynamics (unclassified / association / constraint)
+        </span>
+        <span>
+          <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.disabled, opacity: 0.6 }} /> disabled (kept, excluded from loops)
         </span>
         <span>
           <span className="inline-block rounded border border-border bg-surface px-1 align-middle mr-1 tabular-nums" style={{ fontSize: "0.65rem" }}>

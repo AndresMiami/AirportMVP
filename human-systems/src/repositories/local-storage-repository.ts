@@ -4,7 +4,8 @@
  * build is upgraded (or rejected with a reason) before it reaches the UI.
  * The v1 single-model key is imported once and then removed.
  */
-import { migrateModel } from "@/model/migrations";
+import { domainRegistry } from "@/model/domain";
+import { migrateModel, type MigrationOptions } from "@/model/migrations";
 import { SystemModelSchema, type SystemModel } from "@/types";
 import { summarize } from "./memory-repository";
 import type { ModelRepository, ModelSummary } from "./model-repository";
@@ -23,6 +24,9 @@ interface StoreShape {
   activeId: string | null;
   /** Raw JSON per model id; migrated on read, written in current shape. */
   models: Record<string, unknown>;
+  /** Pre-migration copies, by model id then schema version the copy had.
+   *  Kept until the person deletes them; never read by the app. */
+  backups: Record<string, Record<string, unknown>>;
 }
 
 export interface LoadReport {
@@ -43,7 +47,7 @@ export class LocalStorageModelRepository implements ModelRepository {
   ) {}
 
   private read(): StoreShape {
-    let store: StoreShape = { activeId: null, models: {} };
+    let store: StoreShape = { activeId: null, models: {}, backups: {} };
     const raw = this.storage.getItem(this.key);
     if (raw) {
       try {
@@ -51,9 +55,10 @@ export class LocalStorageModelRepository implements ModelRepository {
         store = {
           activeId: typeof parsed.activeId === "string" ? parsed.activeId : null,
           models: parsed.models && typeof parsed.models === "object" ? parsed.models : {},
+          backups: parsed.backups && typeof parsed.backups === "object" ? parsed.backups : {},
         };
       } catch {
-        store = { activeId: null, models: {} };
+        store = { activeId: null, models: {}, backups: {} };
       }
     }
     // One-time import of the pre-store single-model key.
@@ -78,8 +83,19 @@ export class LocalStorageModelRepository implements ModelRepository {
     this.storage.setItem(this.key, JSON.stringify(store));
   }
 
+  /** Keys the record's domain declares system-scope, so migration can
+   *  attribute ONLY those; everything else stays unassigned. */
+  private migrationOptions(raw: unknown): MigrationOptions {
+    const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const domainId = typeof rec.domainDefinitionId === "string" ? rec.domainDefinitionId : "household";
+    const version = typeof rec.domainDefinitionVersion === "number" ? rec.domainDefinitionVersion : undefined;
+    const domain = domainRegistry.get(domainId, version);
+    if (!domain) return {};
+    return { systemScopeKeys: new Set(domain.variables.filter((v) => v.scope === "system").map((v) => v.key)) };
+  }
+
   private materialize(id: string, raw: unknown): SystemModel | null {
-    const result = migrateModel(raw);
+    const result = migrateModel(raw, this.migrationOptions(raw));
     if (!result.ok) {
       this.reports.set(id, { id, ok: false, migratedFrom: null, error: result.error });
       return null;
@@ -101,9 +117,14 @@ export class LocalStorageModelRepository implements ModelRepository {
   async load(id: string): Promise<SystemModel | null> {
     const store = this.read();
     if (!(id in store.models)) return null;
-    const model = this.materialize(id, store.models[id]);
-    if (model && this.reports.get(id)?.migratedFrom !== null) {
-      // Persist the upgraded shape so the migration runs once.
+    const raw = store.models[id];
+    const model = this.materialize(id, raw);
+    const from = this.reports.get(id)?.migratedFrom;
+    if (model && from !== null && from !== undefined) {
+      // Keep the pre-migration record, then persist the upgraded shape so
+      // the migration runs once. A failed migration never reaches here, so
+      // the original stays untouched.
+      store.backups[id] = { ...(store.backups[id] ?? {}), [String(from)]: raw };
       store.models[id] = model;
       this.write(store);
     }
@@ -117,9 +138,21 @@ export class LocalStorageModelRepository implements ModelRepository {
     this.write(store);
   }
 
+  /** Pre-migration copies kept for a model (by the schema version they had). */
+  async backupsFor(id: string): Promise<Record<string, unknown>> {
+    return this.read().backups[id] ?? {};
+  }
+
+  async deleteBackups(id: string): Promise<void> {
+    const store = this.read();
+    delete store.backups[id];
+    this.write(store);
+  }
+
   async delete(id: string): Promise<void> {
     const store = this.read();
     delete store.models[id];
+    delete store.backups[id];
     if (store.activeId === id) store.activeId = null;
     this.write(store);
   }

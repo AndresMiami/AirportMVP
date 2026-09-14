@@ -1,7 +1,6 @@
 /**
- * Well-known variable ids. Input ids are the values a person enters;
- * derived ids are recomputed by model/derived.ts. Other variables may use
- * any id; these are only the ones the household formulas depend on.
+ * Household domain keys. These are CONFIGURATION of the household domain,
+ * not engine constants: engine modules never import this file.
  */
 export const INPUT_IDS = {
   essentialExpenses: "essential_expenses",
@@ -35,4 +34,21 @@ export const DERIVED_IDS = {
   debtBurden: "debt_burden",
 } as const;
 
-export type DerivedId = (typeof DERIVED_IDS)[keyof typeof DERIVED_IDS];
+/** Other keys the household signature and sample use. */
+export const OTHER_KEYS = {
+  financialPressure: "financial_pressure",
+  planningHorizon: "planning_horizon",
+  survivalWorkShare: "survival_work_share",
+  singleVehicleDependency: "single_vehicle_dependency",
+  vehicleRepairExposure: "vehicle_repair_exposure",
+  availableNewHours: "available_new_hours",
+  scheduleFlexibility: "schedule_flexibility",
+  riskTolerance: "risk_tolerance",
+  physicalCapacity: "physical_capacity",
+  supportNetwork: "support_network",
+  careLoad: "care_load",
+  retrainingReadiness: "retraining_readiness",
+} as const;
+
+export const HOUSEHOLD_DOMAIN_ID = "household";
+export const HOUSEHOLD_DOMAIN_VERSION = 1;

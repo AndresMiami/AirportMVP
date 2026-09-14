@@ -18,6 +18,7 @@ const src = (over: Partial<IncomeSource>): IncomeSource => ({
   id: "x",
   name: "x",
   earner: "",
+  earnerId: null,
   monthlyAmount: 1000,
   reliability: 1,
   volatility: 0,

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { formatLag, horizonOfLag } from "@/calculations/lag";
 import { HorizonBadge } from "@/components/horizon-badge";
 import { HypothesisStatusBadge } from "@/components/loop-list";
@@ -13,7 +14,7 @@ const HYPOTHESIS_STATUSES: HypothesisStatus[] = ["proposed", "accepted", "reject
 export default function EvidencePage() {
   const { evaluated } = useModel();
   if (!evaluated) return <Loading />;
-  const { variables, derived, issues, model, allRelationships, variableById, observations } = evaluated;
+  const { variables, derived, issues, model, allRelationships, variableById, observations, unassignedVariables } = evaluated;
   const counts = new Map<SourceType, number>();
   for (const v of variables) counts.set(v.sourceType, (counts.get(v.sourceType) ?? 0) + 1);
   for (const s of model.incomeSources) counts.set(s.sourceType, (counts.get(s.sourceType) ?? 0) + 1);
@@ -188,6 +189,10 @@ export default function EvidencePage() {
       </Card>
 
       <Card title="Calculated variables and their inputs" className="mt-4">
+        <p className="text-xs text-muted mb-2">
+          Formulas come from the {evaluated.domain.name} domain (version {evaluated.domain.version}) and read their inputs by key at whole-system scope. A missing input is reported, never
+          substituted with zero.
+        </p>
         <table className="data">
           <thead>
             <tr>
@@ -200,13 +205,14 @@ export default function EvidencePage() {
           </thead>
           <tbody>
             {derived.map((d) => (
-              <tr key={d.definition.id}>
+              <tr key={d.definition.key}>
                 <td>
                   <div className="font-medium">{d.definition.name}</div>
                   <div className="text-xs text-muted max-w-sm">{d.definition.description}</div>
+                  <div className="text-xs text-muted font-mono">{d.definition.key}</div>
                 </td>
                 <td className="text-xs font-mono">
-                  {[...d.definition.inputVariables, ...d.definition.inputDerived, ...(d.definition.usesIncomeSources ? ["incomeSources[]"] : [])].join(", ") || "—"}
+                  {[...d.definition.inputKeys, ...d.definition.inputDerivedKeys, ...(d.definition.usesIncomeSources ? ["incomeSources[]"] : [])].join(", ") || "—"}
                 </td>
                 <td className="text-xs">{d.definition.assumptionIds.join(", ") || "arithmetic only"}</td>
                 <td>
@@ -217,6 +223,32 @@ export default function EvidencePage() {
             ))}
           </tbody>
         </table>
+      </Card>
+
+      <Card title="Unassigned subjects" className="mt-4" tone={unassignedVariables.length > 0 ? "warn" : "neutral"}>
+        {unassignedVariables.length === 0 ? (
+          <p className="text-sm text-muted">Every variable has a subject: the whole system or one member.</p>
+        ) : (
+          <>
+            <p className="text-xs text-muted mb-2">
+              These variables have no subject assigned, so no formula reads them and no projection uses them. Their values are kept; assign a subject on the{" "}
+              <Link href="/variables" className="underline">
+                Variables
+              </Link>{" "}
+              page.
+            </p>
+            <ul className="text-sm space-y-1">
+              {unassignedVariables.map((v) => (
+                <li key={v.id} className="flex flex-wrap items-center gap-2">
+                  <span className="flex-1">{v.name}</span>
+                  <span className="text-xs text-muted font-mono">{v.key}</span>
+                  <SourceBadge sourceType={v.sourceType} />
+                  <ConfidenceBadge confidence={v.confidence} />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </Card>
 
       <Card title="Model assumptions" className="mt-4">

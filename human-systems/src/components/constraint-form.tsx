@@ -10,6 +10,7 @@ import { NumberField } from "@/components/fields";
 import { fmtConfidence, fmtPct } from "@/components/format";
 import { SourceBadge } from "@/components/ui";
 import { SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
+import type { ConstraintTemplate } from "@/model/domain";
 import type { ConstraintInput } from "@/services/mutations";
 import {
   SourceTypeSchema,
@@ -17,6 +18,7 @@ import {
   type ConstraintCheck,
   type ConstraintType,
   type Evidence,
+  type Member,
   type SourceType,
 } from "@/types";
 
@@ -70,84 +72,23 @@ export function explainCheck(check: ConstraintCheck): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Templates                                                           */
+/* Subject (display only; the page stores subjectId)                   */
 /* ------------------------------------------------------------------ */
 
-export interface ConstraintTemplate {
-  label: string;
-  name: string;
-  description: string;
-  type: ConstraintType;
-  /** limit null = the person supplies the number after prefill. */
-  check?: { dimension: string; comparator: ConstraintComparator; limit: number | boolean | null };
-  softPenalty?: number;
+/** Select value meaning "no subject assigned" (stored as null). */
+const UNASSIGNED = "";
+
+export function memberOptionLabel(m: Member): string {
+  return m.status === "archived" ? `${m.label} (archived)` : m.label;
 }
 
-export const CONSTRAINT_TEMPLATES: ConstraintTemplate[] = [
-  {
-    label: "Physical limitation",
-    name: "No sustained heavy lifting",
-    description: "A physical demand the person cannot take on (as stated; not diagnosed here).",
-    type: "hard",
-    check: { dimension: "heavyLifting", comparator: "eq", limit: false },
-  },
-  {
-    label: "Available hours",
-    name: "Available hours per week",
-    description: "Hours that can be committed each week after existing obligations.",
-    type: "hard",
-    check: { dimension: "hoursPerWeek", comparator: "lte", limit: null },
-  },
-  {
-    label: "Minimum required income",
-    name: "Minimum required income",
-    description: "An option has to bring in at least this much per month.",
-    type: "hard",
-    check: { dimension: "minimumMonthlyIncome", comparator: "gte", limit: null },
-  },
-  {
-    label: "Transportation requirement",
-    name: "No driving required",
-    description: "Options that depend on driving are not available (no vehicle, no licence, or the person does not drive).",
-    type: "hard",
-    check: { dimension: "requiresDriving", comparator: "eq", limit: false },
-  },
-  {
-    label: "Licensing requirement",
-    name: "No licence held",
-    description: "Options that need a licence or certification the person does not hold.",
-    type: "hard",
-    check: { dimension: "requiresLicense", comparator: "eq", limit: false },
-  },
-  {
-    label: "Startup capital limit",
-    name: "Startup capital limit",
-    description: "Upfront money that can be committed without consuming the reserve.",
-    type: "hard",
-    check: { dimension: "capitalRequired", comparator: "lte", limit: null },
-  },
-  {
-    label: "Location",
-    name: "No relocation",
-    description: "The household stays where it is; options that require moving are out.",
-    type: "hard",
-    check: { dimension: "requiresRelocation", comparator: "eq", limit: false },
-  },
-  {
-    label: "Family responsibility",
-    name: "Family responsibility",
-    description: "A recurring obligation the model cannot check yet; listed as unchecked for every action.",
-    type: "hard",
-  },
-  {
-    label: "Risk tolerance",
-    name: "Prefers predictable income",
-    description: "Options with higher income risk are less suitable, not excluded.",
-    type: "soft",
-    check: { dimension: "riskLevel", comparator: "lte", limit: 0.4 },
-    softPenalty: 0.4,
-  },
-];
+/** "unassigned", "whole system", the member's label, or a marker for an unknown id. */
+export function subjectLabelOf(subjectId: string | null, members: readonly Member[], systemId: string): string {
+  if (subjectId === null) return "unassigned";
+  if (subjectId === systemId) return "whole system";
+  const m = members.find((x) => x.id === subjectId);
+  return m ? memberOptionLabel(m) : `unknown subject (${subjectId})`;
+}
 
 /* ------------------------------------------------------------------ */
 /* Draft                                                               */
@@ -161,6 +102,8 @@ type LimitKind = "number" | "boolean";
 interface Draft {
   name: string;
   description: string;
+  /** null = unassigned. */
+  subjectId: string | null;
   type: ConstraintType;
   hasCheck: boolean;
   dimension: string;
@@ -191,6 +134,7 @@ function draftFrom(initial?: Constraint): Draft {
   return {
     name: initial?.name ?? "",
     description: initial?.description ?? "",
+    subjectId: initial?.subjectId ?? null,
     type: initial?.type ?? "hard",
     ...checkFields(initial?.check),
     softPenalty: initial?.softPenalty ?? 0.5,
@@ -252,6 +196,9 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor?: st
 
 export function ConstraintForm({
   initial,
+  templates,
+  members,
+  systemId,
   onSubmit,
   onCancel,
   error = null,
@@ -260,6 +207,12 @@ export function ConstraintForm({
 }: {
   /** The constraint being edited; absent when creating. */
   initial?: Constraint;
+  /** Quick-start templates from the active domain (evaluated.domain.constraintTemplates). */
+  templates: readonly ConstraintTemplate[];
+  /** Members from model.profile.members, for the subject select. */
+  members: readonly Member[];
+  /** model.id: the subject meaning "whole system". */
+  systemId: string;
   onSubmit: (values: ConstraintFormValues) => void;
   onCancel: () => void;
   /** Refusal from the last apply, shown next to the submit control. */
@@ -327,6 +280,7 @@ export function ConstraintForm({
     onSubmit({
       name,
       description: draft.description.trim(),
+      subjectId: draft.subjectId,
       type: draft.type,
       check,
       softPenalty: draft.softPenalty,
@@ -339,6 +293,7 @@ export function ConstraintForm({
   };
 
   const preview = checkFromDraft(draft);
+  const subjectKnown = draft.subjectId === null || draft.subjectId === systemId || members.some((m) => m.id === draft.subjectId);
   const listId = `${ids}-dimensions`;
   const sourceOptions = SourceTypeSchema.options.filter((s) => s !== "calculated" || s === draft.sourceType);
 
@@ -347,9 +302,10 @@ export function ConstraintForm({
       <div>
         <div className="text-xs text-muted mb-1">Quick start — prefills name, description, type and check; everything can be changed afterwards.</div>
         <div className="flex flex-wrap gap-1.5">
-          {CONSTRAINT_TEMPLATES.map((t) => (
+          {templates.length === 0 ? <span className="text-xs text-muted">The active domain defines no templates.</span> : null}
+          {templates.map((t) => (
             <button
-              key={t.label}
+              key={t.id}
               type="button"
               className="rounded border border-border bg-background px-2 py-1 text-xs hover:bg-accent-soft"
               title={t.check ? `${t.type}: ${t.check.dimension} ${COMPARATOR_SYMBOL[t.check.comparator]} ${t.check.limit === null ? "n" : limitWord(t.check.limit)}` : `${t.type}, descriptive (no check)`}
@@ -367,6 +323,27 @@ export function ConstraintForm({
 
       <Field label="Description" htmlFor={`${ids}-description`}>
         <textarea id={`${ids}-description`} className="w-full max-w-xl" rows={2} value={draft.description} onChange={(e) => update({ description: e.target.value })} />
+      </Field>
+
+      <Field label="Subject" htmlFor={`${ids}-subject`} hint="Whose constraint this is.">
+        <select
+          id={`${ids}-subject`}
+          className="w-full max-w-md"
+          value={draft.subjectId ?? UNASSIGNED}
+          onChange={(e) => update({ subjectId: e.target.value === UNASSIGNED ? null : e.target.value })}
+        >
+          <option value={UNASSIGNED}>unassigned</option>
+          <option value={systemId}>whole system</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {memberOptionLabel(m)}
+            </option>
+          ))}
+          {!subjectKnown ? <option value={draft.subjectId ?? UNASSIGNED}>{subjectLabelOf(draft.subjectId, members, systemId)}</option> : null}
+        </select>
+        {members.length === 0 ? (
+          <p className="text-xs text-muted mt-1">No members recorded in the profile yet; the whole system is the only named subject available.</p>
+        ) : null}
       </Field>
 
       <Field label="Type">

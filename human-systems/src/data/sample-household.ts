@@ -5,12 +5,15 @@
  * balancing loop and two smaller reinforcing loops.
  */
 import { loopIdFor } from "@/calculations/graph";
-import { DERIVED_DEFINITIONS, defaultDerivedVariable } from "@/model/derived";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { registerBuiltInDomains } from "@/domains";
+import { HOUSEHOLD_DERIVED } from "@/domains/household/derived";
+import { DERIVED_IDS, HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION, INPUT_IDS } from "@/domains/household/keys";
+import { defaultDerivedVariable } from "@/model/derived";
 import {
   SystemModelSchema,
   type Action,
   type Constraint,
+  type Event,
   type Hypothesis,
   type IncomeSource,
   type Lag,
@@ -23,11 +26,32 @@ import {
 const D = DERIVED_IDS;
 const I = INPUT_IDS;
 
-type InputSpec = Omit<Variable, "kind" | "formulaId" | "evidence" | "notes" | "description" | "targetMode"> & {
+export const SAMPLE_SYSTEM_ID = "sample_household_okafor_reyes";
+
+/** AUTHORED attribution (fixture data, not migration logic): the variables
+ *  that describe Dani's own career path, capacity and agency belong to
+ *  Dani; household money, pressure and dependencies belong to the system.
+ *  Marisol's person-level variables are deliberately absent: the fixture
+ *  records nothing about her career capital or agency. */
+const DANI_KEYS = new Set<string>([
+  I.careerCapital,
+  I.protectedHours,
+  I.majorPaths,
+  I.switchingFrequency,
+  I.qualityOfEffort,
+  I.persistence,
+  "survival_work_share",
+  "available_new_hours",
+  "schedule_flexibility",
+]);
+
+type InputSpec = Omit<Variable, "kind" | "formulaId" | "evidence" | "notes" | "description" | "targetMode" | "key" | "subjectId"> & {
   description?: string;
   evidence?: Variable["evidence"];
   notes?: string;
   targetMode?: Variable["targetMode"];
+  key?: string;
+  subjectId?: string | null;
 };
 
 function input(spec: InputSpec): Variable {
@@ -37,8 +61,10 @@ function input(spec: InputSpec): Variable {
     evidence: [],
     notes: "",
     targetMode: "exact",
+    key: spec.key ?? spec.id,
+    subjectId: spec.subjectId !== undefined ? spec.subjectId : DANI_KEYS.has(spec.id) ? "dani" : SAMPLE_SYSTEM_ID,
     ...spec,
-  };
+  } as Variable;
 }
 
 const ev = (text: string, sourceType: Variable["sourceType"] = "self_reported") => ({
@@ -48,11 +74,13 @@ const ev = (text: string, sourceType: Variable["sourceType"] = "self_reported") 
 });
 
 export function createSampleHousehold(): SystemModel {
+  registerBuiltInDomains();
   const incomeSources: IncomeSource[] = [
     {
       id: "inc_warehouse",
       name: "Warehouse associate (4 days/week)",
       earner: "Dani",
+      earnerId: "dani",
       monthlyAmount: 2600,
       reliability: 0.85,
       volatility: 0.1,
@@ -67,6 +95,7 @@ export function createSampleHousehold(): SystemModel {
       id: "inc_rideshare",
       name: "Rideshare driving",
       earner: "Marisol",
+      earnerId: "marisol",
       monthlyAmount: 1400,
       reliability: 0.5,
       volatility: 0.5,
@@ -81,6 +110,7 @@ export function createSampleHousehold(): SystemModel {
       id: "inc_catering",
       name: "Occasional catering help",
       earner: "Marisol",
+      earnerId: "marisol",
       monthlyAmount: 300,
       reliability: 0.2,
       volatility: 0.9,
@@ -539,10 +569,10 @@ export function createSampleHousehold(): SystemModel {
     [D.reliableFloor]: { desiredValue: 3740, impact: 0.9, notes: "1.1 x desired essential expenses." },
     [D.totalIncome]: { desiredValue: 5000 },
   };
-  const derived: Variable[] = DERIVED_DEFINITIONS.map((def) => ({
-    ...defaultDerivedVariable(def),
-    ...(derivedDesired[def.id] ?? {}),
-    notes: derivedDesired[def.id]?.notes ?? "",
+  const derived: Variable[] = HOUSEHOLD_DERIVED.map((def) => ({
+    ...defaultDerivedVariable(def, SAMPLE_SYSTEM_ID),
+    ...(derivedDesired[def.key] ?? {}),
+    notes: derivedDesired[def.key]?.notes ?? "",
   }));
 
   const lag = (value: number, unit: Lag["unit"]): Lag => ({ value, unit });
@@ -561,6 +591,11 @@ export function createSampleHousehold(): SystemModel {
     id,
     sourceVariableId,
     targetVariableId,
+    // AUTHORED: by-construction edges are definitional; every other edge in
+    // this fixture is a causal hypothesis. Both are opted into dynamics here
+    // by the fixture's author; a migrated real system gets none of this.
+    kind: sourceType === "calculated" ? "definitional" : "causal_hypothesis",
+    participatesInDynamics: true,
     direction,
     strength,
     lag: lagSpec,
@@ -630,6 +665,7 @@ export function createSampleHousehold(): SystemModel {
       id: "c_hours",
       name: "At most 8 new hours per week",
       description: "After work, commuting, childcare and sleep.",
+      subjectId: SAMPLE_SYSTEM_ID,
       type: "hard",
       check: { dimension: "hoursPerWeek", comparator: "lte", limit: 8 },
       softPenalty: 0.5,
@@ -643,6 +679,7 @@ export function createSampleHousehold(): SystemModel {
       id: "c_capital",
       name: "At most $1,500 of upfront capital",
       description: "Anything above this would consume the reserve.",
+      subjectId: SAMPLE_SYSTEM_ID,
       type: "hard",
       check: { dimension: "capitalRequired", comparator: "lte", limit: 1500 },
       softPenalty: 0.5,
@@ -656,6 +693,7 @@ export function createSampleHousehold(): SystemModel {
       id: "c_relocation",
       name: "No relocation",
       description: "Child's school and extended family are local.",
+      subjectId: SAMPLE_SYSTEM_ID,
       type: "hard",
       check: { dimension: "requiresRelocation", comparator: "eq", limit: false },
       softPenalty: 0.5,
@@ -669,6 +707,7 @@ export function createSampleHousehold(): SystemModel {
       id: "c_lifting",
       name: "No sustained heavy lifting",
       description: "Dani's back injury (stated, not diagnosed here).",
+      subjectId: "dani",
       type: "hard",
       check: { dimension: "heavyLifting", comparator: "eq", limit: false },
       softPenalty: 0.5,
@@ -682,6 +721,7 @@ export function createSampleHousehold(): SystemModel {
       id: "c_risk",
       name: "Prefers predictable income",
       description: "Options with high income risk are less suitable, not excluded.",
+      subjectId: SAMPLE_SYSTEM_ID,
       type: "soft",
       check: { dimension: "riskLevel", comparator: "lte", limit: 0.4 },
       softPenalty: 0.4,
@@ -695,6 +735,7 @@ export function createSampleHousehold(): SystemModel {
       id: "c_pickup",
       name: "School pickup at 3 pm on weekdays",
       description: "Family responsibility; not expressed as a rule the model can check yet.",
+      subjectId: SAMPLE_SYSTEM_ID,
       type: "hard",
       softPenalty: 0.5,
       sourceType: "observed",
@@ -708,6 +749,8 @@ export function createSampleHousehold(): SystemModel {
   const actions: Action[] = [
     {
       id: "a_forklift",
+      subjectId: "dani",
+      extensions: {},
       name: "Forklift certification (Dani)",
       description: "Three-week evening course; employer pays a certified premium.",
       targetVariables: [I.careerCapital, D.reliableFloor],
@@ -721,6 +764,8 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "a_cdl",
+      subjectId: "dani",
+      extensions: {},
       name: "Commercial driving licence (Class A)",
       description: "Full training programme.",
       targetVariables: [I.careerCapital, D.reliableFloor],
@@ -731,6 +776,8 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "a_second_platform",
+      subjectId: "marisol",
+      extensions: {},
       name: "Add a delivery platform (Marisol)",
       description: "Second gig platform to spread platform risk.",
       targetVariables: [D.incomeConcentration, D.reliableFloor],
@@ -741,6 +788,8 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "a_auto_save",
+      subjectId: SAMPLE_SYSTEM_ID,
+      extensions: {},
       name: "Automatic $150/month transfer to reserves",
       description: "Standing order on payday.",
       targetVariables: [I.liquidReserves, I.capitalConversionRate],
@@ -751,6 +800,8 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "a_relocate",
+      subjectId: "dani",
+      extensions: {},
       name: "Relocate for a higher-paying warehouse role",
       description: "Role in another metro area.",
       targetVariables: [D.reliableFloor],
@@ -761,6 +812,8 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "a_protected_block",
+      subjectId: "dani",
+      extensions: {},
       name: "Fixed 6-hour weekly protected block",
       description: "Sunday morning, no shift acceptance; one path only.",
       targetVariables: [I.protectedHours, I.majorPaths],
@@ -869,6 +922,14 @@ export function createSampleHousehold(): SystemModel {
   const hypotheses: Hypothesis[] = [
     {
       id: "hyp_trap",
+      subjectId: null,
+      disconfirmingConditions: [
+        "A quarter with the same floor ratio but rising protected hours would weaken the survival-work leg.",
+        "A raise in reliable income that does not lower rated pressure would weaken the first leg.",
+      ],
+      predictions: [],
+      reviewLog: [],
+      killCriteria: [],
       kind: "loop",
       loopId: LOOP_TRAP,
       statement: "A low reliable floor keeps pressure high, which shortens the planning horizon and pushes hours into survival work, which starves the protected time that would raise the floor.",
@@ -881,6 +942,11 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "hyp_belt",
+      subjectId: null,
+      disconfirmingConditions: ["A month with falling reserves and unchanged discretionary spending."],
+      predictions: [],
+      reviewLog: [{ at: "2026-09-01T00:00:00.000Z", status: "accepted", note: "Two low-shift months in the statements show the cut." }],
+      killCriteria: [],
       kind: "loop",
       loopId: LOOP_BELT,
       statement: "When reserves fall, pressure rises and discretionary spending is cut, which rebuilds reserves within the discretionary margin.",
@@ -893,6 +959,11 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "hyp_churn",
+      subjectId: "dani",
+      disconfirmingConditions: ["A new plan started in a low-pressure month, or a high-pressure quarter with no new plan."],
+      predictions: [],
+      reviewLog: [],
+      killCriteria: [],
       kind: "loop",
       loopId: LOOP_CHURN,
       statement: "Financial pressure increases opportunity exploration, which reduces sustained commitment to one career path.",
@@ -905,6 +976,11 @@ export function createSampleHousehold(): SystemModel {
     },
     {
       id: "hyp_erosion",
+      subjectId: "dani",
+      disconfirmingConditions: [],
+      predictions: [],
+      reviewLog: [],
+      killCriteria: [],
       kind: "loop",
       loopId: LOOP_EROSION,
       statement: "Sustained pressure lowers the quality of protected hours, slowing capital growth.",
@@ -917,9 +993,49 @@ export function createSampleHousehold(): SystemModel {
     },
   ];
 
+  // EVENTS: dated facts. Two are recorded; nothing is interpreted here.
+  const events: Event[] = [
+    {
+      id: "evt_1",
+      kind: "shock",
+      type: "major_expense",
+      title: "Car repair paid from savings",
+      description: "A $1,200 repair; no new debt.",
+      occurred: { kind: "approx", start: "2026-03-01", end: "2026-03-31", precision: "month", text: "March 2026" },
+      recordedAt: "2026-09-01T00:00:00.000Z",
+      subjectId: SAMPLE_SYSTEM_ID,
+      sourceType: "measured",
+      confidence: 0.9,
+      observationIds: ["obs_6"],
+      links: { variableIds: [I.liquidReserves], relationshipIds: ["r13"], hypothesisIds: [], actionIds: [], eventIds: [], incomeSourceIds: [] },
+      expected: [],
+      outcomeEventIds: [],
+      notes: "",
+    },
+    {
+      id: "evt_2",
+      kind: "change",
+      type: "other",
+      title: "Warehouse hours cut in two months",
+      description: "Two of the last six months had fewer shifts.",
+      occurred: { kind: "range", start: "2026-03-01", end: "2026-08-31", precision: "month", text: "Mar-Aug 2026 (two months within)" },
+      recordedAt: "2026-09-01T00:00:00.000Z",
+      subjectId: "dani",
+      sourceType: "measured",
+      confidence: 0.9,
+      observationIds: ["obs_1"],
+      links: { variableIds: [], relationshipIds: [], hypothesisIds: [], actionIds: [], eventIds: [], incomeSourceIds: ["inc_warehouse"] },
+      expected: [],
+      outcomeEventIds: [],
+      notes: "",
+    },
+  ];
+
   const model: SystemModel = {
-    schemaVersion: 2,
-    id: "sample_household_okafor_reyes",
+    schemaVersion: 3,
+    domainDefinitionId: HOUSEHOLD_DOMAIN_ID,
+    domainDefinitionVersion: HOUSEHOLD_DOMAIN_VERSION,
+    id: SAMPLE_SYSTEM_ID,
     profile: {
       name: "Okafor-Reyes household (fictional sample)",
       systemType: "household",
@@ -936,13 +1052,13 @@ export function createSampleHousehold(): SystemModel {
     variables: [...inputs, ...derived],
     incomeSources,
     relationships,
+    events,
     loopAnnotations,
     constraints,
     actions,
     observations,
     hypotheses,
     signatures: [],
-    signatureDefinitionId: "household_default",
     utilityWeights: undefined,
     currentAttractor: {
       summary:

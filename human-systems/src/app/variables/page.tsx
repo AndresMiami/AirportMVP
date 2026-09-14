@@ -6,7 +6,7 @@ import { fmtValue } from "@/components/format";
 import { ConfirmButton } from "@/components/system-switcher";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
 import { CATEGORY_META, SOURCE_TYPE_META } from "@/domain/vocabulary";
-import { STANDARD_INPUTS } from "@/model/standard-inputs";
+import { resolveVariable, type SubjectScope, type VariableDefinition } from "@/model/domain";
 import * as mutations from "@/services/mutations";
 import {
   ChangeSpeedSchema,
@@ -14,7 +14,9 @@ import {
   TargetModeSchema,
   VariableCategorySchema,
   type ChangeSpeed,
+  type Member,
   type SourceType,
+  type SystemModel,
   type TargetMode,
   type Variable,
   type VariableCategory,
@@ -29,6 +31,40 @@ const TARGET_MODES = TargetModeSchema.options;
 const SOURCE_TYPES = SourceTypeSchema.options;
 const TARGET_MODE_LABEL: Record<TargetMode, string> = { at_least: "at least (floor)", at_most: "at most (ceiling)", exact: "exact" };
 
+/** Select value meaning "no subject assigned" (stored as null). */
+const UNASSIGNED = "";
+
+const UNASSIGNED_TEXT = "subject not assigned — feeds no calculation";
+
+/* ------------------------------------------------------------------ */
+/* Subject helpers (display only)                                      */
+/* ------------------------------------------------------------------ */
+
+function memberOptionLabel(m: Member): string {
+  return m.status === "archived" ? `${m.label} (archived)` : m.label;
+}
+
+/** "whole system", the member's label, or a marker for an unknown id. */
+function subjectLabel(subjectId: string | null, model: SystemModel): string {
+  if (subjectId === null) return "unassigned";
+  if (subjectId === model.id) return "whole system";
+  const m = model.profile.members.find((x) => x.id === subjectId);
+  return m ? memberOptionLabel(m) : `unknown subject (${subjectId})`;
+}
+
+/** A subject's scope for the domain's variable definitions. */
+function scopeOf(subjectId: string, systemId: string): SubjectScope {
+  return subjectId === systemId ? "system" : "member";
+}
+
+function UnassignedBadge() {
+  return (
+    <span className="inline-block rounded px-1.5 py-0.5 text-xs bg-warn-soft text-warn" title="Assign a subject so the value can take part in calculations.">
+      {UNASSIGNED_TEXT}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Add form: drafts are strings so half-typed numbers never reach the  */
 /* model; parsing happens once, on submit.                             */
@@ -37,6 +73,8 @@ const TARGET_MODE_LABEL: Record<TargetMode, string> = { at_least: "at least (flo
 interface VariableDraft {
   name: string;
   description: string;
+  /** "" = unassigned; otherwise the system id or a member id. */
+  subjectId: string;
   category: VariableCategory;
   changeSpeed: ChangeSpeed;
   unit: string;
@@ -58,6 +96,7 @@ interface VariableDraft {
 const EMPTY_DRAFT: VariableDraft = {
   name: "",
   description: "",
+  subjectId: UNASSIGNED,
   category: "structure",
   changeSpeed: "slow",
   unit: "",
@@ -130,7 +169,9 @@ export default function VariablesPage() {
   const [errorOwner, setErrorOwner] = useState<string | null>(null);
   const [draft, setDraft] = useState<VariableDraft>(EMPTY_DRAFT);
   const [formError, setFormError] = useState<string | null>(null);
-  const [standardId, setStandardId] = useState("");
+  /** Standard-input card: "" until a subject is chosen (the system id is the default once the model is known). */
+  const [standardSubject, setStandardSubject] = useState<string | null>(null);
+  const [standardKey, setStandardKey] = useState("");
 
   const commit = useCallback(
     (owner: string, mutation: ModelMutation): boolean => {
@@ -162,7 +203,8 @@ export default function VariablesPage() {
   );
 
   if (!evaluated) return <Loading />;
-  const { model } = evaluated;
+  const { model, domain, unassignedVariables } = evaluated;
+  const members = model.profile.members;
   const groups = new Map<VariableCategory, Variable[]>();
   for (const v of evaluated.variables) {
     if (!groups.has(v.category)) groups.set(v.category, []);
@@ -172,6 +214,44 @@ export default function VariablesPage() {
   const relationshipsTouching = (id: string) =>
     model.relationships.filter((r) => r.sourceVariableId === id || r.targetVariableId === id).length;
 
+  /* ---- standard inputs from the domain ---- */
+  const stdSubject =
+    standardSubject !== null && (standardSubject === model.id || members.some((m) => m.id === standardSubject)) ? standardSubject : model.id;
+  const stdScope = scopeOf(stdSubject, model.id);
+  const isPresentFor = (def: VariableDefinition, subjectId: string) =>
+    resolveVariable(evaluated.variables, model.id, { key: def.key, subjectId }) !== undefined;
+  const standardChoices = domain.variables.filter((def) => def.scope === stdScope && !isPresentFor(def, stdSubject));
+  const missingStandardTotal =
+    domain.variables.filter((def) => def.scope === "system" && !isPresentFor(def, model.id)).length +
+    members
+      .filter((m) => m.status === "active")
+      .reduce((n, m) => n + domain.variables.filter((def) => def.scope === "member" && !isPresentFor(def, m.id)).length, 0);
+  const chosenStandard = standardChoices.find((def) => def.key === standardKey);
+
+  const addStandard = () => {
+    if (!chosenStandard) return;
+    const def = chosenStandard;
+    const ok = commit("var:standard", (m) =>
+      mutations.addVariable(m, {
+        key: def.key,
+        subjectId: stdSubject,
+        name: def.name,
+        description: def.description,
+        category: def.category,
+        changeSpeed: def.changeSpeed,
+        unit: def.unit,
+        targetMode: def.targetMode,
+        referenceRange: def.referenceRange,
+        currentValue: null,
+        desiredValue: null,
+        sourceType: "unknown",
+        confidence: 0,
+      }),
+    );
+    if (ok) setStandardKey("");
+  };
+
+  /* ---- add form ---- */
   const submit = () => {
     const name = draft.name.trim();
     if (!name) return setFormError("A variable needs a name.");
@@ -205,9 +285,11 @@ export default function VariablesPage() {
     const evidenceText = draft.evidenceText.trim();
     const sourceType = draft.sourceType;
     const referenceRange = rangeMin.value !== null && rangeMax.value !== null ? { min: rangeMin.value, max: rangeMax.value } : undefined;
+    const subjectId = draft.subjectId === UNASSIGNED ? null : draft.subjectId;
     const ok = commit("var:add", (m) =>
       mutations.addVariable(m, {
         name,
+        subjectId,
         description: draft.description.trim(),
         category: draft.category,
         changeSpeed: draft.changeSpeed,
@@ -240,8 +322,16 @@ export default function VariablesPage() {
     <div>
       <PageHeader
         title="Structural variables"
-        lede="Every variable records where its value came from and how confident that value is. Calculated variables cannot be edited directly; change their inputs instead. Desired values are always editable."
+        lede="Every variable records whose it is, where its value came from and how confident that value is. Calculated variables cannot be edited directly; change their inputs instead. Desired values are always editable."
       />
+      {unassignedVariables.length > 0 ? (
+        <div className="mb-4">
+          <Note tone="warn">
+            {unassignedVariables.length} variable{unassignedVariables.length > 1 ? "s have" : " has"} no subject assigned and feed{unassignedVariables.length > 1 ? "" : "s"} no
+            calculation until one is chosen in the Subject column below.
+          </Note>
+        </div>
+      ) : null}
       {inputCount === 0 ? (
         <div className="mb-4">
           <Note>
@@ -257,6 +347,7 @@ export default function VariablesPage() {
                 <thead>
                   <tr>
                     <th>Variable</th>
+                    <th>Subject</th>
                     <th>Speed</th>
                     <th>Current</th>
                     <th>Desired</th>
@@ -272,6 +363,35 @@ export default function VariablesPage() {
                       <td>
                         <div className="font-medium">{v.name}</div>
                         {v.description ? <div className="text-xs text-muted max-w-xs">{v.description}</div> : null}
+                      </td>
+                      <td>
+                        {v.kind === "derived" ? (
+                          <span className="text-xs text-muted">system (calculated)</span>
+                        ) : (
+                          <div className="flex flex-col gap-1 items-start">
+                            <select
+                              aria-label={`Subject of ${v.name}`}
+                              className="text-xs"
+                              value={v.subjectId ?? UNASSIGNED}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                commit(`var:${v.id}`, (m) => mutations.assignVariableSubject(m, v.id, value === UNASSIGNED ? null : value));
+                              }}
+                            >
+                              <option value={model.id}>whole system</option>
+                              {members.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {memberOptionLabel(m)}
+                                </option>
+                              ))}
+                              <option value={UNASSIGNED}>unassigned</option>
+                              {v.subjectId !== null && v.subjectId !== model.id && !members.some((m) => m.id === v.subjectId) ? (
+                                <option value={v.subjectId}>{subjectLabel(v.subjectId, model)}</option>
+                              ) : null}
+                            </select>
+                            {v.subjectId === null ? <UnassignedBadge /> : null}
+                          </div>
+                        )}
                       </td>
                       <td className="text-xs">{v.changeSpeed}</td>
                       <td>
@@ -355,28 +475,46 @@ export default function VariablesPage() {
       </div>
 
       <div className="mt-4">
-        <Card title="Add a standard household input">
+        <Card title="Add a standard input from the domain">
           <p className="text-xs text-muted mb-2">
-            The calculated ratios (floor ratio, buffer months, surplus, debt burden) and the compounding step models read
-            these inputs by their canonical id. Adding one here creates it with NO value and no provenance; enter the value
-            in the table once it exists. Standard inputs missing from this system:{" "}
-            {STANDARD_INPUTS.filter((d) => !evaluated.variableById.has(d.id)).length}.
+            The {domain.name} domain defines its inputs by key and subject: household-level keys belong to the whole system, per-person keys to one member. The calculated
+            variables and the compounding step models read them through those keys. Adding one here creates it with NO value and no provenance; enter the value in the table
+            once it exists. Standard inputs not yet present for the whole system and its active members: {missingStandardTotal}.
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor={`${ids}-standard-subject`} className="text-sm">
+              Subject
+            </label>
+            <select
+              id={`${ids}-standard-subject`}
+              value={stdSubject}
+              onChange={(e) => {
+                clearError();
+                setStandardSubject(e.target.value);
+                setStandardKey("");
+              }}
+            >
+              <option value={model.id}>whole system</option>
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {memberOptionLabel(m)}
+                </option>
+              ))}
+            </select>
             <label htmlFor={`${ids}-standard`} className="text-sm">
               Standard input
             </label>
             <select
               id={`${ids}-standard`}
-              value={standardId}
+              value={chosenStandard ? standardKey : ""}
               onChange={(e) => {
                 clearError();
-                setStandardId(e.target.value);
+                setStandardKey(e.target.value);
               }}
             >
-              <option value="">Choose…</option>
-              {STANDARD_INPUTS.filter((d) => !evaluated.variableById.has(d.id)).map((d) => (
-                <option key={d.id} value={d.id}>
+              <option value="">{standardChoices.length === 0 ? `none missing for ${subjectLabel(stdSubject, model)}` : "Choose…"}</option>
+              {standardChoices.map((d) => (
+                <option key={d.key} value={d.key}>
                   {d.name} ({d.unit})
                 </option>
               ))}
@@ -384,33 +522,14 @@ export default function VariablesPage() {
             <button
               type="button"
               className="rounded border border-border bg-background px-2 py-1 text-sm disabled:opacity-50"
-              disabled={!standardId}
-              onClick={() => {
-                const def = STANDARD_INPUTS.find((d) => d.id === standardId);
-                if (!def) return;
-                const ok = commit("var:standard", (m) =>
-                  mutations.addVariable(m, {
-                    id: def.id,
-                    name: def.name,
-                    description: def.description,
-                    category: def.category,
-                    changeSpeed: def.changeSpeed,
-                    unit: def.unit,
-                    targetMode: def.targetMode,
-                    referenceRange: def.referenceRange,
-                    currentValue: null,
-                    desiredValue: null,
-                    sourceType: "unknown",
-                    confidence: 0,
-                  }),
-                );
-                if (ok) setStandardId("");
-              }}
+              disabled={!chosenStandard}
+              onClick={addStandard}
             >
               Add with no value yet
             </button>
             <ErrorLine msg={errorFor("var:standard")} />
           </div>
+          {chosenStandard ? <p className="text-xs text-muted mt-2">{chosenStandard.description}</p> : null}
         </Card>
       </div>
 
@@ -427,6 +546,18 @@ export default function VariablesPage() {
                 onChange={(e) => edit({ name: e.target.value })}
                 onKeyDown={onEnter}
               />
+            </Field>
+
+            <Field id={`${ids}-subject`} label="Subject" hint="Whose variable this is. Unassigned variables are kept but feed no calculation.">
+              <select id={`${ids}-subject`} className="w-full" value={draft.subjectId} onChange={(e) => edit({ subjectId: e.target.value })}>
+                <option value={UNASSIGNED}>unassigned</option>
+                <option value={model.id}>whole system</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {memberOptionLabel(m)}
+                  </option>
+                ))}
+              </select>
             </Field>
 
             <Field id={`${ids}-description`} label="Description (optional)">
@@ -631,7 +762,9 @@ export default function VariablesPage() {
               </span>
             ) : null}
           </div>
-          <p className="text-xs text-muted mt-2">Adds an input variable. Calculated variables come only from their formulas and cannot be added here.</p>
+          <p className="text-xs text-muted mt-2">
+            Adds an input variable keyed by a slug of its name. Calculated variables come only from their formulas and cannot be added here.
+          </p>
         </Card>
       </div>
 

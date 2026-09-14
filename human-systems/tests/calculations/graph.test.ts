@@ -16,6 +16,8 @@ const edge = (id: string, from: string, to: string, direction: "positive" | "neg
   id,
   sourceVariableId: from,
   targetVariableId: to,
+  kind: "causal_hypothesis",
+  participatesInDynamics: true,
   direction,
   strength,
   lag: { value: lagMonths, unit: "months" },

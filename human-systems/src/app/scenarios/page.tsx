@@ -1,15 +1,16 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { formatMonths, type Horizon } from "@/calculations/lag";
 import { NumberField } from "@/components/fields";
 import { HorizonBadge } from "@/components/horizon-badge";
 import { useModel } from "@/components/model-provider";
 import { fmtDelta, fmtPct, fmtValue } from "@/components/format";
 import { Sparkline } from "@/components/sparkline";
-import { Card, Loading, Note, PageHeader } from "@/components/ui";
-import { INPUT_IDS } from "@/model/ids";
+import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
+import { INPUT_IDS } from "@/domains/household/keys";
+import { resolveVariable, type SubjectScope } from "@/model/domain";
 import { compareScenario } from "@/scenarios/compare";
-import type { Scenario, ScenarioChange } from "@/types";
+import type { Member, Scenario, ScenarioChange, SystemModel } from "@/types";
 
 interface Draft {
   variableDeltas: Record<string, number>;
@@ -19,26 +20,40 @@ interface Draft {
 
 const EMPTY: Draft = { variableDeltas: {}, incomeAmounts: {}, horizonMonths: 24 };
 
-const PRESETS: { name: string; description: string; draft: (d: Draft) => Draft }[] = [
+/** A preset names domain KEYS, never variable ids: each key is resolved
+ *  for the chosen subject at click time (system-scope keys for the whole
+ *  system, member-scope keys for the member picked on the left). */
+interface Preset {
+  name: string;
+  description: string;
+  deltas: { key: string; scope: SubjectScope; delta: number }[];
+}
+
+const PRESETS: Preset[] = [
   {
     name: "Reserves +$10,000",
     description: "A one-off addition to liquid reserves.",
-    draft: (d) => ({ ...d, variableDeltas: { ...d.variableDeltas, [INPUT_IDS.liquidReserves]: 10000 } }),
+    deltas: [{ key: INPUT_IDS.liquidReserves, scope: "system", delta: 10000 }],
   },
   {
     name: "Protected time +15 h/week",
-    description: "More hours reliably reserved for compounding.",
-    draft: (d) => ({ ...d, variableDeltas: { ...d.variableDeltas, [INPUT_IDS.protectedHours]: 15 } }),
+    description: "More hours reliably reserved for compounding, for the chosen member.",
+    deltas: [{ key: INPUT_IDS.protectedHours, scope: "member", delta: 15 }],
   },
   {
     name: "One path instead of three",
-    description: "Major paths −2, switching frequency −1.5/yr.",
-    draft: (d) => ({
-      ...d,
-      variableDeltas: { ...d.variableDeltas, [INPUT_IDS.majorPaths]: -2, [INPUT_IDS.switchingFrequency]: -1.5 },
-    }),
+    description: "Major paths −2, switching frequency −1.5/yr, for the chosen member.",
+    deltas: [
+      { key: INPUT_IDS.majorPaths, scope: "member", delta: -2 },
+      { key: INPUT_IDS.switchingFrequency, scope: "member", delta: -1.5 },
+    ],
   },
 ];
+
+const NOT_IN_SYSTEM = "not in this system";
+
+/** Select value meaning "no member chosen" for member-scope presets. */
+const NO_MEMBER = "";
 
 /** Heading per horizon group (A16): the EARLIEST a tendency could show,
  *  given the entered lags along the fastest path that reached it. */
@@ -63,9 +78,24 @@ function lagRangeText(minLagMonths: number, maxLagMonths: number): string {
   return `${earliest}, up to ≈ ${latest}`;
 }
 
+function memberOptionLabel(m: Member): string {
+  return m.status === "archived" ? `${m.label} (archived)` : m.label;
+}
+
+/** "whole system", the member's label, "unassigned", or a marker for an unknown id. */
+function subjectLabel(subjectId: string | null, model: SystemModel): string {
+  if (subjectId === null) return "unassigned";
+  if (subjectId === model.id) return "whole system";
+  const m = model.profile.members.find((x) => x.id === subjectId);
+  return m ? memberOptionLabel(m) : `unknown subject (${subjectId})`;
+}
+
 export default function ScenariosPage() {
   const { evaluated } = useModel();
+  const ids = useId();
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  /** Member the member-scope presets apply to; null until chosen or when none is active. */
+  const [presetMember, setPresetMember] = useState<string | null>(null);
 
   const scenario = useMemo<Scenario | null>(() => {
     if (!evaluated) return null;
@@ -84,9 +114,35 @@ export default function ScenariosPage() {
 
   if (!evaluated || !scenario || !comparison) return <Loading />;
   const { model, variableById } = evaluated;
+  const members = model.profile.members;
+  const activeMembers = members.filter((m) => m.status === "active");
   const inputs = evaluated.variables.filter((v) => v.kind === "input" && v.currentValue !== null);
   const hasChanges = scenario.changes.length > 0;
   const changedDerived = comparison.variableDeltas.filter((d) => d.delta !== null && Math.abs(d.delta) > 1e-9);
+
+  /* ---- presets resolved for the chosen subject ---- */
+  const chosenMember = presetMember !== null && members.some((m) => m.id === presetMember) ? presetMember : (activeMembers[0]?.id ?? null);
+  const presetSubject = (scope: SubjectScope): string | null => (scope === "system" ? null : chosenMember);
+  /** Variable ids a preset would adjust, or null when any of its keys is absent for the subject. */
+  const resolvePreset = (p: Preset): { variableId: string; delta: number }[] | null => {
+    const out: { variableId: string; delta: number }[] = [];
+    for (const d of p.deltas) {
+      const v = resolveVariable(evaluated.variables, model.id, { key: d.key, subjectId: presetSubject(d.scope) });
+      if (!v || v.kind !== "input") return null;
+      out.push({ variableId: v.id, delta: d.delta });
+    }
+    return out;
+  };
+  const applyPreset = (p: Preset) => {
+    const resolved = resolvePreset(p);
+    if (!resolved) return;
+    setDraft((d) => {
+      const variableDeltas = { ...d.variableDeltas };
+      for (const r of resolved) variableDeltas[r.variableId] = r.delta;
+      return { ...d, variableDeltas };
+    });
+  };
+  const memberPresets = PRESETS.some((p) => p.deltas.some((d) => d.scope === "member"));
 
   return (
     <div>
@@ -97,16 +153,47 @@ export default function ScenariosPage() {
       <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
         <div className="space-y-4">
           <Card title="Presets">
+            {memberPresets ? (
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                <label htmlFor={`${ids}-preset-member`} className="text-muted">
+                  Per-person presets apply to
+                </label>
+                <select
+                  id={`${ids}-preset-member`}
+                  className="text-xs"
+                  value={chosenMember ?? NO_MEMBER}
+                  onChange={(e) => setPresetMember(e.target.value === NO_MEMBER ? null : e.target.value)}
+                >
+                  {activeMembers.length === 0 ? <option value={NO_MEMBER}>no active member</option> : null}
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {memberOptionLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
-              {PRESETS.map((p) => (
-                <button key={p.name} title={p.description} className="rounded border border-border bg-background px-2 py-1 text-xs hover:border-accent" onClick={() => setDraft((d) => p.draft(d))}>
-                  {p.name}
-                </button>
-              ))}
-              <button className="rounded border border-border px-2 py-1 text-xs text-muted" onClick={() => setDraft(EMPTY)}>
+              {PRESETS.map((p) => {
+                const available = resolvePreset(p) !== null;
+                return (
+                  <button
+                    key={p.name}
+                    type="button"
+                    title={available ? p.description : NOT_IN_SYSTEM}
+                    disabled={!available}
+                    className="rounded border border-border bg-background px-2 py-1 text-xs hover:border-accent disabled:opacity-50 disabled:hover:border-border"
+                    onClick={() => applyPreset(p)}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+              <button type="button" className="rounded border border-border px-2 py-1 text-xs text-muted" onClick={() => setDraft(EMPTY)}>
                 Clear
               </button>
             </div>
+            <p className="text-xs text-muted mt-2">A preset is greyed out when its variables are not present for the chosen subject in this system.</p>
           </Card>
           <Card title="Adjust inputs (delta from current)">
             <div className="max-h-[28rem] overflow-y-auto pr-1">
@@ -115,14 +202,17 @@ export default function ScenariosPage() {
                   {inputs.map((v) => (
                     <tr key={v.id}>
                       <td>
-                        <div className="text-xs">{v.name}</div>
+                        <div className="text-xs">
+                          {v.name}
+                          {v.subjectId !== model.id ? <span className="text-muted"> — {subjectLabel(v.subjectId, model)}</span> : null}
+                        </div>
                         <div className="text-xs text-muted tabular-nums">now {fmtValue(v.currentValue, v.unit)}</div>
                       </td>
                       <td>
                         <NumberField
                           value={draft.variableDeltas[v.id] ?? 0}
                           className="w-24"
-                          ariaLabel={`Delta ${v.name}`}
+                          ariaLabel={`Delta ${v.name}${v.subjectId !== model.id ? ` (${subjectLabel(v.subjectId, model)})` : ""}`}
                           onCommit={(n) => setDraft((d) => ({ ...d, variableDeltas: { ...d.variableDeltas, [v.id]: n ?? 0 } }))}
                         />
                       </td>
@@ -167,16 +257,13 @@ export default function ScenariosPage() {
             <Note tone="warn">{comparison.applied.rejected.map((r) => r.reason).join(" ")}</Note>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-md border border-accent bg-surface px-3 py-2">
-              <div className="text-xs text-muted">Mean normalised gap — current</div>
-              <div className="text-lg font-semibold tabular-nums text-accent">{fmtPct(comparison.meanGapBefore)}</div>
-            </div>
-            <div className="rounded-md border border-desired bg-surface px-3 py-2">
-              <div className="text-xs text-muted">Mean normalised gap — scenario</div>
-              <div className="text-lg font-semibold tabular-nums text-desired">{fmtPct(comparison.meanGapAfter)}</div>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <Stat label="Gaps shrinking" value={comparison.gapsShrinking} sub="closer to the desired value" tone="desired" />
+            <Stat label="Gaps growing" value={comparison.gapsGrowing} sub="further from the desired value" />
+            <Stat label="Open gaps — current" value={comparison.openGapsBefore} sub="variables not yet at target" tone="current" />
+            <Stat label="Open gaps — scenario" value={comparison.openGapsAfter} sub="variables not yet at target" tone="desired" />
           </div>
+          <Note>Counts only: each gap is compared with itself before and after. No mean or total gap is shown, because one number across different variables would read as a score.</Note>
 
           <Card title="Feedback loops under the scenario">
             <table className="data">
@@ -241,19 +328,25 @@ export default function ScenariosPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {changedDerived.map((d) => (
-                    <tr key={d.variableId}>
-                      <td>
-                        {d.name} {d.kind === "derived" ? <span className="text-xs text-muted">(calculated)</span> : null}
-                      </td>
-                      <td className="tabular-nums text-accent">{fmtValue(d.base, d.unit)}</td>
-                      <td className="tabular-nums text-desired">{fmtValue(d.scenario, d.unit)}</td>
-                      <td className="tabular-nums">{fmtDelta(d.delta, d.unit)}</td>
-                      <td className="tabular-nums text-xs">
-                        {d.baseGap === null ? "—" : `${fmtPct(d.baseGap)} → ${fmtPct(d.scenarioGap)}`}
-                      </td>
-                    </tr>
-                  ))}
+                  {changedDerived.map((d) => {
+                    const v = variableById.get(d.variableId);
+                    const subject = v && v.subjectId !== model.id ? subjectLabel(v.subjectId, model) : null;
+                    return (
+                      <tr key={d.variableId}>
+                        <td>
+                          {d.name}
+                          {subject ? <span className="text-xs text-muted"> — {subject}</span> : null}{" "}
+                          {d.kind === "derived" ? <span className="text-xs text-muted">(calculated)</span> : null}
+                        </td>
+                        <td className="tabular-nums text-accent">{fmtValue(d.base, d.unit)}</td>
+                        <td className="tabular-nums text-desired">{fmtValue(d.scenario, d.unit)}</td>
+                        <td className="tabular-nums">{fmtDelta(d.delta, d.unit)}</td>
+                        <td className="tabular-nums text-xs">
+                          {d.baseGap === null ? "—" : `${fmtPct(d.baseGap)} → ${fmtPct(d.scenarioGap)}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -302,10 +395,17 @@ export default function ScenariosPage() {
           </Card>
 
           {comparison.projectionsSkipped.length > 0 ? (
-            <Note>
-              Not projected because an input is unknown (never filled with zero):{" "}
-              {comparison.projectionsSkipped.map((p) => `${p.label} — missing ${p.missingInputs.join(", ")}`).join("; ")}.
-            </Note>
+            <Card title="Not projected (an input is unknown, never filled with zero)">
+              <ul className="text-sm space-y-1">
+                {comparison.projectionsSkipped.map((p) => (
+                  <li key={`${p.label}:${p.subjectId}`}>
+                    <span className="font-medium">{p.label}</span>
+                    <span className="text-xs text-muted"> · subject: {subjectLabel(p.subjectId, model)}</span>
+                    <div className="text-xs text-warn">missing {p.missingInputs.join(", ")}</div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
           ) : null}
           {comparison.projections.length > 0 ? (
             <Card title={`Compounding trajectories over ${scenario.horizonMonths} months — model assumptions, not forecasts`}>
@@ -324,6 +424,7 @@ export default function ScenariosPage() {
                   );
                 })}
               </div>
+              <p className="text-xs text-muted mt-2">Per-person trajectories are labelled with the member they belong to; one is drawn per member for whom every input is known.</p>
             </Card>
           ) : null}
         </div>

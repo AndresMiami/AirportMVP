@@ -368,6 +368,7 @@ export default function ObservationsPage() {
           {members.map((m) => (
             <option key={m.id} value={`member:${m.id}`}>
               {m.label}
+              {m.status === "archived" ? " (archived)" : ""}
             </option>
           ))}
         </select>

@@ -4,6 +4,7 @@ import { useModel, type ModelMutation } from "@/components/model-provider";
 import { ConfirmButton, SystemSwitcher } from "@/components/system-switcher";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
 import * as mutations from "@/services/mutations";
+import { memberReferences, type MemberReferences } from "@/services/mutations";
 import type { AttractorDescription } from "@/types";
 
 const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50";
@@ -178,6 +179,24 @@ function OutcomeList({
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Display order and wording of the per-entity reference counts. */
+const REFERENCE_KINDS: { key: Exclude<keyof MemberReferences, "total">; singular: string; plural: string }[] = [
+  { key: "observations", singular: "observation", plural: "observations" },
+  { key: "variables", singular: "variable", plural: "variables" },
+  { key: "incomeSources", singular: "income source", plural: "income sources" },
+  { key: "constraints", singular: "constraint", plural: "constraints" },
+  { key: "actions", singular: "action", plural: "actions" },
+  { key: "hypotheses", singular: "hypothesis", plural: "hypotheses" },
+  { key: "events", singular: "event", plural: "events" },
+  { key: "signatures", singular: "snapshot", plural: "snapshots" },
+];
+
+/** "3 observations · 2 variables", or "nothing yet". */
+function referencesText(refs: MemberReferences): string {
+  const parts = REFERENCE_KINDS.filter((k) => refs[k.key] > 0).map((k) => `${refs[k.key]} ${refs[k.key] === 1 ? k.singular : k.plural}`);
+  return parts.length === 0 ? "nothing yet" : parts.join(" · ");
+}
+
 /** Inline refusal message for one control; hoisted so it is not re-created on every render. */
 function ErrorLine({ msg }: { msg: string | null }) {
   return msg ? (
@@ -206,7 +225,6 @@ export default function ProfilePage() {
 
   if (!model || !evaluated) return <Loading />;
   const p = model.profile;
-  const subjectCount = (memberId: string) => model.observations.filter((o) => o.subjectId === memberId).length;
 
   const addMember = () => {
     const label = newLabel.trim();
@@ -346,7 +364,7 @@ export default function ProfilePage() {
       <div className="mt-4">
         <Card title={`Members (${p.members.length})`}>
           {p.members.length === 0 ? (
-            <p className="text-sm text-muted mb-3">No members recorded yet. Observations can name a member as their subject once one exists.</p>
+            <p className="text-sm text-muted mb-3">No members recorded yet. Variables, income sources, constraints and observations can name a member as their subject once one exists.</p>
           ) : (
             <div className="overflow-x-auto mb-3">
               <table className="data">
@@ -354,13 +372,13 @@ export default function ProfilePage() {
                   <tr>
                     <th>Label</th>
                     <th>Role</th>
-                    <th>Subject of</th>
+                    <th>Referenced by</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {p.members.map((m) => {
-                    const n = subjectCount(m.id);
+                    const refs = memberReferences(model, m.id);
                     return (
                       <tr key={m.id}>
                         <td>
@@ -382,9 +400,7 @@ export default function ProfilePage() {
                             onCommit={(role) => commit(`member:${m.id}`, (mm) => mutations.updateMember(mm, m.id, { role }))}
                           />
                         </td>
-                        <td className="text-xs text-muted">
-                          {n === 0 ? "no observations" : `${n} observation${n > 1 ? "s" : ""}`}
-                        </td>
+                        <td className="text-xs text-muted">{referencesText(refs)}</td>
                         <td>
                           <div className="flex flex-wrap gap-2 items-center">
                             {m.status === "archived" ? (
@@ -402,11 +418,11 @@ export default function ProfilePage() {
                               <ConfirmButton
                                 label="Archive"
                                 confirmLabel="Archive member"
-                                message={`Archive ${m.label}? Their id and every observation naming them are kept; they are marked as no longer part of the household.`}
+                                message={`Archive ${m.label}? Their id and everything naming them are kept; they are marked as no longer part of the household.`}
                                 onConfirm={() => commit(`member:${m.id}`, (mm) => mutations.archiveMember(mm, m.id))}
                               />
                             )}
-                            {n === 0 ? (
+                            {refs.total === 0 ? (
                               <ConfirmButton
                                 label="Delete"
                                 confirmLabel="Delete member"
@@ -485,7 +501,10 @@ export default function ProfilePage() {
             ) : null}
           </div>
           <div className="mt-3">
-            <Note>Removing a member keeps their observations but clears them as the subject.</Note>
+            <Note>
+              Archiving is the normal way a member leaves: their id stays and everything naming them keeps its subject. Delete is offered only while nothing references a member; once
+              a variable, income source, constraint, observation or other record names them, archive instead.
+            </Note>
           </div>
         </Card>
       </div>

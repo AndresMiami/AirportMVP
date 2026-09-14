@@ -8,9 +8,12 @@
 import type { EdgeDirection, Relationship } from "@/types";
 import { horizonOfMonths, lagToMonths, type Horizon } from "./lag";
 
-/** Only enabled edges take part in loops, propagation and influence. */
+/** Only edges that are enabled AND whose kind lets them participate in
+ *  dynamics (an opted-in causal hypothesis or definitional dependency)
+ *  take part in loops, propagation and influence. Unclassified,
+ *  association and constraint edges never do. */
 export function activeRelationships(relationships: readonly Relationship[]): Relationship[] {
-  return relationships.filter((r) => r.enabled);
+  return relationships.filter((r) => r.enabled && r.participatesInDynamics);
 }
 
 export type LoopPolarity = "reinforcing" | "balancing";

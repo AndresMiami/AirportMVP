@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
 import { evaluateSystem } from "@/model/evaluate";
 import { computeSignature } from "@/signatures";
@@ -27,6 +29,8 @@ const minimalRelationship = {
   id: "r1",
   sourceVariableId: "a",
   targetVariableId: "b",
+  kind: "causal_hypothesis" as const,
+  participatesInDynamics: true,
   direction: "positive",
   strength: 0.5,
   lag: { value: 1, unit: "weeks" },
@@ -66,7 +70,8 @@ describe("ObservationSchema", () => {
 describe("HypothesisSchema", () => {
   it("defaults status to proposed and kind to general with empty lists", () => {
     const h = HypothesisSchema.parse(minimalHypothesis);
-    expect(h).toEqual({
+    expect(h).toMatchObject({ subjectId: null, disconfirmingConditions: [], predictions: [], reviewLog: [], killCriteria: [] });
+    expect(h).toMatchObject({
       ...minimalHypothesis,
       kind: "general",
       relationshipIds: [],
@@ -93,7 +98,7 @@ describe("HypothesisSchema", () => {
 describe("ConstraintSchema", () => {
   it("defaults softPenalty 0.5, userConfirmed false, evidence [] and no check", () => {
     const c = ConstraintSchema.parse(minimalConstraint);
-    expect(c).toEqual({ ...minimalConstraint, description: "", softPenalty: 0.5, evidence: [], userConfirmed: false, notes: "" });
+    expect(c).toEqual({ ...minimalConstraint, description: "", subjectId: null, softPenalty: 0.5, evidence: [], userConfirmed: false, notes: "" });
     expect(c.check).toBeUndefined();
   });
   it("validates type, comparator and limit shape", () => {
@@ -113,6 +118,10 @@ describe("RelationshipSchema", () => {
   it("defaults enabled true, evidence [], explanation and notes ''", () => {
     const r = RelationshipSchema.parse(minimalRelationship);
     expect(r).toEqual({ ...minimalRelationship, evidence: [], explanation: "", notes: "", enabled: true });
+    // An association can never take part in dynamics, whatever the flag says.
+    expect(RelationshipSchema.safeParse({ ...minimalRelationship, kind: "association", participatesInDynamics: true }).success).toBe(false);
+    expect(RelationshipSchema.safeParse({ ...minimalRelationship, kind: "unclassified", participatesInDynamics: true }).success).toBe(false);
+    expect(RelationshipSchema.safeParse({ ...minimalRelationship, kind: "unclassified", participatesInDynamics: false }).success).toBe(true);
     expect(RelationshipSchema.parse({ ...minimalRelationship, enabled: false }).enabled).toBe(false);
   });
   it("rejects invalid direction, strength/confidence bounds and lag units", () => {
@@ -141,22 +150,27 @@ describe("LagSchema", () => {
 
 describe("SystemModelSchema", () => {
   it("pins the schema version and rejects v1 objects", () => {
-    expect(MODEL_SCHEMA_VERSION).toBe(2);
+    expect(MODEL_SCHEMA_VERSION).toBe(3);
     const sample = createSampleHousehold();
     expect(SystemModelSchema.safeParse(sample).success).toBe(true);
     expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 1 }).success).toBe(false);
-    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 3 }).success).toBe(false);
-    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: "2" }).success).toBe(false);
+    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 2 }).success).toBe(false);
+    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 4 }).success).toBe(false);
+    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: "3" }).success).toBe(false);
   });
-  it("defaults signatures to [] and signatureDefinitionId to household_default", () => {
-    const { signatures: _s, signatureDefinitionId: _d, observations: _o, hypotheses: _h, ...rest } = createSampleHousehold();
+  it("defaults signatures/events to [] and REQUIRES a domain definition reference", () => {
+    const { signatures: _s, events: _e, observations: _o, hypotheses: _h, ...rest } = createSampleHousehold();
     void _s;
-    void _d;
+    void _e;
     void _o;
     void _h;
     const parsed = SystemModelSchema.parse(rest);
     expect(parsed.signatures).toEqual([]);
-    expect(parsed.signatureDefinitionId).toBe("household_default");
+    expect(parsed.events).toEqual([]);
+    expect(parsed.domainDefinitionId).toBe("household");
+    const { domainDefinitionId: _d, ...noDomain } = rest;
+    void _d;
+    expect(SystemModelSchema.safeParse(noDomain).success).toBe(false);
     expect(parsed.observations).toEqual([]);
     expect(parsed.hypotheses).toEqual([]);
     expect(parsed.loopAnnotations).toEqual(createSampleHousehold().loopAnnotations);
@@ -194,6 +208,7 @@ describe("StructuralSignatureSchema pieces", () => {
     expect(LoopSnapshotItemSchema.safeParse({ ...loop, status: "proven" }).success).toBe(false);
     const contribution = ContributionSchema.parse({
       variableId: "v",
+      variableKey: "v",
       name: "V",
       unit: "$",
       rawValue: null,

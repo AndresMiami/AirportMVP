@@ -1,32 +1,29 @@
 "use client";
 import { useModel } from "@/components/model-provider";
 import { fmtDelta, fmtPct, fmtValue } from "@/components/format";
-import { Card, CategoryBadge, Loading, Note, PageHeader } from "@/components/ui";
+import { Card, CategoryBadge, Loading, Note, PageHeader, Stat } from "@/components/ui";
 
 export default function GapPage() {
   const { evaluated } = useModel();
   if (!evaluated) return <Loading />;
-  const { gap, variableById } = evaluated;
+  const { gap, variableById, model } = evaluated;
   const rows = [...gap.gaps].sort((a, b) => b.normalizedGap - a.normalizedGap);
+  const subjectLabel = (subjectId: string | null): string => {
+    if (subjectId === null) return "unassigned";
+    if (subjectId === model.id) return "whole system";
+    const m = model.profile.members.find((x) => x.id === subjectId);
+    return m ? (m.status === "archived" ? `${m.label} (archived)` : m.label) : `unknown subject (${subjectId})`;
+  };
   return (
     <div>
       <PageHeader
         title="Structural gap"
-        lede="G = X* − X for every variable with both a current and a desired value. The normalised column divides the gap by the variable's reference range so a $ gap and an hours gap can sit side by side (assumption A11)."
+        lede="G = X* − X for every variable with both a current and a desired value. The normalised column divides the gap by the variable's reference range so a $ gap and an hours gap can sit side by side (assumption A11). The gap is a vector: one entry per variable, never summed into one number."
       />
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="rounded-md border border-border bg-surface px-3 py-2">
-          <div className="text-xs text-muted">Mean normalised gap</div>
-          <div className="text-lg font-semibold tabular-nums">{fmtPct(gap.meanNormalizedGap)}</div>
-        </div>
-        <div className="rounded-md border border-border bg-surface px-3 py-2">
-          <div className="text-xs text-muted">Open</div>
-          <div className="text-lg font-semibold tabular-nums">{gap.openCount}</div>
-        </div>
-        <div className="rounded-md border border-border bg-surface px-3 py-2">
-          <div className="text-xs text-muted">At target</div>
-          <div className="text-lg font-semibold tabular-nums">{gap.closedCount}</div>
-        </div>
+        <Stat label="Variables with targets" value={gap.gaps.length} sub="current and desired both set" />
+        <Stat label="Open" value={gap.openCount} sub="not yet at the desired value" />
+        <Stat label="At target" value={gap.closedCount} sub="desired value reached" />
       </div>
       <Card>
         <div className="overflow-x-auto">
@@ -34,6 +31,7 @@ export default function GapPage() {
             <thead>
               <tr>
                 <th>Variable</th>
+                <th>Subject</th>
                 <th>Category</th>
                 <th>Current</th>
                 <th>Desired</th>
@@ -47,6 +45,7 @@ export default function GapPage() {
                 return (
                   <tr key={g.variableId}>
                     <td>{v.name}</td>
+                    <td className="text-xs text-muted">{subjectLabel(v.subjectId)}</td>
                     <td>
                       <CategoryBadge category={v.category} />
                     </td>
@@ -72,7 +71,10 @@ export default function GapPage() {
         </div>
       </Card>
       <div className="mt-4">
-        <Note>The mean gap is a rough summary; it weights every variable equally regardless of importance. Use the Leverage page for which gaps may be worth closing first.</Note>
+        <Note>
+          No single number summarises these gaps: a mean would weight every variable equally and read as a universal score. Compare entries one by one, and use the Leverage page
+          for which gaps may be worth closing first.
+        </Note>
       </div>
     </div>
   );

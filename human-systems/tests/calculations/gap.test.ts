@@ -4,6 +4,8 @@ import type { Variable } from "@/types";
 
 const v = (over: Partial<Variable>): Variable => ({
   id: "v",
+  key: "v",
+  subjectId: "sys",
   name: "v",
   description: "",
   category: "structure",
@@ -63,7 +65,8 @@ describe("A11 gap", () => {
     expect(s.gaps.length).toBe(2);
     expect(s.openCount).toBe(1);
     expect(s.closedCount).toBe(1);
-    expect(s.meanNormalizedGap).toBeCloseTo(0.5, 9);
-    expect(structuralGap([]).meanNormalizedGap).toBeNull();
+    // No mean exists: a mean of heterogeneous gaps would be a universal score.
+    expect("meanNormalizedGap" in s).toBe(false);
+    expect(structuralGap([])).toEqual({ gaps: [], openCount: 0, closedCount: 0 });
   });
 });

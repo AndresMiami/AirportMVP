@@ -54,19 +54,17 @@ export function variableGap(v: Variable): VariableGap | null {
   };
 }
 
+/** A VECTOR of gaps plus counts. There is deliberately no mean: averaging
+ *  heterogeneous gaps into one number would be a universal score. */
 export interface GapSummary {
   gaps: VariableGap[];
   /** Variables with both values that are not yet at the desired value. */
   openCount: number;
   closedCount: number;
-  /** Mean normalised gap over all variables with both values. */
-  meanNormalizedGap: number | null;
 }
 
 export function structuralGap(variables: readonly Variable[]): GapSummary {
   const gaps = variables.map(variableGap).filter((g): g is VariableGap => g !== null);
   const openCount = gaps.filter((g) => g.direction !== "none").length;
-  const meanNormalizedGap =
-    gaps.length === 0 ? null : gaps.reduce((s, g) => s + g.normalizedGap, 0) / gaps.length;
-  return { gaps, openCount, closedCount: gaps.length - openCount, meanNormalizedGap };
+  return { gaps, openCount, closedCount: gaps.length - openCount };
 }

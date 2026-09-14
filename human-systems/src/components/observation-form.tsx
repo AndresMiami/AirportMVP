@@ -187,6 +187,7 @@ export function ObservationForm({
           {members.map((m) => (
             <option key={m.id} value={m.id}>
               {m.label}
+              {m.status === "archived" ? " (archived)" : ""}
               {m.role ? ` — ${m.role}` : ""}
             </option>
           ))}

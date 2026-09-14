@@ -18,7 +18,9 @@ import {
   EvidenceSchema,
   LagSchema,
   SourceTypeSchema,
+  SubjectIdSchema,
   TargetModeSchema,
+  TemporalRefSchema,
   unitInterval,
 } from "./primitives";
 
@@ -74,6 +76,11 @@ export type ReferenceRange = z.infer<typeof ReferenceRangeSchema>;
 
 export const VariableSchema = z.object({
   id: z.string().min(1),
+  /** Definition key inside the active domain (e.g. "career_capital").
+   *  Ids stay globally unique; keys are resolved per subject. */
+  key: z.string().min(1),
+  /** Whose variable this is. null = UNASSIGNED (not the household). */
+  subjectId: SubjectIdSchema.nullable(),
   name: z.string().min(1),
   description: z.string().default(""),
   category: VariableCategorySchema,
@@ -114,8 +121,10 @@ export type Variable = z.infer<typeof VariableSchema>;
 export const IncomeSourceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  /** Who in the household earns it (free text, e.g. "Adult 1"). */
+  /** Who in the household earns it (free text label, kept for display). */
   earner: z.string().default(""),
+  /** The member who earns it; null = not yet attributed. */
+  earnerId: SubjectIdSchema.nullable().default(null),
   monthlyAmount: z.number().min(0),
   /** Fraction of monthlyAmount that can be counted on in a bad month. */
   reliability: unitInterval,
@@ -137,10 +146,30 @@ export type IncomeSource = z.infer<typeof IncomeSourceSchema>;
 /* Relationships (directed edges)                                      */
 /* ------------------------------------------------------------------ */
 
+/** What an arrow claims. Only causal hypotheses and (opted-in) definitional
+ *  dependencies may take part in loops and propagation. Migration assigns
+ *  "unclassified", never "causal_hypothesis": unknown kind ≠ causal. */
+export const RelationshipKindSchema = z.enum([
+  "unclassified",
+  "causal_hypothesis",
+  "association",
+  "definitional",
+  "constraint",
+]);
+export type RelationshipKind = z.infer<typeof RelationshipKindSchema>;
+
+/** Kinds that MAY participate in dynamics (the person still opts in). */
+export const DYNAMICS_ELIGIBLE_KINDS: readonly RelationshipKind[] = ["causal_hypothesis", "definitional"];
+
 export const RelationshipSchema = z.object({
   id: z.string().min(1),
   sourceVariableId: z.string().min(1),
   targetVariableId: z.string().min(1),
+  kind: RelationshipKindSchema,
+  /** True only for eligible kinds; loops, propagation, influence and the
+   *  dynamics signature read edges with enabled && participatesInDynamics. */
+  participatesInDynamics: z.boolean(),
+  hypothesisId: z.string().optional(),
   /** positive: source up -> target up. negative: source up -> target down. */
   direction: EdgeDirectionSchema,
   /** 0..1 MODEL JUDGMENT of influence. NOT an empirically estimated causal
@@ -155,6 +184,10 @@ export const RelationshipSchema = z.object({
   /** Disabled edges are kept for the record but excluded from loops,
    *  propagation and influence. */
   enabled: z.boolean().default(true),
+}).superRefine((r, ctx) => {
+  if (r.participatesInDynamics && !DYNAMICS_ELIGIBLE_KINDS.includes(r.kind)) {
+    ctx.addIssue({ code: "custom", message: `a ${r.kind} relationship cannot participate in dynamics` });
+  }
 });
 export type Relationship = z.infer<typeof RelationshipSchema>;
 
@@ -192,6 +225,8 @@ export const ConstraintSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
+  /** Whose constraint. null = not yet attributed. */
+  subjectId: SubjectIdSchema.nullable().default(null),
   /** hard: a violation makes an action infeasible.
    *  soft: a violation lowers suitability but never excludes. */
   type: ConstraintTypeSchema,
@@ -239,12 +274,26 @@ export const UtilityWeightsSchema = z.partialRecord(
 );
 export type UtilityWeights = z.infer<typeof UtilityWeightsSchema>;
 
+/** Versioned envelope for domain-module data attached to a core entity.
+ *  The core validates only the envelope and preserves the payload verbatim
+ *  through every migration; the owning module validates and migrates it. */
+export const ExtensionEnvelopeSchema = z.object({
+  schemaVersion: z.number().int().min(1),
+  payload: z.unknown(),
+});
+export type ExtensionEnvelope = z.infer<typeof ExtensionEnvelopeSchema>;
+export const ExtensionsSchema = z.record(z.string(), ExtensionEnvelopeSchema);
+
 export const ActionSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
+  /** Who would carry it out. null = not yet attributed. */
+  subjectId: SubjectIdSchema.nullable().default(null),
   /** Variables this action is intended to move. */
   targetVariables: z.array(z.string()).default([]),
+  /** Domain-module data by domain id (e.g. a future opportunity profile). */
+  extensions: ExtensionsSchema.default({}),
   /** Requirement per constraint dimension. */
   requirements: z.record(z.string(), z.union([z.number(), z.boolean()])),
   utility: UtilityVectorSchema.default({}),
@@ -300,10 +349,46 @@ export type HypothesisKind = z.infer<typeof HypothesisKindSchema>;
 
 /** An INTERPRETATION under review. "accepted" means the person accepts it
  *  as a working reading of their system, never that it is proven. */
+export const HypothesisPredictionSchema = z.object({
+  statement: z.string().min(1),
+  variableId: z.string().optional(),
+  expectedDirection: z.enum(["up", "down"]).optional(),
+  by: TemporalRefSchema.optional(),
+});
+export type HypothesisPrediction = z.infer<typeof HypothesisPredictionSchema>;
+
+export const HypothesisReviewEntrySchema = z.object({
+  at: z.string(),
+  status: HypothesisStatusSchema,
+  note: z.string().default(""),
+});
+export type HypothesisReviewEntry = z.infer<typeof HypothesisReviewEntrySchema>;
+
+/** A decision rule the PERSON set. The engine reports triggered / cleared
+ *  against the named variable; it never changes a hypothesis status. */
+export const KillCriterionSchema = z.object({
+  id: z.string().min(1),
+  statement: z.string().min(1),
+  variableId: z.string().optional(),
+  comparator: z.enum(["lt", "lte", "gt", "gte"]).optional(),
+  threshold: z.number().optional(),
+  status: z.enum(["open", "triggered", "cleared"]).default("open"),
+  observationIds: z.array(z.string()).default([]),
+});
+export type KillCriterion = z.infer<typeof KillCriterionSchema>;
+
 export const HypothesisSchema = z.object({
   id: z.string().min(1),
   statement: z.string().min(1),
   kind: HypothesisKindSchema.default("general"),
+  /** Whose hypothesis, when it is about one person. null = not attributed. */
+  subjectId: SubjectIdSchema.nullable().default(null),
+  /** What evidence would weaken or change this hypothesis. */
+  disconfirmingConditions: z.array(z.string()).default([]),
+  predictions: z.array(HypothesisPredictionSchema).default([]),
+  /** Every status change, with its reason. */
+  reviewLog: z.array(HypothesisReviewEntrySchema).default([]),
+  killCriteria: z.array(KillCriterionSchema).default([]),
   /** For kind "loop": the canonical loop id (calculations/graph). */
   loopId: z.string().optional(),
   /** Relationships this hypothesis is about. */
@@ -315,6 +400,50 @@ export const HypothesisSchema = z.object({
   notes: z.string().default(""),
 });
 export type Hypothesis = z.infer<typeof HypothesisSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Events, shocks, interventions                                       */
+/* ------------------------------------------------------------------ */
+
+export const EventKindSchema = z.enum(["shock", "change", "intervention", "outcome", "decision"]);
+export type EventKind = z.infer<typeof EventKindSchema>;
+
+export const InterventionStatusSchema = z.enum(["planned", "in_progress", "done", "abandoned"]);
+
+export const EventLinksSchema = z.object({
+  variableIds: z.array(z.string()).default([]),
+  relationshipIds: z.array(z.string()).default([]),
+  hypothesisIds: z.array(z.string()).default([]),
+  actionIds: z.array(z.string()).default([]),
+  eventIds: z.array(z.string()).default([]),
+  incomeSourceIds: z.array(z.string()).default([]),
+});
+
+/** A dated fact: something that happened, was changed, or was tried. It is
+ *  never a numeric variable. */
+export const EventSchema = z.object({
+  id: z.string().min(1),
+  kind: EventKindSchema,
+  /** Domain vocabulary, e.g. job_lost, contract_lost, training_started. */
+  type: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().default(""),
+  occurred: TemporalRefSchema,
+  recordedAt: z.string(),
+  subjectId: SubjectIdSchema.nullable().default(null),
+  sourceType: SourceTypeSchema,
+  confidence: unitInterval,
+  observationIds: z.array(z.string()).default([]),
+  links: EventLinksSchema.prefault({}),
+  /** Interventions only. */
+  status: InterventionStatusSchema.optional(),
+  expected: z
+    .array(z.object({ variableId: z.string(), direction: z.enum(["up", "down"]), by: TemporalRefSchema.optional() }))
+    .default([]),
+  outcomeEventIds: z.array(z.string()).default([]),
+  notes: z.string().default(""),
+});
+export type Event = z.infer<typeof EventSchema>;
 
 /* ------------------------------------------------------------------ */
 /* Attractor descriptions                                              */
@@ -357,15 +486,19 @@ export const SystemProfileSchema = z.object({
 export type SystemProfile = z.infer<typeof SystemProfileSchema>;
 
 /** Bump when the stored shape changes; add a step in model/migrations. */
-export const MODEL_SCHEMA_VERSION = 2;
+export const MODEL_SCHEMA_VERSION = 3;
 
 export const SystemModelSchema = z.object({
   schemaVersion: z.literal(MODEL_SCHEMA_VERSION),
   id: z.string().min(1),
+  /** Which domain definition (engine configuration) this system uses. */
+  domainDefinitionId: z.string().min(1),
+  domainDefinitionVersion: z.number().int().min(1),
   profile: SystemProfileSchema,
   variables: z.array(VariableSchema),
   incomeSources: z.array(IncomeSourceSchema),
   relationships: z.array(RelationshipSchema),
+  events: z.array(EventSchema).default([]),
   loopAnnotations: z.record(z.string(), LoopAnnotationSchema).default({}),
   constraints: z.array(ConstraintSchema).default([]),
   actions: z.array(ActionSchema).default([]),
@@ -373,8 +506,6 @@ export const SystemModelSchema = z.object({
   hypotheses: z.array(HypothesisSchema).default([]),
   /** Immutable structural-signature snapshots (see types/signature). */
   signatures: z.array(StructuralSignatureSchema).default([]),
-  /** Which signature definition this system uses. */
-  signatureDefinitionId: z.string().default("household_default"),
   utilityWeights: UtilityWeightsSchema.optional(),
   currentAttractor: AttractorDescriptionSchema.prefault({}),
   desiredAttractor: AttractorDescriptionSchema.prefault({}),

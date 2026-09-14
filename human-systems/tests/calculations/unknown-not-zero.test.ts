@@ -4,10 +4,13 @@
  * substitute 0 and produce a number that looks measured.
  */
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
+import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
 import { createBlankModel } from "@/model/blank";
 import { createSampleHousehold } from "@/data/sample-household";
 import { evaluateSystem } from "@/model/evaluate";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import * as M from "@/services/mutations";
 import { applyScenario, compareScenario } from "@/scenarios";
 import { computeSignature } from "@/signatures";
@@ -36,7 +39,7 @@ describe("derived metrics", () => {
     expect(val(M.updateVariable(base, INPUT_IDS.liquidReserves, { currentValue: null }), DERIVED_IDS.bufferMonths)).toBeNull();
   });
   it("income aggregates are unknown with no sources, not zero", () => {
-    const blank = createBlankModel({ id: "b", name: "b", systemType: "household", now: NOW });
+    const blank = createBlankModel({ id: "b", name: "b", systemType: "household", now: NOW , domain: HOUSEHOLD_DOMAIN });
     const ev = evaluateSystem(blank);
     for (const id of Object.values(DERIVED_IDS)) expect(ev.variableById.get(id)!.currentValue, id).toBeNull();
   });
@@ -62,29 +65,32 @@ describe("scenarios", () => {
   });
   it("projections are skipped, with the missing inputs named, instead of zero-filled", () => {
     const full = compareScenario(createSampleHousehold(), scenario([]));
-    expect(full.projections.map((p) => p.label)).toEqual(["Career capital (index)", "Productive assets"]);
-    expect(full.projectionsSkipped).toEqual([]);
+    expect(full.projections.map((p) => p.label)).toEqual(["Career capital (index) — Dani", "Productive assets"]);
+    // Members without person-level variables are skipped honestly, never zero-filled.
+    expect(full.projectionsSkipped.map((p) => p.subjectId)).toEqual(["marisol", "child"]);
+    for (const skipped of full.projectionsSkipped) expect(skipped.missingInputs.length).toBeGreaterThan(0);
     const noPersistence = M.updateVariable(createSampleHousehold(), INPUT_IDS.persistence, { currentValue: null });
     const c1 = compareScenario(noPersistence, scenario([]));
     expect(c1.projections.map((p) => p.label)).toEqual(["Productive assets"]);
-    expect(c1.projectionsSkipped).toEqual([{ label: "Career capital (index)", missingInputs: ["Persistence"] }]);
+    expect(c1.projectionsSkipped.find((p) => p.subjectId === "dani")).toEqual({ label: "Career capital (index) — Dani", subjectId: "dani", missingInputs: ["Persistence"] });
     const noDebt = M.updateVariable(createSampleHousehold(), INPUT_IDS.monthlyDebtPayments, { currentValue: null });
     const c2 = compareScenario(noDebt, scenario([]));
-    expect(c2.projections.map((p) => p.label)).toEqual(["Career capital (index)"]);
-    expect(c2.projectionsSkipped[0].missingInputs).toEqual(["Monthly debt payments"]);
-    const blank = createBlankModel({ id: "b", name: "b", systemType: "household", now: NOW });
+    expect(c2.projections.map((p) => p.label)).toEqual(["Career capital (index) — Dani"]);
+    expect(c2.projectionsSkipped.find((p) => p.label === "Productive assets")!.missingInputs).toEqual(["Monthly debt payments"]);
+    const blank = createBlankModel({ id: "b", name: "b", systemType: "household", now: NOW , domain: HOUSEHOLD_DOMAIN });
     const c3 = compareScenario(blank, scenario([]));
     expect(c3.projections).toEqual([]);
-    expect(c3.projectionsSkipped).toHaveLength(2);
+    // A blank system has no members: only the system-scope projection is attempted, and skipped.
+    expect(c3.projectionsSkipped).toHaveLength(1);
   });
 });
 
 describe("signatures", () => {
   it("an unknown input is excluded from a dimension, never counted as 0", () => {
     const base = createSampleHousehold();
-    const known = computeSignature(evaluateSystem(base), { id: "a", now: NOW, mode: "current" });
+    const known = computeSignature(evaluateSystem(base), { id: "a", now: NOW, mode: "current", subjectId: "dani" });
     const m = M.updateVariable(base, INPUT_IDS.qualityOfEffort, { currentValue: null });
-    const partial = computeSignature(evaluateSystem(m), { id: "b", now: NOW, mode: "current" });
+    const partial = computeSignature(evaluateSystem(m), { id: "b", now: NOW, mode: "current", subjectId: "dani" });
     const a = known.dimensions.find((d) => d.dimensionId === "focus_commitment")!;
     const b = partial.dimensions.find((d) => d.dimensionId === "focus_commitment")!;
     // Inputs: major_paths 3 -> 0.25 (inv), switching 2 -> 0.5 (inv), persistence 0.6, protected 2/15, quality 0.5 (w 0.5).

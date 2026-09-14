@@ -4,7 +4,6 @@
  * Returns a new model (the original is never mutated) plus a list of
  * changes that could not be applied.
  */
-import { DERIVED_BY_ID } from "@/model/derived";
 import type { Scenario, ScenarioChange, SystemModel } from "@/types";
 
 export interface AppliedScenario {
@@ -28,7 +27,7 @@ export function applyScenario(base: SystemModel, scenario: Scenario): AppliedSce
   const setVariable = (change: ScenarioChange, id: string, next: (current: number | null) => number) => {
     const v = model.variables.find((x) => x.id === id);
     if (!v) return rejected.push({ change, reason: `Unknown variable ${id}` });
-    if (v.kind === "derived" || DERIVED_BY_ID[id]) {
+    if (v.kind === "derived") {
       return rejected.push({
         change,
         reason: `${v.name} is calculated from other variables; change its inputs instead.`,

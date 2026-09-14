@@ -16,19 +16,38 @@ import { Note, SourceBadge } from "@/components/ui";
 import { SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
 import * as mutations from "@/services/mutations";
 import {
+  DYNAMICS_ELIGIBLE_KINDS,
   LagUnitSchema,
+  RelationshipKindSchema,
   SourceTypeSchema,
   type EdgeDirection,
   type Evidence,
   type LagUnit,
   type Observation,
   type Relationship,
+  type RelationshipKind,
   type SourceType,
   type Variable,
 } from "@/types";
 
 const SOURCE_TYPES: readonly SourceType[] = SourceTypeSchema.options;
 const LAG_UNITS: readonly LagUnit[] = LagUnitSchema.options;
+const KINDS: readonly RelationshipKind[] = RelationshipKindSchema.options;
+
+/** One-line meaning of each relationship kind (what the arrow claims). */
+export const RELATIONSHIP_KIND_META: Record<RelationshipKind, { label: string; meaning: string }> = {
+  unclassified: { label: "unclassified", meaning: "not yet classified; excluded from loops" },
+  causal_hypothesis: { label: "causal hypothesis", meaning: "a claimed mechanism, under review" },
+  association: { label: "association", meaning: "co-occurs; not a causal claim" },
+  definitional: { label: "definitional", meaning: "true by formula" },
+  constraint: { label: "constraint", meaning: "limits; not a mechanism" },
+};
+
+export const DYNAMICS_RULE = "Only a causal hypothesis or an opted-in definitional dependency can take part in dynamics";
+
+export function isDynamicsEligible(kind: RelationshipKind): boolean {
+  return DYNAMICS_ELIGIBLE_KINDS.includes(kind);
+}
 
 /** Prominent, always-visible reminder about what strength means. */
 export function JudgmentBanner() {
@@ -47,6 +66,9 @@ export function defaultRelationshipDraft(sourceVariableId = "", targetVariableId
   return {
     sourceVariableId,
     targetVariableId,
+    // Unknown kind is not causal: the person classifies it and opts in.
+    kind: "unclassified",
+    participatesInDynamics: false,
     direction: "positive",
     strength: 0.5,
     lag: { value: 0, unit: "months" },
@@ -142,6 +164,14 @@ export function RelationshipEditor({
       ? `${sourceName} up → ${targetName} up (source up → target up)`
       : `${sourceName} up → ${targetName} down (source up → target down)`;
   const canCreate = !editing && draft.sourceVariableId !== "" && draft.targetVariableId !== "";
+  const eligible = isDynamicsEligible(values.kind);
+  const inDynamics = eligible && values.participatesInDynamics;
+
+  const setKind = (kind: RelationshipKind) => {
+    // A kind that cannot take part in dynamics never leaves the opt-in on.
+    const patch: Partial<RelationshipDraft> = isDynamicsEligible(kind) ? { kind } : { kind, participatesInDynamics: false };
+    set("kind", patch);
+  };
 
   return (
     <div className="space-y-4">
@@ -214,6 +244,48 @@ export function RelationshipEditor({
             </button>
           </div>
         </div>
+      </Field>
+
+      {/* Kind */}
+      <Field
+        id={`${uid}-kind`}
+        label="Kind — what this arrow claims"
+        error={fieldError("kind")}
+        hint={`${RELATIONSHIP_KIND_META[values.kind].meaning}. ${editing ? "" : "New relationships start unclassified; choose what the arrow claims."}`}
+      >
+        <select id={`${uid}-kind`} className="w-full" value={values.kind} onChange={(e) => setKind(e.target.value as RelationshipKind)}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {RELATIONSHIP_KIND_META[k].label} — {RELATIONSHIP_KIND_META[k].meaning}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {/* Dynamics opt-in */}
+      <Field
+        error={fieldError("participatesInDynamics")}
+        hint={
+          eligible
+            ? inDynamics
+              ? "Loops, propagation and influence read this edge (while it is enabled)."
+              : "Not yet part of dynamics: loops and propagation ignore it until you opt in."
+            : DYNAMICS_RULE
+        }
+      >
+        <label className={`flex items-center gap-2 text-sm ${eligible ? "" : "text-muted"}`}>
+          <input
+            type="checkbox"
+            checked={inDynamics}
+            disabled={!eligible}
+            aria-describedby={`${uid}-dynamics-rule`}
+            onChange={(e) => set("participatesInDynamics", { participatesInDynamics: e.target.checked })}
+          />
+          Takes part in loops and propagation
+        </label>
+        <span id={`${uid}-dynamics-rule`} className="sr-only">
+          {DYNAMICS_RULE}
+        </span>
       </Field>
 
       {/* Direction */}
@@ -335,7 +407,7 @@ export function RelationshipEditor({
       </Field>
 
       {/* Enabled */}
-      <Field error={fieldError("enabled")} hint="Disabled edges stay stored and drawn (gray, dotted) but take no part in loops, propagation or influence.">
+      <Field error={fieldError("enabled")} hint="Disabled edges stay stored and drawn (gray, dotted) but take no part in loops, propagation or influence, whatever their kind.">
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -345,7 +417,7 @@ export function RelationshipEditor({
               else set("enabled", { enabled: e.target.checked });
             }}
           />
-          Included in loops and propagation
+          Enabled
         </label>
       </Field>
 

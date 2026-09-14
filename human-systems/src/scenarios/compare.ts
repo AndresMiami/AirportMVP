@@ -4,17 +4,8 @@
  * values under the same model assumptions, plus directional tendencies
  * (A12) and loop-pressure deltas (A10).
  */
-import {
-  annualToMonthlyRate,
-  HORIZON_ORDER,
-  projectCareerCapital,
-  projectProductiveCapital,
-  propagateDirectionalPressure,
-  weeklyToMonthlyHours,
-  type DirectionalPressure,
-  type Horizon,
-} from "@/calculations";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { HORIZON_ORDER, propagateDirectionalPressure, type DirectionalPressure, type Horizon } from "@/calculations";
+import { resolveVariable, type ProjectionDefinition } from "@/model/domain";
 import { evaluateSystem, type EvaluatedLoop, type EvaluatedSystem } from "@/model/evaluate";
 import type { Scenario, SystemModel } from "@/types";
 import { applyScenario, type AppliedScenario } from "./apply";
@@ -75,8 +66,11 @@ export interface ScenarioComparison {
   /** Projections not drawn because an input is unknown (never zero-filled). */
   projectionsSkipped: SkippedProjection[];
   projections: Projection[];
-  meanGapBefore: number | null;
-  meanGapAfter: number | null;
+  /** Counts only: no mean gap exists (a mean would be a universal score). */
+  gapsShrinking: number;
+  gapsGrowing: number;
+  openGapsBefore: number;
+  openGapsAfter: number;
 }
 
 /** Relative change (vs. the larger of the two values) below this is "unchanged". */
@@ -90,49 +84,37 @@ export function classifyLoopChange(before: number | null, after: number | null):
   return diff < 0 ? "weakens" : "strengthens";
 }
 
-function num(system: EvaluatedSystem, id: string): number | null {
-  return system.variableById.get(id)?.currentValue ?? null;
-}
-
 /** A projection that could not be computed because an input is unknown.
  *  UNKNOWN IS NOT ZERO: we say which inputs are missing instead of
  *  substituting zeros and drawing a curve. */
 export interface SkippedProjection {
   label: string;
+  subjectId: string;
   missingInputs: string[];
 }
 
-type ProjectionAttempt = { series: number[] } | { missing: string[] };
-
-function requireAll(system: EvaluatedSystem, ids: readonly string[]): { values: Map<string, number>; missing: string[] } {
-  const values = new Map<string, number>();
-  const missing: string[] = [];
-  for (const id of ids) {
-    const v = num(system, id);
-    if (v === null) missing.push(system.variableById.get(id)?.name ?? id);
-    else values.set(id, v);
-  }
-  return { values, missing };
+function projectionSubjects(system: EvaluatedSystem, def: ProjectionDefinition): string[] {
+  if (def.scope === "system") return [system.model.id];
+  return system.model.profile.members.filter((m) => m.status === "active").map((m) => m.id);
 }
 
-const CAREER_INPUTS = [
-  INPUT_IDS.careerCapital,
-  INPUT_IDS.qualityOfEffort,
-  INPUT_IDS.protectedHours,
-  INPUT_IDS.persistence,
-  INPUT_IDS.effortToCapitalRate,
-  INPUT_IDS.switchingCost,
-  INPUT_IDS.switchingFrequency,
-];
-const CAPITAL_INPUTS = [
-  INPUT_IDS.productiveAssets,
-  DERIVED_IDS.totalIncome,
-  INPUT_IDS.essentialExpenses,
-  INPUT_IDS.discretionaryExpenses,
-  INPUT_IDS.monthlyDebtPayments,
-  INPUT_IDS.capitalConversionRate,
-  INPUT_IDS.annualReturnRate,
-];
+function attemptProjection(
+  system: EvaluatedSystem,
+  def: ProjectionDefinition,
+  subjectId: string,
+  months: number,
+): { series: number[] } | { missing: string[] } {
+  const values = new Map<string, number>();
+  const missing: string[] = [];
+  for (const input of def.inputs) {
+    const ref = { key: input.key, subjectId: input.scope === "system" ? null : subjectId };
+    const v = resolveVariable(system.variables, system.model.id, ref);
+    if (!v || v.currentValue === null) missing.push(v?.name ?? input.key);
+    else values.set(input.key, v.currentValue);
+  }
+  if (missing.length) return { missing };
+  return { series: def.compute(values, months) };
+}
 
 function buildProjections(
   base: EvaluatedSystem,
@@ -141,48 +123,19 @@ function buildProjections(
 ): { projections: Projection[]; skipped: SkippedProjection[] } {
   const projections: Projection[] = [];
   const skipped: SkippedProjection[] = [];
-
-  const career = (s: EvaluatedSystem): ProjectionAttempt => {
-    const { values, missing } = requireAll(s, CAREER_INPUTS);
-    if (missing.length) return { missing };
-    const g = (id: string) => values.get(id)!;
-    return {
-      series: projectCareerCapital(g(INPUT_IDS.careerCapital), months, {
-        qualityOfEffort: g(INPUT_IDS.qualityOfEffort),
-        protectedHoursPerMonth: weeklyToMonthlyHours(g(INPUT_IDS.protectedHours)),
-        persistence: g(INPUT_IDS.persistence),
-        effortToCapitalRate: g(INPUT_IDS.effortToCapitalRate),
-        switchingCostPerMonth: (g(INPUT_IDS.switchingCost) * g(INPUT_IDS.switchingFrequency)) / 12,
-      }),
-    };
-  };
-  const cb = career(base);
-  const cr = career(result);
-  if ("series" in cb && "series" in cr) {
-    projections.push({ label: "Career capital (index)", unit: "index", assumptionIds: ["A6", "A15"], base: cb.series, scenario: cr.series });
-  } else {
-    skipped.push({ label: "Career capital (index)", missingInputs: [...new Set([...("missing" in cb ? cb.missing : []), ...("missing" in cr ? cr.missing : [])])] });
-  }
-
-  const capital = (s: EvaluatedSystem): ProjectionAttempt => {
-    const { values, missing } = requireAll(s, CAPITAL_INPUTS);
-    if (missing.length) return { missing };
-    const g = (id: string) => values.get(id)!;
-    return {
-      series: projectProductiveCapital(g(INPUT_IDS.productiveAssets), months, {
-        capitalConversionRate: g(INPUT_IDS.capitalConversionRate),
-        monthlyIncome: g(DERIVED_IDS.totalIncome),
-        monthlyExpenses: g(INPUT_IDS.essentialExpenses) + g(INPUT_IDS.discretionaryExpenses) + g(INPUT_IDS.monthlyDebtPayments),
-        monthlyReturnRate: annualToMonthlyRate(g(INPUT_IDS.annualReturnRate)),
-      }),
-    };
-  };
-  const pb = capital(base);
-  const pr = capital(result);
-  if ("series" in pb && "series" in pr) {
-    projections.push({ label: "Productive assets", unit: "$", assumptionIds: ["A7"], base: pb.series, scenario: pr.series });
-  } else {
-    skipped.push({ label: "Productive assets", missingInputs: [...new Set([...("missing" in pb ? pb.missing : []), ...("missing" in pr ? pr.missing : [])])] });
+  const memberLabel = (id: string) => base.model.profile.members.find((m) => m.id === id)?.label ?? id;
+  for (const def of base.domain.projections) {
+    for (const subjectId of projectionSubjects(base, def)) {
+      const label = def.scope === "system" ? def.label : `${def.label} — ${memberLabel(subjectId)}`;
+      const b = attemptProjection(base, def, subjectId, months);
+      const r = attemptProjection(result, def, subjectId, months);
+      if ("series" in b && "series" in r) {
+        projections.push({ label, unit: def.unit, assumptionIds: def.assumptionIds, base: b.series, scenario: r.series });
+      } else {
+        const missing = [...new Set([...("missing" in b ? b.missing : []), ...("missing" in r ? r.missing : [])])];
+        skipped.push({ label, subjectId, missingInputs: missing });
+      }
+    }
   }
   return { projections, skipped };
 }
@@ -239,7 +192,9 @@ export function compareScenario(baseModel: SystemModel, scenario: Scenario): Sce
     directionalByHorizon: groupByHorizon(directional),
     projections: built.projections,
     projectionsSkipped: built.skipped,
-    meanGapBefore: base.gap.meanNormalizedGap,
-    meanGapAfter: result.gap.meanNormalizedGap,
+    gapsShrinking: variableDeltas.filter((d) => d.baseGap !== null && d.scenarioGap !== null && d.scenarioGap < d.baseGap - 1e-9).length,
+    gapsGrowing: variableDeltas.filter((d) => d.baseGap !== null && d.scenarioGap !== null && d.scenarioGap > d.baseGap + 1e-9).length,
+    openGapsBefore: base.gap.openCount,
+    openGapsAfter: result.gap.openCount,
   };
 }

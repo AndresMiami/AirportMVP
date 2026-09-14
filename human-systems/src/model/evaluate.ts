@@ -31,6 +31,7 @@ import type {
   Variable,
 } from "@/types";
 import { computeDerivedVariables, type DerivedComputation } from "./derived";
+import { domainRegistry, unassignedVariables, type DomainDefinition } from "./domain";
 
 export interface EvaluatedLoop extends FeedbackLoop {
   annotation?: LoopAnnotation;
@@ -75,6 +76,8 @@ export interface ModelIssue {
 
 export interface EvaluatedSystem {
   model: SystemModel;
+  /** The domain definition the system was evaluated under. */
+  domain: DomainDefinition;
   /** Inputs untouched + derived recomputed. */
   variables: Variable[];
   variableById: Map<string, Variable>;
@@ -88,6 +91,12 @@ export interface EvaluatedSystem {
   /** Every stored relationship with existing endpoints, disabled included. */
   allRelationships: Relationship[];
   disabledRelationshipCount: number;
+  /** Edges stored but not taking part in dynamics (unclassified, association,
+   *  constraint, or definitional not opted in). */
+  nonDynamicsRelationshipCount: number;
+  unclassifiedRelationshipCount: number;
+  /** Variables whose subject has not been assigned. */
+  unassignedVariables: Variable[];
   observations: ObservationIndex;
   networkInfluence: Map<string, number>;
   variableLeverage: VariableLeverage[];
@@ -99,8 +108,16 @@ export interface EvaluatedSystem {
 
 export function evaluateSystem(model: SystemModel): EvaluatedSystem {
   const issues: ModelIssue[] = [];
-  const { variables, computations } = computeDerivedVariables(model.variables, model.incomeSources);
+  const domain = domainRegistry.require(model.domainDefinitionId, model.domainDefinitionVersion);
+  const { variables, computations } = computeDerivedVariables(model.variables, model.incomeSources, domain.derived, model.id);
   const variableById = new Map(variables.map((v) => [v.id, v]));
+  const unassigned = unassignedVariables(variables);
+  if (unassigned.length > 0) {
+    issues.push({
+      level: "warning",
+      message: `${unassigned.length} variable${unassigned.length > 1 ? "s have" : " has"} no subject assigned (${unassigned.map((v) => v.name).slice(0, 4).join(", ")}${unassigned.length > 4 ? ", …" : ""}); they feed no calculation until assigned.`,
+    });
+  }
 
   const allRelationships = model.relationships.filter((r) => {
     const ok = variableById.has(r.sourceVariableId) && variableById.has(r.targetVariableId);
@@ -113,7 +130,15 @@ export function evaluateSystem(model: SystemModel): EvaluatedSystem {
     return ok;
   });
   const relationships = activeRelationships(allRelationships);
-  const disabledRelationshipCount = allRelationships.length - relationships.length;
+  const disabledRelationshipCount = allRelationships.filter((r) => !r.enabled).length;
+  const nonDynamicsRelationshipCount = allRelationships.filter((r) => r.enabled && !r.participatesInDynamics).length;
+  const unclassifiedRelationshipCount = allRelationships.filter((r) => r.kind === "unclassified").length;
+  if (unclassifiedRelationshipCount > 0) {
+    issues.push({
+      level: "warning",
+      message: `${unclassifiedRelationshipCount} relationship${unclassifiedRelationshipCount > 1 ? "s are" : " is"} unclassified and excluded from loops until reviewed.`,
+    });
+  }
 
   const gap = structuralGap(variables);
   const normalizedGapById = new Map(gap.gaps.map((g) => [g.variableId, g.normalizedGap]));
@@ -199,6 +224,7 @@ export function evaluateSystem(model: SystemModel): EvaluatedSystem {
 
   return {
     model,
+    domain,
     variables,
     variableById,
     derived: computations,
@@ -208,6 +234,9 @@ export function evaluateSystem(model: SystemModel): EvaluatedSystem {
     relationships,
     allRelationships,
     disabledRelationshipCount,
+    nonDynamicsRelationshipCount,
+    unclassifiedRelationshipCount,
+    unassignedVariables: unassigned,
     observations,
     networkInfluence: influence,
     variableLeverage,

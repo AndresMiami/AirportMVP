@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
+import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
 import { checkFeasibility } from "@/calculations/feasibility";
 import { loopIdFor, loopPolarity } from "@/calculations/graph";
 import { createSampleHousehold } from "@/data/sample-household";
 import { createBlankModel } from "@/model/blank";
 import { evaluateSystem } from "@/model/evaluate";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import {
   addConstraint,
   addHypothesis,
@@ -45,11 +48,12 @@ import type { VariableInput } from "@/services/mutations";
 const NOW = "2026-09-14T12:00:00.000Z";
 
 function blank(): SystemModel {
-  return createBlankModel({ id: "sys_blank", name: "Blank", systemType: "household", now: NOW });
+  return createBlankModel({ id: "sys_blank", name: "Blank", systemType: "household", now: NOW , domain: HOUSEHOLD_DOMAIN });
 }
 
 const inputVar = (name: string, extra: Partial<VariableInput> = {}): VariableInput => ({
   name,
+  subjectId: "sys_blank",
   category: "event",
   changeSpeed: "fast",
   unit: "units",
@@ -74,7 +78,7 @@ const byName = (m: SystemModel, name: string) => evaluateSystem(m).loops.find((l
 /* ------------------------------------------------------------------ */
 
 describe("relationship create / edit / delete", () => {
-  const edge = { direction: "positive" as const, strength: 0.5, lag: { value: 2, unit: "weeks" as const }, confidence: 0.6, sourceType: "self_reported" as const };
+  const edge = { kind: "causal_hypothesis" as const, participatesInDynamics: true, direction: "positive" as const, strength: 0.5, lag: { value: 2, unit: "weeks" as const }, confidence: 0.6, sourceType: "self_reported" as const };
 
   it("addRelationship assigns rel_1 on a blank model and applies defaults", () => {
     const m = addRelationship(blankWithAB(), { sourceVariableId: "a", targetVariableId: "b", ...edge });
@@ -157,6 +161,8 @@ describe("relationship create / edit / delete", () => {
     m = removeRelationship(m, "r04");
     m = updateRelationship(m, "r01", { strength: 0.1 });
     m = addRelationship(m, {
+      kind: "causal_hypothesis",
+      participatesInDynamics: true,
       sourceVariableId: INPUT_IDS.protectedHours,
       targetVariableId: "financial_pressure",
       direction: "negative",
@@ -204,6 +210,8 @@ describe("derived recalculation after relationship edits", () => {
   it("adding protected_hours -> financial_pressure (negative) closes one new loop with the computed polarity", () => {
     const base = createSampleHousehold();
     const m = addRelationship(base, {
+      kind: "causal_hypothesis",
+      participatesInDynamics: true,
       sourceVariableId: INPUT_IDS.protectedHours,
       targetVariableId: "financial_pressure",
       direction: "negative",
@@ -272,6 +280,8 @@ describe("derived recalculation after relationship edits", () => {
       (m) => updateRelationship(m, "r01", { strength: 0.05, lag: { value: 3, unit: "years" } }),
       (m) =>
         addRelationship(m, {
+      kind: "causal_hypothesis",
+      participatesInDynamics: true,
           sourceVariableId: INPUT_IDS.protectedHours,
           targetVariableId: "financial_pressure",
           direction: "negative",
@@ -533,7 +543,7 @@ describe("members / income / variables", () => {
     m = archiveMember(m, "member_1");
     expect(m.profile.members[0].status).toBe("archived");
     expect(m.observations[0].subjectId).toBe("member_1");
-    expect(memberReferences(m, "member_1")).toEqual({ observations: 1, hypotheses: 0 });
+    expect(memberReferences(m, "member_1")).toMatchObject({ observations: 1, total: 1 });
     m = restoreMember(m, "member_1");
     expect(m.profile.members[0].status).toBe("active");
     expect(() => removeMember(m, "nope")).toThrow(/Unknown member/);
@@ -574,15 +584,20 @@ describe("members / income / variables", () => {
     expect(v.currentValue).toBeNull();
     expect(v.controllability).toBe(0.5);
     expect(v.formulaId).toBeUndefined();
-    // A second "Care load" gets a numeric suffix rather than colliding.
-    expect(addVariable(m, inputVar("Care load!")).variables.at(-1)!.id).toBe("care_load_2");
+    // A second "Care load" for the SAME subject is a duplicate key and is refused; unassigned ones get a suffix.
+    expect(() => addVariable(m, inputVar("Care load!"))).toThrow(/already holds key/);
+    expect(addVariable(m, inputVar("Care load!", { subjectId: null })).variables.at(-1)!.id).toBe("care_load_2");
     // Explicit reserved id: the blank model already carries the derived record.
     expect(() => addVariable(blank(), inputVar("Floor", { id: DERIVED_IDS.floorRatio }))).toThrow(MutationError);
     // Even without the record present, the id is reserved for the formula.
     const stripped = { ...blank(), variables: blank().variables.filter((x) => x.id !== DERIVED_IDS.floorRatio) };
-    expect(() => addVariable(stripped, inputVar("Floor", { id: DERIVED_IDS.floorRatio }))).toThrow(/reserved for a calculated variable/);
-    // A name that slugs to a reserved id is moved to a free slug.
-    expect(addVariable(blank(), inputVar("Floor ratio")).variables.at(-1)!.id).toBe("floor_ratio_2");
+    expect(() => addVariable(stripped, inputVar("Floor", { id: DERIVED_IDS.floorRatio }))).toThrow(/calculated variable and cannot be entered/);
+    // A name that slugs to a domain-derived key is refused: derived values are calculated, never typed.
+    expect(() => addVariable(blank(), inputVar("Floor ratio"))).toThrow(/calculated variable and cannot be entered/);
+    // With an explicit non-derived key, the id follows the key (unassigned variables slug from their key).
+    const moved = addVariable(blank(), { ...inputVar("Floor ratio"), key: "floor_ratio_note" }).variables.at(-1)!;
+    expect(moved.id).toBe("floor_ratio_note");
+    expect(moved.key).toBe("floor_ratio_note");
     expect(addVariable(blank(), inputVar("!!!")).variables.at(-1)!.id).toBe("variable");
   });
 

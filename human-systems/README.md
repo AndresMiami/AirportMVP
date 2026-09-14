@@ -6,11 +6,18 @@ buffers, dependencies, constraints, and leverage. It is **not** a financial
 calculator and **not** a life coach. Every number carries a source type and
 a confidence; every formula is a labelled model assumption.
 
-Status: iteration 2 — the structural model is editable. Schema v2 adds
-editable relationships with lags in the unit the person chose, hard/soft
-constraints, first-class Observations, Hypotheses with a review status
-(loops stay hypotheses), a blank-household workflow, several systems side
-by side, and versioned localStorage state with migrations. No
+Status: schema v3, migration 3a — the engine is domain-agnostic. Every
+variable, constraint, action, hypothesis, event and income source names its
+SUBJECT (a member, the whole system, or explicitly UNASSIGNED — never a
+guessed household); domain definitions (variables, formulas, projections,
+signature, constraint templates, event types) are versioned configuration
+registered with the engine, the household being the first; relationships
+carry an epistemic KIND and take part in loops/propagation only by explicit
+opt-in; events/shocks/interventions live in a log with structured time;
+hypotheses record what would weaken them; migration v2→v3 keeps a backup
+and creates no claim. Schema v2 added editable relationships with lags,
+hard/soft constraints, Observations, Hypotheses with a review status, a
+blank-system workflow and versioned localStorage with migrations. No
 authentication, no cloud, no real AI provider (a deterministic mock
 exercises the review contract).
 
@@ -19,7 +26,7 @@ exercises the review contract).
 ```bash
 npm install --legacy-peer-deps   # vitest 4 + npm's peer resolver need the flag
 npm run dev                      # http://localhost:3000
-npm test                         # vitest, 85 tests
+npm test                         # vitest, 236 tests
 npm run typecheck
 npm run lint
 npm run build
@@ -33,8 +40,15 @@ src/
   domain/         vocabulary (labels) and the model-assumption registry (A1..A15)
   calculations/   pure math: household ratios, HHI, compounding, leverage,
                   gap, graph (loops, pressure, propagation), feasibility, utility
-  model/          derived-variable definitions, evaluateSystem(), migrations,
-                  blank-model factory
+  model/          domain.ts (the ENGINE-OWNED domain interface, registry and
+                  VariableRef resolver), generic derived-variable evaluation,
+                  evaluateSystem(), migrations (v1→v2→v3), blank-model factory
+  domains/        versioned domain CONFIGURATION layered over the engine:
+                  household/ (keys, variables with subject scope, formulas,
+                  projections, signature v1, constraint templates, event
+                  types). Engine directories never import this (tested).
+  signatures/     structural-signature engine: compute (per subject),
+                  dynamics, compare, gap, questions, interpretation
   scenarios/      applyScenario() and compareScenario() (tendencies by horizon)
   ai/             strict output schema, provider interface, system prompt, mock
   data/           the fictional sample household (tests + demo only)
@@ -44,8 +58,11 @@ src/
                   mutations.ts: every edit as a pure, validated function
   components/     React only: provider, primitives, editors, network diagram
   app/            Next.js routes (one screen per directory)
-tests/            vitest; tests/architecture pins the model layer UI-free
+tests/            vitest; tests/architecture pins the model layer UI-free and
+                  the engine free of concrete domain imports; tests/model/
+                  fake-domain proves a second domain needs no engine change
 docs/EDITING-CONTRACT.md  how screens change the model
+docs/SCHEMA-V3-PROPOSAL.md the staged v3 plan (3a shipped; 3b–3d pending)
 ```
 
 Rules the code enforces:
@@ -60,7 +77,19 @@ Rules the code enforces:
   a new, Zod-validated model or throws `MutationError`; removals cascade
   (a removed variable takes its relationships, links and action targets).
 - Stored state carries `schemaVersion`; `src/model/migrations.ts` upgrades
-  older records on load and rejects what it cannot validate.
+  older records on load and rejects what it cannot validate. The
+  repository keeps the pre-migration record as a backup and a failed
+  migration never writes. Migration creates no knowledge claim: person
+  variables come out UNASSIGNED, relationships come out `unclassified`
+  and outside dynamics, and no loop appears because of a migration.
+- Unknown is never zero: a missing input makes the derived value, the
+  projection and the signature dimension UNKNOWN, and scenario deltas on
+  an unknown value are refused.
+- A member who is referenced by anything (variables, income, constraints,
+  actions, hypotheses, events, observations, snapshots) can be ARCHIVED but
+  never deleted: history keeps its subject.
+- There is no universal score: the gap screen reports counts and vectors
+  only (`meanNormalizedGap` does not exist).
 - Relationship strength is a model judgment, never an estimated causal
   coefficient. A loop is a hypothesis with a status; "accepted" means a
   working reading, not proof. Observations are kept verbatim and never

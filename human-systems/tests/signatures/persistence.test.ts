@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
 import { evaluateSystem } from "@/model/evaluate";
-import { INPUT_IDS } from "@/model/ids";
+import { INPUT_IDS } from "@/domains/household/keys";
 import { migrateModel } from "@/model/migrations";
 import { LocalStorageModelRepository, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { ModelService } from "@/services/model-service";
@@ -80,12 +82,11 @@ describe("persisted signatures survive reload and migration", () => {
   it("a stored model without a signatures collection migrates to an empty one (never invents snapshots)", () => {
     const raw = JSON.parse(JSON.stringify(createSampleHousehold())) as Record<string, unknown>;
     delete raw.signatures;
-    delete raw.signatureDefinitionId;
     const result = migrateModel(raw);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.model.signatures).toEqual([]);
-      expect(result.model.signatureDefinitionId).toBe("household_default");
+      expect(result.model.domainDefinitionId).toBe("household");
     }
     const v1 = { ...raw, schemaVersion: 1 };
     const fromV1 = migrateModel(v1);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import { LocalStorageModelRepository, LEGACY_V1_KEY, STORAGE_KEY, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { MemoryModelRepository } from "@/repositories/memory-repository";
 import { ModelService, SAMPLE_MODEL_ID } from "@/services/model-service";

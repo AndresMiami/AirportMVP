@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
-import { ConstraintForm, TYPE_MEANING, describeCheck, type ConstraintFormValues } from "@/components/constraint-form";
+import { ConstraintForm, TYPE_MEANING, describeCheck, subjectLabelOf, type ConstraintFormValues } from "@/components/constraint-form";
 import { useModel, type ModelMutation } from "@/components/model-provider";
 import { fmtPct } from "@/components/format";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge, Stat } from "@/components/ui";
@@ -44,6 +44,7 @@ function usageText(c: Constraint, u: Usage | undefined, actionCount: number): st
 
 function ConstraintView({
   c,
+  subject,
   usage,
   actionCount,
   linked,
@@ -57,6 +58,8 @@ function ConstraintView({
   removeError,
 }: {
   c: Constraint;
+  /** Display label of the constraint's subject. */
+  subject: string;
   usage: Usage | undefined;
   actionCount: number;
   linked: Observation[];
@@ -74,8 +77,11 @@ function ConstraintView({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-medium">{c.name}</div>
-          <div className="mt-1">
+          <div className="mt-1 flex flex-wrap items-center gap-2">
             <TypeBadge type={c.type} />
+            <span className={`text-xs ${c.subjectId === null ? "rounded px-1.5 py-0.5 bg-warn-soft text-warn" : "text-muted"}`}>
+              {c.subjectId === null ? "subject unassigned" : `subject: ${subject}`}
+            </span>
           </div>
         </div>
         <div className="flex gap-2">
@@ -212,7 +218,8 @@ export default function ConstraintsPage() {
   }, [evaluated]);
 
   if (!evaluated) return <Loading />;
-  const { model, observations } = evaluated;
+  const { model, observations, domain } = evaluated;
+  const members = model.profile.members;
   const constraints = model.constraints;
   const actionCount = model.actions.length;
   const counts = {
@@ -220,6 +227,7 @@ export default function ConstraintsPage() {
     soft: constraints.filter((c) => c.type === "soft").length,
     descriptive: constraints.filter((c) => !c.check).length,
     unconfirmed: constraints.filter((c) => !c.userConfirmed).length,
+    unassigned: constraints.filter((c) => c.subjectId === null).length,
   };
 
   /** Run a mutation and remember which control asked for it. */
@@ -252,6 +260,13 @@ export default function ConstraintsPage() {
         <Stat label="Descriptive (no check)" value={counts.descriptive} sub="unchecked for every action" />
         <Stat label="Not yet confirmed" value={counts.unconfirmed} sub="by the person" />
       </div>
+      {counts.unassigned > 0 ? (
+        <div className="mt-4">
+          <Note>
+            {counts.unassigned} constraint{counts.unassigned > 1 ? "s have" : " has"} no subject assigned; choose whose it is with Edit.
+          </Note>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
@@ -276,6 +291,9 @@ export default function ConstraintsPage() {
         <Card title="New constraint" tone="current" className="mt-4">
           <ConstraintForm
             key="create"
+            templates={domain.constraintTemplates}
+            members={members}
+            systemId={model.id}
             onSubmit={(values: ConstraintFormValues) => {
               if (run("form:create", (m) => mutations.addConstraint(m, values))) setMode({ kind: "idle" });
             }}
@@ -300,6 +318,9 @@ export default function ConstraintsPage() {
                 <ConstraintForm
                   key={c.id}
                   initial={c}
+                  templates={domain.constraintTemplates}
+                  members={members}
+                  systemId={model.id}
                   onSubmit={(values: ConstraintFormValues) => {
                     if (run(`form:${c.id}`, (m) => mutations.updateConstraint(m, c.id, values))) setMode({ kind: "idle" });
                   }}
@@ -310,6 +331,7 @@ export default function ConstraintsPage() {
               ) : (
                 <ConstraintView
                   c={c}
+                  subject={subjectLabelOf(c.subjectId, members, model.id)}
                   usage={usage.get(c.id)}
                   actionCount={actionCount}
                   linked={observations.byConstraint.get(c.id) ?? []}

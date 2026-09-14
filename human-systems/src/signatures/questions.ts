@@ -47,7 +47,7 @@ export function questionPriorities(
     .map((def): QuestionPriority | null => {
       const snap = signature.dimensions.find((d) => d.dimensionId === def.id);
       if (!snap) return null;
-      const present = def.inputs.filter((i) => evaluated.variableById.has(i.variableId)).map((i) => i.variableId);
+      const present = snap.contributions.filter((c) => c.variableId !== null).map((c) => c.variableId as string);
       const meanInfluence = present.length
         ? present.reduce((s, id) => s + (evaluated.networkInfluence.get(id) ?? 0), 0) / present.length
         : 0;
@@ -67,7 +67,7 @@ export function questionPriorities(
         .filter((c) => c.normalized !== null)
         .sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0))[0];
       const target = missingRequired ?? missingAny ?? leastConfident ?? snap.contributions[0];
-      const input = def.inputs.find((i) => i.variableId === target.variableId)!;
+      const input = def.inputs.find((i) => i.variableKey === target.variableKey)!;
       let reason: string;
       if (snap.state === "unknown") reason = snap.explanation;
       else if (target.normalized === null) reason = `${target.name} has no value; the dimension rests on ${snap.contributions.length - snap.missingInformation.length} of ${snap.contributions.length} inputs.`;
@@ -82,7 +82,7 @@ export function questionPriorities(
         priority,
         reason,
         question: input.question,
-        targetVariableId: target.variableId,
+        targetVariableId: target.variableId ?? target.variableKey,
         state: snap.state,
         confidence: snap.confidence,
       };

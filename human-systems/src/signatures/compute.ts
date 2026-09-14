@@ -13,9 +13,9 @@
  *    the share of input weight that was known.
  */
 import { effectiveGap } from "@/calculations/gap";
-import { DERIVED_BY_ID } from "@/model/derived";
+import { derivedDefinitionFor, resolveVariable } from "@/model/domain";
 import type { EvaluatedSystem } from "@/model/evaluate";
-import type { Variable } from "@/types";
+import type { SubjectId, Variable } from "@/types";
 import {
   StructuralSignatureSchema,
   type Contribution,
@@ -26,7 +26,6 @@ import {
   type StructuralSignature,
   type VariableSnapshotItem,
 } from "@/types/signature";
-import { HOUSEHOLD_SIGNATURE_V1 } from "./definitions/household-v1";
 import { computeDynamicsSignature, toLoopSnapshot, toRelationshipSnapshot } from "./dynamics";
 import { bandStateOf, binaryStateOf, clip01, compactStrip } from "./encode";
 
@@ -34,6 +33,10 @@ export interface ComputeSignatureOptions {
   id: string;
   now: string;
   mode: "current" | "desired";
+  /** The subject: the system id (default) or a member id. Member-scope
+   *  dimensions are unknown for the system subject and vice versa. */
+  subjectId?: SubjectId;
+  /** Defaults to the active domain's signature definition. */
   definition?: SignatureDefinition;
   label?: string;
   notes?: string;
@@ -75,18 +78,29 @@ export function observationIdsForVariable(evaluated: EvaluatedSystem, variableId
   if (seen.has(variableId)) return [];
   seen.add(variableId);
   const direct = (evaluated.observations.byVariable.get(variableId) ?? []).map((o) => o.id);
-  const def = DERIVED_BY_ID[variableId];
+  const variable = evaluated.variableById.get(variableId);
+  const def = variable && variable.kind === "derived" ? derivedDefinitionFor(evaluated.domain, variable.key) : undefined;
   if (!def) return direct;
-  const upstream = [...def.inputVariables, ...def.inputDerived].flatMap((id) => observationIdsForVariable(evaluated, id, seen));
+  // Formula inputs are system-scope keys; follow them to their variables.
+  const upstream = [...def.inputKeys, ...def.inputDerivedKeys]
+    .map((key) => resolveVariable(evaluated.variables, evaluated.model.id, { key, subjectId: null }))
+    .filter((x): x is Variable => x !== undefined)
+    .flatMap((x) => observationIdsForVariable(evaluated, x.id, seen));
   return [...new Set([...direct, ...upstream])];
 }
 
-function contributionFor(input: DimensionInput, evaluated: EvaluatedSystem, mode: "current" | "desired"): Contribution {
-  const v = evaluated.variableById.get(input.variableId);
+function contributionFor(
+  input: DimensionInput,
+  evaluated: EvaluatedSystem,
+  mode: "current" | "desired",
+  subjectId: SubjectId | null,
+): Contribution {
+  const v = resolveVariable(evaluated.variables, evaluated.model.id, { key: input.variableKey, subjectId });
   const raw = v ? rawValueFor(v, mode) : null;
   return {
-    variableId: input.variableId,
-    name: v?.name ?? input.variableId,
+    variableId: v?.id ?? null,
+    variableKey: input.variableKey,
+    name: v?.name ?? input.variableKey,
     unit: v?.unit ?? "",
     rawValue: raw,
     normalized: raw === null ? null : normalizeInput(raw, input),
@@ -95,7 +109,7 @@ function contributionFor(input: DimensionInput, evaluated: EvaluatedSystem, mode
     sourceType: v?.sourceType ?? null,
     confidence: v ? v.confidence : null,
     evidenceTexts: v?.evidence.map((e) => e.text) ?? [],
-    observationIds: observationIdsForVariable(evaluated, input.variableId),
+    observationIds: v ? observationIdsForVariable(evaluated, v.id) : [],
     transform: input.transform,
     invert: input.invert,
   };
@@ -105,27 +119,36 @@ export function computeDimension(
   def: SignatureDimensionDefinition,
   evaluated: EvaluatedSystem,
   mode: "current" | "desired",
+  subjectId: SubjectId = evaluated.model.id,
 ): StructuralDimensionSnapshot {
-  const contributions = def.inputs.map((input) => contributionFor(input, evaluated, mode));
+  const isSystemSubject = subjectId === evaluated.model.id;
+  // A member-scope dimension has no value for the system subject, and a
+  // system-scope dimension reads household keys whatever the subject.
+  const scopeMismatch = def.subjectScope === "member" && isSystemSubject;
+  const resolveFor = def.subjectScope === "member" ? subjectId : null;
+  const contributions = scopeMismatch
+    ? def.inputs.map((input) => contributionFor(input, evaluated, mode, "__no_subject__"))
+    : def.inputs.map((input) => contributionFor(input, evaluated, mode, resolveFor));
   const known = contributions.filter((c) => c.normalized !== null);
   const totalWeight = contributions.reduce((s, c) => s + c.weight, 0);
   const knownWeight = known.reduce((s, c) => s + c.weight, 0);
   const knownWeightFraction = totalWeight > 0 ? knownWeight / totalWeight : 0;
   const missing = contributions.filter((c) => c.normalized === null);
   const missingRequired = missing.filter((c) => c.required);
-  const missingInformation = missing.map((c) =>
-    evaluated.variableById.has(c.variableId) ? c.variableId : `${c.variableId} (not in the model)`,
-  );
+  const missingInformation = scopeMismatch
+    ? [`member-scope dimension; compute the signature for a member`]
+    : missing.map((c) => (c.variableId ? c.variableId : `${c.variableKey} (not in the model for this subject)`));
   const evidenceIds = [...new Set(contributions.flatMap((c) => c.observationIds))];
 
-  const isUnknown = missingRequired.length > 0 || known.length < def.minimumKnownInputs;
+  const isUnknown = scopeMismatch || missingRequired.length > 0 || known.length < def.minimumKnownInputs;
   let value: number | null = null;
   let confidence = 0;
   let explanation: string;
 
   if (isUnknown) {
-    const why =
-      missingRequired.length > 0
+    const why = scopeMismatch
+      ? "this dimension describes one person; it is unknown for the household as a whole"
+      : missingRequired.length > 0
         ? `required input ${missingRequired.map((c) => c.name).join(", ")} has no value`
         : `${known.length} of ${contributions.length} inputs known; at least ${def.minimumKnownInputs} needed`;
     explanation = `Unknown: ${why}. This is missing information, not a low value.`;
@@ -158,7 +181,7 @@ export function computeDimension(
     bandState: bandStateOf(value, def.bandThresholds),
     confidence,
     knownWeightFraction,
-    contributingVariableIds: def.inputs.map((i) => i.variableId),
+    contributingVariableIds: contributions.map((c) => c.variableId ?? c.variableKey),
     contributions,
     evidenceIds,
     calculationMethod: `${def.aggregation} over known inputs after ${def.inputs.map((i) => i.transform.kind).join("/")} transforms; confidence = ${def.confidenceMethod} × known-weight fraction; unknown when a required input is missing or fewer than ${def.minimumKnownInputs} inputs are known`,
@@ -192,12 +215,17 @@ export function variableSnapshotOf(v: Variable): VariableSnapshotItem {
 }
 
 export function computeSignature(evaluated: EvaluatedSystem, opts: ComputeSignatureOptions): StructuralSignature {
-  const definition = opts.definition ?? HOUSEHOLD_SIGNATURE_V1;
-  const dimensions = definition.dimensions.map((d) => computeDimension(d, evaluated, opts.mode));
+  const definition = opts.definition ?? evaluated.domain.signatureDefinition;
+  const subjectId = opts.subjectId ?? evaluated.model.id;
+  if (subjectId !== evaluated.model.id && !evaluated.model.profile.members.some((m) => m.id === subjectId)) {
+    throw new Error(`Unknown subject "${subjectId}"`);
+  }
+  const dimensions = definition.dimensions.map((d) => computeDimension(d, evaluated, opts.mode, subjectId));
   const known = dimensions.filter((d) => d.state === "known");
   const signature: StructuralSignature = {
     id: opts.id,
     systemId: evaluated.model.id,
+    subjectId,
     createdAt: opts.now,
     schemaVersion: 1,
     definitionId: definition.id,

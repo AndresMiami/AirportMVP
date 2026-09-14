@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { registerBuiltInDomains } from "@/domains";
+registerBuiltInDomains();
+import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
+import { HOUSEHOLD_SIGNATURE_V1 } from "@/domains/household/signature-v1";
 import { createSampleHousehold } from "@/data/sample-household";
 import { createBlankModel } from "@/model/blank";
 import { evaluateSystem } from "@/model/evaluate";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import * as M from "@/services/mutations";
 import {
-  HOUSEHOLD_SIGNATURE_V1,
   bandStateOf,
   binaryStateOf,
   compactStrip,
@@ -21,8 +24,10 @@ import { StructuralSignatureSchema, type SignatureDefinition } from "@/types/sig
 import type { SystemModel } from "@/types";
 
 const NOW = "2026-09-14T12:00:00.000Z";
-const sig = (model: SystemModel, mode: "current" | "desired" = "current", id = "sig_1") =>
-  computeSignature(evaluateSystem(model), { id, now: NOW, mode });
+// The sample's person-level variables belong to Dani, so the fixture's
+// signature is computed for Dani unless a test says otherwise.
+const sig = (model: SystemModel, mode: "current" | "desired" = "current", id = "sig_1", subjectId: string | undefined = "dani") =>
+  computeSignature(evaluateSystem(model), { id, now: NOW, mode, subjectId });
 
 const setValue = (model: SystemModel, id: string, value: number | null) => M.updateVariable(model, id, { currentValue: value });
 
@@ -35,7 +40,7 @@ describe("unknown data is not converted to zero (A20)", () => {
     expect(phys.binaryState).toBe("unknown");
     expect(phys.bandState).toBe("unknown");
     expect(phys.confidence).toBe(0);
-    expect(phys.missingInformation).toContain("physical_capacity (not in the model)");
+    expect(phys.missingInformation).toContain("physical_capacity (not in the model for this subject)");
     expect(phys.explanation).toMatch(/missing information, not a low value/);
     expect(s.compactStrip[s.dimensions.indexOf(phys)]).toBe("?");
   });
@@ -51,8 +56,8 @@ describe("unknown data is not converted to zero (A20)", () => {
     expect(without.confidence).toBeLessThan(withVehicle.confidence + 1e-9);
   });
   it("a blank model yields an all-unknown signature with zero completeness", () => {
-    const blank = createBlankModel({ id: "b", name: "Blank", systemType: "household", now: NOW });
-    const s = sig(blank);
+    const blank = createBlankModel({ id: "b", name: "Blank", systemType: "household", now: NOW , domain: HOUSEHOLD_DOMAIN });
+    const s = computeSignature(evaluateSystem(blank), { id: "sig_1", now: NOW, mode: "current" });
     expect(s.dimensions.every((d) => d.state === "unknown" && d.normalizedValue === null)).toBe(true);
     expect(s.completeness).toBe(0);
     expect(s.overallConfidence).toBeNull();
@@ -65,6 +70,29 @@ describe("unknown data is not converted to zero (A20)", () => {
     expect(buffer.normalizedValue).toBe(0);
     expect(buffer.binaryState).toBe("weak");
     expect(buffer.bandState).toBe("very_weak");
+  });
+});
+
+describe("subjects (3a)", () => {
+  it("member-scope dimensions are unknown for the household subject and known for the member", () => {
+    const m = createSampleHousehold();
+    const household = computeSignature(evaluateSystem(m), { id: "h", now: NOW, mode: "current" });
+    const dani = computeSignature(evaluateSystem(m), { id: "d", now: NOW, mode: "current", subjectId: "dani" });
+    expect(household.subjectId).toBe(m.id);
+    expect(dani.subjectId).toBe("dani");
+    const hCareer = household.dimensions.find((d) => d.dimensionId === "career_capital")!;
+    expect(hCareer.state).toBe("unknown");
+    expect(hCareer.missingInformation).toEqual(["member-scope dimension; compute the signature for a member"]);
+    expect(dani.dimensions.find((d) => d.dimensionId === "career_capital")!.normalizedValue).toBeCloseTo(0.35, 9);
+    // System-scope dimensions read household keys for either subject.
+    expect(household.dimensions.find((d) => d.dimensionId === "financial_buffer")!.normalizedValue).toBe(
+      dani.dimensions.find((d) => d.dimensionId === "financial_buffer")!.normalizedValue,
+    );
+    // Marisol has no person-level variables recorded: her member dimensions are unknown, never borrowed from Dani.
+    const marisol = computeSignature(evaluateSystem(m), { id: "m", now: NOW, mode: "current", subjectId: "marisol" });
+    expect(marisol.dimensions.find((d) => d.dimensionId === "career_capital")!.state).toBe("unknown");
+    expect(marisol.dimensions.find((d) => d.dimensionId === "focus_commitment")!.state).toBe("unknown");
+    expect(() => computeSignature(evaluateSystem(m), { id: "x", now: NOW, mode: "current", subjectId: "nobody" })).toThrow(/Unknown subject/);
   });
 });
 
@@ -106,7 +134,7 @@ describe("normalisation and provenance", () => {
   });
   it("sample values match the definition arithmetic", () => {
     const ev = evaluateSystem(createSampleHousehold());
-    const s = computeSignature(ev, { id: "x", now: NOW, mode: "current" });
+    const s = computeSignature(ev, { id: "x", now: NOW, mode: "current", subjectId: "dani" });
     const floor = s.dimensions.find((d) => d.dimensionId === "income_floor")!;
     expect(floor.normalizedValue).toBeCloseTo((2970 / 3600) / 1.5, 9);
     expect(floor.confidence).toBe(ev.variableById.get(DERIVED_IDS.floorRatio)!.confidence);
@@ -159,7 +187,7 @@ describe("signature recomputes when source variables change", () => {
   });
   it("an unknown dimension becomes known once its required input exists", () => {
     let m = createSampleHousehold();
-    m = M.addVariable(m, { id: "physical_capacity", name: "Physical capacity", category: "person_fit", changeSpeed: "slow", unit: "index 0-1", sourceType: "self_reported", confidence: 0.6, currentValue: 0.7 });
+    m = M.addVariable(m, { id: "physical_capacity", subjectId: "dani", name: "Physical capacity", category: "person_fit", changeSpeed: "slow", unit: "index 0-1", sourceType: "self_reported", confidence: 0.6, currentValue: 0.7 });
     const phys = sig(m).dimensions.find((d) => d.dimensionId === "physical_feasibility")!;
     expect(phys.state).toBe("known");
     // required input 0.7 (w1) + schedule_flexibility 0.3 (w0.5)
@@ -191,7 +219,7 @@ describe("confidence propagates correctly (A21)", () => {
       id: "t",
       dimensions: [{ ...HOUSEHOLD_SIGNATURE_V1.dimensions[5], confidenceMethod: "min" }],
     };
-    const s = computeSignature(evaluateSystem(createSampleHousehold()), { id: "x", now: NOW, mode: "current", definition: def });
+    const s = computeSignature(evaluateSystem(createSampleHousehold()), { id: "x", now: NOW, mode: "current", definition: def, subjectId: "dani" });
     expect(s.dimensions[0].confidence).toBeCloseTo(0.35, 9);
     expect(s.overallConfidence).toBeCloseTo(0.35, 9);
     expect(s.definitionId).toBe("t");
@@ -203,7 +231,7 @@ describe("different relationship graphs can exist for identical state vectors", 
     const a = createSampleHousehold();
     // Person B: same values, but pressure reduces effort instead of spawning plans.
     let b = M.removeRelationship(a, "r16");
-    b = M.addRelationship(b, { sourceVariableId: "financial_pressure", targetVariableId: INPUT_IDS.protectedHours, direction: "negative", strength: 0.9, lag: { value: 1, unit: "weeks" }, confidence: 0.6, sourceType: "observed" });
+    b = M.addRelationship(b, { kind: "causal_hypothesis", participatesInDynamics: true, sourceVariableId: "financial_pressure", targetVariableId: INPUT_IDS.protectedHours, direction: "negative", strength: 0.9, lag: { value: 1, unit: "weeks" }, confidence: 0.6, sourceType: "observed" });
     const sa = sig(a, "current", "a");
     const sb = sig(b, "current", "b");
     expect(sa.dimensions.map((d) => d.normalizedValue)).toEqual(sb.dimensions.map((d) => d.normalizedValue));
@@ -322,15 +350,15 @@ describe("question priority favours high-uncertainty, high-impact dimensions (A2
   it("adding evidence lowers a dimension's priority", () => {
     const base = createSampleHousehold();
     const ev0 = evaluateSystem(base);
-    const q0 = questionPriorities(ev0, computeSignature(ev0, { id: "a", now: NOW, mode: "current" }), HOUSEHOLD_SIGNATURE_V1).find((q) => q.dimensionId === "career_capital")!;
+    const q0 = questionPriorities(ev0, computeSignature(ev0, { id: "a", now: NOW, mode: "current", subjectId: "dani" }), HOUSEHOLD_SIGNATURE_V1).find((q) => q.dimensionId === "career_capital")!;
     const better = M.updateVariable(base, INPUT_IDS.careerCapital, { confidence: 0.9, sourceType: "measured" });
     const ev1 = evaluateSystem(better);
-    const q1 = questionPriorities(ev1, computeSignature(ev1, { id: "b", now: NOW, mode: "current" }), HOUSEHOLD_SIGNATURE_V1).find((q) => q.dimensionId === "career_capital")!;
+    const q1 = questionPriorities(ev1, computeSignature(ev1, { id: "b", now: NOW, mode: "current", subjectId: "dani" }), HOUSEHOLD_SIGNATURE_V1).find((q) => q.dimensionId === "career_capital")!;
     expect(q1.priority).toBeLessThan(q0.priority);
     expect(q1.uncertainty).toBeCloseTo(0.1, 9);
   });
   it("influence is floored so an isolated unknown dimension is still askable", () => {
-    const blank = createBlankModel({ id: "b", name: "Blank", systemType: "household", now: NOW });
+    const blank = createBlankModel({ id: "b", name: "Blank", systemType: "household", now: NOW , domain: HOUSEHOLD_DOMAIN });
     const ev = evaluateSystem(blank);
     const qs = questionPriorities(ev, computeSignature(ev, { id: "x", now: NOW, mode: "current" }), HOUSEHOLD_SIGNATURE_V1);
     expect(qs.every((q) => q.influence === 0.1 && q.uncertainty === 1)).toBe(true);

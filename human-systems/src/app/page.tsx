@@ -5,19 +5,23 @@ import { useModel } from "@/components/model-provider";
 import { fmtPct, fmtValue } from "@/components/format";
 import { SystemSwitcher } from "@/components/system-switcher";
 import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
-import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
+import { DERIVED_IDS, INPUT_IDS, OTHER_KEYS } from "@/domains/household/keys";
+import { resolveVariable, type SubjectScope } from "@/model/domain";
+import type { Variable } from "@/types";
 
-const HEADLINE_IDS = [
-  DERIVED_IDS.floorRatio,
-  DERIVED_IDS.bufferMonths,
-  DERIVED_IDS.reliableFloor,
-  DERIVED_IDS.monthlySurplus,
-  DERIVED_IDS.incomeConcentration,
-  DERIVED_IDS.failureCorrelation,
-  INPUT_IDS.protectedHours,
-  INPUT_IDS.careerCapital,
-  INPUT_IDS.majorPaths,
-  "financial_pressure",
+/** Headline keys of the household domain. System-scope keys resolve once;
+ *  member-scope keys resolve once per active member. */
+const HEADLINE_KEYS: { key: string; scope: SubjectScope }[] = [
+  { key: DERIVED_IDS.floorRatio, scope: "system" },
+  { key: DERIVED_IDS.bufferMonths, scope: "system" },
+  { key: DERIVED_IDS.reliableFloor, scope: "system" },
+  { key: DERIVED_IDS.monthlySurplus, scope: "system" },
+  { key: DERIVED_IDS.incomeConcentration, scope: "system" },
+  { key: DERIVED_IDS.failureCorrelation, scope: "system" },
+  { key: OTHER_KEYS.financialPressure, scope: "system" },
+  { key: INPUT_IDS.protectedHours, scope: "member" },
+  { key: INPUT_IDS.careerCapital, scope: "member" },
+  { key: INPUT_IDS.majorPaths, scope: "member" },
 ];
 
 export default function DashboardPage() {
@@ -25,7 +29,21 @@ export default function DashboardPage() {
   if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
   if (status === "loading" || !evaluated) return <Loading />;
 
-  const { model, variableById, loops, gap, issues } = evaluated;
+  const { model, loops, gap, issues, unassignedVariables } = evaluated;
+  const activeMembers = model.profile.members.filter((m) => m.status === "active");
+  /** Headline variables present in this system, labelled per member where the key is per person. */
+  const headline: { variable: Variable; label: string }[] = [];
+  for (const { key, scope } of HEADLINE_KEYS) {
+    if (scope === "system") {
+      const v = resolveVariable(evaluated.variables, model.id, { key, subjectId: null });
+      if (v) headline.push({ variable: v, label: v.name });
+    } else {
+      for (const m of activeMembers) {
+        const v = resolveVariable(evaluated.variables, model.id, { key, subjectId: m.id });
+        if (v) headline.push({ variable: v, label: `${v.name} — ${m.label}` });
+      }
+    }
+  }
   const reinforcing = loops.filter((l) => l.polarity === "reinforcing");
   const balancing = loops.filter((l) => l.polarity === "balancing");
   const topLoop = [...loops].sort((a, b) => (b.pressure ?? -1) - (a.pressure ?? -1))[0];
@@ -70,6 +88,17 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {unassignedVariables.length > 0 ? (
+        <div className="mb-4">
+          <Note tone="warn">
+            {unassignedVariables.length} variable{unassignedVariables.length > 1 ? "s have" : " has"} no subject assigned and feed{unassignedVariables.length > 1 ? "" : "s"} no calculation.{" "}
+            <Link href="/variables" className="underline">
+              Assign subjects
+            </Link>
+          </Note>
+        </div>
+      ) : null}
+
       {isEmpty ? (
         <div className="mb-4">
           <GettingStarted model={model} evaluated={evaluated} defaultOpen />
@@ -82,19 +111,15 @@ export default function DashboardPage() {
             <p className="text-sm text-muted">No values yet. The calculated variables fill in once income sources and input variables exist.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              {HEADLINE_IDS.map((id) => {
-                const v = variableById.get(id);
-                if (!v) return null;
-                return (
-                  <Stat
-                    key={id}
-                    tone="current"
-                    label={v.name}
-                    value={fmtValue(v.currentValue, v.unit)}
-                    sub={`${v.sourceType.replace("_", " ")} · ${Math.round(v.confidence * 100)}% conf.`}
-                  />
-                );
-              })}
+              {headline.map(({ variable: v, label }) => (
+                <Stat
+                  key={v.id}
+                  tone="current"
+                  label={label}
+                  value={fmtValue(v.currentValue, v.unit)}
+                  sub={`${v.sourceType.replace("_", " ")} · ${Math.round(v.confidence * 100)}% conf.`}
+                />
+              ))}
             </div>
           )}
           <p className="text-xs text-muted mt-3">{model.currentAttractor.summary || "No current attractor described yet (System profile)."}</p>
@@ -104,15 +129,13 @@ export default function DashboardPage() {
             <p className="text-sm text-muted">No targets yet. A desired value can be set on any variable once one exists.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              {HEADLINE_IDS.map((id) => {
-                const v = variableById.get(id);
-                if (!v) return null;
-                const g = gap.gaps.find((x) => x.variableId === id);
+              {headline.map(({ variable: v, label }) => {
+                const g = gap.gaps.find((x) => x.variableId === v.id);
                 return (
                   <Stat
-                    key={id}
+                    key={v.id}
                     tone="desired"
-                    label={v.name}
+                    label={label}
                     value={fmtValue(v.desiredValue, v.unit)}
                     sub={g ? `gap ${fmtPct(g.normalizedGap)} of range` : "no target set"}
                   />
@@ -127,9 +150,12 @@ export default function DashboardPage() {
       {isEmpty ? null : (
         <div className="grid gap-4 md:grid-cols-3 mt-4">
           <Card title="Structural gap">
-            <div className="text-2xl font-semibold tabular-nums">{fmtPct(gap.meanNormalizedGap)}</div>
+            <div className="text-2xl font-semibold tabular-nums">
+              {gap.openCount} <span className="text-sm font-normal text-muted">open</span> · {gap.closedCount}{" "}
+              <span className="text-sm font-normal text-muted">at target</span>
+            </div>
             <div className="text-xs text-muted">
-              mean normalised gap across {gap.gaps.length} variables with targets · {gap.openCount} open
+              across {gap.gaps.length} variable{gap.gaps.length === 1 ? "" : "s"} with targets; one gap per variable, never summed
             </div>
             <Link href="/gap" className="text-xs underline mt-2 inline-block">
               Per-variable gap
