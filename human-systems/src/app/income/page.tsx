@@ -8,7 +8,7 @@ import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge, Stat } f
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
 import { DERIVED_IDS } from "@/domains/household/keys";
 import { incomeShares } from "@/calculations/household";
-import { resolveVariable } from "@/model/domain";
+import { resolveVariable, systemRef } from "@/model/domain";
 import * as mutations from "@/services/mutations";
 import { SourceTypeSchema, type Member, type SourceType } from "@/types";
 
@@ -495,7 +495,7 @@ export default function IncomePage() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-4">
         {SUMMARY.map((key) => {
-          const v = resolveVariable(evaluated.variables, model.id, { key, subjectId: null });
+          const v = resolveVariable(evaluated.variables, model.id, systemRef(key));
           if (!v) return null;
           return <Stat key={key} label={v.name} value={fmtValue(v.currentValue, v.unit)} sub={`calculated · ${Math.round(v.confidence * 100)}% conf. (min of inputs)`} />;
         })}

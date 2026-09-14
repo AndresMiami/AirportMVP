@@ -190,8 +190,8 @@ export default function EvidencePage() {
 
       <Card title="Calculated variables and their inputs" className="mt-4">
         <p className="text-xs text-muted mb-2">
-          Formulas come from the {evaluated.domain.name} domain (version {evaluated.domain.version}) and read their inputs by key at whole-system scope. A missing input is reported, never
-          substituted with zero.
+          Formulas come from the {evaluated.domain.name} domain (version {evaluated.domain.version}). Each formula declares its scope (once for the whole system, or once per member) and where
+          each input comes from (the system, or the same subject). A missing input is reported, never substituted with zero; members are never averaged.
         </p>
         <table className="data">
           <thead>
@@ -205,14 +205,20 @@ export default function EvidencePage() {
           </thead>
           <tbody>
             {derived.map((d) => (
-              <tr key={d.definition.key}>
+              <tr key={d.variable.id}>
                 <td>
                   <div className="font-medium">{d.definition.name}</div>
+                  <div className="text-xs text-muted">
+                    {d.definition.scope === "system" ? "whole system" : `per member — ${model.profile.members.find((m) => m.id === d.subjectId)?.label ?? d.subjectId}`}
+                  </div>
                   <div className="text-xs text-muted max-w-sm">{d.definition.description}</div>
                   <div className="text-xs text-muted font-mono">{d.definition.key}</div>
                 </td>
                 <td className="text-xs font-mono">
-                  {[...d.definition.inputKeys, ...d.definition.inputDerivedKeys, ...(d.definition.usesIncomeSources ? ["incomeSources[]"] : [])].join(", ") || "—"}
+                  {[
+                    ...[...d.definition.inputs, ...d.definition.derivedInputs].map((i) => (i.from === "system" ? i.key : `${i.key} (same subject)`)),
+                    ...(d.definition.usesIncomeSources ? ["incomeSources[]"] : []),
+                  ].join(", ") || "—"}
                 </td>
                 <td className="text-xs">{d.definition.assumptionIds.join(", ") || "arithmetic only"}</td>
                 <td>

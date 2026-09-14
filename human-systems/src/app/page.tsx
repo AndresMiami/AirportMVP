@@ -6,7 +6,7 @@ import { fmtPct, fmtValue } from "@/components/format";
 import { SystemSwitcher } from "@/components/system-switcher";
 import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
 import { DERIVED_IDS, INPUT_IDS, OTHER_KEYS } from "@/domains/household/keys";
-import { resolveVariable, type SubjectScope } from "@/model/domain";
+import { resolveVariable, subjectRef, systemRef, type SubjectScope } from "@/model/domain";
 import type { Variable } from "@/types";
 
 /** Headline keys of the household domain. System-scope keys resolve once;
@@ -35,11 +35,11 @@ export default function DashboardPage() {
   const headline: { variable: Variable; label: string }[] = [];
   for (const { key, scope } of HEADLINE_KEYS) {
     if (scope === "system") {
-      const v = resolveVariable(evaluated.variables, model.id, { key, subjectId: null });
+      const v = resolveVariable(evaluated.variables, model.id, systemRef(key));
       if (v) headline.push({ variable: v, label: v.name });
     } else {
       for (const m of activeMembers) {
-        const v = resolveVariable(evaluated.variables, model.id, { key, subjectId: m.id });
+        const v = resolveVariable(evaluated.variables, model.id, subjectRef(key, m.id));
         if (v) headline.push({ variable: v, label: `${v.name} — ${m.label}` });
       }
     }

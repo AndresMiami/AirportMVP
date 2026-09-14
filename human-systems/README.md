@@ -26,7 +26,7 @@ exercises the review contract).
 ```bash
 npm install --legacy-peer-deps   # vitest 4 + npm's peer resolver need the flag
 npm run dev                      # http://localhost:3000
-npm test                         # vitest, 236 tests
+npm test                         # vitest, 244 tests
 npm run typecheck
 npm run lint
 npm run build
@@ -41,8 +41,12 @@ src/
   calculations/   pure math: household ratios, HHI, compounding, leverage,
                   gap, graph (loops, pressure, propagation), feasibility, utility
   model/          domain.ts (the ENGINE-OWNED domain interface, registry and
-                  VariableRef resolver), generic derived-variable evaluation,
-                  evaluateSystem(), migrations (v1→v2→v3), blank-model factory
+                  the explicit-scope VariableRef resolver: systemRef /
+                  subjectRef, never null), derived.ts (generic derived
+                  evaluation: a definition declares scope system|member and
+                  each input's source system|subject; member formulas run
+                  once per active member, never averaged), evaluateSystem(),
+                  migrations (v1→v2→v3), blank-model factory
   domains/        versioned domain CONFIGURATION layered over the engine:
                   household/ (keys, variables with subject scope, formulas,
                   projections, signature v1, constraint templates, event

@@ -570,7 +570,7 @@ export function createSampleHousehold(): SystemModel {
     [D.totalIncome]: { desiredValue: 5000 },
   };
   const derived: Variable[] = HOUSEHOLD_DERIVED.map((def) => ({
-    ...defaultDerivedVariable(def, SAMPLE_SYSTEM_ID),
+    ...defaultDerivedVariable(def, SAMPLE_SYSTEM_ID, SAMPLE_SYSTEM_ID),
     ...(derivedDesired[def.key] ?? {}),
     notes: derivedDesired[def.key]?.notes ?? "",
   }));

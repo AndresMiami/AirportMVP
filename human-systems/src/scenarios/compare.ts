@@ -5,7 +5,7 @@
  * (A12) and loop-pressure deltas (A10).
  */
 import { HORIZON_ORDER, propagateDirectionalPressure, type DirectionalPressure, type Horizon } from "@/calculations";
-import { resolveVariable, type ProjectionDefinition } from "@/model/domain";
+import { resolveVariable, subjectRef, systemRef, type ProjectionDefinition } from "@/model/domain";
 import { evaluateSystem, type EvaluatedLoop, type EvaluatedSystem } from "@/model/evaluate";
 import type { Scenario, SystemModel } from "@/types";
 import { applyScenario, type AppliedScenario } from "./apply";
@@ -107,7 +107,7 @@ function attemptProjection(
   const values = new Map<string, number>();
   const missing: string[] = [];
   for (const input of def.inputs) {
-    const ref = { key: input.key, subjectId: input.scope === "system" ? null : subjectId };
+    const ref = input.scope === "system" ? systemRef(input.key) : subjectRef(input.key, subjectId);
     const v = resolveVariable(system.variables, system.model.id, ref);
     if (!v || v.currentValue === null) missing.push(v?.name ?? input.key);
     else values.set(input.key, v.currentValue);

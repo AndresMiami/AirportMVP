@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { createBlankModel } from "@/model/blank";
-import { domainRegistry, resolveVariable, type DomainDefinition } from "@/model/domain";
+import { domainRegistry, resolveVariable, subjectRef, systemRef, variableIdFor, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
 import { migrateModel } from "@/model/migrations";
 import { compareScenario } from "@/scenarios/compare";
@@ -17,7 +17,8 @@ import { SignatureDefinitionSchema } from "@/types/signature";
 
 const NOW = "2026-09-14T12:00:00.000Z";
 
-/** A tiny "workshop" domain: two inputs, one derived value, one projection. */
+/** A tiny "workshop" domain: three inputs, one system-scoped and two
+ *  member-scoped derived values, one projection. */
 const WORKSHOP: DomainDefinition = {
   id: "workshop",
   version: 1,
@@ -38,14 +39,58 @@ const WORKSHOP: DomainDefinition = {
       category: "structure",
       changeSpeed: "fast",
       targetMode: "at_most",
-      inputKeys: ["orders_per_month", "hours_per_order"],
-      inputDerivedKeys: [],
+      scope: "system",
+      inputs: [
+        { key: "orders_per_month", from: "system" },
+        { key: "hours_per_order", from: "system" },
+      ],
+      derivedInputs: [],
       usesIncomeSources: false,
       assumptionIds: [],
       compute: (ctx) => {
         const o = ctx.value("orders_per_month");
         const h = ctx.value("hours_per_order");
         return o === null || h === null ? null : o * h;
+      },
+    },
+    {
+      key: "capacity_hours",
+      name: "Capacity hours",
+      description: "skill level × 10, per member",
+      unit: "h",
+      category: "asset",
+      changeSpeed: "slow",
+      targetMode: "at_least",
+      scope: "member",
+      inputs: [{ key: "skill_level", from: "subject" }],
+      derivedInputs: [],
+      usesIncomeSources: false,
+      assumptionIds: [],
+      compute: (ctx) => {
+        const s = ctx.value("skill_level");
+        return s === null ? null : s * 10;
+      },
+    },
+    {
+      key: "load_share",
+      name: "Load share",
+      description: "this member's capacity relative to the workshop's hours per month (a member formula reading a SYSTEM derived value explicitly)",
+      unit: "ratio",
+      category: "structure",
+      changeSpeed: "slow",
+      targetMode: "at_most",
+      scope: "member",
+      inputs: [],
+      derivedInputs: [
+        { key: "hours_per_month", from: "system" },
+        { key: "capacity_hours", from: "subject" },
+      ],
+      usesIncomeSources: false,
+      assumptionIds: [],
+      compute: (ctx) => {
+        const total = ctx.derived("hours_per_month");
+        const mine = ctx.derived("capacity_hours");
+        return total === null || mine === null || total === 0 ? null : mine / total;
       },
     },
   ],
@@ -115,8 +160,8 @@ describe("a second minimal domain works without engine changes", () => {
     let m = workshop();
     m = M.addVariable(m, input("Skill level", "skill_level", "ana", 4));
     const ev = evaluateSystem(m);
-    expect(resolveVariable(ev.variables, m.id, { key: "skill_level", subjectId: "ana" })?.currentValue).toBe(4);
-    expect(resolveVariable(ev.variables, m.id, { key: "skill_level", subjectId: null })).toBeUndefined();
+    expect(resolveVariable(ev.variables, m.id, subjectRef("skill_level", "ana"))?.currentValue).toBe(4);
+    expect(resolveVariable(ev.variables, m.id, systemRef("skill_level"))).toBeUndefined();
 
     const cmp = compareScenario(m, { id: "s", name: "s", description: "", changes: [], horizonMonths: 12 });
     expect(cmp.projections.map((p) => p.label)).toEqual(["Skill level — Ana"]);
@@ -151,6 +196,62 @@ describe("a second minimal domain works without engine changes", () => {
     const skill = r.model.variables.find((v) => v.key === "skill_level")!;
     expect(skill.subjectId).toBeNull();
     expect(r.model.domainDefinitionId).toBe("workshop");
+  });
+
+  it("member-scoped derived values are computed independently per member, never averaged", () => {
+    let m = workshop();
+    m = M.addMember(m, { id: "bo", label: "Bo", role: "Apprentice" });
+    m = M.addMember(m, { id: "cy", label: "Cy", role: "Retired" });
+    m = M.archiveMember(m, "cy");
+    m = M.addVariable(m, input("Skill level", "skill_level", "ana", 4));
+    m = M.addVariable(m, input("Skill level", "skill_level", "bo", 1));
+    m = M.addVariable(m, input("Orders per month", "orders_per_month", "shop", 20));
+    m = M.addVariable(m, input("Hours per order", "hours_per_order", "shop", 4));
+    const ev = evaluateSystem(m);
+    const capacity = ev.variables.filter((v) => v.key === "capacity_hours");
+    // one record per ACTIVE member, attributed to that member, with its own id
+    expect(capacity.map((v) => [v.subjectId, v.id, v.currentValue])).toEqual([
+      ["ana", variableIdFor("capacity_hours", "ana", "shop"), 40],
+      ["bo", variableIdFor("capacity_hours", "bo", "shop"), 10],
+    ]);
+    expect(capacity.every((v) => v.kind === "derived" && v.sourceType === "calculated")).toBe(true);
+    // no system-level capacity exists: the engine did not sum or average the members
+    expect(resolveVariable(ev.variables, m.id, systemRef("capacity_hours"))).toBeUndefined();
+    // a member formula may read a SYSTEM derived value when it declares from: "system"
+    expect(resolveVariable(ev.variables, m.id, subjectRef("load_share", "ana"))!.currentValue).toBeCloseTo(40 / 80);
+    expect(resolveVariable(ev.variables, m.id, subjectRef("load_share", "bo"))!.currentValue).toBeCloseTo(10 / 80);
+    // confidence follows the member's own inputs
+    expect(resolveVariable(ev.variables, m.id, subjectRef("capacity_hours", "ana"))!.confidence).toBe(0.7);
+    // the computations name their subject
+    expect(ev.derived.filter((c) => c.definition.key === "load_share").map((c) => c.subjectId)).toEqual(["ana", "bo"]);
+  });
+
+  it("a member without the input gets an UNKNOWN member derived value, not a zero or a neighbour's number", () => {
+    let m = workshop();
+    m = M.addMember(m, { id: "bo", label: "Bo", role: "Apprentice" });
+    m = M.addVariable(m, input("Skill level", "skill_level", "ana", 4));
+    const ev = evaluateSystem(m);
+    const bo = resolveVariable(ev.variables, m.id, subjectRef("capacity_hours", "bo"))!;
+    expect(bo.currentValue).toBeNull();
+    expect(bo.confidence).toBe(0);
+    expect(ev.derived.find((c) => c.definition.key === "capacity_hours" && c.subjectId === "bo")!.missingInputs).toEqual(["skill_level"]);
+    expect(resolveVariable(ev.variables, m.id, subjectRef("capacity_hours", "ana"))!.currentValue).toBe(40);
+    // an UNASSIGNED skill level feeds nobody
+    let u = workshop();
+    u = M.addVariable(u, input("Skill level", "skill_level", null, 9));
+    expect(resolveVariable(evaluateSystem(u).variables, u.id, subjectRef("capacity_hours", "ana"))!.currentValue).toBeNull();
+  });
+
+  it("a formula that reads an undeclared input is a definition bug and is refused loudly", () => {
+    const broken: DomainDefinition = {
+      ...WORKSHOP,
+      id: "broken",
+      derived: [{ ...WORKSHOP.derived[0], inputs: [{ key: "orders_per_month", from: "system" }] }],
+    };
+    domainRegistry.register(broken);
+    let m = createBlankModel({ id: "b", name: "B", systemType: "organization", now: NOW, domain: broken });
+    m = M.addVariable(m, input("Orders per month", "orders_per_month", "b", 20));
+    expect(() => evaluateSystem(m)).toThrow(/undeclared input "hours_per_order"/);
   });
 
   it("an unregistered domain is refused at evaluation with a plain message", () => {

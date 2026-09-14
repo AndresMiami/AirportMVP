@@ -109,7 +109,8 @@ export interface EvaluatedSystem {
 export function evaluateSystem(model: SystemModel): EvaluatedSystem {
   const issues: ModelIssue[] = [];
   const domain = domainRegistry.require(model.domainDefinitionId, model.domainDefinitionVersion);
-  const { variables, computations } = computeDerivedVariables(model.variables, model.incomeSources, domain.derived, model.id);
+  const activeMemberIds = model.profile.members.filter((m) => m.status === "active").map((m) => m.id);
+  const { variables, computations } = computeDerivedVariables(model.variables, model.incomeSources, domain.derived, model.id, activeMemberIds);
   const variableById = new Map(variables.map((v) => [v.id, v]));
   const unassigned = unassignedVariables(variables);
   if (unassigned.length > 0) {

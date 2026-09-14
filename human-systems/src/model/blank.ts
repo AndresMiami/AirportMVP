@@ -32,7 +32,7 @@ export function createBlankModel(opts: BlankModelOptions): SystemModel {
       location: opts.location ?? "",
       currency: opts.currency ?? "USD",
     },
-    variables: opts.domain.derived.map((d) => defaultDerivedVariable(d, opts.id)),
+    variables: opts.domain.derived.filter((d) => d.scope === "system").map((d) => defaultDerivedVariable(d, opts.id, opts.id)),
     incomeSources: [],
     relationships: [],
     events: [],

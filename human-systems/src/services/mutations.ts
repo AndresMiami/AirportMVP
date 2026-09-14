@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { DYNAMICS_ELIGIBLE_KINDS, EventSchema, type Event, type ExtensionEnvelope, type KillCriterion, type RelationshipKind, type SubjectId } from "@/types";
-import { domainRegistry, resolveVariable, variableIdFor } from "@/model/domain";
+import { domainRegistry, refFor, resolveVariable, variableIdFor } from "@/model/domain";
 import {
   ConstraintSchema,
   HypothesisSchema,
@@ -294,8 +294,9 @@ export function addVariable(model: SystemModel, input: VariableInput): SystemMod
   const key = input.key ?? input.id ?? slugId(input.name, "variable");
   const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
   if (domain?.derived.some((d) => d.key === key)) throw new MutationError(`"${key}" is a calculated variable and cannot be entered`);
-  const existing = resolveVariable(model.variables, model.id, { key, subjectId: input.subjectId });
-  if (existing && input.subjectId !== null) throw new MutationError(`${existing.name} already holds key "${key}" for that subject`);
+  // An unassigned variable has no resolvable reference, so only an assigned subject can collide.
+  const existing = input.subjectId === null ? undefined : resolveVariable(model.variables, model.id, refFor(key, input.subjectId, model.id));
+  if (existing) throw new MutationError(`${existing.name} already holds key "${key}" for that subject`);
   const id = input.id ?? uniqueId(model, input.subjectId === null ? uniqueSlug(model, key) : variableIdFor(key, input.subjectId, model.id));
   if (model.variables.some((v) => v.id === id)) throw new MutationError(`Variable "${id}" already exists`);
   const variable = parseOr(VariableSchema, {

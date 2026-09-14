@@ -77,8 +77,14 @@ Ids: pass none and `nextId(model, prefix)` assigns one.
 ## Evaluated data (src/model/evaluate.ts)
 
 `evaluated.domain` = the registered DomainDefinition the model names
-(`domainDefinitionId` + version; resolve keys with `resolveVariable(
-evaluated.variables, model.id, {key, subjectId})`).
+(`domainDefinitionId` + version). Resolve keys with `resolveVariable(
+evaluated.variables, model.id, ref)` where `ref` is `systemRef(key)`,
+`subjectRef(key, memberId)`, or `refFor(key, knownSubjectId, model.id)`.
+There is no null in a reference: `Variable.subjectId === null` means
+UNASSIGNED in storage and such a variable resolves for nobody.
+`evaluated.derived[]` = one computation per definition per subject
+(`{variable, definition, subjectId, missingInputs}`): a system-scope
+definition once, a member-scope definition once per ACTIVE member.
 `evaluated.relationships` = ENABLED edges that TAKE PART IN DYNAMICS with
 valid endpoints (what loops use); `evaluated.allRelationships` = every
 stored edge; `evaluated.disabledRelationshipCount`,

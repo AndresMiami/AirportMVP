@@ -16,8 +16,13 @@ import {
   replacementLatency,
   totalMonthlyIncome,
 } from "@/calculations/household";
-import type { DerivedDefinition } from "@/model/domain";
+import type { DerivedDefinition, DerivedInputRef } from "@/model/domain";
 import { DERIVED_IDS as D, INPUT_IDS as I } from "./keys";
+
+/** Every household formula is SYSTEM-scoped and reads system-scope keys:
+ *  that is what the v2 household formulas represented, and migration keeps
+ *  their records system-attributed. */
+const sys = (keys: string[]): DerivedInputRef[] => keys.map((key) => ({ key, from: "system" }));
 
 export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
   {
@@ -28,8 +33,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "event",
     changeSpeed: "fast",
     targetMode: "at_least",
-    inputKeys: [],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([]),
+    derivedInputs: sys([]),
     usesIncomeSources: true,
     assumptionIds: [],
     compute: (ctx) => (ctx.incomeSources.length ? totalMonthlyIncome(ctx.incomeSources) : null),
@@ -42,8 +48,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "structure",
     changeSpeed: "slow",
     targetMode: "at_least",
-    inputKeys: [],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([]),
+    derivedInputs: sys([]),
     usesIncomeSources: true,
     assumptionIds: ["A1"],
     compute: (ctx) => (ctx.incomeSources.length ? reliableIncomeFloor(ctx.incomeSources) : null),
@@ -56,8 +63,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "event",
     changeSpeed: "fast",
     targetMode: "at_least",
-    inputKeys: [I.essentialExpenses, I.discretionaryExpenses, I.monthlyDebtPayments],
-    inputDerivedKeys: [D.totalIncome],
+    scope: "system",
+    inputs: sys([I.essentialExpenses, I.discretionaryExpenses, I.monthlyDebtPayments]),
+    derivedInputs: sys([D.totalIncome]),
     usesIncomeSources: false,
     assumptionIds: [],
     compute: (ctx) => {
@@ -78,8 +86,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "structure",
     changeSpeed: "slow",
     targetMode: "at_least",
-    inputKeys: [I.essentialExpenses],
-    inputDerivedKeys: [D.reliableFloor],
+    scope: "system",
+    inputs: sys([I.essentialExpenses]),
+    derivedInputs: sys([D.reliableFloor]),
     usesIncomeSources: false,
     assumptionIds: ["A1"],
     compute: (ctx) => {
@@ -98,8 +107,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "buffer",
     changeSpeed: "slow",
     targetMode: "at_least",
-    inputKeys: [I.liquidReserves, I.essentialExpenses],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([I.liquidReserves, I.essentialExpenses]),
+    derivedInputs: sys([]),
     usesIncomeSources: false,
     assumptionIds: ["A2"],
     compute: (ctx) => {
@@ -118,8 +128,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "dependency",
     changeSpeed: "slow",
     targetMode: "at_most",
-    inputKeys: [],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([]),
+    derivedInputs: sys([]),
     usesIncomeSources: true,
     assumptionIds: ["A3"],
     compute: (ctx) => incomeConcentration(ctx.incomeSources),
@@ -133,8 +144,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "structure",
     changeSpeed: "slow",
     targetMode: "at_most",
-    inputKeys: [],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([]),
+    derivedInputs: sys([]),
     usesIncomeSources: true,
     assumptionIds: ["A5"],
     compute: (ctx) => incomeVolatility(ctx.incomeSources),
@@ -148,8 +160,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "dependency",
     changeSpeed: "slow",
     targetMode: "at_most",
-    inputKeys: [],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([]),
+    derivedInputs: sys([]),
     usesIncomeSources: true,
     assumptionIds: ["A4"],
     compute: (ctx) => failureCorrelation(ctx.incomeSources),
@@ -163,8 +176,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "structure",
     changeSpeed: "slow",
     targetMode: "at_most",
-    inputKeys: [],
-    inputDerivedKeys: [],
+    scope: "system",
+    inputs: sys([]),
+    derivedInputs: sys([]),
     usesIncomeSources: true,
     assumptionIds: ["A5"],
     compute: (ctx) => replacementLatency(ctx.incomeSources),
@@ -178,8 +192,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     category: "structure",
     changeSpeed: "slow",
     targetMode: "at_most",
-    inputKeys: [I.monthlyDebtPayments],
-    inputDerivedKeys: [D.totalIncome],
+    scope: "system",
+    inputs: sys([I.monthlyDebtPayments]),
+    derivedInputs: sys([D.totalIncome]),
     usesIncomeSources: false,
     assumptionIds: [],
     compute: (ctx) => {

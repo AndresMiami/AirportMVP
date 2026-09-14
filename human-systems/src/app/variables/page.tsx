@@ -6,7 +6,7 @@ import { fmtValue } from "@/components/format";
 import { ConfirmButton } from "@/components/system-switcher";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
 import { CATEGORY_META, SOURCE_TYPE_META } from "@/domain/vocabulary";
-import { resolveVariable, type SubjectScope, type VariableDefinition } from "@/model/domain";
+import { refFor, resolveVariable, type SubjectScope, type VariableDefinition } from "@/model/domain";
 import * as mutations from "@/services/mutations";
 import {
   ChangeSpeedSchema,
@@ -219,7 +219,7 @@ export default function VariablesPage() {
     standardSubject !== null && (standardSubject === model.id || members.some((m) => m.id === standardSubject)) ? standardSubject : model.id;
   const stdScope = scopeOf(stdSubject, model.id);
   const isPresentFor = (def: VariableDefinition, subjectId: string) =>
-    resolveVariable(evaluated.variables, model.id, { key: def.key, subjectId }) !== undefined;
+    resolveVariable(evaluated.variables, model.id, refFor(def.key, subjectId, model.id)) !== undefined;
   const standardChoices = domain.variables.filter((def) => def.scope === stdScope && !isPresentFor(def, stdSubject));
   const missingStandardTotal =
     domain.variables.filter((def) => def.scope === "system" && !isPresentFor(def, model.id)).length +

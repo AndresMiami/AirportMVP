@@ -13,7 +13,7 @@
  *    the share of input weight that was known.
  */
 import { effectiveGap } from "@/calculations/gap";
-import { derivedDefinitionFor, resolveVariable } from "@/model/domain";
+import { derivedDefinitionFor, refFor, resolveVariable, subjectRef, systemRef, type VariableRef } from "@/model/domain";
 import type { EvaluatedSystem } from "@/model/evaluate";
 import type { SubjectId, Variable } from "@/types";
 import {
@@ -80,10 +80,12 @@ export function observationIdsForVariable(evaluated: EvaluatedSystem, variableId
   const direct = (evaluated.observations.byVariable.get(variableId) ?? []).map((o) => o.id);
   const variable = evaluated.variableById.get(variableId);
   const def = variable && variable.kind === "derived" ? derivedDefinitionFor(evaluated.domain, variable.key) : undefined;
-  if (!def) return direct;
-  // Formula inputs are system-scope keys; follow them to their variables.
-  const upstream = [...def.inputKeys, ...def.inputDerivedKeys]
-    .map((key) => resolveVariable(evaluated.variables, evaluated.model.id, { key, subjectId: null }))
+  if (!def || !variable || variable.subjectId === null) return direct;
+  // Follow each declared input from the source it names to its variable.
+  const subjectId = variable.subjectId;
+  const upstream = [...def.inputs, ...def.derivedInputs]
+    .map((input) => (input.from === "system" ? systemRef(input.key) : refFor(input.key, subjectId, evaluated.model.id)))
+    .map((ref) => resolveVariable(evaluated.variables, evaluated.model.id, ref))
     .filter((x): x is Variable => x !== undefined)
     .flatMap((x) => observationIdsForVariable(evaluated, x.id, seen));
   return [...new Set([...direct, ...upstream])];
@@ -93,9 +95,10 @@ function contributionFor(
   input: DimensionInput,
   evaluated: EvaluatedSystem,
   mode: "current" | "desired",
-  subjectId: SubjectId | null,
+  /** null = nothing can resolve (scope mismatch); the input is reported unknown. */
+  ref: VariableRef | null,
 ): Contribution {
-  const v = resolveVariable(evaluated.variables, evaluated.model.id, { key: input.variableKey, subjectId });
+  const v = ref ? resolveVariable(evaluated.variables, evaluated.model.id, ref) : undefined;
   const raw = v ? rawValueFor(v, mode) : null;
   return {
     variableId: v?.id ?? null,
@@ -125,10 +128,9 @@ export function computeDimension(
   // A member-scope dimension has no value for the system subject, and a
   // system-scope dimension reads household keys whatever the subject.
   const scopeMismatch = def.subjectScope === "member" && isSystemSubject;
-  const resolveFor = def.subjectScope === "member" ? subjectId : null;
-  const contributions = scopeMismatch
-    ? def.inputs.map((input) => contributionFor(input, evaluated, mode, "__no_subject__"))
-    : def.inputs.map((input) => contributionFor(input, evaluated, mode, resolveFor));
+  const refFor = (key: string): VariableRef | null =>
+    scopeMismatch ? null : def.subjectScope === "member" ? subjectRef(key, subjectId) : systemRef(key);
+  const contributions = def.inputs.map((input) => contributionFor(input, evaluated, mode, refFor(input.variableKey)));
   const known = contributions.filter((c) => c.normalized !== null);
   const totalWeight = contributions.reduce((s, c) => s + c.weight, 0);
   const knownWeight = known.reduce((s, c) => s + c.weight, 0);

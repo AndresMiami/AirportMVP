@@ -8,7 +8,7 @@ import { fmtDelta, fmtPct, fmtValue } from "@/components/format";
 import { Sparkline } from "@/components/sparkline";
 import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
 import { INPUT_IDS } from "@/domains/household/keys";
-import { resolveVariable, type SubjectScope } from "@/model/domain";
+import { resolveVariable, subjectRef, systemRef, type SubjectScope, type VariableRef } from "@/model/domain";
 import { compareScenario } from "@/scenarios/compare";
 import type { Member, Scenario, ScenarioChange, SystemModel } from "@/types";
 
@@ -122,12 +122,15 @@ export default function ScenariosPage() {
 
   /* ---- presets resolved for the chosen subject ---- */
   const chosenMember = presetMember !== null && members.some((m) => m.id === presetMember) ? presetMember : (activeMembers[0]?.id ?? null);
-  const presetSubject = (scope: SubjectScope): string | null => (scope === "system" ? null : chosenMember);
+  /** The reference a preset key resolves through; null when a member-scope key has no member to point at. */
+  const presetRef = (key: string, scope: SubjectScope): VariableRef | null =>
+    scope === "system" ? systemRef(key) : chosenMember === null ? null : subjectRef(key, chosenMember);
   /** Variable ids a preset would adjust, or null when any of its keys is absent for the subject. */
   const resolvePreset = (p: Preset): { variableId: string; delta: number }[] | null => {
     const out: { variableId: string; delta: number }[] = [];
     for (const d of p.deltas) {
-      const v = resolveVariable(evaluated.variables, model.id, { key: d.key, subjectId: presetSubject(d.scope) });
+      const ref = presetRef(d.key, d.scope);
+      const v = ref ? resolveVariable(evaluated.variables, model.id, ref) : undefined;
       if (!v || v.kind !== "input") return null;
       out.push({ variableId: v.id, delta: d.delta });
     }

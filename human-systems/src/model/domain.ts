@@ -37,8 +37,21 @@ export interface VariableDefinition {
   question?: string;
 }
 
-/** Values visible to a derived formula, resolved at SYSTEM scope. */
+/** Where a derived formula's input comes from: the whole system, or the
+ *  SAME subject the formula is being computed for (the system itself for a
+ *  system-scope definition, one member for a member-scope definition). */
+export type DerivedInputSource = "system" | "subject";
+
+export interface DerivedInputRef {
+  key: string;
+  from: DerivedInputSource;
+}
+
+/** Values visible to a derived formula. Only DECLARED inputs resolve; an
+ *  undeclared key is a definition bug and throws. */
 export interface DerivedContext {
+  /** The subject this evaluation is for (system id or member id). */
+  subjectId: SubjectId;
   value: (key: string) => number | null;
   derived: (key: string) => number | null;
   incomeSources: readonly IncomeSource[];
@@ -52,10 +65,14 @@ export interface DerivedDefinition {
   category: VariableCategory;
   changeSpeed: ChangeSpeed;
   targetMode: TargetMode;
-  /** Input variable keys (system scope). */
-  inputKeys: string[];
-  /** Derived keys read (must appear earlier in the domain's list). */
-  inputDerivedKeys: string[];
+  /** system: computed once, subject = the system. member: computed
+   *  independently for each member, subject = that member. Members are
+   *  never averaged into a system value by the engine. */
+  scope: SubjectScope;
+  /** Input variables the formula reads, each with its source. */
+  inputs: DerivedInputRef[];
+  /** Earlier derived definitions the formula reads, each with its source. */
+  derivedInputs: DerivedInputRef[];
   usesIncomeSources: boolean;
   assumptionIds: string[];
   compute: (ctx: DerivedContext) => number | null;
@@ -154,23 +171,41 @@ export const domainRegistry = new DomainRegistry();
 /* Variable references                                                 */
 /* ------------------------------------------------------------------ */
 
-/** A key resolved for a subject. subjectId null = system scope. */
-export interface VariableRef {
-  key: string;
-  subjectId: SubjectId | null;
+/**
+ * A reference to a variable by definition key and EXPLICIT scope. There is
+ * no null here: `Variable.subjectId === null` means UNASSIGNED in storage,
+ * and an unassigned variable has no resolvable reference at all.
+ */
+export type VariableRef =
+  | { key: string; scope: "system" }
+  | { key: string; scope: "subject"; subjectId: SubjectId };
+
+export function systemRef(key: string): VariableRef {
+  return { key, scope: "system" };
+}
+
+export function subjectRef(key: string, subjectId: SubjectId): VariableRef {
+  return { key, scope: "subject", subjectId };
+}
+
+/** Reference for a KNOWN subject id: the system's own id is a system
+ *  reference, any other id a subject reference. Never accepts null. */
+export function refFor(key: string, subjectId: SubjectId, systemId: string): VariableRef {
+  return subjectId === systemId ? systemRef(key) : subjectRef(key, subjectId);
 }
 
 /**
- * Resolve a reference among a system's variables. An UNASSIGNED variable
- * (subjectId null) is never matched: nobody has said whose it is, so it
- * feeds no computation until assigned.
+ * Resolve a reference among a system's variables. A system reference
+ * matches only a variable attributed to the system; a subject reference
+ * only that subject's variable. An UNASSIGNED variable (subjectId null)
+ * is never matched: nobody has said whose it is, so it feeds no
+ * computation until assigned.
  */
-export function resolveVariable(
-  variables: readonly Variable[],
-  systemId: string,
-  ref: VariableRef,
-): Variable | undefined {
-  const subject = ref.subjectId ?? systemId;
+export function resolveVariable(variables: readonly Variable[], systemId: string, ref: VariableRef): Variable | undefined {
+  const subject = ref.scope === "system" ? systemId : ref.subjectId;
+  // Runtime guard behind the type: a non-string subject (null smuggled in
+  // from untyped data) must never match the unassigned rows.
+  if (typeof subject !== "string" || subject.length === 0) return undefined;
   return variables.find((v) => v.key === ref.key && v.subjectId === subject);
 }
 
