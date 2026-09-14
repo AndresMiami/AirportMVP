@@ -178,6 +178,15 @@ function OutcomeList({
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Inline refusal message for one control; hoisted so it is not re-created on every render. */
+function ErrorLine({ msg }: { msg: string | null }) {
+  return msg ? (
+    <div className="text-xs text-neg mt-1" role="alert">
+      {msg}
+    </div>
+  ) : null;
+}
+
 export default function ProfilePage() {
   const { model, evaluated, apply, lastError, clearError } = useModel();
   const ids = useId();
@@ -212,15 +221,6 @@ export default function ProfilePage() {
     }
   };
 
-  const ErrorLine = ({ owner }: { owner: string }) => {
-    const msg = errorFor(owner);
-    return msg ? (
-      <div className="text-xs text-neg mt-1" role="alert">
-        {msg}
-      </div>
-    ) : null;
-  };
-
   const attractorCard = (
     key: "current" | "desired",
     title: string,
@@ -241,14 +241,14 @@ export default function ProfilePage() {
         onEdit={clearError}
         onCommit={(summary) => commit(`${key}:summary`, (m) => setter(m, { summary }))}
       />
-      <ErrorLine owner={`${key}:summary`} />
+      <ErrorLine msg={errorFor(`${key}:summary`)} />
       <OutcomeList
         label="Recurring outcomes"
         items={a.recurringOutcomes}
         onEdit={clearError}
         onChange={(recurringOutcomes) => commit(`${key}:outcomes`, (m) => setter(m, { recurringOutcomes }))}
       />
-      <ErrorLine owner={`${key}:outcomes`} />
+      <ErrorLine msg={errorFor(`${key}:outcomes`)} />
       <div className="mt-3 flex gap-2">
         <SourceBadge sourceType={a.sourceType} />
         <ConfidenceBadge confidence={a.confidence} />
@@ -280,7 +280,7 @@ export default function ProfilePage() {
               onEdit={clearError}
               onCommit={(name) => commit("profile:name", (m) => mutations.updateProfile(m, { name }))}
             />
-            <ErrorLine owner="profile:name" />
+            <ErrorLine msg={errorFor("profile:name")} />
           </dd>
 
           <dt className="text-muted pt-1">
@@ -304,7 +304,7 @@ export default function ProfilePage() {
                 country (not yet supported)
               </option>
             </select>
-            <ErrorLine owner="profile:type" />
+            <ErrorLine msg={errorFor("profile:type")} />
           </dd>
 
           <dt className="text-muted pt-1">
@@ -319,7 +319,7 @@ export default function ProfilePage() {
               onEdit={clearError}
               onCommit={(location) => commit("profile:location", (m) => mutations.updateProfile(m, { location }))}
             />
-            <ErrorLine owner="profile:location" />
+            <ErrorLine msg={errorFor("profile:location")} />
           </dd>
 
           <dt className="text-muted pt-1">Currency</dt>
@@ -338,7 +338,7 @@ export default function ProfilePage() {
               onEdit={clearError}
               onCommit={(description) => commit("profile:description", (m) => mutations.updateProfile(m, { description }))}
             />
-            <ErrorLine owner="profile:description" />
+            <ErrorLine msg={errorFor("profile:description")} />
           </dd>
         </dl>
       </Card>
@@ -392,7 +392,7 @@ export default function ProfilePage() {
                             message={`Remove ${m.label}? ${n > 0 ? `Their ${n} observation${n > 1 ? "s stay" : " stays"} and will no longer name a subject.` : "No observations name them."}`}
                             onConfirm={() => commit(`member:${m.id}`, (mm) => mutations.removeMember(mm, m.id))}
                           />
-                          <ErrorLine owner={`member:${m.id}`} />
+                          <ErrorLine msg={errorFor(`member:${m.id}`)} />
                         </td>
                       </tr>
                     );

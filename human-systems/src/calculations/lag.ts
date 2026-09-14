@@ -48,7 +48,7 @@ export function monthsToLag(months: number): Lag {
   if (months <= 0) return { value: 0, unit: "days" };
   const days = months * DAYS_PER_MONTH;
   if (days < 14) return { value: round1(days), unit: "days" };
-  if (months < 2) return { value: round1(days / 7), unit: "weeks" };
+  if (months < 1) return { value: round1(days / 7), unit: "weeks" };
   if (months < 24) return { value: round1(months), unit: "months" };
   return { value: round1(months / 12), unit: "years" };
 }

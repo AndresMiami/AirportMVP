@@ -4,6 +4,7 @@
  * throws MutationError with a message meant for the person. Nothing here
  * touches storage or React.
  */
+import { z } from "zod";
 import { DERIVED_BY_ID } from "@/model/derived";
 import {
   ConstraintSchema,
@@ -73,8 +74,22 @@ export function slugId(name: string, fallback: string): string {
 
 function commit(model: SystemModel): SystemModel {
   const parsed = SystemModelSchema.safeParse(model);
-  if (!parsed.success) throw new MutationError(`Invalid model: ${parsed.error.issues[0]?.message ?? "validation failed"}`);
+  if (!parsed.success) throw new MutationError(`Invalid model: ${describe(parsed.error)}`);
   return parsed.data;
+}
+
+/** Validate one entity; a refusal is a MutationError naming the field. */
+function parseOr<T extends z.ZodType>(schema: T, value: unknown, what: string): z.infer<T> {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new MutationError(`Invalid ${what}: ${describe(parsed.error)}`);
+  return parsed.data;
+}
+
+function describe(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return "validation failed";
+  const path = issue.path.length ? `${issue.path.join(".")}: ` : "";
+  return `${path}${issue.message}`;
 }
 
 function requireVariable(model: SystemModel, id: string): Variable {
@@ -118,7 +133,7 @@ export function updateProfile(model: SystemModel, patch: Partial<Omit<SystemProf
 export function addMember(model: SystemModel, input: { id?: string; label: string; role?: string }): SystemModel {
   const id = input.id ?? nextId(model, "member");
   if (model.profile.members.some((m) => m.id === id)) throw new MutationError(`Member "${id}" already exists`);
-  const member = MemberSchema.parse({ id, label: input.label, role: input.role ?? "" });
+  const member = parseOr(MemberSchema, { id, label: input.label, role: input.role ?? "" }, "member");
   return commit({ ...model, profile: { ...model.profile, members: [...model.profile.members, member] } });
 }
 
@@ -128,7 +143,7 @@ export function updateMember(model: SystemModel, id: string, patch: Partial<Omit
     ...model,
     profile: {
       ...model.profile,
-      members: model.profile.members.map((m) => (m.id === id ? MemberSchema.parse({ ...m, ...patch }) : m)),
+      members: model.profile.members.map((m) => (m.id === id ? parseOr(MemberSchema, { ...m, ...patch }, "member") : m)),
     },
   });
 }
@@ -161,7 +176,7 @@ export type IncomeSourceInput = Omit<IncomeSource, "id" | "evidence" | "notes" |
 export function addIncomeSource(model: SystemModel, input: IncomeSourceInput): SystemModel {
   const id = input.id ?? nextId(model, "inc");
   if (model.incomeSources.some((s) => s.id === id)) throw new MutationError(`Income source "${id}" already exists`);
-  const source = IncomeSourceSchema.parse({ ...input, id });
+  const source = parseOr(IncomeSourceSchema, { ...input, id }, "income source");
   return commit({ ...model, incomeSources: [...model.incomeSources, source] });
 }
 
@@ -169,7 +184,7 @@ export function updateIncomeSource(model: SystemModel, id: string, patch: Partia
   if (!model.incomeSources.some((s) => s.id === id)) throw new MutationError(`Unknown income source "${id}"`);
   return commit({
     ...model,
-    incomeSources: model.incomeSources.map((s) => (s.id === id ? IncomeSourceSchema.parse({ ...s, ...patch }) : s)),
+    incomeSources: model.incomeSources.map((s) => (s.id === id ? parseOr(IncomeSourceSchema, { ...s, ...patch }, "income source") : s)),
   });
 }
 
@@ -207,7 +222,7 @@ export function addVariable(model: SystemModel, input: VariableInput): SystemMod
   const id = input.id ?? uniqueSlug(model, slugId(input.name, "variable"));
   if (model.variables.some((v) => v.id === id)) throw new MutationError(`Variable "${id}" already exists`);
   if (DERIVED_BY_ID[id]) throw new MutationError(`"${id}" is reserved for a calculated variable`);
-  const variable = VariableSchema.parse({
+  const variable = parseOr(VariableSchema, {
     description: "",
     currentValue: null,
     desiredValue: null,
@@ -221,7 +236,7 @@ export function addVariable(model: SystemModel, input: VariableInput): SystemMod
     id,
     kind: "input",
     formulaId: undefined,
-  });
+  }, "variable");
   return commit({ ...model, variables: [...model.variables, variable] });
 }
 
@@ -248,7 +263,7 @@ export function updateVariable(model: SystemModel, id: string, patch: Partial<Om
   } else {
     merged.kind = "input";
   }
-  return commit({ ...model, variables: model.variables.map((v) => (v.id === id ? VariableSchema.parse(merged) : v)) });
+  return commit({ ...model, variables: model.variables.map((v) => (v.id === id ? parseOr(VariableSchema, merged, "variable") : v)) });
 }
 
 /** Removes an input variable and everything that pointed at it:
@@ -308,20 +323,20 @@ export function addRelationship(model: SystemModel, input: RelationshipInput): S
   validateEndpoints(model, input.sourceVariableId, input.targetVariableId);
   const id = input.id ?? nextId(model, "rel");
   if (model.relationships.some((r) => r.id === id)) throw new MutationError(`Relationship "${id}" already exists`);
-  const relationship = RelationshipSchema.parse({
+  const relationship = parseOr(RelationshipSchema, {
     evidence: [],
     explanation: "",
     notes: "",
     enabled: true,
     ...input,
     id,
-  });
+  }, "relationship");
   return commit({ ...model, relationships: [...model.relationships, relationship] });
 }
 
 export function updateRelationship(model: SystemModel, id: string, patch: Partial<Omit<Relationship, "id">>): SystemModel {
   const current = requireRelationship(model, id);
-  const merged = RelationshipSchema.parse({ ...current, ...patch, id });
+  const merged = parseOr(RelationshipSchema, { ...current, ...patch, id }, "relationship");
   validateEndpoints(model, merged.sourceVariableId, merged.targetVariableId, id);
   return commit({ ...model, relationships: model.relationships.map((r) => (r.id === id ? merged : r)) });
 }
@@ -361,13 +376,13 @@ export type ConstraintInput = Pick<Constraint, "name" | "type" | "sourceType" | 
 export function addConstraint(model: SystemModel, input: ConstraintInput): SystemModel {
   const id = input.id ?? nextId(model, "con");
   if (model.constraints.some((c) => c.id === id)) throw new MutationError(`Constraint "${id}" already exists`);
-  const constraint = ConstraintSchema.parse({ description: "", evidence: [], userConfirmed: false, notes: "", ...input, id });
+  const constraint = parseOr(ConstraintSchema, { description: "", evidence: [], userConfirmed: false, notes: "", ...input, id }, "constraint");
   return commit({ ...model, constraints: [...model.constraints, constraint] });
 }
 
 export function updateConstraint(model: SystemModel, id: string, patch: Partial<Omit<Constraint, "id">>): SystemModel {
   const current = requireConstraint(model, id);
-  const merged = ConstraintSchema.parse({ ...current, ...patch, id });
+  const merged = parseOr(ConstraintSchema, { ...current, ...patch, id }, "constraint");
   return commit({ ...model, constraints: model.constraints.map((c) => (c.id === id ? merged : c)) });
 }
 
@@ -415,14 +430,14 @@ export function addObservation(model: SystemModel, input: ObservationInput): Sys
   const id = input.id ?? nextId(model, "obs");
   if (model.observations.some((o) => o.id === id)) throw new MutationError(`Observation "${id}" already exists`);
   validateSubject(model, input.subjectId);
-  const observation = ObservationSchema.parse({ dateOrPeriod: "", subjectId: "", evidenceSource: "", notes: "", ...input, id });
+  const observation = parseOr(ObservationSchema, { dateOrPeriod: "", subjectId: "", evidenceSource: "", notes: "", ...input, id }, "observation");
   validateLinks(model, observation.links);
   return commit({ ...model, observations: [...model.observations, observation] });
 }
 
 export function updateObservation(model: SystemModel, id: string, patch: Partial<Omit<Observation, "id">>): SystemModel {
   const current = requireObservation(model, id);
-  const merged = ObservationSchema.parse({ ...current, ...patch, id });
+  const merged = parseOr(ObservationSchema, { ...current, ...patch, id }, "observation");
   validateSubject(model, merged.subjectId);
   validateLinks(model, merged.links);
   return commit({ ...model, observations: model.observations.map((o) => (o.id === id ? merged : o)) });
@@ -491,7 +506,7 @@ function validateHypothesisRefs(model: SystemModel, h: Hypothesis): void {
 export function addHypothesis(model: SystemModel, input: HypothesisInput): SystemModel {
   const id = input.id ?? nextId(model, "hyp");
   if (model.hypotheses.some((h) => h.id === id)) throw new MutationError(`Hypothesis "${id}" already exists`);
-  const hypothesis = HypothesisSchema.parse({
+  const hypothesis = parseOr(HypothesisSchema, {
     kind: "general",
     relationshipIds: [],
     supportingObservationIds: [],
@@ -500,14 +515,14 @@ export function addHypothesis(model: SystemModel, input: HypothesisInput): Syste
     notes: "",
     ...input,
     id,
-  });
+  }, "hypothesis");
   validateHypothesisRefs(model, hypothesis);
   return commit({ ...model, hypotheses: [...model.hypotheses, hypothesis] });
 }
 
 export function updateHypothesis(model: SystemModel, id: string, patch: Partial<Omit<Hypothesis, "id">>): SystemModel {
   const current = requireHypothesis(model, id);
-  const merged = HypothesisSchema.parse({ ...current, ...patch, id });
+  const merged = parseOr(HypothesisSchema, { ...current, ...patch, id }, "hypothesis");
   validateHypothesisRefs(model, merged);
   return commit({ ...model, hypotheses: model.hypotheses.map((h) => (h.id === id ? merged : h)) });
 }

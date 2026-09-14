@@ -90,7 +90,8 @@ describe("fictional user: from incomplete observations to a compared history", (
     const second = computeSignature(evaluateSystem(m), { id: "sig_second", now: T1, mode: "current" });
     expect(second.dimensions.find((d) => d.dimensionId === "financial_buffer")!.state).toBe("known");
     expect(second.dimensions.find((d) => d.dimensionId === "financial_buffer")!.confidence).toBeCloseTo(Math.min(0.95, 0.6), 9);
-    expect(second.dimensions.find((d) => d.dimensionId === "financial_buffer")!.evidenceIds).toEqual(["o4"]);
+    // Provenance follows the formula chain: buffer_months reads liquid_reserves (o4) AND essential_expenses (o3).
+    expect(second.dimensions.find((d) => d.dimensionId === "financial_buffer")!.evidenceIds).toEqual(["o4", "o3"]);
     expect(second.dimensions.find((d) => d.dimensionId === "career_capital")!.confidence).toBe(0.7);
     expect(second.completeness).toBeGreaterThan(first.completeness);
     expect(second.overallConfidence!).toBeGreaterThan(first.overallConfidence!);

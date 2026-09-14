@@ -103,7 +103,7 @@ export const ContributionSchema = z.object({
   /** Raw value used (null = unknown; NEVER substituted with 0). */
   rawValue: z.number().nullable(),
   /** 0..1 after transform and inversion; null when raw is unknown. */
-  normalized: z.number().nullable(),
+  normalized: unitInterval.nullable(),
   weight: z.number(),
   required: z.boolean(),
   sourceType: SourceTypeSchema.nullable(),
@@ -121,8 +121,8 @@ export const StructuralDimensionSnapshotSchema = z.object({
   dimensionId: z.string(),
   name: z.string(),
   state: DimensionStateSchema,
-  /** Canonical value. null exactly when state is "unknown". */
-  normalizedValue: z.number().nullable(),
+  /** Canonical value, 0..1. null exactly when state is "unknown". */
+  normalizedValue: unitInterval.nullable(),
   binaryState: BinaryStateSchema,
   bandState: BandStateSchema,
   /** 0 when unknown. */
@@ -185,7 +185,7 @@ export const VariableSnapshotItemSchema = z.object({
   desiredValue: z.number().nullable(),
   targetMode: TargetModeSchema,
   /** 0..1 position inside referenceRange when one exists. */
-  normalized: z.number().nullable(),
+  normalized: unitInterval.nullable(),
   confidence: z.number(),
   sourceType: SourceTypeSchema,
 });
