@@ -6,11 +6,13 @@ buffers, dependencies, constraints, and leverage. It is **not** a financial
 calculator and **not** a life coach. Every number carries a source type and
 a confidence; every formula is a labelled model assumption.
 
-Status: MVP iteration 1 — data model, calculation library, fictional sample
-household, dashboard, current-vs-desired comparison, feedback-loop
-detection, network diagram, scenario simulator, and unit tests. Local
-persistence only (browser localStorage). No authentication, no cloud, no
-real AI provider yet (a deterministic mock exercises the review contract).
+Status: iteration 2 — the structural model is editable. Schema v2 adds
+editable relationships with lags in the unit the person chose, hard/soft
+constraints, first-class Observations, Hypotheses with a review status
+(loops stay hypotheses), a blank-household workflow, several systems side
+by side, and versioned localStorage state with migrations. No
+authentication, no cloud, no real AI provider (a deterministic mock
+exercises the review contract).
 
 ## Run
 
@@ -31,15 +33,19 @@ src/
   domain/         vocabulary (labels) and the model-assumption registry (A1..A15)
   calculations/   pure math: household ratios, HHI, compounding, leverage,
                   gap, graph (loops, pressure, propagation), feasibility, utility
-  model/          derived-variable definitions and evaluateSystem()
-  scenarios/      applyScenario() and compareScenario()
+  model/          derived-variable definitions, evaluateSystem(), migrations,
+                  blank-model factory
+  scenarios/      applyScenario() and compareScenario() (tendencies by horizon)
   ai/             strict output schema, provider interface, system prompt, mock
-  data/           the fictional sample household
-  repositories/   persistence boundary (localStorage, in-memory)
-  services/       ModelService (load-or-seed, save, guarded updates)
-  components/     React only: provider, primitives, network diagram, fields
+  data/           the fictional sample household (tests + demo only)
+  repositories/   persistence boundary: several models + active id
+                  (localStorage with migration on load, in-memory)
+  services/       ModelService (active system, seed, create blank, save) and
+                  mutations.ts: every edit as a pure, validated function
+  components/     React only: provider, primitives, editors, network diagram
   app/            Next.js routes (one screen per directory)
 tests/            vitest; tests/architecture pins the model layer UI-free
+docs/EDITING-CONTRACT.md  how screens change the model
 ```
 
 Rules the code enforces:
@@ -50,6 +56,15 @@ Rules the code enforces:
   recomputed through the same `evaluateSystem` the screens use.
 - AI output is validated with Zod and lands on a review screen; approved
   items enter the model stamped `ai_inferred` with the cited evidence.
+- Every edit is a pure mutation in `src/services/mutations.ts` that returns
+  a new, Zod-validated model or throws `MutationError`; removals cascade
+  (a removed variable takes its relationships, links and action targets).
+- Stored state carries `schemaVersion`; `src/model/migrations.ts` upgrades
+  older records on load and rejects what it cannot validate.
+- Relationship strength is a model judgment, never an estimated causal
+  coefficient. A loop is a hypothesis with a status; "accepted" means a
+  working reading, not proof. Observations are kept verbatim and never
+  become values by themselves.
 - Directories under `src/` other than `components/` and `app/` must not
   import React or Next (tested).
 

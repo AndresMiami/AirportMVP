@@ -3,6 +3,7 @@ import { useState } from "react";
 import { MockAiProvider } from "@/ai/mock-provider";
 import { ANALYSIS_SYSTEM_PROMPT } from "@/ai/prompt";
 import type { AiAnalysis } from "@/ai/schema";
+import { formatLag } from "@/calculations/lag";
 import { useModel } from "@/components/model-provider";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader } from "@/components/ui";
 import type { Variable } from "@/types";
@@ -180,7 +181,8 @@ export default function AiPage() {
                 <ul className="text-sm space-y-1">
                   {analysis.candidate_relationships.map((r, i) => (
                     <li key={i}>
-                      {r.sourceVariable} → {r.targetVariable} ({r.direction}, strength ≈ {r.strengthEstimate}) <ConfidenceBadge confidence={r.confidence} />
+                      {r.sourceVariable} → {r.targetVariable} ({r.direction}, strength ≈ {r.strengthEstimate}, lag {formatLag(r.lagEstimate)}){" "}
+                      <ConfidenceBadge confidence={r.confidence} />
                       <div className="text-xs text-muted">{r.explanation}</div>
                     </li>
                   ))}
