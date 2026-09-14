@@ -148,13 +148,38 @@ export function updateMember(model: SystemModel, id: string, patch: Partial<Omit
   });
 }
 
-/** Removing a member clears it as the subject of observations (they stay). */
+/** Where a member is referenced as a historical subject. */
+export function memberReferences(model: SystemModel, id: string): { observations: number; hypotheses: number } {
+  return {
+    observations: model.observations.filter((o) => o.subjectId === id).length,
+    hypotheses: 0,
+  };
+}
+
+/** Archive a member: the id stays, every observation keeps naming them.
+ *  History is an asset; leaving the household is a status change. */
+export function archiveMember(model: SystemModel, id: string): SystemModel {
+  return updateMember(model, id, { status: "archived" });
+}
+
+export function restoreMember(model: SystemModel, id: string): SystemModel {
+  return updateMember(model, id, { status: "active" });
+}
+
+/** Hard deletion is allowed only while nothing in the history names the
+ *  member. Otherwise archive them; the historical attribution must survive. */
 export function removeMember(model: SystemModel, id: string): SystemModel {
   if (!model.profile.members.some((m) => m.id === id)) throw new MutationError(`Unknown member "${id}"`);
+  const refs = memberReferences(model, id);
+  const total = refs.observations + refs.hypotheses;
+  if (total > 0) {
+    throw new MutationError(
+      `${total} observation${total > 1 ? "s name" : " names"} this member; archive them instead so the history keeps its subject`,
+    );
+  }
   return commit({
     ...model,
     profile: { ...model.profile, members: model.profile.members.filter((m) => m.id !== id) },
-    observations: model.observations.map((o) => (o.subjectId === id ? { ...o, subjectId: "" } : o)),
   });
 }
 

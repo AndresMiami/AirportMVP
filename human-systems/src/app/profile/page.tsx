@@ -386,12 +386,35 @@ export default function ProfilePage() {
                           {n === 0 ? "no observations" : `${n} observation${n > 1 ? "s" : ""}`}
                         </td>
                         <td>
-                          <ConfirmButton
-                            label="Remove"
-                            confirmLabel="Remove member"
-                            message={`Remove ${m.label}? ${n > 0 ? `Their ${n} observation${n > 1 ? "s stay" : " stays"} and will no longer name a subject.` : "No observations name them."}`}
-                            onConfirm={() => commit(`member:${m.id}`, (mm) => mutations.removeMember(mm, m.id))}
-                          />
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {m.status === "archived" ? (
+                              <>
+                                <span className="rounded px-1.5 py-0.5 text-xs bg-background border border-border">archived</span>
+                                <button
+                                  type="button"
+                                  className="rounded border border-border bg-background px-2 py-1 text-xs"
+                                  onClick={() => commit(`member:${m.id}`, (mm) => mutations.restoreMember(mm, m.id))}
+                                >
+                                  Restore
+                                </button>
+                              </>
+                            ) : (
+                              <ConfirmButton
+                                label="Archive"
+                                confirmLabel="Archive member"
+                                message={`Archive ${m.label}? Their id and every observation naming them are kept; they are marked as no longer part of the household.`}
+                                onConfirm={() => commit(`member:${m.id}`, (mm) => mutations.archiveMember(mm, m.id))}
+                              />
+                            )}
+                            {n === 0 ? (
+                              <ConfirmButton
+                                label="Delete"
+                                confirmLabel="Delete member"
+                                message={`Delete ${m.label}? Nothing in the history names them, so no attribution is lost.`}
+                                onConfirm={() => commit(`member:${m.id}`, (mm) => mutations.removeMember(mm, m.id))}
+                              />
+                            ) : null}
+                          </div>
                           <ErrorLine msg={errorFor(`member:${m.id}`)} />
                         </td>
                       </tr>

@@ -336,10 +336,13 @@ export type AttractorDescription = z.infer<typeof AttractorDescriptionSchema>;
 /* System profile + aggregate                                          */
 /* ------------------------------------------------------------------ */
 
+/** A member's id is a stable historical subject id: it survives leaving the
+ *  household. Members are archived, never silently erased. */
 export const MemberSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   role: z.string().default(""),
+  status: z.enum(["active", "archived"]).default("active"),
 });
 export type Member = z.infer<typeof MemberSchema>;
 

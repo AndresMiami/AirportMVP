@@ -301,6 +301,12 @@ export default function ScenariosPage() {
             </div>
           </Card>
 
+          {comparison.projectionsSkipped.length > 0 ? (
+            <Note>
+              Not projected because an input is unknown (never filled with zero):{" "}
+              {comparison.projectionsSkipped.map((p) => `${p.label} — missing ${p.missingInputs.join(", ")}`).join("; ")}.
+            </Note>
+          ) : null}
           {comparison.projections.length > 0 ? (
             <Card title={`Compounding trajectories over ${scenario.horizonMonths} months — model assumptions, not forecasts`}>
               <div className="grid gap-4 md:grid-cols-2">

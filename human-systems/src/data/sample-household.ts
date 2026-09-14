@@ -926,9 +926,9 @@ export function createSampleHousehold(): SystemModel {
       description:
         "Two adults and one child in Miami. One four-day warehouse job, one rideshare income, occasional catering. Fictional data for developing the model.",
       members: [
-        { id: "dani", label: "Dani", role: "Adult, warehouse associate" },
-        { id: "marisol", label: "Marisol", role: "Adult, rideshare driver" },
-        { id: "child", label: "Child", role: "Age 7" },
+        { id: "dani", label: "Dani", role: "Adult, warehouse associate", status: "active" },
+        { id: "marisol", label: "Marisol", role: "Adult, rideshare driver", status: "active" },
+        { id: "child", label: "Child", role: "Age 7", status: "active" },
       ],
       location: "Miami, FL",
       currency: "USD",

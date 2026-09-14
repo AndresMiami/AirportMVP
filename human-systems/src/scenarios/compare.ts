@@ -72,6 +72,8 @@ export interface ScenarioComparison {
   loopDeltas: LoopDelta[];
   directional: DirectionalPressure[];
   directionalByHorizon: HorizonGroup[];
+  /** Projections not drawn because an input is unknown (never zero-filled). */
+  projectionsSkipped: SkippedProjection[];
   projections: Projection[];
   meanGapBefore: number | null;
   meanGapAfter: number | null;
@@ -92,60 +94,97 @@ function num(system: EvaluatedSystem, id: string): number | null {
   return system.variableById.get(id)?.currentValue ?? null;
 }
 
-function buildProjections(base: EvaluatedSystem, result: EvaluatedSystem, months: number): Projection[] {
-  const out: Projection[] = [];
+/** A projection that could not be computed because an input is unknown.
+ *  UNKNOWN IS NOT ZERO: we say which inputs are missing instead of
+ *  substituting zeros and drawing a curve. */
+export interface SkippedProjection {
+  label: string;
+  missingInputs: string[];
+}
 
-  const cc = (s: EvaluatedSystem) => {
-    const start = num(s, INPUT_IDS.careerCapital);
-    if (start === null) return null;
-    return projectCareerCapital(start, months, {
-      qualityOfEffort: num(s, INPUT_IDS.qualityOfEffort) ?? 0,
-      protectedHoursPerMonth: weeklyToMonthlyHours(num(s, INPUT_IDS.protectedHours) ?? 0),
-      persistence: num(s, INPUT_IDS.persistence) ?? 0,
-      effortToCapitalRate: num(s, INPUT_IDS.effortToCapitalRate) ?? 0,
-      switchingCostPerMonth:
-        ((num(s, INPUT_IDS.switchingCost) ?? 0) * (num(s, INPUT_IDS.switchingFrequency) ?? 0)) / 12,
-    });
+type ProjectionAttempt = { series: number[] } | { missing: string[] };
+
+function requireAll(system: EvaluatedSystem, ids: readonly string[]): { values: Map<string, number>; missing: string[] } {
+  const values = new Map<string, number>();
+  const missing: string[] = [];
+  for (const id of ids) {
+    const v = num(system, id);
+    if (v === null) missing.push(system.variableById.get(id)?.name ?? id);
+    else values.set(id, v);
+  }
+  return { values, missing };
+}
+
+const CAREER_INPUTS = [
+  INPUT_IDS.careerCapital,
+  INPUT_IDS.qualityOfEffort,
+  INPUT_IDS.protectedHours,
+  INPUT_IDS.persistence,
+  INPUT_IDS.effortToCapitalRate,
+  INPUT_IDS.switchingCost,
+  INPUT_IDS.switchingFrequency,
+];
+const CAPITAL_INPUTS = [
+  INPUT_IDS.productiveAssets,
+  DERIVED_IDS.totalIncome,
+  INPUT_IDS.essentialExpenses,
+  INPUT_IDS.discretionaryExpenses,
+  INPUT_IDS.monthlyDebtPayments,
+  INPUT_IDS.capitalConversionRate,
+  INPUT_IDS.annualReturnRate,
+];
+
+function buildProjections(
+  base: EvaluatedSystem,
+  result: EvaluatedSystem,
+  months: number,
+): { projections: Projection[]; skipped: SkippedProjection[] } {
+  const projections: Projection[] = [];
+  const skipped: SkippedProjection[] = [];
+
+  const career = (s: EvaluatedSystem): ProjectionAttempt => {
+    const { values, missing } = requireAll(s, CAREER_INPUTS);
+    if (missing.length) return { missing };
+    const g = (id: string) => values.get(id)!;
+    return {
+      series: projectCareerCapital(g(INPUT_IDS.careerCapital), months, {
+        qualityOfEffort: g(INPUT_IDS.qualityOfEffort),
+        protectedHoursPerMonth: weeklyToMonthlyHours(g(INPUT_IDS.protectedHours)),
+        persistence: g(INPUT_IDS.persistence),
+        effortToCapitalRate: g(INPUT_IDS.effortToCapitalRate),
+        switchingCostPerMonth: (g(INPUT_IDS.switchingCost) * g(INPUT_IDS.switchingFrequency)) / 12,
+      }),
+    };
   };
-  const ccBase = cc(base);
-  const ccResult = cc(result);
-  if (ccBase && ccResult) {
-    out.push({
-      label: "Career capital (index)",
-      unit: "index",
-      assumptionIds: ["A6", "A15"],
-      base: ccBase,
-      scenario: ccResult,
-    });
+  const cb = career(base);
+  const cr = career(result);
+  if ("series" in cb && "series" in cr) {
+    projections.push({ label: "Career capital (index)", unit: "index", assumptionIds: ["A6", "A15"], base: cb.series, scenario: cr.series });
+  } else {
+    skipped.push({ label: "Career capital (index)", missingInputs: [...new Set([...("missing" in cb ? cb.missing : []), ...("missing" in cr ? cr.missing : [])])] });
   }
 
-  const pc = (s: EvaluatedSystem) => {
-    const start = num(s, INPUT_IDS.productiveAssets);
-    const income = num(s, DERIVED_IDS.totalIncome);
-    if (start === null || income === null) return null;
-    const expenses =
-      (num(s, INPUT_IDS.essentialExpenses) ?? 0) +
-      (num(s, INPUT_IDS.discretionaryExpenses) ?? 0) +
-      (num(s, INPUT_IDS.monthlyDebtPayments) ?? 0);
-    return projectProductiveCapital(start, months, {
-      capitalConversionRate: num(s, INPUT_IDS.capitalConversionRate) ?? 0,
-      monthlyIncome: income,
-      monthlyExpenses: expenses,
-      monthlyReturnRate: annualToMonthlyRate(num(s, INPUT_IDS.annualReturnRate) ?? 0),
-    });
+  const capital = (s: EvaluatedSystem): ProjectionAttempt => {
+    const { values, missing } = requireAll(s, CAPITAL_INPUTS);
+    if (missing.length) return { missing };
+    const g = (id: string) => values.get(id)!;
+    return {
+      series: projectProductiveCapital(g(INPUT_IDS.productiveAssets), months, {
+        capitalConversionRate: g(INPUT_IDS.capitalConversionRate),
+        monthlyIncome: g(DERIVED_IDS.totalIncome),
+        monthlyExpenses: g(INPUT_IDS.essentialExpenses) + g(INPUT_IDS.discretionaryExpenses) + g(INPUT_IDS.monthlyDebtPayments),
+        monthlyReturnRate: annualToMonthlyRate(g(INPUT_IDS.annualReturnRate)),
+      }),
+    };
   };
-  const pcBase = pc(base);
-  const pcResult = pc(result);
-  if (pcBase && pcResult) {
-    out.push({
-      label: "Productive assets",
-      unit: "$",
-      assumptionIds: ["A7"],
-      base: pcBase,
-      scenario: pcResult,
-    });
+  const pb = capital(base);
+  const pr = capital(result);
+  if ("series" in pb && "series" in pr) {
+    projections.push({ label: "Productive assets", unit: "$", assumptionIds: ["A7"], base: pb.series, scenario: pr.series });
+  } else {
+    skipped.push({ label: "Productive assets", missingInputs: [...new Set([...("missing" in pb ? pb.missing : []), ...("missing" in pr ? pr.missing : [])])] });
   }
-  return out;
+  return { projections, skipped };
 }
 
 export function compareScenario(baseModel: SystemModel, scenario: Scenario): ScenarioComparison {
@@ -187,6 +226,7 @@ export function compareScenario(baseModel: SystemModel, scenario: Scenario): Sce
     }
   }
   const directional = propagateDirectionalPressure(base.relationships, seeds);
+  const built = buildProjections(base, result, scenario.horizonMonths);
 
   return {
     scenario,
@@ -197,7 +237,8 @@ export function compareScenario(baseModel: SystemModel, scenario: Scenario): Sce
     loopDeltas,
     directional,
     directionalByHorizon: groupByHorizon(directional),
-    projections: buildProjections(base, result, scenario.horizonMonths),
+    projections: built.projections,
+    projectionsSkipped: built.skipped,
     meanGapBefore: base.gap.meanNormalizedGap,
     meanGapAfter: result.gap.meanNormalizedGap,
   };

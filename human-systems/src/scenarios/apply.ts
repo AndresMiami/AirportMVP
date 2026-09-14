@@ -47,9 +47,17 @@ export function applyScenario(base: SystemModel, scenario: Scenario): AppliedSce
       case "setVariable":
         setVariable(change, change.variableId, () => change.value);
         break;
-      case "adjustVariable":
+      case "adjustVariable": {
+        // UNKNOWN IS NOT ZERO: a delta on a variable with no value cannot be
+        // applied; set a value instead.
+        const target = model.variables.find((x) => x.id === change.variableId);
+        if (target && target.kind === "input" && target.currentValue === null) {
+          rejected.push({ change, reason: `${target.name} has no current value; set a value instead of adjusting it.` });
+          break;
+        }
         setVariable(change, change.variableId, (c) => (c ?? 0) + change.delta);
         break;
+      }
       case "setIncomeSourceAmount": {
         const s = model.incomeSources.find((x) => x.id === change.incomeSourceId);
         if (!s) {

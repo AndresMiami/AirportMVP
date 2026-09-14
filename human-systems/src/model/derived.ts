@@ -50,8 +50,6 @@ export interface DerivedDefinition {
   targetMode: "at_least" | "at_most" | "exact";
 }
 
-const money = (n: number | null) => (n === null ? 0 : n);
-
 export const DERIVED_DEFINITIONS: DerivedDefinition[] = [
   {
     id: DERIVED_IDS.totalIncome,
@@ -94,14 +92,15 @@ export const DERIVED_DEFINITIONS: DerivedDefinition[] = [
     usesIncomeSources: false,
     assumptionIds: [],
     compute: (ctx) => {
+      // UNKNOWN IS NOT ZERO (A20): a missing expense class makes the surplus
+      // unknown rather than silently larger. The missing input is reported by
+      // computeDerivedVariables as a model issue.
       const income = ctx.derived(DERIVED_IDS.totalIncome);
-      if (income === null) return null;
-      return monthlySurplus({
-        totalIncome: income,
-        essentialExpenses: money(ctx.value(INPUT_IDS.essentialExpenses)),
-        discretionaryExpenses: money(ctx.value(INPUT_IDS.discretionaryExpenses)),
-        debtPayments: money(ctx.value(INPUT_IDS.monthlyDebtPayments)),
-      });
+      const essentialExpenses = ctx.value(INPUT_IDS.essentialExpenses);
+      const discretionaryExpenses = ctx.value(INPUT_IDS.discretionaryExpenses);
+      const debtPayments = ctx.value(INPUT_IDS.monthlyDebtPayments);
+      if (income === null || essentialExpenses === null || discretionaryExpenses === null || debtPayments === null) return null;
+      return monthlySurplus({ totalIncome: income, essentialExpenses, discretionaryExpenses, debtPayments });
     },
     defaultReferenceRange: { min: -2000, max: 2000 },
   },

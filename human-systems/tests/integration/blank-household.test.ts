@@ -217,7 +217,7 @@ describe("blank household end to end (service + repository, no React)", () => {
       `Monthly surplus / deficit cannot be computed fully: missing ${INPUT_IDS.discretionaryExpenses}, ${INPUT_IDS.monthlyDebtPayments}.`,
       `Debt burden cannot be computed fully: missing ${INPUT_IDS.monthlyDebtPayments}.`,
     ]);
-    expect(derivedValue(ev, DERIVED_IDS.monthlySurplus)).toBe(EXPECTED_TOTAL - ESSENTIAL); // missing expenses count as 0
+    expect(derivedValue(ev, DERIVED_IDS.monthlySurplus)).toBeNull(); // UNKNOWN IS NOT ZERO: missing expense classes make the surplus unknown
     expect(derivedValue(ev, DERIVED_IDS.debtBurden)).toBeNull();
 
     m = M.linkObservation(m, "o1", { kind: "variable", id: INPUT_IDS.essentialExpenses });

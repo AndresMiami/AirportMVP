@@ -22,8 +22,11 @@ import {
   nextSignatureId,
   removeConstraint,
   removeHypothesis,
+  archiveMember,
+  memberReferences,
   removeMember,
   removeObservation,
+  restoreMember,
   removeRelationship,
   removeSignatureSnapshot,
   removeVariable,
@@ -519,17 +522,27 @@ describe("hypothesis acceptance / rejection", () => {
 /* ------------------------------------------------------------------ */
 
 describe("members / income / variables", () => {
-  it("addMember then removeMember clears the observation subject", () => {
+  it("a member named by observations can be archived, not deleted; the subject id survives", () => {
     let m = addMember(blank(), { label: "Sam", role: "Adult" });
-    expect(m.profile.members).toEqual([{ id: "member_1", label: "Sam", role: "Adult" }]);
+    expect(m.profile.members).toEqual([{ id: "member_1", label: "Sam", role: "Adult", status: "active" }]);
     m = addObservation(m, { statement: "Sam works nights", sourceType: "self_reported", confidence: 0.8, subjectId: "member_1" });
-    expect(m.observations[0].subjectId).toBe("member_1");
     expect(() => addMember(m, { id: "member_1", label: "Dup" })).toThrow(/already exists/);
+    // History is an asset: hard deletion is refused while an observation names the member.
+    expect(() => removeMember(m, "member_1")).toThrow(/archive them instead/);
+    expect(m.observations[0].subjectId).toBe("member_1");
+    m = archiveMember(m, "member_1");
+    expect(m.profile.members[0].status).toBe("archived");
+    expect(m.observations[0].subjectId).toBe("member_1");
+    expect(memberReferences(m, "member_1")).toEqual({ observations: 1, hypotheses: 0 });
+    m = restoreMember(m, "member_1");
+    expect(m.profile.members[0].status).toBe("active");
+    expect(() => removeMember(m, "nope")).toThrow(/Unknown member/);
+  });
+
+  it("an unreferenced member can be deleted outright", () => {
+    let m = addMember(blank(), { label: "Temp" });
     m = removeMember(m, "member_1");
     expect(m.profile.members).toEqual([]);
-    expect(m.observations).toHaveLength(1);
-    expect(m.observations[0].subjectId).toBe("");
-    expect(() => removeMember(m, "member_1")).toThrow(/Unknown member/);
   });
 
   it("addIncomeSource changes total_income by the amount", () => {
