@@ -1,65 +1,101 @@
 /**
- * Application service: loads the model (or seeds the sample), saves edits,
- * and exposes the few mutations the MVP screens need. UI code goes through
- * this; it never touches the repository directly.
+ * Application service: which system is active, loading with migration,
+ * seeding the sample when nothing exists, creating blank systems, and
+ * saving. All model EDITS are pure functions in ./mutations; the UI
+ * composes them and hands the result to `save`.
  */
 import { createSampleHousehold } from "@/data/sample-household";
-import type { ModelRepository } from "@/repositories";
-import {
-  IncomeSourceSchema,
-  SystemModelSchema,
-  VariableSchema,
-  type IncomeSource,
-  type SystemModel,
-  type Variable,
-} from "@/types";
+import { createBlankModel } from "@/model/blank";
+import type { ModelRepository, ModelSummary } from "@/repositories";
+import { SystemModelSchema, type IncomeSource, type SystemModel, type SystemType, type Variable } from "@/types";
+import * as M from "./mutations";
+
+export const SAMPLE_MODEL_ID = "sample_household_okafor_reyes";
+
+export interface ServiceOptions {
+  /** Injectable clock so tests stay deterministic. */
+  now?: () => string;
+  /** Injectable id source for new systems. */
+  newId?: () => string;
+}
 
 export class ModelService {
-  constructor(private readonly repo: ModelRepository) {}
+  private readonly now: () => string;
+  private readonly newId: () => string;
 
-  async loadOrSeed(): Promise<{ model: SystemModel; seeded: boolean }> {
-    const existing = await this.repo.load();
-    if (existing) return { model: existing, seeded: false };
+  constructor(
+    private readonly repo: ModelRepository,
+    options: ServiceOptions = {},
+  ) {
+    this.now = options.now ?? (() => new Date().toISOString());
+    this.newId = options.newId ?? (() => `sys_${Date.now().toString(36)}`);
+  }
+
+  /** The active model, or the first stored one, or a freshly seeded sample. */
+  async loadActiveOrSeed(): Promise<{ model: SystemModel; seeded: boolean }> {
+    const activeId = await this.repo.getActiveId();
+    if (activeId) {
+      const m = await this.repo.load(activeId);
+      if (m) return { model: m, seeded: false };
+    }
+    const all = await this.repo.list();
+    if (all.length > 0) {
+      const m = await this.repo.load(all[0].id);
+      if (m) {
+        await this.repo.setActiveId(m.id);
+        return { model: m, seeded: false };
+      }
+    }
     const model = createSampleHousehold();
     await this.repo.save(model);
+    await this.repo.setActiveId(model.id);
     return { model, seeded: true };
   }
 
+  listModels(): Promise<ModelSummary[]> {
+    return this.repo.list();
+  }
+
+  async switchActive(id: string): Promise<SystemModel> {
+    const m = await this.repo.load(id);
+    if (!m) throw new Error(`No stored system with id ${id}`);
+    await this.repo.setActiveId(id);
+    return m;
+  }
+
+  async createBlank(input: { name: string; systemType: SystemType; location?: string; currency?: string }): Promise<SystemModel> {
+    const model = createBlankModel({ id: this.newId(), now: this.now(), ...input });
+    await this.repo.save(model);
+    await this.repo.setActiveId(model.id);
+    return model;
+  }
+
+  /** (Re)creates the fictional sample under its fixed id and activates it. */
+  async resetSample(): Promise<SystemModel> {
+    const model = createSampleHousehold();
+    await this.repo.save(model);
+    await this.repo.setActiveId(model.id);
+    return model;
+  }
+
+  async deleteModel(id: string): Promise<void> {
+    await this.repo.delete(id);
+  }
+
   async save(model: SystemModel): Promise<SystemModel> {
-    const next = SystemModelSchema.parse({ ...model, updatedAt: new Date().toISOString() });
+    const next = SystemModelSchema.parse({ ...model, updatedAt: this.now() });
     await this.repo.save(next);
     return next;
   }
 
-  async resetToSample(): Promise<SystemModel> {
-    await this.repo.clear();
-    const model = createSampleHousehold();
-    await this.repo.save(model);
-    return model;
-  }
-
-  /** Replace one variable. Derived variables keep their computed fields
-   *  protected: only desired value, notes and judgments may change. */
+  /** Convenience wrappers kept for the existing screens. */
   updateVariable(model: SystemModel, patch: Partial<Variable> & { id: string }): SystemModel {
-    const variables = model.variables.map((v) => {
-      if (v.id !== patch.id) return v;
-      const merged = { ...v, ...patch };
-      if (v.kind === "derived") {
-        merged.kind = "derived";
-        merged.currentValue = v.currentValue;
-        merged.sourceType = "calculated";
-        merged.confidence = v.confidence;
-        merged.formulaId = v.formulaId;
-      }
-      return VariableSchema.parse(merged);
-    });
-    return { ...model, variables };
+    const { id, ...rest } = patch;
+    return M.updateVariable(model, id, rest);
   }
 
   updateIncomeSource(model: SystemModel, patch: Partial<IncomeSource> & { id: string }): SystemModel {
-    const incomeSources = model.incomeSources.map((s) =>
-      s.id === patch.id ? IncomeSourceSchema.parse({ ...s, ...patch }) : s,
-    );
-    return { ...model, incomeSources };
+    const { id, ...rest } = patch;
+    return M.updateIncomeSource(model, id, rest);
   }
 }

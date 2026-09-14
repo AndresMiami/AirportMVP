@@ -151,6 +151,21 @@ export const IncomeSourceSchema = z.object({
 export type IncomeSource = z.infer<typeof IncomeSourceSchema>;
 
 /* ------------------------------------------------------------------ */
+/* Time lags                                                           */
+/* ------------------------------------------------------------------ */
+
+export const LagUnitSchema = z.enum(["days", "weeks", "months", "years"]);
+export type LagUnit = z.infer<typeof LagUnitSchema>;
+
+/** Delay before an effect shows. Stored in the unit the person thinks in;
+ *  converted only for arithmetic (calculations/lag). */
+export const LagSchema = z.object({
+  value: z.number().min(0),
+  unit: LagUnitSchema,
+});
+export type Lag = z.infer<typeof LagSchema>;
+
+/* ------------------------------------------------------------------ */
 /* Relationships (directed edges)                                      */
 /* ------------------------------------------------------------------ */
 
@@ -159,17 +174,22 @@ export type EdgeDirection = z.infer<typeof EdgeDirectionSchema>;
 
 export const RelationshipSchema = z.object({
   id: z.string().min(1),
-  sourceVariable: z.string().min(1),
-  targetVariable: z.string().min(1),
+  sourceVariableId: z.string().min(1),
+  targetVariableId: z.string().min(1),
   /** positive: source up -> target up. negative: source up -> target down. */
   direction: EdgeDirectionSchema,
-  /** 0..1 subjective influence weight (NOT a measured elasticity). */
+  /** 0..1 MODEL JUDGMENT of influence. NOT an empirically estimated causal
+   *  coefficient; nothing in this application estimates one. */
   strength: unitInterval,
-  /** Delay before the effect shows, in months. */
-  lagMonths: z.number().min(0),
+  lag: LagSchema,
   confidence: unitInterval,
-  explanation: z.string().default(""),
   sourceType: SourceTypeSchema,
+  evidence: z.array(EvidenceSchema).default([]),
+  explanation: z.string().default(""),
+  notes: z.string().default(""),
+  /** Disabled edges are kept for the record but excluded from loops,
+   *  propagation and influence. */
+  enabled: z.boolean().default(true),
 });
 export type Relationship = z.infer<typeof RelationshipSchema>;
 
@@ -185,21 +205,39 @@ export type LoopAnnotation = z.infer<typeof LoopAnnotationSchema>;
 /* Constraints, actions, person fit                                    */
 /* ------------------------------------------------------------------ */
 
-/** Hard constraints are expressed as a limit on a requirement dimension.
- *  An action declares its requirements on the same dimension keys. */
+export const ConstraintTypeSchema = z.enum(["hard", "soft"]);
+export type ConstraintType = z.infer<typeof ConstraintTypeSchema>;
+
 export const ConstraintComparatorSchema = z.enum(["lte", "gte", "eq"]);
+
+/** Optional machine-checkable rule: a limit on a requirement dimension.
+ *  An action declares its requirements on the same dimension keys. A
+ *  constraint without a check is descriptive only and is listed as
+ *  "unchecked" for every action. */
+export const ConstraintCheckSchema = z.object({
+  /** e.g. "hoursPerWeek", "capitalRequired", "requiresRelocation",
+   *  "requiresDriving", "requiresLicense", "physicalDemand". */
+  dimension: z.string().min(1),
+  comparator: ConstraintComparatorSchema,
+  limit: z.union([z.number(), z.boolean()]),
+});
+export type ConstraintCheck = z.infer<typeof ConstraintCheckSchema>;
 
 export const ConstraintSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
-  /** Requirement dimension, e.g. "hoursPerWeek", "capitalRequired",
-   *  "requiresRelocation", "requiresDriving", "physicalDemand". */
-  dimension: z.string().min(1),
-  comparator: ConstraintComparatorSchema,
-  limit: z.union([z.number(), z.boolean()]),
+  /** hard: a violation makes an action infeasible.
+   *  soft: a violation lowers suitability but never excludes. */
+  type: ConstraintTypeSchema,
+  check: ConstraintCheckSchema.optional(),
+  /** Soft constraints only: how much a violation lowers suitability (0..1). */
+  softPenalty: unitInterval.default(0.5),
   sourceType: SourceTypeSchema,
   confidence: unitInterval,
+  evidence: z.array(EvidenceSchema).default([]),
+  /** The person has read and confirmed this constraint applies to them. */
+  userConfirmed: z.boolean().default(false),
   notes: z.string().default(""),
 });
 export type Constraint = z.infer<typeof ConstraintSchema>;
@@ -258,6 +296,62 @@ export const ActionSchema = z.object({
 export type Action = z.infer<typeof ActionSchema>;
 
 /* ------------------------------------------------------------------ */
+/* Observations and hypotheses                                         */
+/* ------------------------------------------------------------------ */
+
+/** Which model entities an observation is linked to. Linking never turns
+ *  the observation into a value; it records "this observation bears on". */
+export const ObservationLinksSchema = z.object({
+  variableIds: z.array(z.string()).default([]),
+  relationshipIds: z.array(z.string()).default([]),
+  constraintIds: z.array(z.string()).default([]),
+  hypothesisIds: z.array(z.string()).default([]),
+});
+export type ObservationLinks = z.infer<typeof ObservationLinksSchema>;
+
+/** An OBSERVATION: something noticed or reported, kept verbatim. It is not
+ *  a variable, not a relationship, and carries no interpretation. */
+export const ObservationSchema = z.object({
+  id: z.string().min(1),
+  statement: z.string().min(1),
+  /** Free text: "2019-2021", "March 2026", "ongoing". */
+  dateOrPeriod: z.string().default(""),
+  /** A member id from the profile, or the system id for the whole system. */
+  subjectId: z.string().default(""),
+  sourceType: SourceTypeSchema,
+  confidence: unitInterval,
+  /** Where it came from: "bank statements", "conversation 2026-09-01". */
+  evidenceSource: z.string().default(""),
+  notes: z.string().default(""),
+  links: ObservationLinksSchema.prefault({}),
+});
+export type Observation = z.infer<typeof ObservationSchema>;
+
+export const HypothesisStatusSchema = z.enum(["proposed", "accepted", "rejected", "uncertain"]);
+export type HypothesisStatus = z.infer<typeof HypothesisStatusSchema>;
+
+export const HypothesisKindSchema = z.enum(["loop", "relationship", "general"]);
+export type HypothesisKind = z.infer<typeof HypothesisKindSchema>;
+
+/** An INTERPRETATION under review. "accepted" means the person accepts it
+ *  as a working reading of their system, never that it is proven. */
+export const HypothesisSchema = z.object({
+  id: z.string().min(1),
+  statement: z.string().min(1),
+  kind: HypothesisKindSchema.default("general"),
+  /** For kind "loop": the canonical loop id (calculations/graph). */
+  loopId: z.string().optional(),
+  /** Relationships this hypothesis is about. */
+  relationshipIds: z.array(z.string()).default([]),
+  supportingObservationIds: z.array(z.string()).default([]),
+  contradictingObservationIds: z.array(z.string()).default([]),
+  confidence: unitInterval,
+  status: HypothesisStatusSchema.default("proposed"),
+  notes: z.string().default(""),
+});
+export type Hypothesis = z.infer<typeof HypothesisSchema>;
+
+/* ------------------------------------------------------------------ */
 /* Attractor descriptions                                              */
 /* ------------------------------------------------------------------ */
 
@@ -277,19 +371,25 @@ export type AttractorDescription = z.infer<typeof AttractorDescriptionSchema>;
 /* System profile + aggregate                                          */
 /* ------------------------------------------------------------------ */
 
+export const MemberSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  role: z.string().default(""),
+});
+export type Member = z.infer<typeof MemberSchema>;
+
 export const SystemProfileSchema = z.object({
   name: z.string().min(1),
   systemType: SystemTypeSchema,
   description: z.string().default(""),
-  members: z
-    .array(z.object({ label: z.string(), role: z.string().default("") }))
-    .default([]),
+  members: z.array(MemberSchema).default([]),
   location: z.string().default(""),
   currency: z.string().default("USD"),
 });
 export type SystemProfile = z.infer<typeof SystemProfileSchema>;
 
-export const MODEL_SCHEMA_VERSION = 1;
+/** Bump when the stored shape changes; add a step in model/migrations. */
+export const MODEL_SCHEMA_VERSION = 2;
 
 export const SystemModelSchema = z.object({
   schemaVersion: z.literal(MODEL_SCHEMA_VERSION),
@@ -301,9 +401,12 @@ export const SystemModelSchema = z.object({
   loopAnnotations: z.record(z.string(), LoopAnnotationSchema).default({}),
   constraints: z.array(ConstraintSchema).default([]),
   actions: z.array(ActionSchema).default([]),
+  observations: z.array(ObservationSchema).default([]),
+  hypotheses: z.array(HypothesisSchema).default([]),
   utilityWeights: UtilityWeightsSchema.optional(),
   currentAttractor: AttractorDescriptionSchema.prefault({}),
   desiredAttractor: AttractorDescriptionSchema.prefault({}),
+  createdAt: z.string().optional(),
   updatedAt: z.string(),
 });
 export type SystemModel = z.infer<typeof SystemModelSchema>;

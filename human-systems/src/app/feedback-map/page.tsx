@@ -4,6 +4,7 @@ import { LoopList } from "@/components/loop-list";
 import { useModel } from "@/components/model-provider";
 import { NetworkDiagram } from "@/components/network-diagram";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
+import { formatLag } from "@/calculations/lag";
 
 export default function FeedbackMapPage() {
   const { evaluated } = useModel();
@@ -17,10 +18,10 @@ export default function FeedbackMapPage() {
       return { edges: new Set(l?.edgeIds ?? []), nodes: new Set(l?.variableIds ?? []) };
     }
     if (selectedNode) {
-      const edges = evaluated.relationships.filter((r) => r.sourceVariable === selectedNode || r.targetVariable === selectedNode);
+      const edges = evaluated.relationships.filter((r) => r.sourceVariableId === selectedNode || r.targetVariableId === selectedNode);
       return {
         edges: new Set(edges.map((e) => e.id)),
-        nodes: new Set([selectedNode, ...edges.flatMap((e) => [e.sourceVariable, e.targetVariable])]),
+        nodes: new Set([selectedNode, ...edges.flatMap((e) => [e.sourceVariableId, e.targetVariableId])]),
       };
     }
     return { edges: new Set<string>(), nodes: new Set<string>() };
@@ -82,13 +83,13 @@ export default function FeedbackMapPage() {
                   <tr key={r.id} className={highlight.edges.has(r.id) ? "bg-accent-soft" : ""}>
                     <td>
                       <div>
-                        {variableById.get(r.sourceVariable)?.name} → {variableById.get(r.targetVariable)?.name}
+                        {variableById.get(r.sourceVariableId)?.name} → {variableById.get(r.targetVariableId)?.name}
                       </div>
                       <div className="text-xs text-muted">{r.explanation}</div>
                     </td>
                     <td className={r.direction === "negative" ? "text-warn" : "text-accent"}>{r.direction === "negative" ? "−" : "+"}</td>
                     <td className="tabular-nums">{r.strength.toFixed(1)}</td>
-                    <td className="tabular-nums">{r.lagMonths} mo</td>
+                    <td className="tabular-nums">{formatLag(r.lag)}</td>
                     <td>
                       <div className="flex flex-col gap-1 items-start">
                         <SourceBadge sourceType={r.sourceType} />

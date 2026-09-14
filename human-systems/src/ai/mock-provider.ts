@@ -62,7 +62,7 @@ export const MOCK_ANALYSIS_JSON = {
       targetVariable: "Liquid savings",
       direction: "positive",
       strengthEstimate: 0.7,
-      lagMonthsEstimate: 1,
+      lagEstimate: { value: 1, unit: "months" },
       explanation: "Consistent saving behaviour accumulates reserves.",
       confidence: 0.7,
     },

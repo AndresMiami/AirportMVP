@@ -6,11 +6,13 @@
  */
 import {
   annualToMonthlyRate,
+  HORIZON_ORDER,
   projectCareerCapital,
   projectProductiveCapital,
   propagateDirectionalPressure,
   weeklyToMonthlyHours,
   type DirectionalPressure,
+  type Horizon,
 } from "@/calculations";
 import { DERIVED_IDS, INPUT_IDS } from "@/model/ids";
 import { evaluateSystem, type EvaluatedLoop, type EvaluatedSystem } from "@/model/evaluate";
@@ -47,6 +49,20 @@ export interface Projection {
   scenario: number[];
 }
 
+/** Directional tendencies grouped by the earliest horizon they could show
+ *  (A16). Groups are in horizon order and empty groups are omitted. */
+export interface HorizonGroup {
+  horizon: Horizon;
+  tendencies: DirectionalPressure[];
+}
+
+export function groupByHorizon(tendencies: readonly DirectionalPressure[]): HorizonGroup[] {
+  return HORIZON_ORDER.map((horizon) => ({
+    horizon,
+    tendencies: tendencies.filter((t) => t.earliestHorizon === horizon),
+  })).filter((g) => g.tendencies.length > 0);
+}
+
 export interface ScenarioComparison {
   scenario: Scenario;
   applied: AppliedScenario;
@@ -55,6 +71,7 @@ export interface ScenarioComparison {
   variableDeltas: VariableDelta[];
   loopDeltas: LoopDelta[];
   directional: DirectionalPressure[];
+  directionalByHorizon: HorizonGroup[];
   projections: Projection[];
   meanGapBefore: number | null;
   meanGapAfter: number | null;
@@ -179,6 +196,7 @@ export function compareScenario(baseModel: SystemModel, scenario: Scenario): Sce
     variableDeltas,
     loopDeltas,
     directional,
+    directionalByHorizon: groupByHorizon(directional),
     projections: buildProjections(base, result, scenario.horizonMonths),
     meanGapBefore: base.gap.meanNormalizedGap,
     meanGapAfter: result.gap.meanNormalizedGap,

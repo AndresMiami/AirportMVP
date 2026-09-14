@@ -79,7 +79,7 @@ export const ASSUMPTIONS: ModelAssumption[] = [
     id: "A8",
     title: "Leverage score",
     statement:
-      "L = (impact x controllability x durability) / (max(cost, 0.05) x max(uncertainty, 0.05)). All five factors are 0..1 ordinal judgments. Only the RANK of scores is meaningful; the magnitude is not.",
+      "L = (impact x controllability x durability) / (max(cost, 0.05) x max(uncertainty, 0.05)). All five factors are 0..1 ordinal judgments. Only the RANK of scores is meaningful; the magnitude is not. Relationship strengths are likewise judgments, not estimated causal coefficients.",
     status: "hypothesis",
     usedBy: ["leverageScore"],
   },
@@ -127,9 +127,33 @@ export const ASSUMPTIONS: ModelAssumption[] = [
     id: "A14",
     title: "Feasibility is a hard filter",
     statement:
-      "An action is infeasible if any hard constraint whose dimension the action declares is violated. Constraints on dimensions the action does not declare are reported as unverified, not as violations.",
+      "An action is infeasible if any HARD constraint whose dimension the action declares is violated. Constraints on dimensions the action does not declare are reported as unverified, not as violations; constraints with no machine-checkable rule are reported as unchecked.",
     status: "convention",
     usedBy: ["checkFeasibility"],
+  },
+  {
+    id: "A16",
+    title: "Lag units and horizon classes",
+    statement:
+      "Lags are stored in the unit entered (days, weeks, months, years) and converted with 30.4375 days per month only for arithmetic. Horizon classes for display: immediate (0), days (< 1 week), weeks (< 1 month), months (< 1 year), years. Cycle time is the plain sum of edge lags; propagation reports the shortest and longest cumulative lag along the paths found.",
+    status: "convention",
+    usedBy: ["lagToMonths", "horizonOfMonths", "findFeedbackLoops", "propagateDirectionalPressure"],
+  },
+  {
+    id: "A17",
+    title: "Soft-constraint suitability",
+    statement:
+      "A violated SOFT constraint never excludes an action; suitability = product over violated soft constraints of (1 - softPenalty), shown next to the leverage rank and never folded into it.",
+    status: "convention",
+    usedBy: ["checkFeasibility"],
+  },
+  {
+    id: "A18",
+    title: "Loops are hypotheses",
+    statement:
+      "A detected loop is a structural consequence of the entered edges, and each edge is a model judgment. A loop's epistemic status is the status of its hypothesis (proposed, accepted, rejected, uncertain); 'accepted' means the person accepts it as a working reading, never that it is established.",
+    status: "convention",
+    usedBy: ["evaluateSystem"],
   },
   {
     id: "A15",

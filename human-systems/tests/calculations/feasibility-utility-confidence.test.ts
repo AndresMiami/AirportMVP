@@ -4,18 +4,23 @@ import { checkFeasibility, feasible } from "@/calculations/feasibility";
 import { utilityView } from "@/calculations/utility";
 import type { Action, Constraint } from "@/types";
 
-const constraint = (over: Partial<Constraint>): Constraint => ({
-  id: "c",
-  name: "c",
-  description: "",
-  dimension: "hoursPerWeek",
-  comparator: "lte",
-  limit: 8,
-  sourceType: "self_reported",
-  confidence: 0.7,
-  notes: "",
-  ...over,
-});
+const constraint = (over: Partial<Constraint> & { dimension?: string; comparator?: "lte" | "gte" | "eq"; limit?: number | boolean }): Constraint => {
+  const { dimension = "hoursPerWeek", comparator = "lte", limit = 8, ...rest } = over;
+  return {
+    id: "c",
+    name: "c",
+    description: "",
+    type: "hard",
+    check: { dimension, comparator, limit },
+    softPenalty: 0.5,
+    sourceType: "self_reported",
+    confidence: 0.7,
+    evidence: [],
+    userConfirmed: true,
+    notes: "",
+    ...rest,
+  };
+};
 const action = (requirements: Action["requirements"]): Action => ({
   id: "a",
   name: "a",
@@ -42,13 +47,14 @@ describe("A14 feasibility", () => {
   it("passes when every declared requirement satisfies its constraint", () => {
     const r = checkFeasibility(action({ hoursPerWeek: 4, capitalRequired: 250, requiresRelocation: false }), constraints);
     expect(r.feasible).toBe(true);
-    expect(r.violations).toEqual([]);
+    expect(r.hardViolations).toEqual([]);
     expect(r.unverified).toEqual([]);
+    expect(r.suitability).toBe(1);
   });
   it("fails on any violated constraint and lists each", () => {
     const r = checkFeasibility(action({ hoursPerWeek: 15, capitalRequired: 4000, requiresRelocation: false }), constraints);
     expect(r.feasible).toBe(false);
-    expect(r.violations.map((v) => v.constraint.id)).toEqual(["hours", "capital"]);
+    expect(r.hardViolations.map((v) => v.constraint.id)).toEqual(["hours", "capital"]);
   });
   it("boolean constraints use eq", () => {
     expect(feasible(action({ requiresRelocation: true }), [constraints[2]])).toBe(false);

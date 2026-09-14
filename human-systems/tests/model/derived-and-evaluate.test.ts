@@ -18,8 +18,8 @@ describe("sample household", () => {
     const m = createSampleHousehold();
     const ids = new Set(m.variables.map((v) => v.id));
     for (const r of m.relationships) {
-      expect(ids.has(r.sourceVariable), r.id).toBe(true);
-      expect(ids.has(r.targetVariable), r.id).toBe(true);
+      expect(ids.has(r.sourceVariableId), r.id).toBe(true);
+      expect(ids.has(r.targetVariableId), r.id).toBe(true);
     }
     for (const v of m.variables.filter((x) => x.kind === "input")) expect(v.evidence.length, v.id).toBeGreaterThan(0);
   });
@@ -98,15 +98,21 @@ describe("evaluateSystem on the sample", () => {
     const relocate = ev.actions.find((a) => a.action.id === "a_relocate")!;
     expect(cdl.feasibility.feasible).toBe(false);
     expect(cdl.rank).toBeNull();
-    expect(cdl.feasibility.violations.map((v) => v.constraint.id).sort()).toEqual(["c_capital", "c_hours"]);
-    expect(relocate.feasibility.violations.map((v) => v.constraint.id)).toEqual(["c_capital", "c_relocation"]);
+    expect(cdl.feasibility.hardViolations.map((v) => v.constraint.id).sort()).toEqual(["c_capital", "c_hours"]);
+    expect(relocate.feasibility.hardViolations.map((v) => v.constraint.id)).toEqual(["c_capital", "c_relocation"]);
+    // The soft "prefers predictable income" constraint lowers suitability without excluding.
+    expect(relocate.feasibility.softViolations.map((v) => v.constraint.id)).toEqual(["c_risk"]);
+    expect(relocate.feasibility.suitability).toBeCloseTo(0.6, 9);
+    const forklift = ev.actions.find((a) => a.action.id === "a_forklift")!;
+    expect(forklift.feasibility.suitability).toBe(1);
+    expect(forklift.feasibility.unchecked.map((c) => c.id)).toEqual(["c_pickup"]);
     const ranked = ev.actions.filter((a) => a.rank !== null).sort((a, b) => a.rank! - b.rank!);
     expect(ranked.map((a) => a.rank)).toEqual(ranked.map((_, i) => i + 1));
     expect(ranked.every((a) => a.feasibility.feasible)).toBe(true);
   });
   it("flags a relationship to a missing variable as an error and drops it", () => {
     const m = createSampleHousehold();
-    m.relationships.push({ ...m.relationships[0], id: "bad", targetVariable: "does_not_exist" });
+    m.relationships.push({ ...m.relationships[0], id: "bad", targetVariableId: "does_not_exist" });
     const e = evaluateSystem(m);
     expect(e.issues.some((i) => i.level === "error" && i.message.includes("bad"))).toBe(true);
     expect(e.relationships.find((r) => r.id === "bad")).toBeUndefined();

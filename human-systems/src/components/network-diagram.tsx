@@ -5,6 +5,7 @@
  * Highlighted edge ids are drawn thicker; everything else fades.
  */
 import { useMemo } from "react";
+import { formatLag } from "@/calculations/lag";
 import { CATEGORY_META } from "@/domain/vocabulary";
 import type { Relationship, Variable, VariableCategory } from "@/types";
 
@@ -40,7 +41,7 @@ export function NetworkDiagram({
   const R = Math.min(W, H) / 2 - 70;
 
   const { nodes, edges } = useMemo(() => {
-    const connected = new Set(relationships.flatMap((r) => [r.sourceVariable, r.targetVariable]));
+    const connected = new Set(relationships.flatMap((r) => [r.sourceVariableId, r.targetVariableId]));
     const listed = variables
       .filter((v) => connected.has(v.id))
       .sort(
@@ -56,8 +57,8 @@ export function NetworkDiagram({
     });
     const edges = relationships
       .map((r) => {
-        const a = pos.get(r.sourceVariable);
-        const b = pos.get(r.targetVariable);
+        const a = pos.get(r.sourceVariableId);
+        const b = pos.get(r.targetVariableId);
         if (!a || !b) return null;
         // Control point pulled toward the centre and offset to the right of
         // the direction of travel, so A->B and B->A do not overlap.
@@ -112,7 +113,7 @@ export function NetworkDiagram({
               markerEnd={`url(#${neg ? "arrow-neg" : "arrow-pos"})`}
             >
               <title>
-                {`${r.sourceVariable} → ${r.targetVariable} (${r.direction}, strength ${r.strength}, lag ${r.lagMonths} mo)\n${r.explanation}`}
+                {`${r.sourceVariableId} → ${r.targetVariableId} (${r.direction}, strength ${r.strength}, lag ${formatLag(r.lag)})${r.enabled ? "" : " [disabled]"}\n${r.explanation}`}
               </title>
             </path>
           );

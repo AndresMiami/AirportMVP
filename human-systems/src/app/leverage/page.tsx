@@ -126,10 +126,10 @@ export default function LeveragePage() {
             <li key={a.action.id}>
               <span className="font-medium">{a.action.name}</span>
               <ul className="text-xs text-muted list-disc pl-5">
-                {a.feasibility.violations.map((v) => (
+                {a.feasibility.hardViolations.map((v) => (
                   <li key={v.constraint.id}>
-                    Conflicts with the stated constraint &ldquo;{v.constraint.name}&rdquo; (requires {String(v.required)}, limit {v.constraint.comparator}{" "}
-                    {String(v.constraint.limit)}).
+                    Conflicts with the stated constraint &ldquo;{v.constraint.name}&rdquo; (requires {String(v.required)}, limit{" "}
+                    {v.constraint.check?.comparator} {String(v.constraint.check?.limit)}).
                   </li>
                 ))}
               </ul>

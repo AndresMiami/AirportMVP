@@ -5,6 +5,7 @@
  * rankings, feasibility of actions. It is pure and synchronous.
  */
 import {
+  activeRelationships,
   checkFeasibility,
   findFeedbackLoops,
   leverageScore,
@@ -19,13 +20,29 @@ import {
   type LeverageResult,
   type UtilityView,
 } from "@/calculations";
-import type { Action, LoopAnnotation, Relationship, SystemModel, Variable } from "@/types";
+import type {
+  Action,
+  Hypothesis,
+  HypothesisStatus,
+  LoopAnnotation,
+  Observation,
+  Relationship,
+  SystemModel,
+  Variable,
+} from "@/types";
 import { computeDerivedVariables, type DerivedComputation } from "./derived";
 
 export interface EvaluatedLoop extends FeedbackLoop {
   annotation?: LoopAnnotation;
   /** A10; null when no loop variable has a desired value. */
   pressure: number | null;
+  /** The hypothesis recorded for this loop, if any (A18). */
+  hypothesis?: Hypothesis;
+  /** Epistemic status: the hypothesis status, or "proposed" when none is
+   *  recorded. A detected loop is never more than its hypothesis says. */
+  status: HypothesisStatus;
+  /** Observations linked to this loop's hypothesis or to any of its edges. */
+  observationIds: string[];
 }
 
 export interface VariableLeverage {
@@ -43,6 +60,14 @@ export interface EvaluatedAction {
   rank: number | null;
 }
 
+/** Observations indexed by the entity they are linked to. */
+export interface ObservationIndex {
+  byVariable: Map<string, Observation[]>;
+  byRelationship: Map<string, Observation[]>;
+  byConstraint: Map<string, Observation[]>;
+  byHypothesis: Map<string, Observation[]>;
+}
+
 export interface ModelIssue {
   level: "error" | "warning";
   message: string;
@@ -57,8 +82,13 @@ export interface EvaluatedSystem {
   gap: GapSummary;
   normalizedGapById: Map<string, number>;
   loops: EvaluatedLoop[];
-  /** Relationships whose endpoints both exist. */
+  /** ENABLED relationships whose endpoints both exist (used by loops,
+   *  propagation and influence). */
   relationships: Relationship[];
+  /** Every stored relationship with existing endpoints, disabled included. */
+  allRelationships: Relationship[];
+  disabledRelationshipCount: number;
+  observations: ObservationIndex;
   networkInfluence: Map<string, number>;
   variableLeverage: VariableLeverage[];
   /** Variables with no `impact` judgment (leverage not computed). */
@@ -72,25 +102,52 @@ export function evaluateSystem(model: SystemModel): EvaluatedSystem {
   const { variables, computations } = computeDerivedVariables(model.variables, model.incomeSources);
   const variableById = new Map(variables.map((v) => [v.id, v]));
 
-  const relationships = model.relationships.filter((r) => {
-    const ok = variableById.has(r.sourceVariable) && variableById.has(r.targetVariable);
+  const allRelationships = model.relationships.filter((r) => {
+    const ok = variableById.has(r.sourceVariableId) && variableById.has(r.targetVariableId);
     if (!ok) {
       issues.push({
         level: "error",
-        message: `Relationship ${r.id} references a missing variable (${r.sourceVariable} -> ${r.targetVariable}) and was ignored.`,
+        message: `Relationship ${r.id} references a missing variable (${r.sourceVariableId} -> ${r.targetVariableId}) and was ignored.`,
       });
     }
     return ok;
   });
+  const relationships = activeRelationships(allRelationships);
+  const disabledRelationshipCount = allRelationships.length - relationships.length;
 
   const gap = structuralGap(variables);
   const normalizedGapById = new Map(gap.gaps.map((g) => [g.variableId, g.normalizedGap]));
 
-  const loops: EvaluatedLoop[] = findFeedbackLoops(relationships).map((loop) => ({
-    ...loop,
-    annotation: model.loopAnnotations[loop.id],
-    pressure: loopPressure(loop, normalizedGapById),
-  }));
+  const observations = indexObservations(model.observations);
+  const loopHypotheses = new Map(
+    model.hypotheses.filter((h) => h.kind === "loop" && h.loopId).map((h) => [h.loopId!, h]),
+  );
+
+  const loops: EvaluatedLoop[] = findFeedbackLoops(relationships).map((loop) => {
+    const hypothesis = loopHypotheses.get(loop.id);
+    const linked = new Set<string>();
+    if (hypothesis) {
+      for (const o of observations.byHypothesis.get(hypothesis.id) ?? []) linked.add(o.id);
+      for (const id of [...hypothesis.supportingObservationIds, ...hypothesis.contradictingObservationIds]) linked.add(id);
+    }
+    for (const edgeId of loop.edgeIds) for (const o of observations.byRelationship.get(edgeId) ?? []) linked.add(o.id);
+    return {
+      ...loop,
+      annotation: model.loopAnnotations[loop.id],
+      pressure: loopPressure(loop, normalizedGapById),
+      hypothesis,
+      status: hypothesis?.status ?? "proposed",
+      observationIds: [...linked],
+    };
+  });
+  for (const h of model.hypotheses) {
+    if (h.kind === "loop" && h.loopId && !loops.some((l) => l.id === h.loopId)) {
+      issues.push({
+        level: "warning",
+        message: `Hypothesis "${h.statement.slice(0, 60)}" refers to loop ${h.loopId}, which the current (enabled) relationships no longer form.`,
+      });
+    }
+  }
 
   const influence = networkInfluence(relationships);
 
@@ -149,10 +206,33 @@ export function evaluateSystem(model: SystemModel): EvaluatedSystem {
     normalizedGapById,
     loops,
     relationships,
+    allRelationships,
+    disabledRelationshipCount,
+    observations,
     networkInfluence: influence,
     variableLeverage,
     unassessedVariables,
     actions: evaluatedActions,
     issues,
   };
+}
+
+function indexObservations(observations: readonly Observation[]): ObservationIndex {
+  const idx: ObservationIndex = {
+    byVariable: new Map(),
+    byRelationship: new Map(),
+    byConstraint: new Map(),
+    byHypothesis: new Map(),
+  };
+  const push = (map: Map<string, Observation[]>, key: string, o: Observation) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(o);
+  };
+  for (const o of observations) {
+    for (const id of o.links.variableIds) push(idx.byVariable, id, o);
+    for (const id of o.links.relationshipIds) push(idx.byRelationship, id, o);
+    for (const id of o.links.constraintIds) push(idx.byConstraint, id, o);
+    for (const id of o.links.hypothesisIds) push(idx.byHypothesis, id, o);
+  }
+  return idx;
 }

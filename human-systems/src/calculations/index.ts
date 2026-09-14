@@ -6,3 +6,4 @@ export * from "./confidence";
 export * from "./feasibility";
 export * from "./utility";
 export * from "./graph";
+export * from "./lag";

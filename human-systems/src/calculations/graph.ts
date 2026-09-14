@@ -6,6 +6,12 @@
  * annotations can be attached to them stably.
  */
 import type { EdgeDirection, Relationship } from "@/types";
+import { horizonOfMonths, lagToMonths, type Horizon } from "./lag";
+
+/** Only enabled edges take part in loops, propagation and influence. */
+export function activeRelationships(relationships: readonly Relationship[]): Relationship[] {
+  return relationships.filter((r) => r.enabled);
+}
 
 export type LoopPolarity = "reinforcing" | "balancing";
 
@@ -21,8 +27,12 @@ export interface FeedbackLoop {
   gain: number;
   /** Geometric mean of edge strengths: comparable across loop lengths. */
   meanStrength: number;
-  /** Sum of edge lags: rough time for one trip around the loop. */
+  /** Sum of edge lags in months: rough time for one trip around the loop. */
   cycleTimeMonths: number;
+  /** Lag of each edge in months, in edge order (never collapsed). */
+  edgeLagMonths: number[];
+  /** Horizon class of the slowest edge on the loop. */
+  slowestHorizon: Horizon;
   /** Minimum edge confidence along the loop. */
   minConfidence: number;
 }
@@ -59,8 +69,8 @@ export function loopMeanStrength(strengths: readonly number[]): number {
 function outgoing(relationships: readonly Relationship[]): Map<string, Relationship[]> {
   const out = new Map<string, Relationship[]>();
   for (const r of relationships) {
-    if (!out.has(r.sourceVariable)) out.set(r.sourceVariable, []);
-    out.get(r.sourceVariable)!.push(r);
+    if (!out.has(r.sourceVariableId)) out.set(r.sourceVariableId, []);
+    out.get(r.sourceVariableId)!.push(r);
   }
   return out;
 }
@@ -77,7 +87,7 @@ export function findFeedbackLoops(
 ): FeedbackLoop[] {
   const maxLength = options.maxLength ?? 12;
   const vertices = Array.from(
-    new Set(relationships.flatMap((r) => [r.sourceVariable, r.targetVariable])),
+    new Set(relationships.flatMap((r) => [r.sourceVariableId, r.targetVariableId])),
   ).sort();
   const index = new Map(vertices.map((v, i) => [v, i]));
   const out = outgoing(relationships);
@@ -93,7 +103,7 @@ export function findFeedbackLoops(
 
     const dfs = (current: string) => {
       for (const edge of out.get(current) ?? []) {
-        const next = edge.targetVariable;
+        const next = edge.targetVariableId;
         const nextIdx = index.get(next)!;
         if (nextIdx < startIdx) continue; // found from the smaller start vertex instead
         if (next === start) {
@@ -125,6 +135,9 @@ function buildLoop(vars: readonly string[], edges: readonly Relationship[]): Fee
   const offset = vars.indexOf(rotated[0]);
   const edgeIds = edges.map((_, i) => edges[(i + offset) % edges.length].id);
   const directions = edges.map((e) => e.direction);
+  const rotatedEdges = edges.map((_, i) => edges[(i + offset) % edges.length]);
+  const edgeLagMonths = rotatedEdges.map((e) => lagToMonths(e.lag));
+  const cycleTimeMonths = edgeLagMonths.reduce((s, m) => s + m, 0);
   return {
     id: rotated.join(">"),
     variableIds: rotated,
@@ -133,7 +146,9 @@ function buildLoop(vars: readonly string[], edges: readonly Relationship[]): Fee
     negativeEdgeCount: directions.filter((d) => d === "negative").length,
     gain: loopGain(edges.map((e) => e.strength)),
     meanStrength: loopMeanStrength(edges.map((e) => e.strength)),
-    cycleTimeMonths: edges.reduce((s, e) => s + e.lagMonths, 0),
+    cycleTimeMonths,
+    edgeLagMonths,
+    slowestHorizon: horizonOfMonths(Math.max(0, ...edgeLagMonths)),
     minConfidence: Math.min(...edges.map((e) => e.confidence)),
   };
 }
@@ -164,6 +179,12 @@ export interface DirectionalPressure {
   tendency: Tendency;
   /** Number of distinct paths that reached this variable. */
   pathCount: number;
+  /** Shortest cumulative lag (months) along any path that reached it. */
+  minLagMonths: number;
+  /** Longest cumulative lag (months) along any path that reached it. */
+  maxLagMonths: number;
+  /** Horizon class of the FASTEST path: the earliest the effect could show. */
+  earliestHorizon: Horizon;
 }
 
 /**
@@ -183,27 +204,32 @@ export function propagateDirectionalPressure(
   const positive = new Map<string, number>();
   const negative = new Map<string, number>();
   const paths = new Map<string, number>();
+  const minLag = new Map<string, number>();
+  const maxLag = new Map<string, number>();
 
-  const walk = (node: string, sign: number, weight: number, depth: number, visited: Set<string>) => {
+  const walk = (node: string, sign: number, weight: number, lagMonths: number, depth: number, visited: Set<string>) => {
     if (depth >= maxDepth) return;
     for (const edge of out.get(node) ?? []) {
-      const next = edge.targetVariable;
+      const next = edge.targetVariableId;
       if (visited.has(next)) continue;
       const nextSign = edge.direction === "positive" ? sign : -sign;
       const nextWeight = weight * edge.strength;
+      const nextLag = lagMonths + lagToMonths(edge.lag);
       if (nextWeight <= 0) continue;
       if (!seeds.has(next)) {
         if (nextSign > 0) positive.set(next, (positive.get(next) ?? 0) + nextWeight);
         else negative.set(next, (negative.get(next) ?? 0) + nextWeight);
         paths.set(next, (paths.get(next) ?? 0) + 1);
+        minLag.set(next, Math.min(minLag.get(next) ?? Infinity, nextLag));
+        maxLag.set(next, Math.max(maxLag.get(next) ?? -Infinity, nextLag));
       }
       visited.add(next);
-      walk(next, nextSign, nextWeight, depth + 1, visited);
+      walk(next, nextSign, nextWeight, nextLag, depth + 1, visited);
       visited.delete(next);
     }
   };
 
-  for (const [seed, sign] of seeds) walk(seed, sign, 1, 0, new Set([seed]));
+  for (const [seed, sign] of seeds) walk(seed, sign, 1, 0, 0, new Set([seed]));
 
   const ids = new Set([...positive.keys(), ...negative.keys()]);
   const results: DirectionalPressure[] = [];
@@ -217,7 +243,16 @@ export function propagateDirectionalPressure(
       const dominance = Math.abs(score) / total;
       tendency = dominance < mixedThreshold ? "mixed" : score > 0 ? "up" : "down";
     }
-    results.push({ variableId: id, score, tendency, pathCount: paths.get(id) ?? 0 });
+    const minLagMonths = minLag.get(id) ?? 0;
+    results.push({
+      variableId: id,
+      score,
+      tendency,
+      pathCount: paths.get(id) ?? 0,
+      minLagMonths,
+      maxLagMonths: maxLag.get(id) ?? 0,
+      earliestHorizon: horizonOfMonths(minLagMonths),
+    });
   }
   results.sort(
     (a, b) => Math.abs(b.score) - Math.abs(a.score) || a.variableId.localeCompare(b.variableId),
@@ -228,7 +263,7 @@ export function propagateDirectionalPressure(
 /** Weighted out-reach: how much of the graph a variable can influence, scaled 0..1. */
 export function networkInfluence(relationships: readonly Relationship[]): Map<string, number> {
   const vertices = Array.from(
-    new Set(relationships.flatMap((r) => [r.sourceVariable, r.targetVariable])),
+    new Set(relationships.flatMap((r) => [r.sourceVariableId, r.targetVariableId])),
   );
   const raw = new Map<string, number>();
   for (const v of vertices) {

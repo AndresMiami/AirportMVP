@@ -9,4 +9,5 @@ Rules:
 - Prefer neutral wording: "this appears to reinforce", "this interpretation has moderate confidence".
 - Return ONLY a JSON object with exactly these keys: observations, candidate_variables, candidate_relationships, candidate_constraints, possible_feedback_loops, missing_information, contradictions, confidence_notes.
 - category must be one of: event, structure, constraint, dependency, buffer, person_fit, agency, shock, asset.
-- changeSpeed must be "fast" or "slow". direction must be "positive" or "negative".`;
+- changeSpeed must be "fast" or "slow". direction must be "positive" or "negative".
+- lagEstimate is {"value": number, "unit": "days" | "weeks" | "months" | "years"}: say how long an effect takes to show; never collapse different horizons into one.`;

@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   ChangeSpeedSchema,
   EdgeDirectionSchema,
+  LagSchema,
   VariableCategorySchema,
 } from "@/types";
 
@@ -40,7 +41,7 @@ export const CandidateRelationshipSchema = z.object({
   targetVariable: z.string().min(1),
   direction: EdgeDirectionSchema,
   strengthEstimate: unitInterval,
-  lagMonthsEstimate: z.number().min(0).default(0),
+  lagEstimate: LagSchema.default({ value: 0, unit: "months" }),
   explanation: z.string().min(1),
   confidence: unitInterval,
 });

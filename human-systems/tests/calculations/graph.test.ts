@@ -12,16 +12,19 @@ import {
 } from "@/calculations/graph";
 import type { Relationship } from "@/types";
 
-const edge = (id: string, from: string, to: string, direction: "positive" | "negative", strength = 0.5, lag = 0): Relationship => ({
+const edge = (id: string, from: string, to: string, direction: "positive" | "negative", strength = 0.5, lagMonths = 0): Relationship => ({
   id,
-  sourceVariable: from,
-  targetVariable: to,
+  sourceVariableId: from,
+  targetVariableId: to,
   direction,
   strength,
-  lagMonths: lag,
+  lag: { value: lagMonths, unit: "months" },
   confidence: 0.6,
-  explanation: "",
   sourceType: "self_reported",
+  evidence: [],
+  explanation: "",
+  notes: "",
+  enabled: true,
 });
 
 describe("A9 polarity and gain", () => {
