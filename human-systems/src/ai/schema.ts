@@ -60,16 +60,48 @@ export const CandidateLoopSchema = z.object({
   confidence: unitInterval,
 });
 
-export const AiAnalysisSchema = z.object({
-  observations: z.array(ObservationSchema),
-  candidate_variables: z.array(CandidateVariableSchema),
-  candidate_relationships: z.array(CandidateRelationshipSchema),
-  candidate_constraints: z.array(CandidateConstraintSchema),
-  possible_feedback_loops: z.array(CandidateLoopSchema),
-  missing_information: z.array(z.string()),
-  contradictions: z.array(z.string()),
-  confidence_notes: z.array(z.string()),
+/** A dimension the AI thinks the signature definition is missing for
+ *  this system. It is a PROPOSAL for the person and the definition
+ *  author; the engine never adds dimensions on its own. */
+export const CandidateStructuralDimensionSchema = z.object({
+  name: z.string().min(1),
+  rationale: z.string().min(1),
+  /** Names of variables (existing or candidate) that would feed it. */
+  suggestedContributingVariables: z.array(z.string()).default([]),
+  confidence: unitInterval,
 });
+
+/** A question whose answer would most reduce uncertainty. The AI ranks
+ *  by its own judgment; the deterministic question-priority heuristic
+ *  (signatures/questions.ts) is the one the app orders by. */
+export const UncertaintyQuestionSchema = z.object({
+  question: z.string().min(1),
+  targetsVariable: z.string().optional(),
+  targetsDimension: z.string().optional(),
+  whyItMatters: z.string().min(1),
+  expectedInformationGain: z.enum(["low", "medium", "high"]),
+});
+
+/**
+ * STRICT: unknown keys are rejected, so a provider that tries to return a
+ * structural signature, a score, or any other verdict fails validation.
+ * AI interprets; evidence constrains; the model calculates; the human
+ * approves.
+ */
+export const AiAnalysisSchema = z
+  .object({
+    observations: z.array(ObservationSchema),
+    candidate_variables: z.array(CandidateVariableSchema),
+    candidate_relationships: z.array(CandidateRelationshipSchema),
+    candidate_constraints: z.array(CandidateConstraintSchema),
+    possible_feedback_loops: z.array(CandidateLoopSchema),
+    missing_information: z.array(z.string()),
+    contradictions: z.array(z.string()),
+    confidence_notes: z.array(z.string()),
+    candidate_structural_dimensions: z.array(CandidateStructuralDimensionSchema).default([]),
+    questions_to_reduce_uncertainty: z.array(UncertaintyQuestionSchema).default([]),
+  })
+  .strict();
 export type AiAnalysis = z.infer<typeof AiAnalysisSchema>;
 
 export type ParseResult =

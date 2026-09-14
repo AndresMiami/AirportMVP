@@ -78,6 +78,28 @@ export const MOCK_ANALYSIS_JSON = {
   confidence_notes: [
     "Leisure behaviour is reported, not interpreted as motivation.",
   ],
+  candidate_structural_dimensions: [
+    {
+      name: "Goal-directed saving capacity",
+      rationale: "The text shows sustained accumulation toward a defined purchase; the default definition measures buffer size but not the capacity to accumulate deliberately.",
+      suggestedContributingVariables: ["Saving discipline", "Capital conversion rate"],
+      confidence: 0.5,
+    },
+  ],
+  questions_to_reduce_uncertainty: [
+    {
+      question: "What is the monthly income, and what are the essential monthly expenses?",
+      targetsDimension: "Reliable income floor",
+      whyItMatters: "Without both, the floor ratio and buffer months cannot be computed at all.",
+      expectedInformationGain: "high",
+    },
+    {
+      question: "Is the four-day schedule chosen or imposed, and are the remaining days available for anything else?",
+      targetsDimension: "Adaptive capacity",
+      whyItMatters: "Free hours are unknown; rest time is being observed, not explained.",
+      expectedInformationGain: "medium",
+    },
+  ],
 };
 
 export class MockAiProvider implements AiProvider {

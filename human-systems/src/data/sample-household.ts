@@ -941,6 +941,8 @@ export function createSampleHousehold(): SystemModel {
     actions,
     observations,
     hypotheses,
+    signatures: [],
+    signatureDefinitionId: "household_default",
     utilityWeights: undefined,
     currentAttractor: {
       summary:

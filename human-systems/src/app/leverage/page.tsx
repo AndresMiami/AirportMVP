@@ -1,8 +1,30 @@
 "use client";
+import Link from "next/link";
 import { useModel } from "@/components/model-provider";
 import { fmtPct } from "@/components/format";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
 import { UTILITY_DIMENSION_META } from "@/domain/vocabulary";
+import type { FeasibilityResult } from "@/calculations";
+
+/** Symbols for the stored comparator keys, for the excluded-actions list. */
+const COMPARATOR_SYMBOL: Record<"lte" | "gte" | "eq", string> = { lte: "≤", gte: "≥", eq: "=" };
+
+const UNCONFIRMED_NOTE = "one or more of these constraints has not been confirmed by the person";
+
+/** Muted lines shown under an action's name: constraints the check could
+ *  not settle (unverified) and constraints it never could (unchecked). */
+function CoverageLines({ feasibility }: { feasibility: FeasibilityResult }) {
+  return (
+    <>
+      {feasibility.unverified.length > 0 ? (
+        <div className="text-xs text-warn">Unverified against: {feasibility.unverified.map((c) => c.name).join(", ")}</div>
+      ) : null}
+      {feasibility.unchecked.length > 0 ? (
+        <div className="text-xs text-muted">Unchecked descriptive constraints: {feasibility.unchecked.map((c) => c.name).join(", ")}</div>
+      ) : null}
+    </>
+  );
+}
 
 export default function LeveragePage() {
   const { evaluated } = useModel();
@@ -15,7 +37,7 @@ export default function LeveragePage() {
     <div>
       <PageHeader
         title="Leverage points"
-        lede="L = (impact × controllability × durability) / (cost × uncertainty), all five 0–1 judgments (assumption A8). Only the ranking is meaningful. Network influence is a separate, calculated reach measure and is shown for comparison, never folded into the score."
+        lede="L = (impact × controllability × durability) / (cost × uncertainty), all five 0–1 judgments (assumption A8). Only the ranking is meaningful. Network influence is a separate, calculated reach measure and is shown for comparison, never folded into the score. Suitability comes from soft constraints alone and is shown beside the rank, never folded into it (A17)."
       />
       <Card title="Variables ranked by leverage judgment">
         <div className="overflow-x-auto">
@@ -69,6 +91,7 @@ export default function LeveragePage() {
                 <th>Action</th>
                 <th>Targets</th>
                 <th>Leverage</th>
+                <th>Suitability</th>
                 <th>Utility view (−1…1 per dimension)</th>
                 <th>Provenance</th>
               </tr>
@@ -80,12 +103,21 @@ export default function LeveragePage() {
                   <td>
                     <div className="font-medium">{a.action.name}</div>
                     <div className="text-xs text-muted max-w-xs">{a.action.description}</div>
-                    {a.feasibility.unverified.length > 0 ? (
-                      <div className="text-xs text-warn">Unverified against: {a.feasibility.unverified.map((c) => c.name).join(", ")}</div>
-                    ) : null}
+                    <CoverageLines feasibility={a.feasibility} />
                   </td>
                   <td className="text-xs">{a.action.targetVariables.map((t) => variableById.get(t)?.name ?? t).join(", ")}</td>
                   <td className="tabular-nums">{a.leverage.score.toFixed(1)}</td>
+                  <td>
+                    <div className="tabular-nums">{fmtPct(a.feasibility.suitability)}</div>
+                    {a.feasibility.softViolations.length > 0 ? (
+                      <div className="text-xs text-muted max-w-[14rem]">
+                        lowered by: {a.feasibility.softViolations.map((v) => v.constraint.name).join(", ")}
+                      </div>
+                    ) : null}
+                    {a.feasibility.unconfirmedViolations.length > 0 ? (
+                      <div className="text-xs text-muted max-w-[14rem]">{UNCONFIRMED_NOTE}</div>
+                    ) : null}
+                  </td>
                   <td>
                     <div className="flex flex-wrap gap-1 max-w-md">
                       {a.utility.dimensions
@@ -118,9 +150,13 @@ export default function LeveragePage() {
             </tbody>
           </table>
         </div>
+        <p className="text-xs text-muted mt-3">
+          Suitability = product over violated soft constraints of (1 − penalty); 100% means no soft constraint is violated. It does not change the leverage score or the rank.
+        </p>
       </Card>
 
       <Card title="Excluded by a hard constraint (not ranked)" className="mt-4">
+        {infeasible.length === 0 ? <p className="text-sm text-muted">No candidate action is excluded.</p> : null}
         <ul className="text-sm space-y-2">
           {infeasible.map((a) => (
             <li key={a.action.id}>
@@ -129,16 +165,24 @@ export default function LeveragePage() {
                 {a.feasibility.hardViolations.map((v) => (
                   <li key={v.constraint.id}>
                     Conflicts with the stated constraint &ldquo;{v.constraint.name}&rdquo; (requires {String(v.required)}, limit{" "}
-                    {v.constraint.check?.comparator} {String(v.constraint.check?.limit)}).
+                    {v.constraint.check ? COMPARATOR_SYMBOL[v.constraint.check.comparator] : ""} {String(v.constraint.check?.limit)}).
                   </li>
                 ))}
               </ul>
+              {a.feasibility.unconfirmedViolations.length > 0 ? <div className="text-xs text-muted pl-5">{UNCONFIRMED_NOTE}</div> : null}
+              <div className="pl-5">
+                <CoverageLines feasibility={a.feasibility} />
+              </div>
             </li>
           ))}
         </ul>
         <div className="mt-3">
           <Note>
-            Constraints in force: {model.constraints.map((c) => c.name).join("; ")}. A mathematically attractive option that conflicts with a constraint is excluded rather than down-weighted (A14).
+            Constraints in force: {model.constraints.length > 0 ? model.constraints.map((c) => c.name).join("; ") : "none recorded"}. A mathematically attractive option that conflicts with a hard constraint is excluded rather than down-weighted (A14). Constraints are edited on the{" "}
+            <Link href="/constraints" className="underline">
+              Constraints
+            </Link>{" "}
+            screen.
           </Note>
         </div>
       </Card>

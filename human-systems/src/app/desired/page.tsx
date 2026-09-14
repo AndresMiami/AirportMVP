@@ -1,5 +1,6 @@
 "use client";
 import { NumberField } from "@/components/fields";
+import { HypothesisStatusBadge } from "@/components/loop-list";
 import { useModel } from "@/components/model-provider";
 import { fmtValue } from "@/components/format";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
@@ -11,7 +12,9 @@ export default function DesiredPage() {
   const d = model.desiredAttractor;
   const withTargets = variables.filter((v) => v.desiredValue !== null);
   const withoutTargets = variables.filter((v) => v.desiredValue === null);
-  const reinforcing = loops.filter((l) => l.polarity === "reinforcing" && (l.pressure ?? 0) > 0);
+  const pressing = loops.filter((l) => l.polarity === "reinforcing" && (l.pressure ?? 0) > 0);
+  const reinforcing = pressing.filter((l) => l.status !== "rejected");
+  const rejectedCount = pressing.length - reinforcing.length;
 
   return (
     <div>
@@ -62,17 +65,29 @@ export default function DesiredPage() {
           </table>
         </Card>
         <div className="space-y-4">
-          <Card title="Loops that would need to weaken">
-            <ul className="text-sm space-y-1">
-              {reinforcing.map((l) => (
-                <li key={l.id}>
-                  <span className="font-medium">{l.annotation?.name ?? l.id}</span>
-                  <span className="text-xs text-muted"> — pressure {l.pressure?.toFixed(2)}</span>
-                </li>
-              ))}
-            </ul>
+          <Card title="Loop hypotheses that would need to weaken">
+            {reinforcing.length === 0 ? (
+              <p className="text-sm text-muted">No reinforcing loop hypothesis currently carries pressure.</p>
+            ) : (
+              <ul className="text-sm space-y-1.5">
+                {reinforcing.map((l) => (
+                  <li key={l.id} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{l.annotation?.name ?? l.id}</span>
+                    <HypothesisStatusBadge status={l.status} prefix="hypothesis:" />
+                    <span className="text-xs text-muted tabular-nums">pressure {l.pressure?.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {rejectedCount > 0 ? (
+              <p className="text-xs text-muted mt-2">
+                {rejectedCount} rejected loop hypothes{rejectedCount > 1 ? "es" : "is"} left out; the edges still form {rejectedCount > 1 ? "those loops" : "that loop"}.
+              </p>
+            ) : null}
             <div className="mt-3">
-              <Note>Reaching the desired state is expected to show up as these reinforcing loops losing pressure in the Scenario simulator. That is a consistency check, not a guarantee.</Note>
+              <Note>
+                Reaching the desired state is expected to show up as these reinforcing loops losing pressure in the Scenario simulator. That is a consistency check, not a guarantee. A loop&apos;s status is the status of its hypothesis; &quot;accepted&quot; is a working reading, not established fact.
+              </Note>
             </div>
           </Card>
           <Card title={`No target yet (${withoutTargets.length})`}>

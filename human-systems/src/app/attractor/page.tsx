@@ -1,15 +1,20 @@
 "use client";
+import Link from "next/link";
 import { LoopList } from "@/components/loop-list";
 import { useModel } from "@/components/model-provider";
 import { fmtPct, fmtValue } from "@/components/format";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
+import type { Relationship } from "@/types";
 
 export default function AttractorPage() {
   const { evaluated, replaceModel } = useModel();
   if (!evaluated) return <Loading />;
-  const { model, loops, gap, variableById } = evaluated;
-  const reinforcing = [...loops.filter((l) => l.polarity === "reinforcing")].sort((a, b) => (b.pressure ?? -1) - (a.pressure ?? -1));
-  const balancing = loops.filter((l) => l.polarity === "balancing");
+  const { model, loops, gap, variableById, allRelationships } = evaluated;
+  const relationshipById = new Map<string, Relationship>(allRelationships.map((r) => [r.id, r]));
+  const byPressure = (a: (typeof loops)[number], b: (typeof loops)[number]) => (b.pressure ?? -1) - (a.pressure ?? -1);
+  const rejected = [...loops.filter((l) => l.status === "rejected")].sort(byPressure);
+  const reinforcing = [...loops.filter((l) => l.polarity === "reinforcing" && l.status !== "rejected")].sort(byPressure);
+  const balancing = loops.filter((l) => l.polarity === "balancing" && l.status !== "rejected");
   const slowOpen = gap.gaps
     .filter((g) => g.direction !== "none")
     .map((g) => ({ g, v: variableById.get(g.variableId)! }))
@@ -22,7 +27,7 @@ export default function AttractorPage() {
     <div>
       <PageHeader
         title="Current attractor"
-        lede="The recurring state the system tends to return to. The description is the person's own account; the loops and slow variables below are the model's reading of what may keep reproducing it. Neither is a diagnosis."
+        lede="The recurring state the system tends to return to. The description is the person's own account; the loop hypotheses and slow variables below are the model's reading of what may keep reproducing it. Neither is a diagnosis."
       />
       <Card tone="current" title="As described">
         <textarea
@@ -42,15 +47,34 @@ export default function AttractorPage() {
         </div>
       </Card>
       <div className="grid gap-4 md:grid-cols-2 mt-4">
-        <Card title="Reinforcing loops that appear to hold this state in place">
-          <LoopList loops={reinforcing} variableById={variableById} />
-          {balancing.length > 0 ? (
-            <p className="text-xs text-muted mt-3">
-              {balancing.length} balancing loop{balancing.length > 1 ? "s" : ""} also present (
-              {balancing.map((l) => l.annotation?.name ?? l.id).join(", ")}); these tend to stabilise rather than escalate.
-            </p>
+        <div className="space-y-4 min-w-0">
+          <Card title="Reinforcing loop hypotheses that may hold this state in place">
+            <div className="mb-3">
+              <Note>
+                A loop is a structural consequence of the relationships entered as judgments, not something observed on its own. It stays a hypothesis until it is reviewed on the{" "}
+                <Link href="/hypotheses" className="underline">
+                  Hypotheses
+                </Link>{" "}
+                screen; &quot;accepted&quot; is a working reading, not established fact (A18).
+              </Note>
+            </div>
+            <LoopList loops={reinforcing} variableById={variableById} relationshipById={relationshipById} />
+            {balancing.length > 0 ? (
+              <p className="text-xs text-muted mt-3">
+                {balancing.length} balancing loop hypothes{balancing.length > 1 ? "es" : "is"} also present (
+                {balancing.map((l) => l.annotation?.name ?? l.id).join(", ")}); these tend to stabilise rather than escalate.
+              </p>
+            ) : null}
+          </Card>
+          {rejected.length > 0 ? (
+            <Card title={`Rejected loop hypotheses (still formed by the edges) (${rejected.length})`}>
+              <p className="text-xs text-muted mb-3">
+                These readings were set aside by the person. The relationships that form them are unchanged, so the loops remain in the map; they are kept out of the list above.
+              </p>
+              <LoopList loops={rejected} variableById={variableById} relationshipById={relationshipById} />
+            </Card>
           ) : null}
-        </Card>
+        </div>
         <Card title="Slow variables farthest from the desired state">
           <table className="data">
             <thead>

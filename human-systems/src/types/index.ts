@@ -13,6 +13,19 @@
  *  - The model layer knows nothing about React or the browser.
  */
 import { z } from "zod";
+import {
+  EdgeDirectionSchema,
+  EvidenceSchema,
+  LagSchema,
+  SourceTypeSchema,
+  TargetModeSchema,
+  unitInterval,
+} from "./primitives";
+
+import { StructuralSignatureSchema } from "./signature";
+
+export * from "./primitives";
+export * from "./signature";
 
 /* ------------------------------------------------------------------ */
 /* Vocabulary                                                          */
@@ -47,42 +60,12 @@ export type VariableCategory = z.infer<typeof VariableCategorySchema>;
 export const ChangeSpeedSchema = z.enum(["fast", "slow"]);
 export type ChangeSpeed = z.infer<typeof ChangeSpeedSchema>;
 
-export const SourceTypeSchema = z.enum([
-  "measured",
-  "calculated",
-  "self_reported",
-  "observed",
-  "estimated", // analyst's rough estimate, not stated by the person
-  "ai_inferred",
-  "unknown",
-]);
-export type SourceType = z.infer<typeof SourceTypeSchema>;
-
 export const VariableKindSchema = z.enum(["input", "derived"]);
 export type VariableKind = z.infer<typeof VariableKindSchema>;
-
-/** How desiredValue is meant: a floor, a ceiling, or an exact point.
- *  Overshooting a floor or undershooting a ceiling closes the gap. */
-export const TargetModeSchema = z.enum(["at_least", "at_most", "exact"]);
-export type TargetMode = z.infer<typeof TargetModeSchema>;
-
-/* ------------------------------------------------------------------ */
-/* Evidence                                                            */
-/* ------------------------------------------------------------------ */
-
-export const EvidenceSchema = z.object({
-  text: z.string().min(1),
-  sourceType: SourceTypeSchema.default("self_reported"),
-  /** ISO date the evidence was recorded, if known. */
-  recordedAt: z.string().optional(),
-});
-export type Evidence = z.infer<typeof EvidenceSchema>;
 
 /* ------------------------------------------------------------------ */
 /* Variables                                                           */
 /* ------------------------------------------------------------------ */
-
-const unitInterval = z.number().min(0).max(1);
 
 export const ReferenceRangeSchema = z
   .object({ min: z.number(), max: z.number() })
@@ -151,26 +134,8 @@ export const IncomeSourceSchema = z.object({
 export type IncomeSource = z.infer<typeof IncomeSourceSchema>;
 
 /* ------------------------------------------------------------------ */
-/* Time lags                                                           */
-/* ------------------------------------------------------------------ */
-
-export const LagUnitSchema = z.enum(["days", "weeks", "months", "years"]);
-export type LagUnit = z.infer<typeof LagUnitSchema>;
-
-/** Delay before an effect shows. Stored in the unit the person thinks in;
- *  converted only for arithmetic (calculations/lag). */
-export const LagSchema = z.object({
-  value: z.number().min(0),
-  unit: LagUnitSchema,
-});
-export type Lag = z.infer<typeof LagSchema>;
-
-/* ------------------------------------------------------------------ */
 /* Relationships (directed edges)                                      */
 /* ------------------------------------------------------------------ */
-
-export const EdgeDirectionSchema = z.enum(["positive", "negative"]);
-export type EdgeDirection = z.infer<typeof EdgeDirectionSchema>;
 
 export const RelationshipSchema = z.object({
   id: z.string().min(1),
@@ -403,6 +368,10 @@ export const SystemModelSchema = z.object({
   actions: z.array(ActionSchema).default([]),
   observations: z.array(ObservationSchema).default([]),
   hypotheses: z.array(HypothesisSchema).default([]),
+  /** Immutable structural-signature snapshots (see types/signature). */
+  signatures: z.array(StructuralSignatureSchema).default([]),
+  /** Which signature definition this system uses. */
+  signatureDefinitionId: z.string().default("household_default"),
   utilityWeights: UtilityWeightsSchema.optional(),
   currentAttractor: AttractorDescriptionSchema.prefault({}),
   desiredAttractor: AttractorDescriptionSchema.prefault({}),

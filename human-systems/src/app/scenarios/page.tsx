@@ -1,6 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
+import { formatMonths, type Horizon } from "@/calculations/lag";
 import { NumberField } from "@/components/fields";
+import { HorizonBadge } from "@/components/horizon-badge";
 import { useModel } from "@/components/model-provider";
 import { fmtDelta, fmtPct, fmtValue } from "@/components/format";
 import { Sparkline } from "@/components/sparkline";
@@ -37,6 +39,29 @@ const PRESETS: { name: string; description: string; draft: (d: Draft) => Draft }
     }),
   },
 ];
+
+/** Heading per horizon group (A16): the EARLIEST a tendency could show,
+ *  given the entered lags along the fastest path that reached it. */
+const HORIZON_HEADING: Record<Horizon, string> = {
+  immediate: "Immediate",
+  days: "Could show within days",
+  weeks: "Could show within weeks",
+  months: "Could show within months",
+  years: "Could show within years",
+};
+
+/** Display only. Cumulative lags are shown with ≈ because they are sums
+ *  converted to a natural unit, not the unit entered on any one edge. The
+ *  longest path is mentioned when it is more than 10% beyond the shortest
+ *  and still reads differently once formatted. */
+function lagRangeText(minLagMonths: number, maxLagMonths: number): string {
+  const earliest = minLagMonths <= 0 ? "earliest: immediate" : `earliest ≈ ${formatMonths(minLagMonths)}`;
+  const spread = maxLagMonths - minLagMonths;
+  const scale = Math.max(Math.abs(maxLagMonths), 1e-9);
+  const latest = formatMonths(maxLagMonths);
+  if (spread <= 0 || spread / scale < 0.1 || latest === formatMonths(minLagMonths)) return earliest;
+  return `${earliest}, up to ≈ ${latest}`;
+}
 
 export default function ScenariosPage() {
   const { evaluated } = useModel();
@@ -159,6 +184,9 @@ export default function ScenariosPage() {
                 <tr>
                   <th>Loop</th>
                   <th>Polarity</th>
+                  <th title="Sum of the edge lags around the loop (A16), shown ≈ in a natural unit. The badge is the horizon class of the slowest step.">
+                    Cycle time
+                  </th>
                   <th>Pressure now</th>
                   <th>Pressure in scenario</th>
                   <th>Reading</th>
@@ -169,6 +197,10 @@ export default function ScenariosPage() {
                   <tr key={d.loop.id}>
                     <td>{d.loop.annotation?.name ?? d.loop.id}</td>
                     <td className={d.loop.polarity === "reinforcing" ? "text-warn" : "text-desired"}>{d.loop.polarity}</td>
+                    <td>
+                      <div className="tabular-nums">≈ {formatMonths(d.loop.cycleTimeMonths)}</div>
+                      <HorizonBadge horizon={d.loop.slowestHorizon} prefix="slowest step:" />
+                    </td>
                     <td className="tabular-nums">{d.basePressure?.toFixed(3) ?? "—"}</td>
                     <td className="tabular-nums">{d.scenarioPressure?.toFixed(3) ?? "—"}</td>
                     <td>
@@ -187,11 +219,14 @@ export default function ScenariosPage() {
               </tbody>
             </table>
             <div className="mt-3">
-              <Note>Pressure = mean edge strength × mean normalised gap of the loop&apos;s variables (A10). A reinforcing loop losing pressure means its variables sit closer to the desired state under the scenario; the loop structure itself is unchanged.</Note>
+              <Note>Pressure = mean edge strength × mean normalised gap of the loop&apos;s variables (A10). A reinforcing loop losing pressure means its variables sit closer to the desired state under the scenario; the loop structure itself is unchanged. Cycle time is the plain sum of the entered edge lags (A16): a rough time for one trip around the loop, not a measured period.</Note>
             </div>
           </Card>
 
           <Card title="Values that move (same model assumptions)">
+            <p className="text-xs text-muted mb-2">
+              Calculated values update instantly because they are definitions; the feedback effects below are the ones that take time.
+            </p>
             {changedDerived.length === 0 ? (
               <p className="text-sm text-muted">Nothing moves yet.</p>
             ) : (
@@ -225,30 +260,44 @@ export default function ScenariosPage() {
           </Card>
 
           <Card title="Directional tendencies through the feedback map">
-            {comparison.directional.length === 0 ? (
+            {comparison.directionalByHorizon.length === 0 ? (
               <p className="text-sm text-muted">No downstream tendencies (no changes, or the changed variables have no outgoing edges).</p>
             ) : (
-              <ul className="text-sm space-y-1">
-                {comparison.directional.map((p) => (
-                  <li key={p.variableId}>
-                    <span className="font-medium">{variableById.get(p.variableId)?.name ?? p.variableId}</span>{" "}
-                    {p.tendency === "up" ? (
-                      <span className="text-accent">may be pushed up</span>
-                    ) : p.tendency === "down" ? (
-                      <span className="text-warn">may be pushed down</span>
-                    ) : (
-                      <span className="text-muted">receives mixed pressure</span>
-                    )}
-                    <span className="text-xs text-muted tabular-nums">
-                      {" "}
-                      (net weight {p.score.toFixed(2)} over {p.pathCount} path{p.pathCount > 1 ? "s" : ""})
-                    </span>
-                  </li>
+              <div className="space-y-3">
+                {comparison.directionalByHorizon.map((group) => (
+                  <section key={group.horizon} aria-labelledby={`horizon-${group.horizon}`}>
+                    <h3 id={`horizon-${group.horizon}`} className="text-xs font-semibold text-muted mb-1 flex items-center gap-2">
+                      {HORIZON_HEADING[group.horizon]}
+                      <HorizonBadge horizon={group.horizon} />
+                    </h3>
+                    <ul className="text-sm space-y-1">
+                      {group.tendencies.map((p) => (
+                        <li key={p.variableId}>
+                          <span className="font-medium">{variableById.get(p.variableId)?.name ?? p.variableId}</span>{" "}
+                          {p.tendency === "up" ? (
+                            <span className="text-accent">may be pushed up</span>
+                          ) : p.tendency === "down" ? (
+                            <span className="text-warn">may be pushed down</span>
+                          ) : (
+                            <span className="text-muted">receives mixed pressure</span>
+                          )}
+                          <span className="text-xs text-muted tabular-nums">
+                            {" "}
+                            ({lagRangeText(p.minLagMonths, p.maxLagMonths)} · net weight {p.score.toFixed(2)} over {p.pathCount} path
+                            {p.pathCount > 1 ? "s" : ""})
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
             )}
-            <div className="mt-3">
-              <Note>Sign-only propagation up to four steps along the edges (A12). The weights order the list; they are not magnitudes of change.</Note>
+            <div className="mt-3 space-y-2">
+              <Note>Sign-only propagation up to four steps along the edges (A12). The weights order each group; they are not magnitudes of change.</Note>
+              <Note>
+                Effects propagate on different time horizons (A16). Groups are ordered by the earliest a tendency could show given the entered lags, and the range is the shortest and longest cumulative lag along the paths found; &quot;Immediate&quot; means a lag entered as zero, not an instantaneous response. Nothing here is a forecast.
+              </Note>
             </div>
           </Card>
 

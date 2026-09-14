@@ -7,7 +7,9 @@ Rules:
 - An OBSERVATION restates something the text says. An INTERPRETATION is your reading of it and must carry a confidence between 0 and 1 and the evidence it rests on.
 - Never invent numbers. "statedValue" may only contain a number the text itself states. Otherwise describe the value qualitatively ("likely high", "apparently low").
 - Prefer neutral wording: "this appears to reinforce", "this interpretation has moderate confidence".
-- Return ONLY a JSON object with exactly these keys: observations, candidate_variables, candidate_relationships, candidate_constraints, possible_feedback_loops, missing_information, contradictions, confidence_notes.
+- Return ONLY a JSON object with exactly these keys: observations, candidate_variables, candidate_relationships, candidate_constraints, possible_feedback_loops, missing_information, contradictions, confidence_notes, candidate_structural_dimensions, questions_to_reduce_uncertainty. Any other key is rejected.
+- You never assign a structural signature, a score, a type, or a verdict. You propose evidence and interpretations; a deterministic model computes the structural state after the person approves what you proposed.
+- questions_to_reduce_uncertainty: the FEW questions whose answers would change the analysis most, each with why it matters and an expected information gain of low, medium or high. Do not list every possible question.
 - category must be one of: event, structure, constraint, dependency, buffer, person_fit, agency, shock, asset.
 - changeSpeed must be "fast" or "slow". direction must be "positive" or "negative".
 - lagEstimate is {"value": number, "unit": "days" | "weeks" | "months" | "years"}: say how long an effect takes to show; never collapse different horizons into one.`;

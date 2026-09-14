@@ -23,6 +23,7 @@ import {
   type Member,
   type Observation,
   type Relationship,
+  type StructuralSignature,
   type SystemModel,
   type SystemProfile,
   type Variable,
@@ -571,4 +572,36 @@ export function ensureLoopHypothesis(
     confidence: input.confidence ?? 0.5,
     status: "proposed",
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Structural signature snapshots                                      */
+/* ------------------------------------------------------------------ */
+
+/** Store a COMPUTED signature. The snapshot itself is never edited: only
+ *  its label and notes may change afterwards (updateSignatureMeta). */
+export function addSignatureSnapshot(model: SystemModel, signature: StructuralSignature): SystemModel {
+  if (signature.systemId !== model.id) throw new MutationError("Snapshot belongs to a different system");
+  if (model.signatures.some((s) => s.id === signature.id)) throw new MutationError(`Snapshot "${signature.id}" already exists`);
+  return commit({ ...model, signatures: [...model.signatures, signature] });
+}
+
+export function updateSignatureMeta(model: SystemModel, id: string, patch: { label?: string; notes?: string }): SystemModel {
+  if (!model.signatures.some((s) => s.id === id)) throw new MutationError(`Unknown snapshot "${id}"`);
+  return commit({
+    ...model,
+    signatures: model.signatures.map((s) => (s.id === id ? { ...s, label: patch.label ?? s.label, notes: patch.notes ?? s.notes } : s)),
+  });
+}
+
+export function removeSignatureSnapshot(model: SystemModel, id: string): SystemModel {
+  if (!model.signatures.some((s) => s.id === id)) throw new MutationError(`Unknown snapshot "${id}"`);
+  return commit({ ...model, signatures: model.signatures.filter((s) => s.id !== id) });
+}
+
+export function nextSignatureId(model: SystemModel): string {
+  const taken = new Set(model.signatures.map((s) => s.id));
+  let n = model.signatures.length + 1;
+  while (taken.has(`sig_${n}`)) n += 1;
+  return `sig_${n}`;
 }

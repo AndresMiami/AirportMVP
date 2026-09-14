@@ -22,13 +22,32 @@ describe("AI output validation", () => {
     expect(stated[0].statedValue).toBe(10000);
     expect(MOCK_ANALYSIS_JSON.candidate_variables.every((c) => c.evidence.length > 0)).toBe(true);
   });
+  it("rejects any attempt to return a structural signature or score (strict keys)", () => {
+    const withSignature = { ...MOCK_ANALYSIS_JSON, structural_signature: "10110010" };
+    expect(AiAnalysisSchema.safeParse(withSignature).success).toBe(false);
+    const withScore = { ...MOCK_ANALYSIS_JSON, life_score: 0.7 };
+    expect(AiAnalysisSchema.safeParse(withScore).success).toBe(false);
+  });
+  it("accepts candidate dimensions and uncertainty questions, defaulting them when absent", () => {
+    const { candidate_structural_dimensions: _d, questions_to_reduce_uncertainty: _q, ...legacy } = MOCK_ANALYSIS_JSON;
+    void _d;
+    void _q;
+    const parsed = AiAnalysisSchema.parse(legacy);
+    expect(parsed.candidate_structural_dimensions).toEqual([]);
+    expect(parsed.questions_to_reduce_uncertainty).toEqual([]);
+    const full = AiAnalysisSchema.parse(MOCK_ANALYSIS_JSON);
+    expect(full.candidate_structural_dimensions[0].name).toBe("Goal-directed saving capacity");
+    expect(full.questions_to_reduce_uncertainty[0].expectedInformationGain).toBe("high");
+    const badGain = { ...MOCK_ANALYSIS_JSON, questions_to_reduce_uncertainty: [{ ...MOCK_ANALYSIS_JSON.questions_to_reduce_uncertainty[0], expectedInformationGain: "huge" }] };
+    expect(AiAnalysisSchema.safeParse(badGain).success).toBe(false);
+  });
   it("provider returns a validated analysis", async () => {
     const r = await new MockAiProvider().analyze({ text: "anything" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.analysis.candidate_variables.length).toBeGreaterThan(0);
   });
   it("system prompt carries the required stance", () => {
-    for (const phrase of ["Separate observations from interpretations", "Do not moralize", "Do not assume motivation from leisure behavior", "Identify uncertainty explicitly"]) {
+    for (const phrase of ["Separate observations from interpretations", "Do not moralize", "Do not assume motivation from leisure behavior", "Identify uncertainty explicitly", "never assign a structural signature"]) {
       expect(ANALYSIS_SYSTEM_PROMPT).toContain(phrase);
     }
   });

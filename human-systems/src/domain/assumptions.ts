@@ -162,6 +162,54 @@ export const ASSUMPTIONS: ModelAssumption[] = [
     status: "convention",
     usedBy: ["projectCareerCapital"],
   },
+  {
+    id: "A19",
+    title: "Signature dimension normalisation",
+    statement:
+      "A structural dimension is a weighted mean (or min/max) of its contributing variables after each is mapped to 0..1 by a declared transform (linear range or ratio to a 'strong' value), inverted where a higher raw value is the weaker position, and clipped. Ranges, thresholds and weights live in the signature definition and are conventions, not findings. The continuous value is canonical; 'weak/strong' and bands are display classifications derived from it.",
+    status: "convention",
+    usedBy: ["computeDimension", "HOUSEHOLD_SIGNATURE_V1"],
+  },
+  {
+    id: "A20",
+    title: "Unknown is not zero",
+    statement:
+      "A contributing variable that is absent or has no value is UNKNOWN. It is excluded from the aggregate rather than counted as 0; a dimension becomes unknown (value null, confidence 0, strip character '?') when a required input is unknown or fewer than the minimum number of inputs are known.",
+    status: "convention",
+    usedBy: ["computeDimension", "compactStrip"],
+  },
+  {
+    id: "A21",
+    title: "Dimension confidence",
+    statement:
+      "Dimension confidence = (weighted mean, or minimum, of the known inputs' confidence) × (share of input weight that was known). Overall signature confidence is the mean over known dimensions; completeness is the share of dimensions that are known.",
+    status: "convention",
+    usedBy: ["computeDimension", "computeSignature"],
+  },
+  {
+    id: "A22",
+    title: "Question priority heuristic",
+    statement:
+      "priority = importance × uncertainty × influence, where importance is the definition's weight, uncertainty is 1 for an unknown dimension and (1 - confidence) otherwise, and influence = max(0.1, 0.5 × mean network influence of the dimension's variables + 0.5 × share of detected loops touching them). Multiplicative with a floor, so there is no division. A MODEL HEURISTIC, not an information-theoretic quantity.",
+    status: "hypothesis",
+    usedBy: ["questionPriorities"],
+  },
+  {
+    id: "A23",
+    title: "Change and persistence thresholds",
+    statement:
+      "Between two snapshots a dimension or variable 'changed' when its normalised value moved by at least 0.10 and is 'persistent' when both values are known and moved less. Across several snapshots an item is persistent when its range over the known snapshots is below 0.10. Confidence 'improved' at +0.10. Repeated appearance of a pattern is reported as repetition, never as cause.",
+    status: "convention",
+    usedBy: ["compareSignatures", "persistenceIndicators", "recurringRelationships"],
+  },
+  {
+    id: "A24",
+    title: "Gap bands",
+    statement:
+      "Per-dimension gap = desired - current on the 0..1 scale. Bands: none < 0.05, small < 0.15, moderate < 0.30, large < 0.50, very large otherwise; 'already strong' when there is no gap and the current value is at or above the strong threshold. Gaps are reported as a vector; there is no total.",
+    status: "convention",
+    usedBy: ["signatureGap"],
+  },
 ];
 
 export const ASSUMPTION_BY_ID: Record<string, ModelAssumption> = Object.fromEntries(
