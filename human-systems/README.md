@@ -26,11 +26,26 @@ exercises the review contract).
 ```bash
 npm install --legacy-peer-deps   # vitest 4 + npm's peer resolver need the flag
 npm run dev                      # http://localhost:3000
-npm test                         # vitest, 244 tests
+npm test                         # vitest, 248 tests
 npm run typecheck
 npm run lint
 npm run build
 ```
+
+## Foundations
+
+`docs/FOUNDATIONS.md` is the scientific and normative foundation and is
+required reading before changing schemas, AI, domains or screens. It keeps
+three things apart: what is mathematically grounded (identities, measures,
+graph structure, explicit unknowns), what is our modeling convention
+(signatures, leverage, thresholds, step models, all labelled in
+`src/domain/assumptions.ts`), and what is a deliberate normative
+commitment (human sovereignty, the limits of quantification,
+anti-exploitation, data minimisation). Its constitution in one breath:
+unknown ≠ zero, observation ≠ interpretation, association ≠ causation,
+immeasurable ≠ nonexistent, pattern ≠ identity, model ≠ person,
+optimization ≠ meaning, understanding vulnerability ≠ permission to exploit
+it, the model serves the person, human judgment retains final authority.
 
 ## Architecture
 
@@ -65,6 +80,7 @@ src/
 tests/            vitest; tests/architecture pins the model layer UI-free and
                   the engine free of concrete domain imports; tests/model/
                   fake-domain proves a second domain needs no engine change
+docs/FOUNDATIONS.md       the foundation: grounded math, conventions, principles
 docs/EDITING-CONTRACT.md  how screens change the model
 docs/SCHEMA-V3-PROPOSAL.md the staged v3 plan (3a shipped; 3b–3d pending)
 ```

@@ -1,11 +1,15 @@
 /**
- * Registry of MODEL ASSUMPTIONS.
+ * Registry of MODEL ASSUMPTIONS (docs/FOUNDATIONS.md, Part B).
  *
  * Every formula in calculations/ cites one or more of these ids. The
  * Evidence / Assumptions screen renders this list so a reader can see
  * exactly which conventions the numbers rest on. None of these are
  * established scientific laws; they are working conventions chosen for
- * the MVP and open to revision.
+ * the MVP and open to revision. The mathematically grounded pieces
+ * (identities, concentration measures, graph structure, constraint logic,
+ * explicit unknowns) are Part A of the foundation; the normative design
+ * principles are Part C and are deliberate commitments, not derivable
+ * from any formula here.
  */
 export type AssumptionStatus = "convention" | "hypothesis" | "placeholder";
 

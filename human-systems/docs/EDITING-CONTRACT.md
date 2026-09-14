@@ -1,6 +1,33 @@
 # Editing contract (schema v3)
 
-How UI screens change the model. Read this before writing an editor.
+How UI screens change the model. Read this before writing an editor, and
+read docs/FOUNDATIONS.md before this: every screen is bound by its
+constitution (Part F) and the measurement boundary (Part E.2).
+
+## Foundation rules every screen obeys
+
+- Class 3 information (values, commitments, spiritual beliefs, intuitions,
+  purposes) is entered as TEXT: an Observation, or a hard Constraint with
+  no machine-checkable `check` (reported "unchecked", never scored). A
+  screen never offers a slider, rating or number for meaning. If the
+  person chooses a numeric convention for a limited purpose, the screen
+  labels it as their chosen convention and keeps the statement beside it.
+- An intuition is preserved verbatim as an observation. A screen may ask
+  the follow-up questions in FOUNDATIONS E.3; it never labels the intuition
+  irrational, correct, incorrect, a bias or a truth.
+- Wording: describe conditions and positions of the situation, never the
+  person. Allowed: structural signature, recurring pattern, observed
+  tendency, working hypothesis, current state, persistent condition.
+  Never: type, code, diagnosis, trait-as-verdict, identity, "you are".
+- Every number about a person shows its provenance and its epistemic
+  class; ranks and bands come before decimals; unknown stays visible.
+- The only objective a screen optimises, ranks or sorts by is the
+  person's own targets, constraints, weights and hypothesis status. No
+  screen nudges toward engagement, retention, conversion or any third
+  party's interest, and no screen manufactures urgency from the data.
+- Inferred (`ai_inferred`, `estimated`) and entered (`self_reported`,
+  `measured`, `observed`) information are visually distinguishable
+  everywhere a value is shown.
 
 ## Flow
 

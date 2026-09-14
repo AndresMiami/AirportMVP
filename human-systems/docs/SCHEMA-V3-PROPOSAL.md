@@ -287,6 +287,18 @@ exposures → Σ(t1) vs Σ(t2) with the events in between listed.
 
 ## M. Invariants and the tests that pin them
 
+FOUNDATION (added 2026-09-14): every remaining stage (3b dated values and
+targets, 3c evidence convergence, 3d income refinement and the
+OpportunityProfile) is additionally bound by docs/FOUNDATIONS.md, Part E
+(measurement boundary) and Part F (constitution): no new numeric field for
+human meaning; qualitative statements enter as text with subject and
+provenance; interpretations never auto-promote to facts; no universal
+score; no optimisation target other than the person's own; inferred and
+entered information stay distinguishable; nothing repurposed silently.
+Section K's `physicalRequirements` and `facts` are class 1 (measurable /
+estimable) and stay per-dimension, never collapsed; `keyUnknowns` and
+`killCriteria` are class 2 (interpretive) with observation links.
+
 Cross-cutting (tests/architecture, tests/calculations/unknown-not-zero, new tests/invariants):
 1. UNKNOWN ≠ ZERO: every derived formula, projection, dimension and
    aggregate returns null / unknown when a required input is null; no
