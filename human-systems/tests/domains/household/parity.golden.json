@@ -1,0 +1,1958 @@
+{
+  "domain": {
+    "id": "household",
+    "version": 1
+  },
+  "counts": {
+    "inputs": 24,
+    "derived": 10,
+    "loops": 4,
+    "actions": 6,
+    "unassigned": 0,
+    "issuesWarning": 0
+  },
+  "inputs": {
+    "annual_return_rate": {
+      "key": "annual_return_rate",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 0.03,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "estimated",
+      "confidence": 0.3,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "rate/year"
+    },
+    "available_new_hours": {
+      "key": "available_new_hours",
+      "subjectId": "dani",
+      "currentValue": 8,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "self_reported",
+      "confidence": 0.7,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "hours/week"
+    },
+    "capital_conversion_rate": {
+      "key": "capital_conversion_rate",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 0.3,
+      "desiredValue": 0.5,
+      "targetMode": "at_least",
+      "sourceType": "self_reported",
+      "confidence": 0.4,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "share 0-1"
+    },
+    "career_capital": {
+      "key": "career_capital",
+      "subjectId": "dani",
+      "currentValue": 35,
+      "desiredValue": 60,
+      "targetMode": "at_least",
+      "sourceType": "self_reported",
+      "confidence": 0.4,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "index 0-100"
+    },
+    "discretionary_expenses": {
+      "key": "discretionary_expenses",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 400,
+      "desiredValue": 300,
+      "targetMode": "at_most",
+      "sourceType": "measured",
+      "confidence": 0.7,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "$/month"
+    },
+    "effort_to_capital_rate": {
+      "key": "effort_to_capital_rate",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 0.1,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "estimated",
+      "confidence": 0.25,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "index points/hour"
+    },
+    "essential_expenses": {
+      "key": "essential_expenses",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 3600,
+      "desiredValue": 3400,
+      "targetMode": "at_most",
+      "sourceType": "measured",
+      "confidence": 0.85,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "$/month"
+    },
+    "financial_pressure": {
+      "key": "financial_pressure",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 7,
+      "desiredValue": 3,
+      "targetMode": "at_most",
+      "sourceType": "self_reported",
+      "confidence": 0.7,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "self-rating 0-10"
+    },
+    "liquid_reserves": {
+      "key": "liquid_reserves",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 2800,
+      "desiredValue": 10800,
+      "targetMode": "at_least",
+      "sourceType": "measured",
+      "confidence": 0.95,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "$"
+    },
+    "major_paths": {
+      "key": "major_paths",
+      "subjectId": "dani",
+      "currentValue": 3,
+      "desiredValue": 1,
+      "targetMode": "at_most",
+      "sourceType": "self_reported",
+      "confidence": 0.7,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "count"
+    },
+    "monthly_debt_payments": {
+      "key": "monthly_debt_payments",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 320,
+      "desiredValue": 0,
+      "targetMode": "at_most",
+      "sourceType": "measured",
+      "confidence": 0.9,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "$/month"
+    },
+    "persistence": {
+      "key": "persistence",
+      "subjectId": "dani",
+      "currentValue": 0.6,
+      "desiredValue": 0.7,
+      "targetMode": "at_least",
+      "sourceType": "observed",
+      "confidence": 0.4,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "index 0-1"
+    },
+    "planning_horizon": {
+      "key": "planning_horizon",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 1,
+      "desiredValue": 6,
+      "targetMode": "at_least",
+      "sourceType": "self_reported",
+      "confidence": 0.6,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "months"
+    },
+    "productive_assets": {
+      "key": "productive_assets",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 1200,
+      "desiredValue": 5000,
+      "targetMode": "at_least",
+      "sourceType": "measured",
+      "confidence": 0.8,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "$"
+    },
+    "protected_hours": {
+      "key": "protected_hours",
+      "subjectId": "dani",
+      "currentValue": 2,
+      "desiredValue": 10,
+      "targetMode": "at_least",
+      "sourceType": "self_reported",
+      "confidence": 0.6,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "hours/week"
+    },
+    "quality_of_effort": {
+      "key": "quality_of_effort",
+      "subjectId": "dani",
+      "currentValue": 0.5,
+      "desiredValue": 0.7,
+      "targetMode": "at_least",
+      "sourceType": "self_reported",
+      "confidence": 0.35,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "index 0-1"
+    },
+    "risk_tolerance": {
+      "key": "risk_tolerance",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 0.3,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "self_reported",
+      "confidence": 0.5,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "index 0-1"
+    },
+    "schedule_flexibility": {
+      "key": "schedule_flexibility",
+      "subjectId": "dani",
+      "currentValue": 0.3,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "self_reported",
+      "confidence": 0.6,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "index 0-1"
+    },
+    "single_vehicle_dependency": {
+      "key": "single_vehicle_dependency",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 1,
+      "desiredValue": 0,
+      "targetMode": "at_most",
+      "sourceType": "observed",
+      "confidence": 0.9,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "flag 0/1"
+    },
+    "survival_work_share": {
+      "key": "survival_work_share",
+      "subjectId": "dani",
+      "currentValue": 0.9,
+      "desiredValue": 0.7,
+      "targetMode": "at_most",
+      "sourceType": "self_reported",
+      "confidence": 0.5,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "share 0-1"
+    },
+    "switching_cost": {
+      "key": "switching_cost",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 6,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "estimated",
+      "confidence": 0.3,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "index points/switch"
+    },
+    "switching_frequency": {
+      "key": "switching_frequency",
+      "subjectId": "dani",
+      "currentValue": 2,
+      "desiredValue": 0.5,
+      "targetMode": "at_most",
+      "sourceType": "self_reported",
+      "confidence": 0.5,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "switches/year"
+    },
+    "total_debt": {
+      "key": "total_debt",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 9500,
+      "desiredValue": 0,
+      "targetMode": "at_most",
+      "sourceType": "measured",
+      "confidence": 0.9,
+      "valueResolution": "resolved",
+      "targetResolution": "resolved",
+      "unit": "$"
+    },
+    "vehicle_repair_exposure": {
+      "key": "vehicle_repair_exposure",
+      "subjectId": "sample_household_okafor_reyes",
+      "currentValue": 1500,
+      "desiredValue": null,
+      "targetMode": "exact",
+      "sourceType": "estimated",
+      "confidence": 0.4,
+      "valueResolution": "resolved",
+      "targetResolution": "no_entries",
+      "unit": "$"
+    }
+  },
+  "derived": {
+    "buffer_months": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 0.777778,
+      "confidence": 0.85,
+      "desired": 3,
+      "missingInputs": []
+    },
+    "debt_burden": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 0.074419,
+      "confidence": 0.5,
+      "desired": 0,
+      "missingInputs": []
+    },
+    "failure_correlation": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 0.604651,
+      "confidence": 0.5,
+      "desired": 0.5,
+      "missingInputs": []
+    },
+    "floor_ratio": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 0.825,
+      "confidence": 0.5,
+      "desired": 1.1,
+      "missingInputs": []
+    },
+    "income_concentration": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 0.476474,
+      "confidence": 0.5,
+      "desired": 0.35,
+      "missingInputs": []
+    },
+    "income_volatility": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 0.286047,
+      "confidence": 0.5,
+      "desired": 0.2,
+      "missingInputs": []
+    },
+    "monthly_surplus": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": -20,
+      "confidence": 0.5,
+      "desired": 400,
+      "missingInputs": []
+    },
+    "reliable_floor": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 2970,
+      "confidence": 0.5,
+      "desired": 3740,
+      "missingInputs": []
+    },
+    "replacement_latency": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 1.44186,
+      "confidence": 0.5,
+      "desired": 1,
+      "missingInputs": []
+    },
+    "total_income": {
+      "subjectId": "sample_household_okafor_reyes",
+      "value": 4300,
+      "confidence": 0.5,
+      "desired": 5000,
+      "missingInputs": []
+    }
+  },
+  "loops": [
+    {
+      "id": "career_capital>reliable_floor>financial_pressure>major_paths>switching_frequency",
+      "polarity": "reinforcing",
+      "variableIds": [
+        "career_capital",
+        "reliable_floor",
+        "financial_pressure",
+        "major_paths",
+        "switching_frequency"
+      ],
+      "status": "proposed",
+      "gain": 0.048,
+      "pressure": 0.177706
+    },
+    {
+      "id": "career_capital>reliable_floor>financial_pressure>planning_horizon>survival_work_share>protected_hours",
+      "polarity": "reinforcing",
+      "variableIds": [
+        "career_capital",
+        "reliable_floor",
+        "financial_pressure",
+        "planning_horizon",
+        "survival_work_share",
+        "protected_hours"
+      ],
+      "status": "proposed",
+      "gain": 0.08064,
+      "pressure": 0.205135
+    },
+    {
+      "id": "career_capital>reliable_floor>financial_pressure>quality_of_effort",
+      "polarity": "reinforcing",
+      "variableIds": [
+        "career_capital",
+        "reliable_floor",
+        "financial_pressure",
+        "quality_of_effort"
+      ],
+      "status": "uncertain",
+      "gain": 0.08,
+      "pressure": 0.140387
+    },
+    {
+      "id": "discretionary_expenses>monthly_surplus>liquid_reserves>financial_pressure",
+      "polarity": "balancing",
+      "variableIds": [
+        "discretionary_expenses",
+        "monthly_surplus",
+        "liquid_reserves",
+        "financial_pressure"
+      ],
+      "status": "accepted",
+      "gain": 0.243,
+      "pressure": 0.170553
+    }
+  ],
+  "actions": [
+    {
+      "id": "a_auto_save",
+      "feasible": true,
+      "hardViolations": [],
+      "softViolations": [],
+      "suitability": 1,
+      "leverage": 16.625,
+      "utilityTotal": null,
+      "utility": {
+        "financialImprovement": 0.2,
+        "stability": 0.5,
+        "upside": 0,
+        "scheduleFit": 1,
+        "stress": 0.1,
+        "timeRequirement": 0,
+        "risk": 0,
+        "reversibility": 1,
+        "assetCompounding": 0.3
+      }
+    },
+    {
+      "id": "a_cdl",
+      "feasible": false,
+      "hardViolations": [
+        "c_capital",
+        "c_hours"
+      ],
+      "softViolations": [
+        "c_risk"
+      ],
+      "suitability": 0.6,
+      "leverage": 1.51875,
+      "utilityTotal": null,
+      "utility": {
+        "financialImprovement": 0.8,
+        "stability": 0.6,
+        "upside": 0.6,
+        "scheduleFit": -0.6,
+        "stress": -0.5,
+        "timeRequirement": -0.8,
+        "risk": -0.4,
+        "reversibility": 0.3,
+        "careerCompounding": 0.7
+      }
+    },
+    {
+      "id": "a_forklift",
+      "feasible": true,
+      "hardViolations": [],
+      "softViolations": [],
+      "suitability": 1,
+      "leverage": 7.2,
+      "utilityTotal": null,
+      "utility": {
+        "financialImprovement": 0.4,
+        "stability": 0.5,
+        "upside": 0.3,
+        "physicalFit": 0.6,
+        "scheduleFit": 0.6,
+        "stress": -0.1,
+        "timeRequirement": -0.3,
+        "risk": -0.1,
+        "reversibility": 0.8,
+        "careerCompounding": 0.5
+      }
+    },
+    {
+      "id": "a_protected_block",
+      "feasible": true,
+      "hardViolations": [],
+      "softViolations": [],
+      "suitability": 1,
+      "leverage": 1.2,
+      "utilityTotal": null,
+      "utility": {
+        "financialImprovement": -0.1,
+        "stability": 0,
+        "upside": 0.5,
+        "autonomy": 0.4,
+        "scheduleFit": 0.3,
+        "stress": -0.2,
+        "timeRequirement": -0.5,
+        "risk": -0.1,
+        "reversibility": 0.9,
+        "careerCompounding": 0.7
+      }
+    },
+    {
+      "id": "a_relocate",
+      "feasible": false,
+      "hardViolations": [
+        "c_capital",
+        "c_relocation"
+      ],
+      "softViolations": [
+        "c_risk"
+      ],
+      "suitability": 0.6,
+      "leverage": 0.592593,
+      "utilityTotal": null,
+      "utility": {
+        "financialImprovement": 0.7,
+        "stability": 0.3,
+        "upside": 0.5,
+        "valuesFit": -0.8,
+        "scheduleFit": 0,
+        "stress": -0.7,
+        "timeRequirement": -0.2,
+        "risk": -0.6,
+        "reversibility": 0.2
+      }
+    },
+    {
+      "id": "a_second_platform",
+      "feasible": true,
+      "hardViolations": [],
+      "softViolations": [],
+      "suitability": 1,
+      "leverage": 1.35,
+      "utilityTotal": null,
+      "utility": {
+        "financialImprovement": 0.3,
+        "stability": 0.2,
+        "upside": 0.1,
+        "autonomy": 0.3,
+        "scheduleFit": 0.5,
+        "stress": -0.2,
+        "timeRequirement": -0.4,
+        "risk": -0.1,
+        "reversibility": 0.9,
+        "careerCompounding": 0
+      }
+    }
+  ],
+  "leverageRank": [
+    "a_auto_save",
+    "a_forklift",
+    "a_cdl",
+    "a_second_platform",
+    "a_protected_block",
+    "a_relocate"
+  ],
+  "gap": {
+    "openCount": 27,
+    "closedCount": 0,
+    "gaps": [
+      {
+        "id": "buffer_months",
+        "normalized": 0.185185
+      },
+      {
+        "id": "capital_conversion_rate",
+        "normalized": 0.2
+      },
+      {
+        "id": "career_capital",
+        "normalized": 0.25
+      },
+      {
+        "id": "debt_burden",
+        "normalized": 0.148837
+      },
+      {
+        "id": "discretionary_expenses",
+        "normalized": 0.066667
+      },
+      {
+        "id": "essential_expenses",
+        "normalized": 0.033333
+      },
+      {
+        "id": "failure_correlation",
+        "normalized": 0.104651
+      },
+      {
+        "id": "financial_pressure",
+        "normalized": 0.4
+      },
+      {
+        "id": "floor_ratio",
+        "normalized": 0.1375
+      },
+      {
+        "id": "income_concentration",
+        "normalized": 0.126474
+      },
+      {
+        "id": "income_volatility",
+        "normalized": 0.086047
+      },
+      {
+        "id": "liquid_reserves",
+        "normalized": 0.4
+      },
+      {
+        "id": "major_paths",
+        "normalized": 0.4
+      },
+      {
+        "id": "monthly_debt_payments",
+        "normalized": 0.32
+      },
+      {
+        "id": "monthly_surplus",
+        "normalized": 0.105
+      },
+      {
+        "id": "persistence",
+        "normalized": 0.1
+      },
+      {
+        "id": "planning_horizon",
+        "normalized": 0.416667
+      },
+      {
+        "id": "productive_assets",
+        "normalized": 0.38
+      },
+      {
+        "id": "protected_hours",
+        "normalized": 0.4
+      },
+      {
+        "id": "quality_of_effort",
+        "normalized": 0.2
+      },
+      {
+        "id": "reliable_floor",
+        "normalized": 0.205882
+      },
+      {
+        "id": "replacement_latency",
+        "normalized": 0.073643
+      },
+      {
+        "id": "single_vehicle_dependency",
+        "normalized": 1
+      },
+      {
+        "id": "survival_work_share",
+        "normalized": 0.2
+      },
+      {
+        "id": "switching_frequency",
+        "normalized": 0.375
+      },
+      {
+        "id": "total_debt",
+        "normalized": 0.475
+      },
+      {
+        "id": "total_income",
+        "normalized": 0.14
+      }
+    ]
+  },
+  "signatures": {
+    "system": {
+      "income_floor": {
+        "state": "known",
+        "value": 0.55,
+        "band": "mixed",
+        "confidence": 0.5,
+        "missing": []
+      },
+      "financial_buffer": {
+        "state": "known",
+        "value": 0.12963,
+        "band": "very_weak",
+        "confidence": 0.85,
+        "missing": []
+      },
+      "income_resilience": {
+        "state": "known",
+        "value": 0.531671,
+        "band": "mixed",
+        "confidence": 0.544444,
+        "missing": []
+      },
+      "career_capital": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "member-scope dimension; compute the signature for a member"
+        ]
+      },
+      "productive_assets": {
+        "state": "known",
+        "value": 0.14,
+        "band": "very_weak",
+        "confidence": 0.666667,
+        "missing": []
+      },
+      "focus_commitment": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "member-scope dimension; compute the signature for a member"
+        ]
+      },
+      "physical_feasibility": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "member-scope dimension; compute the signature for a member"
+        ]
+      },
+      "adaptive_capacity": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "member-scope dimension; compute the signature for a member"
+        ]
+      },
+      "social_support": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "care_load (not in the model for this subject)",
+          "support_network (not in the model for this subject)"
+        ]
+      },
+      "planning_horizon": {
+        "state": "known",
+        "value": 0.155556,
+        "band": "very_weak",
+        "confidence": 0.633333,
+        "missing": []
+      }
+    },
+    "dani": {
+      "income_floor": {
+        "state": "known",
+        "value": 0.55,
+        "band": "mixed",
+        "confidence": 0.5,
+        "missing": []
+      },
+      "financial_buffer": {
+        "state": "known",
+        "value": 0.12963,
+        "band": "very_weak",
+        "confidence": 0.85,
+        "missing": []
+      },
+      "income_resilience": {
+        "state": "known",
+        "value": 0.531671,
+        "band": "mixed",
+        "confidence": 0.544444,
+        "missing": []
+      },
+      "career_capital": {
+        "state": "known",
+        "value": 0.35,
+        "band": "weak",
+        "confidence": 0.4,
+        "missing": []
+      },
+      "productive_assets": {
+        "state": "known",
+        "value": 0.14,
+        "band": "very_weak",
+        "confidence": 0.666667,
+        "missing": []
+      },
+      "focus_commitment": {
+        "state": "known",
+        "value": 0.385185,
+        "band": "weak",
+        "confidence": 0.527778,
+        "missing": []
+      },
+      "physical_feasibility": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "physical_capacity (not in the model for this subject)"
+        ]
+      },
+      "adaptive_capacity": {
+        "state": "known",
+        "value": 0.35,
+        "band": "weak",
+        "confidence": 0.52,
+        "missing": [
+          "retraining_readiness (not in the model for this subject)"
+        ]
+      },
+      "social_support": {
+        "state": "unknown",
+        "value": null,
+        "band": "unknown",
+        "confidence": 0,
+        "missing": [
+          "care_load (not in the model for this subject)",
+          "support_network (not in the model for this subject)"
+        ]
+      },
+      "planning_horizon": {
+        "state": "known",
+        "value": 0.155556,
+        "band": "very_weak",
+        "confidence": 0.633333,
+        "missing": []
+      }
+    }
+  },
+  "histories": {
+    "annual_return_rate": {
+      "values": [
+        {
+          "value": 0.03,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "estimated",
+          "confidence": 0.3,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    },
+    "available_new_hours": {
+      "values": [
+        {
+          "value": 8,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.7,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    },
+    "buffer_months": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 3,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "capital_conversion_rate": {
+      "values": [
+        {
+          "value": 0.3,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.4,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0.5,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "career_capital": {
+      "values": [
+        {
+          "value": 35,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.4,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 60,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "debt_burden": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 0,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "discretionary_expenses": {
+      "values": [
+        {
+          "value": 400,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "measured",
+          "confidence": 0.7,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 300,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "effort_to_capital_rate": {
+      "values": [
+        {
+          "value": 0.1,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "estimated",
+          "confidence": 0.25,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    },
+    "essential_expenses": {
+      "values": [
+        {
+          "value": 3600,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "measured",
+          "confidence": 0.85,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 3400,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "failure_correlation": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 0.5,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "financial_pressure": {
+      "values": [
+        {
+          "value": 7,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.7,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 3,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "floor_ratio": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 1.1,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "income_concentration": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 0.35,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "income_volatility": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 0.2,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "liquid_reserves": {
+      "values": [
+        {
+          "value": 2800,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "measured",
+          "confidence": 0.95,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 10800,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "major_paths": {
+      "values": [
+        {
+          "value": 3,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.7,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 1,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "monthly_debt_payments": {
+      "values": [
+        {
+          "value": 320,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "measured",
+          "confidence": 0.9,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "monthly_surplus": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 400,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "persistence": {
+      "values": [
+        {
+          "value": 0.6,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "observed",
+          "confidence": 0.4,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0.7,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "planning_horizon": {
+      "values": [
+        {
+          "value": 1,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.6,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 6,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "productive_assets": {
+      "values": [
+        {
+          "value": 1200,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "measured",
+          "confidence": 0.8,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 5000,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "protected_hours": {
+      "values": [
+        {
+          "value": 2,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.6,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 10,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "quality_of_effort": {
+      "values": [
+        {
+          "value": 0.5,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.35,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0.7,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "reliable_floor": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 3740,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "replacement_latency": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 1,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "risk_tolerance": {
+      "values": [
+        {
+          "value": 0.3,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.5,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    },
+    "schedule_flexibility": {
+      "values": [
+        {
+          "value": 0.3,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.6,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    },
+    "single_vehicle_dependency": {
+      "values": [
+        {
+          "value": 1,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "observed",
+          "confidence": 0.9,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "survival_work_share": {
+      "values": [
+        {
+          "value": 0.9,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.5,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0.7,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "switching_cost": {
+      "values": [
+        {
+          "value": 6,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "estimated",
+          "confidence": 0.3,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    },
+    "switching_frequency": {
+      "values": [
+        {
+          "value": 2,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "self_reported",
+          "confidence": 0.5,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0.5,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "total_debt": {
+      "values": [
+        {
+          "value": 9500,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "measured",
+          "confidence": 0.9,
+          "status": "active"
+        }
+      ],
+      "targets": [
+        {
+          "desiredValue": 0,
+          "mode": "at_most",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "total_income": {
+      "values": [],
+      "targets": [
+        {
+          "desiredValue": 5000,
+          "mode": "at_least",
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "status": "active"
+        }
+      ]
+    },
+    "vehicle_repair_exposure": {
+      "values": [
+        {
+          "value": 1500,
+          "valid": {
+            "kind": "date",
+            "start": "2026-09-01",
+            "precision": "day",
+            "text": "since September 2026 (sample)"
+          },
+          "basis": "asserted",
+          "recordedAt": "2026-09-01T12:00:00.000Z",
+          "sourceType": "estimated",
+          "confidence": 0.4,
+          "status": "active"
+        }
+      ],
+      "targets": []
+    }
+  },
+  "references": {
+    "hypotheses": [
+      {
+        "id": "hyp_belt",
+        "kind": "loop",
+        "status": "accepted",
+        "loopId": "discretionary_expenses>monthly_surplus>liquid_reserves>financial_pressure",
+        "relationshipIds": [
+          "r07",
+          "r08",
+          "r09",
+          "r10"
+        ]
+      },
+      {
+        "id": "hyp_churn",
+        "kind": "loop",
+        "status": "proposed",
+        "loopId": "career_capital>reliable_floor>financial_pressure>major_paths>switching_frequency",
+        "relationshipIds": [
+          "r16",
+          "r17",
+          "r18"
+        ]
+      },
+      {
+        "id": "hyp_erosion",
+        "kind": "loop",
+        "status": "uncertain",
+        "loopId": "career_capital>reliable_floor>financial_pressure>quality_of_effort",
+        "relationshipIds": [
+          "r19",
+          "r20"
+        ]
+      },
+      {
+        "id": "hyp_trap",
+        "kind": "loop",
+        "status": "proposed",
+        "loopId": "career_capital>reliable_floor>financial_pressure>planning_horizon>survival_work_share>protected_hours",
+        "relationshipIds": [
+          "r01",
+          "r02",
+          "r03",
+          "r04",
+          "r05",
+          "r06"
+        ]
+      }
+    ],
+    "events": [
+      {
+        "id": "evt_1",
+        "kind": "shock",
+        "subjectId": "sample_household_okafor_reyes",
+        "links": {
+          "variableIds": [
+            "liquid_reserves"
+          ],
+          "relationshipIds": [
+            "r13"
+          ],
+          "hypothesisIds": [],
+          "actionIds": [],
+          "eventIds": [],
+          "incomeSourceIds": []
+        }
+      },
+      {
+        "id": "evt_2",
+        "kind": "change",
+        "subjectId": "dani",
+        "links": {
+          "variableIds": [],
+          "relationshipIds": [],
+          "hypothesisIds": [],
+          "actionIds": [],
+          "eventIds": [],
+          "incomeSourceIds": [
+            "inc_warehouse"
+          ]
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "id": "r01",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "reliable_floor",
+        "to": "financial_pressure",
+        "direction": "negative"
+      },
+      {
+        "id": "r02",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "financial_pressure",
+        "to": "planning_horizon",
+        "direction": "negative"
+      },
+      {
+        "id": "r03",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "planning_horizon",
+        "to": "survival_work_share",
+        "direction": "negative"
+      },
+      {
+        "id": "r04",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "survival_work_share",
+        "to": "protected_hours",
+        "direction": "negative"
+      },
+      {
+        "id": "r05",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "protected_hours",
+        "to": "career_capital",
+        "direction": "positive"
+      },
+      {
+        "id": "r06",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "career_capital",
+        "to": "reliable_floor",
+        "direction": "positive"
+      },
+      {
+        "id": "r07",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "liquid_reserves",
+        "to": "financial_pressure",
+        "direction": "negative"
+      },
+      {
+        "id": "r08",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "financial_pressure",
+        "to": "discretionary_expenses",
+        "direction": "negative"
+      },
+      {
+        "id": "r09",
+        "kind": "definitional",
+        "dynamics": true,
+        "from": "discretionary_expenses",
+        "to": "monthly_surplus",
+        "direction": "negative"
+      },
+      {
+        "id": "r10",
+        "kind": "definitional",
+        "dynamics": true,
+        "from": "monthly_surplus",
+        "to": "liquid_reserves",
+        "direction": "positive"
+      },
+      {
+        "id": "r11",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "single_vehicle_dependency",
+        "to": "income_volatility",
+        "direction": "positive"
+      },
+      {
+        "id": "r12",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "income_volatility",
+        "to": "financial_pressure",
+        "direction": "positive"
+      },
+      {
+        "id": "r13",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "vehicle_repair_exposure",
+        "to": "liquid_reserves",
+        "direction": "negative"
+      },
+      {
+        "id": "r14",
+        "kind": "definitional",
+        "dynamics": true,
+        "from": "liquid_reserves",
+        "to": "buffer_months",
+        "direction": "positive"
+      },
+      {
+        "id": "r15",
+        "kind": "definitional",
+        "dynamics": true,
+        "from": "monthly_debt_payments",
+        "to": "monthly_surplus",
+        "direction": "negative"
+      },
+      {
+        "id": "r16",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "financial_pressure",
+        "to": "major_paths",
+        "direction": "positive"
+      },
+      {
+        "id": "r17",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "major_paths",
+        "to": "switching_frequency",
+        "direction": "positive"
+      },
+      {
+        "id": "r18",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "switching_frequency",
+        "to": "career_capital",
+        "direction": "negative"
+      },
+      {
+        "id": "r19",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "financial_pressure",
+        "to": "quality_of_effort",
+        "direction": "negative"
+      },
+      {
+        "id": "r20",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "quality_of_effort",
+        "to": "career_capital",
+        "direction": "positive"
+      },
+      {
+        "id": "r21",
+        "kind": "causal_hypothesis",
+        "dynamics": true,
+        "from": "income_concentration",
+        "to": "failure_correlation",
+        "direction": "positive"
+      }
+    ]
+  }
+}

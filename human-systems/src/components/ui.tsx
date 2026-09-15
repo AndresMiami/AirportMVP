@@ -1,4 +1,4 @@
-import { CATEGORY_META, SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
+import { categoryMeta, SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
 import type { SourceType, VariableCategory } from "@/types";
 import { fmtConfidence } from "./format";
 
@@ -88,7 +88,7 @@ export function ConfidenceBadge({ confidence }: { confidence: number }) {
 }
 
 export function CategoryBadge({ category }: { category: VariableCategory }) {
-  const meta = CATEGORY_META[category];
+  const meta = categoryMeta(category);
   return (
     <span title={meta.description} className="inline-block rounded px-1.5 py-0.5 text-xs bg-background border border-border">
       {meta.short}

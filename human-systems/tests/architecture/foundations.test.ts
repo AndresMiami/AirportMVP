@@ -6,7 +6,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ANALYSIS_SYSTEM_PROMPT } from "@/ai/prompt";
+import { ANALYSIS_SYSTEM_PROMPT, buildSystemPrompt } from "@/ai/prompt";
+import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
+import { categoryVocabulary } from "@/model/domain";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const read = (p: string) => readFileSync(path.join(ROOT, p), "utf8");
@@ -90,6 +92,17 @@ describe("foundations", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("A source type is provenance, not truth");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("You never state a probability");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("never judge a past decision by its outcome alone");
+  });
+
+  it("the generic AI constitution names no kind of system; domain vocabulary comes only from the pack's fragment", () => {
+    const generic = buildSystemPrompt();
+    expect(generic).not.toMatch(/household|person's|income|career|family|employ|salary|\bjob\b/i);
+    expect(generic).toContain("Category vocabulary: event");
+    expect(generic).not.toContain("person_fit");
+    const household = buildSystemPrompt(HOUSEHOLD_DOMAIN, categoryVocabulary(HOUSEHOLD_DOMAIN));
+    expect(household.startsWith(ANALYSIS_SYSTEM_PROMPT)).toBe(true);
+    expect(household).toMatch(/income sources/);
+    expect(household).toContain("person_fit (Values, preferences");
   });
 
   it("no screen, component, engine or domain text prescribes a choice or states odds of an outcome", () => {

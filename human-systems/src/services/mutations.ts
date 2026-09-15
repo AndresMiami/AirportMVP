@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { DYNAMICS_ELIGIBLE_KINDS, EventSchema, type Event, type ExtensionEnvelope, type KillCriterion, type RelationshipKind, type SubjectId } from "@/types";
-import { domainRegistry, refFor, resolveVariable, variableIdFor } from "@/model/domain";
+import { categoryVocabulary, domainRegistry, refFor, resolveVariable, variableIdFor } from "@/model/domain";
 import {
   ConstraintSchema,
   HypothesisSchema,
@@ -196,7 +196,7 @@ export function memberReferences(model: SystemModel, id: string): MemberReferenc
 }
 
 /** Archive a member: the id stays, every observation keeps naming them.
- *  History is an asset; leaving the household is a status change. */
+ *  History is an asset; leaving the system is a status change. */
 export function archiveMember(model: SystemModel, id: string): SystemModel {
   return updateMember(model, id, { status: "archived" });
 }
@@ -319,6 +319,7 @@ export function addVariable(model: SystemModel, input: VariableInput): SystemMod
   const key = input.key ?? input.id ?? slugId(input.name, "variable");
   const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
   if (domain?.derived.some((d) => d.key === key)) throw new MutationError(`"${key}" is a calculated variable and cannot be entered`);
+  requireCategory(model, input.category);
   // An unassigned variable has no resolvable reference, so only an assigned subject can collide.
   const existing = input.subjectId === null ? undefined : resolveVariable(model.variables, model.id, refFor(key, input.subjectId, model.id));
   if (existing) throw new MutationError(`${existing.name} already holds key "${key}" for that subject`);
@@ -573,6 +574,7 @@ export function updateVariable(model: SystemModel, id: string, patch: VariablePa
     merged.kind = "input";
     if (fields.subjectId !== undefined) requireSubject(model, fields.subjectId, "variable");
   }
+  if (fields.category !== undefined && fields.category !== current.category) requireCategory(model, fields.category);
   let next = replaceVariable(model, id, merged);
   if (currentValue !== undefined || sourceType !== undefined || confidence !== undefined) {
     if (current.kind === "derived") throw new MutationError(`${current.name} is calculated and never takes an entered value`);
@@ -602,6 +604,14 @@ export function updateVariable(model: SystemModel, id: string, patch: VariablePa
     });
   }
   return next;
+}
+
+/** NEW writes use the active domain's category vocabulary (generic plus
+ *  the pack's own). Historical values outside it are kept untouched. */
+function requireCategory(model: SystemModel, category: string): void {
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  const words = categoryVocabulary(domain);
+  if (!words.includes(category)) throw new MutationError(`Category "${category}" is not in this domain's vocabulary (${words.join(", ")})`);
 }
 
 /** Removes an input variable and everything that pointed at it:

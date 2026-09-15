@@ -7,7 +7,7 @@ import { ConfirmButton } from "@/components/system-switcher";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge, Stat } from "@/components/ui";
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
 import { DERIVED_IDS } from "@/domains/household/keys";
-import { incomeShares } from "@/calculations/household";
+import { incomeShares } from "@/domains/household/calculations";
 import { resolveVariable, systemRef } from "@/model/domain";
 import * as mutations from "@/services/mutations";
 import { SourceTypeSchema, type Member, type SourceType } from "@/types";

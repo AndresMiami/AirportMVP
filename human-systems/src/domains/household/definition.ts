@@ -3,7 +3,10 @@
  * Systems engine. Nothing in the engine depends on this file.
  */
 import type { DomainDefinition } from "@/model/domain";
+import { HOUSEHOLD_AI_EXAMPLE, HOUSEHOLD_PROMPT_FRAGMENT } from "./ai-example";
+import { HOUSEHOLD_ASSUMPTIONS } from "./assumptions";
 import { HOUSEHOLD_CONSTRAINT_TEMPLATES } from "./constraint-templates";
+import { HOUSEHOLD_CATEGORIES, HOUSEHOLD_EVALUATION_DIMENSIONS } from "./evaluation-dimensions";
 import { HOUSEHOLD_DERIVED } from "./derived";
 import { HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION } from "./keys";
 import { HOUSEHOLD_PROJECTIONS } from "./projections";
@@ -35,7 +38,15 @@ export const HOUSEHOLD_DOMAIN: DomainDefinition = {
   name: "Personal / household",
   description:
     "Income, expenses, buffers, dependencies, career capital and agency for an individual or a household. The first configuration of the engine; its thresholds and formulas are conventions, not findings.",
-  systemTypes: ["individual", "household"],
+  kinds: [
+    { id: "individual", label: "One person" },
+    { id: "household", label: "Household" },
+  ],
+  subjectLabel: "Person",
+  categories: HOUSEHOLD_CATEGORIES,
+  evaluationDimensions: HOUSEHOLD_EVALUATION_DIMENSIONS,
+  assumptions: HOUSEHOLD_ASSUMPTIONS,
+  promptFragment: { ...HOUSEHOLD_PROMPT_FRAGMENT, exampleAnalysis: HOUSEHOLD_AI_EXAMPLE },
   variables: HOUSEHOLD_VARIABLES,
   derived: HOUSEHOLD_DERIVED,
   projections: HOUSEHOLD_PROJECTIONS,

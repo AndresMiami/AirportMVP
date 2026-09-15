@@ -3,7 +3,6 @@ import Link from "next/link";
 import { useModel } from "@/components/model-provider";
 import { fmtPct } from "@/components/format";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
-import { UTILITY_DIMENSION_META } from "@/domain/vocabulary";
 import type { FeasibilityResult } from "@/calculations";
 
 /** Symbols for the stored comparator keys, for the excluded-actions list. */
@@ -123,7 +122,7 @@ export default function LeveragePage() {
                       {a.utility.dimensions
                         .filter((d) => d.value !== null)
                         .map((d) => {
-                          const meta = UTILITY_DIMENSION_META[d.dimension];
+                          const meta = { label: d.label, higherIsBetter: d.higherIsBetter };
                           const good = meta.higherIsBetter ? (d.value ?? 0) >= 0 : (d.value ?? 0) <= 0;
                           return (
                             <span key={d.dimension} className={`rounded px-1.5 py-0.5 text-xs ${good ? "bg-desired-soft text-desired" : "bg-neg-soft text-neg"}`}>

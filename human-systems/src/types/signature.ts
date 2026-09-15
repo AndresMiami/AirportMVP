@@ -63,7 +63,7 @@ export const SignatureDimensionDefinitionSchema = z.object({
    *  position. Inputs already encode their own direction via `invert`;
    *  this is the reading of the dimension as a whole. */
   targetDirection: z.enum(["higher"]).default("higher"),
-  /** system: reads household keys; member: reads the subject member's keys. */
+  /** system: reads system-scope keys; member: reads the subject's keys. */
   subjectScope: z.enum(["system", "member"]).default("system"),
   inputs: z.array(DimensionInputSchema).min(1),
   aggregation: AggregationSchema.default("weighted_mean"),
@@ -81,8 +81,8 @@ export type SignatureDimensionDefinition = z.infer<typeof SignatureDimensionDefi
 export const SignatureDefinitionSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  /** Which system types this definition is meant for. */
-  domain: z.enum(["individual", "household", "organization", "country"]),
+  /** The domain pack this definition belongs to (its id). */
+  domainId: z.string().min(1),
   version: z.number().int().min(1),
   /** experimental: thresholds and weights are unreviewed conventions. */
   maturity: z.enum(["experimental", "reviewed"]).default("experimental"),

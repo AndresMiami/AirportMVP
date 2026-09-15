@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { MockAiProvider, MOCK_ANALYSIS_JSON } from "@/ai/mock-provider";
+import { MockAiProvider, NEUTRAL_EXAMPLE_ANALYSIS } from "@/ai/mock-provider";
+import { HOUSEHOLD_AI_EXAMPLE } from "@/domains/household/ai-example";
+import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
+import { categoryVocabulary } from "@/model/domain";
+
+const MOCK_ANALYSIS_JSON = HOUSEHOLD_AI_EXAMPLE;
+const HOUSEHOLD_CATEGORIES = categoryVocabulary(HOUSEHOLD_DOMAIN);
 import { ANALYSIS_SYSTEM_PROMPT } from "@/ai/prompt";
 import { AiAnalysisSchema, parseAiAnalysis } from "@/ai/schema";
 
@@ -12,15 +18,19 @@ describe("AI output validation", () => {
     expect(parseAiAnalysis("not json").ok).toBe(false);
     expect(parseAiAnalysis(JSON.stringify({ observations: [] })).ok).toBe(false);
     const badCategory = { ...MOCK_ANALYSIS_JSON, candidate_variables: [{ ...MOCK_ANALYSIS_JSON.candidate_variables[0], category: "vibes" }] };
-    expect(parseAiAnalysis(JSON.stringify(badCategory)).ok).toBe(false);
+    // the category vocabulary belongs to the domain: unknown words are refused when the vocabulary is given
+    expect(parseAiAnalysis(JSON.stringify(badCategory), { categories: HOUSEHOLD_CATEGORIES }).ok).toBe(false);
+    expect(parseAiAnalysis(JSON.stringify(MOCK_ANALYSIS_JSON), { categories: HOUSEHOLD_CATEGORIES }).ok).toBe(true);
+    // the household example uses household words (agency), which a domain without them refuses
+    expect(parseAiAnalysis(JSON.stringify(MOCK_ANALYSIS_JSON), { categories: ["event", "structure"] }).ok).toBe(false);
     const badConfidence = { ...MOCK_ANALYSIS_JSON, candidate_variables: [{ ...MOCK_ANALYSIS_JSON.candidate_variables[0], confidence: 7 }] };
     expect(AiAnalysisSchema.safeParse(badConfidence).success).toBe(false);
   });
   it("mock provider never invents numbers: statedValue is null unless the text stated one", () => {
-    const stated = MOCK_ANALYSIS_JSON.candidate_variables.filter((c) => c.statedValue !== null);
+    const stated = MOCK_ANALYSIS_JSON.candidate_variables.filter((c: { statedValue: number | null }) => c.statedValue !== null);
     expect(stated).toHaveLength(1);
     expect(stated[0].statedValue).toBe(10000);
-    expect(MOCK_ANALYSIS_JSON.candidate_variables.every((c) => c.evidence.length > 0)).toBe(true);
+    expect(MOCK_ANALYSIS_JSON.candidate_variables.every((c) => String(c.evidence).length > 0)).toBe(true);
   });
   it("rejects any attempt to return a structural signature or score (strict keys)", () => {
     const withSignature = { ...MOCK_ANALYSIS_JSON, structural_signature: "10110010" };
@@ -45,6 +55,10 @@ describe("AI output validation", () => {
     const r = await new MockAiProvider().analyze({ text: "anything" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.analysis.candidate_variables.length).toBeGreaterThan(0);
+    // the neutral default assumes no kind of system
+    expect(JSON.stringify(NEUTRAL_EXAMPLE_ANALYSIS)).not.toMatch(/income|career|household|family|job/i);
+    const household = await new MockAiProvider(HOUSEHOLD_AI_EXAMPLE).analyze({ text: "anything" });
+    expect(household.ok && household.analysis.candidate_structural_dimensions[0].name).toBe("Goal-directed saving capacity");
   });
   it("system prompt carries the required stance", () => {
     for (const phrase of ["Separate observations from interpretations", "Do not moralize", "Do not assume motivation from leisure behavior", "Identify uncertainty explicitly", "never assign a structural signature"]) {

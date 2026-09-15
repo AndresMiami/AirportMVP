@@ -11,7 +11,7 @@ import {
   reliableIncomeFloor,
   replacementLatency,
   totalMonthlyIncome,
-} from "@/calculations/household";
+} from "@/domains/household/calculations";
 import type { IncomeSource } from "@/types";
 
 const src = (over: Partial<IncomeSource>): IncomeSource => ({

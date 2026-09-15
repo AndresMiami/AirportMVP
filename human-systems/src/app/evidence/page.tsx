@@ -5,7 +5,7 @@ import { HorizonBadge } from "@/components/horizon-badge";
 import { HypothesisStatusBadge } from "@/components/loop-list";
 import { useModel } from "@/components/model-provider";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
-import { ASSUMPTIONS } from "@/domain/assumptions";
+import { assumptionsFor } from "@/domain/assumptions";
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
 import type { HypothesisStatus, SourceType } from "@/types";
 
@@ -268,7 +268,7 @@ export default function EvidencePage() {
             </tr>
           </thead>
           <tbody>
-            {ASSUMPTIONS.map((a) => (
+            {assumptionsFor(evaluated.domain).map((a) => (
               <tr key={a.id}>
                 <td className="font-mono text-xs">{a.id}</td>
                 <td>

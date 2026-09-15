@@ -34,30 +34,28 @@ export * from "./signature";
 /* Vocabulary                                                          */
 /* ------------------------------------------------------------------ */
 
-/** System types. Only individual + household are implemented in the MVP;
- *  the others exist so the schema does not need to change later. */
-export const SystemTypeSchema = z.enum([
-  "individual",
-  "household",
-  "organization",
-  "country",
-]);
+/** The KIND of system, as a human-readable label ("household", "market",
+ *  "ecosystem"). The engine never interprets it; the domain pack may
+ *  suggest values for a picker. Engine identity is the domain definition
+ *  (domainDefinitionId + version), not this label. */
+export const SystemTypeSchema = z.string().min(1);
 export type SystemType = z.infer<typeof SystemTypeSchema>;
 
-/** The ten distinctions from the working concept, collapsed into a
- *  category enum. `changeSpeed` carries the fast/slow distinction
- *  separately because any category can move fast or slow. */
-export const VariableCategorySchema = z.enum([
+/** Variable category: a vocabulary word, never an engine mechanic (no
+ *  calculation branches on it). The engine ships the generic categories
+ *  below; a domain pack may add its own (e.g. the household pack adds
+ *  person_fit and agency). Stored values are validated against the active
+ *  domain's vocabulary on NEW writes only; historical values are kept. */
+export const GENERIC_CATEGORIES = [
   "event", // fast-changing visible state
   "structure", // slow-changing structural condition
   "constraint", // limits the action space
   "dependency", // single point of failure / fragility
   "buffer", // reserve, redundancy, slack
-  "person_fit", // values, preferences, physical feasibility
-  "agency", // execution, persistence, readiness
   "shock", // external event
-  "asset", // productive asset / career capital that compounds
-]);
+  "asset", // something that accumulates or compounds
+] as const;
+export const VariableCategorySchema = z.string().min(1);
 export type VariableCategory = z.infer<typeof VariableCategorySchema>;
 
 export const ChangeSpeedSchema = z.enum(["fast", "slow"]);
@@ -152,7 +150,7 @@ export const VariableSchema = z.object({
   /** Definition key inside the active domain (e.g. "career_capital").
    *  Ids stay globally unique; keys are resolved per subject. */
   key: z.string().min(1),
-  /** Whose variable this is. null = UNASSIGNED (not the household). */
+  /** Whose variable this is. null = UNASSIGNED (never the whole system). */
   subjectId: SubjectIdSchema.nullable(),
   name: z.string().min(1),
   description: z.string().default(""),
@@ -350,34 +348,24 @@ export const ConstraintSchema = z.object({
 });
 export type Constraint = z.infer<typeof ConstraintSchema>;
 
-export const UtilityDimensionSchema = z.enum([
-  "financialImprovement",
-  "stability",
-  "upside",
-  "physicalFit",
-  "personalityFit",
-  "valuesFit",
-  "autonomy",
-  "scheduleFit",
-  "stress",
-  "timeRequirement",
-  "risk",
-  "reversibility",
-  "careerCompounding",
-  "assetCompounding",
-]);
+/** An option-evaluation dimension KEY. The engine knows only "a named
+ *  dimension with a signed judgment"; the meaning of a key (e.g. the
+ *  household pack's "scheduleFit") is declared by the domain pack. New
+ *  writes are validated against the active domain's declared dimensions;
+ *  historical values are preserved without being reinterpreted. */
+export const UtilityDimensionSchema = z.string().min(1);
 export type UtilityDimension = z.infer<typeof UtilityDimensionSchema>;
 
 /** -1..1 per dimension: negative = the action makes this worse. */
-export const UtilityVectorSchema = z.partialRecord(
-  UtilityDimensionSchema,
+export const UtilityVectorSchema = z.record(
+  z.string().min(1),
   z.number().min(-1).max(1),
 );
 export type UtilityVector = z.infer<typeof UtilityVectorSchema>;
 
 /** Optional priorities. Absent = unweighted view only. */
-export const UtilityWeightsSchema = z.partialRecord(
-  UtilityDimensionSchema,
+export const UtilityWeightsSchema = z.record(
+  z.string().min(1),
   z.number().min(0).max(1),
 );
 export type UtilityWeights = z.infer<typeof UtilityWeightsSchema>;

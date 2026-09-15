@@ -1,7 +1,12 @@
 /**
- * Registry of MODEL ASSUMPTIONS (docs/FOUNDATIONS.md, Part B).
+ * Registry of the GENERIC MODEL ASSUMPTIONS (docs/FOUNDATIONS.md, Part B):
+ * conventions of the engine itself (leverage, loops, gaps, propagation,
+ * confidence, feasibility, lags, signatures, persistence). A domain pack
+ * carries its own assumptions (the household pack's economic and career
+ * conventions A1–A7, A15) and `assumptionsFor(domain)` merges the two; ids
+ * stay globally unique so historical provenance keeps resolving.
  *
- * Every formula in calculations/ cites one or more of these ids. The
+ * Every formula cites one or more of these ids. The
  * Evidence / Assumptions screen renders this list so a reader can see
  * exactly which conventions the numbers rest on. None of these are
  * established scientific laws; they are working conventions chosen for
@@ -23,62 +28,6 @@ export interface ModelAssumption {
 }
 
 export const ASSUMPTIONS: ModelAssumption[] = [
-  {
-    id: "A1",
-    title: "Reliable income floor",
-    statement:
-      "Floor = sum over sources of (monthly amount x reliability), where reliability is the fraction of the amount that can be counted on in a bad month. This is a judgment per source, not a measured distribution.",
-    status: "convention",
-    usedBy: ["reliableIncomeFloor", "floorRatio"],
-  },
-  {
-    id: "A2",
-    title: "Buffer months use essential expenses only",
-    statement:
-      "Buffer months = liquid reserves / essential monthly expenses. Discretionary spending is assumed to be cut first in a crisis.",
-    status: "convention",
-    usedBy: ["bufferMonths"],
-  },
-  {
-    id: "A3",
-    title: "Income concentration via HHI",
-    statement:
-      "H = sum of squared income shares. 1 = a single source, 1/n = n equal sources. Shares use gross monthly amounts.",
-    status: "convention",
-    usedBy: ["incomeConcentration"],
-  },
-  {
-    id: "A4",
-    title: "Failure correlation as largest correlated block",
-    statement:
-      "Sources sharing a correlation group are assumed to fail together. Failure correlation = the largest share of income held by one group.",
-    status: "convention",
-    usedBy: ["failureCorrelation"],
-  },
-  {
-    id: "A5",
-    title: "Share-weighted volatility and replacement latency",
-    statement:
-      "Household income volatility and replacement latency are income-share-weighted means of the per-source values.",
-    status: "convention",
-    usedBy: ["incomeVolatility", "replacementLatency"],
-  },
-  {
-    id: "A6",
-    title: "Career-capital step model",
-    statement:
-      "C(t+1) = C(t) + effortToCapitalRate x qualityOfEffort x protectedHours x persistence - switchingCost. Career capital is an index whose scale is set by the estimated effortToCapitalRate; only its direction and relative change are meaningful.",
-    status: "hypothesis",
-    usedBy: ["careerCapitalStep", "projectCareerCapital"],
-  },
-  {
-    id: "A7",
-    title: "Productive-capital step model",
-    statement:
-      "A(t+1) = A(t) + capitalConversionRate x max(0, income - expenses) + A(t) x monthlyReturnRate. Expenses include essential, discretionary and debt payments.",
-    status: "hypothesis",
-    usedBy: ["productiveCapitalStep", "projectProductiveCapital"],
-  },
   {
     id: "A8",
     title: "Leverage score",
@@ -160,19 +109,12 @@ export const ASSUMPTIONS: ModelAssumption[] = [
     usedBy: ["evaluateSystem"],
   },
   {
-    id: "A15",
-    title: "Monthly hours conversion",
-    statement: "Weekly hours are converted to monthly hours with a factor of 4.33.",
-    status: "convention",
-    usedBy: ["projectCareerCapital"],
-  },
-  {
     id: "A19",
     title: "Signature dimension normalisation",
     statement:
       "A structural dimension is a weighted mean (or min/max) of its contributing variables after each is mapped to 0..1 by a declared transform (linear range or ratio to a 'strong' value), inverted where a higher raw value is the weaker position, and clipped. Ranges, thresholds and weights live in the signature definition and are conventions, not findings. The continuous value is canonical; 'weak/strong' and bands are display classifications derived from it.",
     status: "convention",
-    usedBy: ["computeDimension", "HOUSEHOLD_SIGNATURE_V1"],
+    usedBy: ["computeDimension"],
   },
   {
     id: "A20",
@@ -219,3 +161,13 @@ export const ASSUMPTIONS: ModelAssumption[] = [
 export const ASSUMPTION_BY_ID: Record<string, ModelAssumption> = Object.fromEntries(
   ASSUMPTIONS.map((a) => [a.id, a]),
 );
+
+/** Generic assumptions followed by the domain's own; ids are unique. */
+export function assumptionsFor(domain?: { assumptions?: readonly ModelAssumption[] }): ModelAssumption[] {
+  const seen = new Set<string>();
+  return [...ASSUMPTIONS, ...(domain?.assumptions ?? [])].filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true)));
+}
+
+export function assumptionById(id: string, domain?: { assumptions?: readonly ModelAssumption[] }): ModelAssumption | undefined {
+  return assumptionsFor(domain).find((a) => a.id === id);
+}

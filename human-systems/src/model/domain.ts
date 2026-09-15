@@ -9,16 +9,18 @@
  *   CORE ENGINE  <-  this interface  <-  src/domains/<domain> configuration
  */
 import type { SignatureDefinition } from "@/types/signature";
-import type {
-  ChangeSpeed,
-  Constraint,
-  IncomeSource,
-  SubjectId,
-  SystemType,
-  TargetMode,
-  Variable,
-  VariableCategory,
+import {
+  GENERIC_CATEGORIES,
+  type ChangeSpeed,
+  type Constraint,
+  type IncomeSource,
+  type SubjectId,
+  type SystemType,
+  type TargetMode,
+  type Variable,
+  type VariableCategory,
 } from "@/types";
+import type { ModelAssumption } from "@/domain/assumptions";
 
 export type SubjectScope = "system" | "member";
 
@@ -29,7 +31,7 @@ export interface VariableDefinition {
   unit: string;
   category: VariableCategory;
   changeSpeed: ChangeSpeed;
-  /** system: one per system; member: one per person. */
+  /** system: one per system; member: one per subject. */
   scope: SubjectScope;
   targetMode: TargetMode;
   referenceRange?: { min: number; max: number };
@@ -109,18 +111,66 @@ export interface ConstraintTemplate {
   softPenalty?: number;
 }
 
+/** A named option-evaluation dimension. The engine reads only the key
+ *  and the direction; the meaning is the domain's. */
+export interface EvaluationDimension {
+  key: string;
+  label: string;
+  higherIsBetter: boolean;
+}
+
+export interface CategoryDefinition {
+  id: string;
+  label: string;
+  description: string;
+}
+
+/** Domain vocabulary for the AI layer. The generic constitution is fixed
+ *  in src/ai/prompt.ts; this fragment adds words, examples and questions. */
+export interface PromptFragment {
+  /** One paragraph naming the kind of system and its usual vocabulary. */
+  vocabulary: string;
+  /** Optional worked examples or wording guidance. */
+  examples?: string;
+  /** Questions that usually reduce uncertainty in this domain. */
+  questions?: string[];
+  /** Optional example analysis a mock provider may return for demos. */
+  exampleAnalysis?: unknown;
+}
+
 export interface DomainDefinition {
   id: string;
   version: number;
   name: string;
   description: string;
-  systemTypes: SystemType[];
+  /** Suggested kinds of system for a picker ("household", "market"); the
+   *  engine never interprets them and any label is allowed. */
+  kinds: { id: SystemType; label: string }[];
+  /** What the domain calls a subject ("Person", "Segment", "Unit"). */
+  subjectLabel: string;
+  /** Categories added to the generic vocabulary. */
+  categories?: CategoryDefinition[];
   variables: VariableDefinition[];
   derived: DerivedDefinition[];
   projections: ProjectionDefinition[];
   signatureDefinition: SignatureDefinition;
   constraintTemplates: ConstraintTemplate[];
   eventTypes: string[];
+  /** Option-evaluation dimensions this domain declares (may be empty). */
+  evaluationDimensions?: EvaluationDimension[];
+  /** The domain's own model assumptions (ids unique across the registry). */
+  assumptions?: ModelAssumption[];
+  promptFragment?: PromptFragment;
+}
+
+/** The category words a domain accepts: generic plus its own. */
+export function categoryVocabulary(domain?: Pick<DomainDefinition, "categories">): VariableCategory[] {
+  return [...GENERIC_CATEGORIES, ...(domain?.categories?.map((c) => c.id) ?? [])];
+}
+
+/** Declared evaluation-dimension keys (empty = the domain declares none). */
+export function evaluationDimensionKeys(domain?: Pick<DomainDefinition, "evaluationDimensions">): string[] {
+  return domain?.evaluationDimensions?.map((d) => d.key) ?? [];
 }
 
 /* ------------------------------------------------------------------ */

@@ -15,7 +15,7 @@ import {
   reliableIncomeFloor,
   replacementLatency,
   totalMonthlyIncome,
-} from "@/calculations/household";
+} from "./calculations";
 import type { DerivedDefinition, DerivedInputRef } from "@/model/domain";
 import { DERIVED_IDS as D, INPUT_IDS as I } from "./keys";
 

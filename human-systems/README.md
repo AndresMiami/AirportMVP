@@ -67,8 +67,10 @@ decides.
 src/
   types/          Zod schemas + inferred types (the data model)
   domain/         vocabulary (labels) and the model-assumption registry (A1..A15)
-  calculations/   pure math: household ratios, HHI, compounding, leverage,
-                  gap, graph (loops, pressure, propagation), feasibility, utility
+  calculations/   pure engine math: leverage, gap, graph (loops, pressure,
+                  propagation), feasibility, evaluation-dimension view,
+                  confidence, lag, time (household ratios and the
+                  compounding step models live in the household pack)
   model/          domain.ts (the ENGINE-OWNED domain interface, registry and
                   the explicit-scope VariableRef resolver: systemRef /
                   subjectRef, never null), derived.ts (generic derived

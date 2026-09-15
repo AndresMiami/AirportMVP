@@ -9,7 +9,6 @@ import { useModel } from "@/components/model-provider";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader } from "@/components/ui";
 import * as mutations from "@/services/mutations";
 
-const provider = new MockAiProvider();
 
 export default function AiPage() {
   const { evaluated, apply, lastError, clearError } = useModel();
@@ -31,6 +30,7 @@ export default function AiPage() {
     setAnalysis(null);
     setApproved(new Set());
     setAdded([]);
+    const provider = new MockAiProvider(evaluated.domain.promptFragment?.exampleAnalysis);
     const r = await provider.analyze({ text, existingVariableNames: model.variables.map((v) => v.name) });
     setBusy(false);
     if (!r.ok) setError(r.error);
@@ -88,7 +88,7 @@ export default function AiPage() {
         <textarea className="w-full" rows={6} value={text} onChange={(e) => setText(e.target.value)} />
         <div className="mt-2 flex gap-2 items-center">
           <button className="rounded bg-accent text-white px-3 py-1.5 text-sm disabled:opacity-50" disabled={busy || text.trim().length === 0} onClick={run}>
-            {busy ? "Analyzing…" : `Analyze with ${provider.name} provider`}
+            {busy ? "Analyzing…" : `Analyze with ${"mock"} provider`}
           </button>
           <details className="text-xs text-muted">
             <summary className="cursor-pointer">System prompt</summary>

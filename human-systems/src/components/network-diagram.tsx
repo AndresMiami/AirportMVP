@@ -15,7 +15,7 @@
  */
 import { useMemo } from "react";
 import { formatLag } from "@/calculations/lag";
-import { CATEGORY_META } from "@/domain/vocabulary";
+import { categoryMeta } from "@/domain/vocabulary";
 import type { Relationship, Variable, VariableCategory } from "@/types";
 
 const CATEGORY_ORDER: VariableCategory[] = [
@@ -282,7 +282,7 @@ export function NetworkDiagram({
                 strokeDasharray={derived ? "3 2" : undefined}
               />
               <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="10" fill={COLOR.muted}>
-                {CATEGORY_META[v.category].short.slice(0, 5)}
+                {categoryMeta(v.category).short.slice(0, 5)}
               </text>
               <text x={lx} y={ly} textAnchor={anchor} fontSize="12" fill={isolated ? COLOR.muted : COLOR.ink}>
                 {v.name.length > 26 ? `${v.name.slice(0, 25)}…` : v.name}

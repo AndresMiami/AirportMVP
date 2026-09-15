@@ -24,7 +24,8 @@ const WORKSHOP: DomainDefinition = {
   version: 1,
   name: "Workshop (test)",
   description: "A fake domain used only to prove the engine is domain-agnostic.",
-  systemTypes: ["organization"],
+  kinds: [{ id: "organization", label: "Organisation" }],
+  subjectLabel: "Member of staff",
   variables: [
     { key: "orders_per_month", name: "Orders per month", description: "", unit: "orders", category: "event", changeSpeed: "fast", scope: "system", targetMode: "at_least" },
     { key: "hours_per_order", name: "Hours per order", description: "", unit: "h", category: "structure", changeSpeed: "slow", scope: "system", targetMode: "at_most" },
@@ -108,7 +109,7 @@ const WORKSHOP: DomainDefinition = {
   signatureDefinition: SignatureDefinitionSchema.parse({
     id: "workshop_v1",
     name: "Workshop signature",
-    domain: "organization",
+    domainId: "workshop",
     version: 1,
     dimensions: [
       { id: "load", name: "Load", explanation: "Orders relative to a full book", inputs: [{ variableKey: "orders_per_month", transform: { kind: "ratio", strongAt: 40 }, question: "How many orders?" }] },

@@ -334,7 +334,13 @@ The shell exists to feed and expose the cycle:
   resolution plug into the same READ and PROPOSE tools without changing
   the shell.
 
-## 13. Domain-agnostic cleanup before the shell (ROADMAP)
+## 13. Domain-agnostic cleanup before the shell (IN PROGRESS)
+
+Checkpoint 1 (vocabulary, calculation moves, assumption split, evaluation
+dimensions, categories, prompt seam) is DONE without a schema version
+bump. Checkpoint 2 (collections and migration v5) and Checkpoint 3
+(screens, service defaults, neutral-domain proof) remain. The plan below
+is kept as written; steps 1, 2, 4 and 5 are complete, step 3 is next.
 
 The universal engine still carries household shape. Smallest refactor,
 each step a separate PR:

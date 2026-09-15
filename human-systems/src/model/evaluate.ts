@@ -31,7 +31,7 @@ import type {
   Variable,
 } from "@/types";
 import { computeDerivedVariables, type DerivedComputation } from "./derived";
-import { domainRegistry, unassignedVariables, type DomainDefinition } from "./domain";
+import { categoryVocabulary, domainRegistry, evaluationDimensionKeys, unassignedVariables, type DomainDefinition } from "./domain";
 import { describeResolution, normalizeInstant, resolveVariableAt } from "./history";
 
 export interface EvaluateOptions {
@@ -150,6 +150,21 @@ export function evaluateSystem(model: SystemModel, options: EvaluateOptions = {}
       message: `Values and targets as of ${asOf.slice(0, 10)}; relationships, constraints, hypotheses, income sources and the domain definition are today's. A stored snapshot is the record of the whole model at a past date.`,
     });
   }
+  // Historical vocabulary outside the active domain is kept, never
+  // reinterpreted; it is reported so the person can see it.
+  const vocabulary = new Set<string>(categoryVocabulary(domain));
+  const foreignCategories = model.variables.filter((v) => !vocabulary.has(v.category));
+  if (foreignCategories.length > 0) {
+    issues.push({
+      level: "info",
+      message: `${foreignCategories.length} variable${foreignCategories.length > 1 ? "s use" : " uses"} a category this domain does not declare (${[...new Set(foreignCategories.map((v) => v.category))].join(", ")}); kept as recorded.`,
+    });
+  }
+  const declaredDims = new Set(evaluationDimensionKeys(domain));
+  const foreignDims = new Set(model.actions.flatMap((a) => Object.keys(a.utility).filter((k) => !declaredDims.has(k))));
+  if (foreignDims.size > 0) {
+    issues.push({ level: "info", message: `Actions carry evaluation dimensions this domain does not declare (${[...foreignDims].sort().join(", ")}); shown as recorded.` });
+  }
   const ambiguous = inputs.filter((v) => v.valueResolution === "ambiguous" || v.targetResolution === "ambiguous");
   for (const v of ambiguous) {
     const which = v.valueResolution === "ambiguous" ? "value" : "target";
@@ -254,7 +269,7 @@ export function evaluateSystem(model: SystemModel, options: EvaluateOptions = {}
         cost: action.cost,
         uncertainty: action.uncertainty,
       }),
-      utility: utilityView(action.utility, model.utilityWeights),
+      utility: utilityView(action.utility, model.utilityWeights, domain.evaluationDimensions ?? []),
       rank: null,
     };
   });

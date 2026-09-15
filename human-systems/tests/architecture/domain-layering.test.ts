@@ -10,7 +10,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /** Directories that make up the generic engine. */
-const ENGINE_DIRS = ["types", "domain", "calculations", "model", "scenarios", "signatures", "repositories"];
+const ENGINE_DIRS = ["types", "domain", "calculations", "model", "scenarios", "signatures", "repositories", "ai"];
 const FORBIDDEN = [/from\s+["']@\/domains(\/|["'])/, /from\s+["'](\.\.\/)+domains\//, /from\s+["'].*\/household\//];
 
 function walk(dir: string): string[] {

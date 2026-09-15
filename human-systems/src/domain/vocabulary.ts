@@ -2,12 +2,18 @@
  * Human-readable labels and explanations for the enums in types/.
  * Kept out of the UI so tests and future exports can reuse the wording.
  */
-import type { SourceType, UtilityDimension, VariableCategory } from "@/types";
+import { domainRegistry } from "@/model/domain";
+import type { SourceType, VariableCategory } from "@/types";
 
-export const CATEGORY_META: Record<
-  VariableCategory,
-  { label: string; short: string; description: string }
-> = {
+export interface CategoryMeta {
+  label: string;
+  short: string;
+  description: string;
+}
+
+/** Labels for the GENERIC categories. Domain packs supply meta for the
+ *  categories they add (see `categoryMeta`). */
+export const CATEGORY_META: Record<string, CategoryMeta> = {
   event: {
     label: "Visible event / state",
     short: "Event",
@@ -34,16 +40,6 @@ export const CATEGORY_META: Record<
     short: "Buffer",
     description: "Reserve or slack that absorbs shocks; a source of resilience.",
   },
-  person_fit: {
-    label: "Person fit",
-    short: "Fit",
-    description: "Values, preferences, physical feasibility, work style, risk tolerance.",
-  },
-  agency: {
-    label: "Agency / readiness",
-    short: "Agency",
-    description: "Execution, persistence, willingness and readiness to change.",
-  },
   shock: {
     label: "External shock",
     short: "Shock",
@@ -52,7 +48,7 @@ export const CATEGORY_META: Record<
   asset: {
     label: "Productive asset / capital",
     short: "Asset",
-    description: "Career capital or productive assets that compound over time.",
+    description: "Something that accumulates or compounds over time.",
   },
 };
 
@@ -97,27 +93,16 @@ export const SOURCE_TYPE_META: Record<
   },
 };
 
-export const UTILITY_DIMENSION_META: Record<
-  UtilityDimension,
-  { label: string; higherIsBetter: boolean }
-> = {
-  financialImprovement: { label: "Financial improvement", higherIsBetter: true },
-  stability: { label: "Stability", higherIsBetter: true },
-  upside: { label: "Upside", higherIsBetter: true },
-  physicalFit: { label: "Physical fit", higherIsBetter: true },
-  personalityFit: { label: "Personality fit", higherIsBetter: true },
-  valuesFit: { label: "Values fit", higherIsBetter: true },
-  autonomy: { label: "Autonomy", higherIsBetter: true },
-  scheduleFit: { label: "Schedule fit", higherIsBetter: true },
-  stress: { label: "Stress", higherIsBetter: false },
-  timeRequirement: { label: "Time requirement", higherIsBetter: false },
-  risk: { label: "Risk", higherIsBetter: false },
-  reversibility: { label: "Reversibility", higherIsBetter: true },
-  careerCompounding: { label: "Career compounding", higherIsBetter: true },
-  assetCompounding: { label: "Asset compounding", higherIsBetter: true },
-};
-
-export const UTILITY_DIMENSIONS = Object.keys(UTILITY_DIMENSION_META) as UtilityDimension[];
+/** Meta for any category: generic first, then the domain's additions,
+ *  then an honest fallback so an unknown historical word still renders. */
+export function categoryMeta(category: VariableCategory, domainCategories?: readonly { id: string; label: string; description: string }[]): CategoryMeta {
+  const generic = CATEGORY_META[category];
+  if (generic) return generic;
+  const candidates = domainCategories ?? domainRegistry.list().flatMap((d) => d.categories ?? []);
+  const fromDomain = candidates.find((c) => c.id === category);
+  if (fromDomain) return { label: fromDomain.label, short: fromDomain.label.split(/[\s/]/)[0], description: fromDomain.description };
+  return { label: category, short: category.slice(0, 8), description: "Not in this domain's vocabulary (kept as recorded)." };
+}
 
 /** Wording helpers for confidence, so the UI never invents its own. */
 export function confidenceLabel(c: number): string {

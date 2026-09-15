@@ -188,7 +188,7 @@ describe("repository: backup and failure discipline", () => {
 
   it("a migration that fails validation leaves the stored record byte-identical and reports the error", async () => {
     const v2 = buildV2();
-    (v2.variables as Raw[])[0].category = "not_a_category";
+    (v2.variables as Raw[])[0].changeSpeed = "not_a_speed";
     const id = v2.id as string;
     const s = new FakeStorage();
     const before = JSON.stringify({ activeId: id, models: { [id]: v2 } });

@@ -9,8 +9,7 @@ import {
   ChangeSpeedSchema,
   EdgeDirectionSchema,
   LagSchema,
-  VariableCategorySchema,
-} from "@/types";
+  } from "@/types";
 
 const unitInterval = z.number().min(0).max(1);
 
@@ -23,7 +22,8 @@ export const ObservationSchema = z.object({
 export const CandidateVariableSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
-  category: VariableCategorySchema,
+  /** A category word; validated against the active domain's vocabulary by parseAiAnalysis. */
+  category: z.string().min(1),
   changeSpeed: ChangeSpeedSchema,
   /** Qualitative reading, e.g. "likely high". Never a number invented by the AI. */
   qualitativeValue: z.string().min(1),
@@ -109,7 +109,13 @@ export type ParseResult =
   | { ok: false; error: string };
 
 /** Parse raw provider text as strict JSON, then validate. */
-export function parseAiAnalysis(raw: string): ParseResult {
+export interface ParseOptions {
+  /** The active domain's category vocabulary; when given, every candidate
+   *  variable's category must be one of these words. */
+  categories?: readonly string[];
+}
+
+export function parseAiAnalysis(raw: string, options: ParseOptions = {}): ParseResult {
   let json: unknown;
   try {
     json = JSON.parse(stripCodeFence(raw));
@@ -119,6 +125,11 @@ export function parseAiAnalysis(raw: string): ParseResult {
   const result = AiAnalysisSchema.safeParse(json);
   if (!result.success) {
     return { ok: false, error: `Response did not match the analysis schema: ${result.error.message}` };
+  }
+  if (options.categories) {
+    const allowed = new Set(options.categories);
+    const bad = result.data.candidate_variables.filter((c) => !allowed.has(c.category)).map((c) => `${c.name}: "${c.category}"`);
+    if (bad.length > 0) return { ok: false, error: `Category not in this domain's vocabulary: ${bad.join(", ")}` };
   }
   return { ok: true, analysis: result.data };
 }

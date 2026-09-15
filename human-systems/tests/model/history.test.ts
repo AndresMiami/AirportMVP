@@ -285,7 +285,8 @@ const WORKSHOP: DomainDefinition = {
   version: 1,
   name: "Workshop (history test)",
   description: "",
-  systemTypes: ["organization"],
+  kinds: [{ id: "organization", label: "Organisation" }],
+  subjectLabel: "Member of staff",
   variables: [{ key: "skill_level", name: "Skill level", description: "", unit: "index", category: "asset", changeSpeed: "slow", scope: "member", targetMode: "at_least" }],
   derived: [
     {
@@ -311,7 +312,7 @@ const WORKSHOP: DomainDefinition = {
   signatureDefinition: SignatureDefinitionSchema.parse({
     id: "w",
     name: "w",
-    domain: "organization",
+    domainId: "workshop",
     version: 1,
     dimensions: [{ id: "craft", name: "Craft", explanation: "x", subjectScope: "member", inputs: [{ variableKey: "skill_level", transform: { kind: "linear", min: 0, max: 10 }, question: "?" }] }],
   }),
@@ -472,7 +473,7 @@ describe("migration v3 -> v4", () => {
     expect(stored4.models[id].schemaVersion).toBe(4);
 
     const bad = buildV3();
-    (bad.variables as Raw[])[0].category = "not_a_category";
+    (bad.variables as Raw[])[0].changeSpeed = "not_a_speed";
     const s2 = new FakeStorage();
     const before = JSON.stringify({ activeId: id, models: { [id]: bad } });
     s2.setItem(STORAGE_KEY, before);
@@ -512,7 +513,7 @@ describe("19. export / import", () => {
     expect((await svcC.importModel("{not json")).ok).toBe(false);
     expect((await svcC.importModel(JSON.stringify({ format: "other", model: {} }))).ok).toBe(false);
     const broken = JSON.parse(text) as { model: Raw };
-    (broken.model.variables as Raw[])[0].category = "nope";
+    (broken.model.variables as Raw[])[0].changeSpeed = "nope";
     expect((await svcC.importModel(JSON.stringify(broken))).ok).toBe(false);
     expect(await repoC.list()).toEqual([]);
 
