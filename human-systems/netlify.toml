@@ -1,0 +1,24 @@
+# Netlify configuration for Human Systems Lens as its OWN Netlify site.
+#
+# Create a second Netlify site pointing at this same GitHub repository and
+# set its BASE DIRECTORY to "human-systems". Netlify then reads this file
+# instead of the repository-root netlify.toml (which belongs to LinkMia),
+# installs dependencies here, and deploys only this app. Nothing from the
+# LinkMia site (functions, redirects, env vars) is shared.
+#
+# See docs/DEPLOY-NETLIFY.md for the click-by-click steps.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # vitest 4 + npm's peer resolver need this flag (same as local install)
+  NPM_FLAGS = "--legacy-peer-deps"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Netlify auto-detects Next.js and uses its Next runtime; no adapter or
+# plugin declaration is needed. All pages are static and all data lives in
+# the visitor's browser (localStorage): there are no serverless functions,
+# no environment secrets and no database for this site.
