@@ -1765,7 +1765,7 @@
           "hypothesisIds": [],
           "actionIds": [],
           "eventIds": [],
-          "incomeSourceIds": []
+          "collectionItemRefs": []
         }
       },
       {
@@ -1778,8 +1778,11 @@
           "hypothesisIds": [],
           "actionIds": [],
           "eventIds": [],
-          "incomeSourceIds": [
-            "inc_warehouse"
+          "collectionItemRefs": [
+            {
+              "collection": "incomeSources",
+              "id": "inc_warehouse"
+            }
           ]
         }
       }

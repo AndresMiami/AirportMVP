@@ -1,4 +1,4 @@
-# Editing contract (schema v4)
+# Editing contract (schema v5)
 
 How UI screens change the model. Read this before writing an editor, and
 read docs/FOUNDATIONS.md before this: every screen is bound by its
@@ -109,8 +109,8 @@ screen  --apply(mutation)-->  ModelProvider  --service.save-->  repository (loca
   computed only with `includeArchivedMembers`.
 - `evaluateSystem(model, { now?, asOf?, includeArchivedMembers? })`:
   `asOf` reconstructs VALUES and TARGETS at that instant under TODAY'S
-  relationships, constraints, hypotheses, domain definition AND income
-  sources (income is not dated until 3d); `evaluated.clock` says which
+  relationships, constraints, hypotheses, domain definition AND domain
+  collections (collection items are not dated until 3d); `evaluated.clock` says which
   instant was used and `evaluated.issues` carries an "info" note. A stored
   signature snapshot (now stamped `valuesAsOf`) remains the record of a
   whole past model.
@@ -132,8 +132,21 @@ Profile/members: `updateProfile`, `addMember`, `updateMember`,
 `archiveMember` / `restoreMember` (the normal lifecycle), `removeMember`
 (refused while `memberReferences(model, id).total > 0`),
 `setCurrentAttractor`, `setDesiredAttractor`.
-Income: `addIncomeSource` (`earnerId`: member id or null), `updateIncomeSource`,
-`removeIncomeSource`.
+Collections (schema v5): `addCollectionItem(model, name, item)`,
+`updateCollectionItem(model, name, id, patch)`, `removeCollectionItem(model,
+name, id)` (also drops the item's event refs), `collectionItems(model, name)`.
+The collection must be DECLARED by the system's registered domain and hold
+`origin: "domain"`; items are validated with the pack's item schema and
+their `subjectFields` must name an existing member (active or archived) or
+null. A collection preserved from an older format (`origin:
+"legacy_universal"`) or undeclared by the domain is opaque: kept, exported,
+never evaluated, never edited here, and it blocks hard deletion of a member
+(`memberReferences(...).unresolvedCollections`). The household pack's typed
+wrappers (`addIncomeSource`, `updateIncomeSource`, `removeIncomeSource`,
+`incomeSourcesOf`) live in `src/services/household-income.ts`. Schema-valid
+is not domain-valid: `collectionProblems(model)` names the first invalid
+item of a declared collection; `commit` and `ModelService.save` refuse it,
+`evaluateSystem` withholds that collection from calculations with a warning.
 Variables: `addVariable` (inputs only; `subjectId` is REQUIRED — a member id,
 the system id, or `null` = unassigned; `key` defaults to the id or a slug of
 the name; a domain-derived key is refused), `updateVariable` (derived fields
@@ -171,7 +184,7 @@ Ids: pass none and `nextId(model, prefix)` assigns one.
 - Observation links and hypothesis references must point at existing
   entities; an observation cannot both support and contradict one hypothesis.
 - One loop hypothesis per loop id.
-- Subjects: every `subjectId` / `earnerId` must be the system id, an existing
+- Subjects: every `subjectId` / collection subject field must be the system id, an existing
   member id (active OR archived — history keeps its subject), or `null`.
   Nothing ever defaults an unknown subject to the household.
 - Dynamics: `participatesInDynamics: true` on an ineligible kind is refused

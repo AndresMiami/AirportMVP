@@ -10,13 +10,13 @@ import { HOUSEHOLD_DERIVED } from "@/domains/household/derived";
 import { DERIVED_IDS, HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION, INPUT_IDS } from "@/domains/household/keys";
 import { exactDate } from "@/calculations/time";
 import { defaultDerivedVariable } from "@/model/derived";
+import type { IncomeSource } from "@/domains/household/income";
 import {
   SystemModelSchema,
   type Action,
   type Constraint,
   type Event,
   type Hypothesis,
-  type IncomeSource,
   type Lag,
   type Observation,
   type Relationship,
@@ -1036,7 +1036,7 @@ export function createSampleHousehold(): SystemModel {
       sourceType: "measured",
       confidence: 0.9,
       observationIds: ["obs_6"],
-      links: { variableIds: [I.liquidReserves], relationshipIds: ["r13"], hypothesisIds: [], actionIds: [], eventIds: [], incomeSourceIds: [] },
+      links: { variableIds: [I.liquidReserves], relationshipIds: ["r13"], hypothesisIds: [], actionIds: [], eventIds: [], collectionItemRefs: [] },
       expected: [],
       outcomeEventIds: [],
       notes: "",
@@ -1053,7 +1053,7 @@ export function createSampleHousehold(): SystemModel {
       sourceType: "measured",
       confidence: 0.9,
       observationIds: ["obs_1"],
-      links: { variableIds: [], relationshipIds: [], hypothesisIds: [], actionIds: [], eventIds: [], incomeSourceIds: ["inc_warehouse"] },
+      links: { variableIds: [], relationshipIds: [], hypothesisIds: [], actionIds: [], eventIds: [], collectionItemRefs: [{ collection: "incomeSources", id: "inc_warehouse" }] },
       expected: [],
       outcomeEventIds: [],
       notes: "",
@@ -1061,7 +1061,7 @@ export function createSampleHousehold(): SystemModel {
   ];
 
   const model: SystemModel = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     domainDefinitionId: HOUSEHOLD_DOMAIN_ID,
     domainDefinitionVersion: HOUSEHOLD_DOMAIN_VERSION,
     id: SAMPLE_SYSTEM_ID,
@@ -1079,7 +1079,7 @@ export function createSampleHousehold(): SystemModel {
       currency: "USD",
     },
     variables: [...inputs, ...derived],
-    incomeSources,
+    collections: { incomeSources: { items: incomeSources, origin: "domain" } },
     relationships,
     events,
     loopAnnotations,

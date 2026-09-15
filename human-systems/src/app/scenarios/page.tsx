@@ -8,6 +8,7 @@ import { fmtDelta, fmtPct, fmtValue } from "@/components/format";
 import { Sparkline } from "@/components/sparkline";
 import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
 import { INPUT_IDS } from "@/domains/household/keys";
+import { incomeSourcesOf } from "@/services/household-income";
 import { resolveVariable, subjectRef, systemRef, type SubjectScope, type VariableRef } from "@/model/domain";
 import { compareScenario } from "@/scenarios/compare";
 import type { Member, Scenario, ScenarioChange, SystemModel } from "@/types";
@@ -104,8 +105,10 @@ export default function ScenariosPage() {
       if (delta !== 0) changes.push({ kind: "adjustVariable", variableId, delta });
     }
     for (const [incomeSourceId, monthlyAmount] of Object.entries(draft.incomeAmounts)) {
-      const current = evaluated.model.incomeSources.find((s) => s.id === incomeSourceId)?.monthlyAmount;
-      if (current !== undefined && monthlyAmount !== current) changes.push({ kind: "setIncomeSourceAmount", incomeSourceId, monthlyAmount });
+      const current = incomeSourcesOf(evaluated.model).find((s) => s.id === incomeSourceId)?.monthlyAmount;
+      if (current !== undefined && monthlyAmount !== current) {
+        changes.push({ kind: "updateCollectionItem", collection: "incomeSources", itemId: incomeSourceId, patch: { monthlyAmount } });
+      }
     }
     return { id: "draft", name: "Draft scenario", description: "", changes, horizonMonths: draft.horizonMonths };
   }, [draft, evaluated]);
@@ -228,7 +231,7 @@ export default function ScenariosPage() {
           <Card title="Income sources (set monthly amount)">
             <table className="data">
               <tbody>
-                {model.incomeSources.map((s) => (
+                {incomeSourcesOf(model).map((s) => (
                   <tr key={s.id}>
                     <td className="text-xs">
                       {s.name}

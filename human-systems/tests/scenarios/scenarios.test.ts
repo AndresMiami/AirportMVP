@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { incomeSourcesOf } from "@/services/household-income";
 import { currentValueOf } from "@/services/mutations";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
@@ -38,20 +39,29 @@ describe("applyScenario", () => {
     expect(r.rejected[0].reason).toMatch(/calculated/);
     expect(r.changedVariables.size).toBe(0);
   });
-  it("edits, adds and removes income sources", () => {
+  it("edits, adds and removes items of a declared collection (income sources), in memory only", () => {
     const base = createSampleHousehold();
+    const first = incomeSourcesOf(base)[0];
     const r = applyScenario(base, scenario([
-      { kind: "setIncomeSourceAmount", incomeSourceId: "inc_rideshare", monthlyAmount: 1000 },
-      { kind: "removeIncomeSource", incomeSourceId: "inc_catering" },
-      { kind: "addIncomeSource", source: { ...base.incomeSources[0], id: "inc_new", name: "New", monthlyAmount: 800, correlationGroup: "other" } },
-      { kind: "removeIncomeSource", incomeSourceId: "missing" },
-      { kind: "addIncomeSource", source: { ...base.incomeSources[0] } },
+      { kind: "updateCollectionItem", collection: "incomeSources", itemId: "inc_rideshare", patch: { monthlyAmount: 1000 } },
+      { kind: "removeCollectionItem", collection: "incomeSources", itemId: "inc_catering" },
+      { kind: "addCollectionItem", collection: "incomeSources", item: { ...first, id: "inc_new", name: "New", monthlyAmount: 800, correlationGroup: "other" } },
+      { kind: "removeCollectionItem", collection: "incomeSources", itemId: "missing" },
+      { kind: "addCollectionItem", collection: "incomeSources", item: { ...first } },
+      { kind: "updateCollectionItem", collection: "incomeSources", itemId: "inc_rideshare", patch: { monthlyAmount: -5 } },
+      { kind: "addCollectionItem", collection: "customers", item: { id: "c1" } },
     ]));
-    expect(r.incomeSourcesChanged).toBe(true);
-    expect(r.model.incomeSources.map((s) => s.id).sort()).toEqual(["inc_new", "inc_rideshare", "inc_warehouse"]);
-    expect(r.model.incomeSources.find((s) => s.id === "inc_rideshare")!.monthlyAmount).toBe(1000);
-    expect(r.rejected).toHaveLength(2);
-    expect(base.incomeSources).toHaveLength(3);
+    expect(r.collectionsChanged).toEqual(["incomeSources"]);
+    const after = incomeSourcesOf(r.model);
+    expect(after.map((s) => s.id).sort()).toEqual(["inc_new", "inc_rideshare", "inc_warehouse"]);
+    expect(after.find((s) => s.id === "inc_rideshare")!.monthlyAmount).toBe(1000);
+    expect(r.rejected.map((x) => x.reason)).toEqual([
+      expect.stringMatching(/Unknown item "missing"/),
+      expect.stringMatching(/already exists/),
+      expect.stringMatching(/does not match the incomeSources schema/),
+      expect.stringMatching(/not declared by this domain/),
+    ]);
+    expect(incomeSourcesOf(base)).toHaveLength(3); // the stored model is untouched
   });
 });
 
@@ -91,7 +101,7 @@ describe("compareScenario", () => {
     expect(capital.tendency).toBe("up");
   });
   it("changing an income source moves calculated values and seeds propagation from them", () => {
-    const c = compareScenario(createSampleHousehold(), scenario([{ kind: "setIncomeSourceAmount", incomeSourceId: "inc_rideshare", monthlyAmount: 2600 }]));
+    const c = compareScenario(createSampleHousehold(), scenario([{ kind: "updateCollectionItem", collection: "incomeSources", itemId: "inc_rideshare", patch: { monthlyAmount: 2600 } }]));
     const hhi = c.variableDeltas.find((d) => d.variableId === DERIVED_IDS.incomeConcentration)!;
     expect(hhi.delta!).toBeLessThan(0); // two equal large sources -> less concentrated
     const floor = c.variableDeltas.find((d) => d.variableId === DERIVED_IDS.reliableFloor)!;

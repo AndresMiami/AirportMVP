@@ -9,7 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { evaluateSystem, type EvaluatedSystem } from "@/model/evaluate";
 import { LocalStorageModelRepository, type ModelSummary } from "@/repositories";
 import { ModelService, MutationError, type ImportResult } from "@/services";
-import type { IncomeSource, SystemModel, SystemType, Variable } from "@/types";
+import type { SystemModel, SystemType, Variable } from "@/types";
 
 export type ModelMutation = (model: SystemModel) => SystemModel;
 
@@ -37,7 +37,6 @@ interface ModelContextValue {
   /** Apply a pure mutation; returns false (and sets lastError) on refusal. */
   apply: (mutation: ModelMutation) => boolean;
   updateVariable: (patch: Partial<Variable> & { id: string }) => void;
-  updateIncomeSource: (patch: Partial<IncomeSource> & { id: string }) => void;
   replaceModel: (model: SystemModel) => void;
   createBlank: (input: { name: string; systemType: SystemType; location?: string }) => Promise<void>;
   switchModel: (id: string) => Promise<void>;
@@ -126,14 +125,6 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     [model, apply],
   );
 
-  const updateIncomeSource = useCallback<ModelContextValue["updateIncomeSource"]>(
-    (patch) => {
-      if (!model || !serviceRef.current) return;
-      const service = serviceRef.current;
-      apply((m) => service.updateIncomeSource(m, patch));
-    },
-    [model, apply],
-  );
 
   const replaceModel = useCallback<ModelContextValue["replaceModel"]>((next) => persist(next), [persist]);
 
@@ -223,7 +214,6 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       setAsOf,
       apply,
       updateVariable,
-      updateIncomeSource,
       replaceModel,
       createBlank,
       switchModel,
@@ -245,7 +235,6 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       setAsOf,
       apply,
       updateVariable,
-      updateIncomeSource,
       replaceModel,
       createBlank,
       switchModel,

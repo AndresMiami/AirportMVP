@@ -92,8 +92,15 @@ written and is never sorted by guess; two entries that disagree for the
 same start are reported as ambiguous, not chosen between; derived
 variables are shells that never hold a typed value; as-of evaluation
 reconstructs values and targets only, under today's graph and today's
-income sources, and stored snapshots remain the record of a past whole
-model.
+domain collections, and stored snapshots remain the record of a past whole
+model. Schema v5 (Checkpoint 2): domain data lives in DECLARED collections
+(`model.collections[name]`, household declares `incomeSources`); the
+engine knows no "income" — derived formulas read `ctx.collection(name)`;
+a collection a domain does not declare, or one preserved from the v4
+universal field under another domain, is kept opaque: exported, never
+evaluated, never edited by typed tools, never a reason to call the model
+invalid. Migration dispatches on `schemaVersion` only, never on field
+presence.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /

@@ -221,32 +221,45 @@ export type Variable = StoredVariable & {
 };
 
 /* ------------------------------------------------------------------ */
-/* Income sources                                                      */
+/* Collections (domain-owned, schema v5)                               */
 /* ------------------------------------------------------------------ */
 
-export const IncomeSourceSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  /** Who in the household earns it (free text label, kept for display). */
-  earner: z.string().default(""),
-  /** The member who earns it; null = not yet attributed. */
-  earnerId: SubjectIdSchema.nullable().default(null),
-  monthlyAmount: z.number().min(0),
-  /** Fraction of monthlyAmount that can be counted on in a bad month. */
-  reliability: unitInterval,
-  /** Month-to-month variability, 0 = fixed salary, 1 = fully unpredictable. */
-  volatility: unitInterval,
-  /** Sources sharing a group are assumed to fail together
-   *  (same employer, same platform, same local industry). */
-  correlationGroup: z.string().min(1),
-  /** Months needed to replace this source if it disappears. */
-  replacementLatencyMonths: z.number().min(0),
-  sourceType: SourceTypeSchema,
-  confidence: unitInterval,
-  evidence: z.array(EvidenceSchema).default([]),
-  notes: z.string().default(""),
-});
-export type IncomeSource = z.infer<typeof IncomeSourceSchema>;
+/** The engine knows a collection ITEM only as "an object with an id". The
+ *  registered domain pack supplies the item schema, subject-reference
+ *  fields, confidence field and meaning. */
+export const CollectionItemSchema = z.looseObject({ id: z.string().min(1) });
+export type CollectionItem = z.infer<typeof CollectionItemSchema>;
+
+/** Why a collection exists on this model:
+ *  - domain: the active domain declares it (validated against its schema);
+ *  - legacy_universal: preserved from the schema-v4 universal
+ *    `incomeSources` field on a record whose domain does not declare it.
+ *    Kept verbatim, never evaluated, never edited through typed tools, and
+ *    never a reason to call the model invalid. "I preserved this
+ *    information, but I do not know what it means in this domain." */
+export const CollectionOriginSchema = z.enum(["domain", "legacy_universal"]);
+export type CollectionOrigin = z.infer<typeof CollectionOriginSchema>;
+
+export const CollectionEnvelopeSchema = z
+  .object({
+    items: z.array(CollectionItemSchema).default([]),
+    origin: CollectionOriginSchema.default("domain"),
+    note: z.string().optional(),
+  })
+  .superRefine((c, ctx) => {
+    const seen = new Set<string>();
+    for (const item of c.items) {
+      if (seen.has(item.id)) ctx.addIssue({ code: "custom", path: ["items"], message: `duplicate collection item id "${item.id}"` });
+      seen.add(item.id);
+    }
+  });
+export type CollectionEnvelope = z.infer<typeof CollectionEnvelopeSchema>;
+export const CollectionsSchema = z.record(z.string().min(1), CollectionEnvelopeSchema);
+export type Collections = z.infer<typeof CollectionsSchema>;
+
+/** A reference from an event to an item of a named collection. */
+export const CollectionItemRefSchema = z.object({ collection: z.string().min(1), id: z.string().min(1) });
+export type CollectionItemRef = z.infer<typeof CollectionItemRefSchema>;
 
 /* ------------------------------------------------------------------ */
 /* Relationships (directed edges)                                      */
@@ -512,7 +525,8 @@ export const EventLinksSchema = z.object({
   hypothesisIds: z.array(z.string()).default([]),
   actionIds: z.array(z.string()).default([]),
   eventIds: z.array(z.string()).default([]),
-  incomeSourceIds: z.array(z.string()).default([]),
+  /** Items of domain collections (schema v5; was incomeSourceIds in v4). */
+  collectionItemRefs: z.array(CollectionItemRefSchema).default([]),
 });
 
 /** A dated fact: something that happened, was changed, or was tried. It is
@@ -582,7 +596,7 @@ export const SystemProfileSchema = z.object({
 export type SystemProfile = z.infer<typeof SystemProfileSchema>;
 
 /** Bump when the stored shape changes; add a step in model/migrations. */
-export const MODEL_SCHEMA_VERSION = 4;
+export const MODEL_SCHEMA_VERSION = 5;
 
 export const SystemModelSchema = z.object({
   schemaVersion: z.literal(MODEL_SCHEMA_VERSION),
@@ -592,7 +606,8 @@ export const SystemModelSchema = z.object({
   domainDefinitionVersion: z.number().int().min(1),
   profile: SystemProfileSchema,
   variables: z.array(VariableSchema),
-  incomeSources: z.array(IncomeSourceSchema),
+  /** Domain-owned collections by name (schema v5). */
+  collections: CollectionsSchema.default({}),
   relationships: z.array(RelationshipSchema),
   events: z.array(EventSchema).default([]),
   loopAnnotations: z.record(z.string(), LoopAnnotationSchema).default({}),
@@ -617,13 +632,11 @@ export type SystemModel = z.infer<typeof SystemModelSchema>;
 export const ScenarioChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("setVariable"), variableId: z.string(), value: z.number() }),
   z.object({ kind: z.literal("adjustVariable"), variableId: z.string(), delta: z.number() }),
-  z.object({
-    kind: z.literal("setIncomeSourceAmount"),
-    incomeSourceId: z.string(),
-    monthlyAmount: z.number().min(0),
-  }),
-  z.object({ kind: z.literal("addIncomeSource"), source: IncomeSourceSchema }),
-  z.object({ kind: z.literal("removeIncomeSource"), incomeSourceId: z.string() }),
+  /** Collection changes are validated by applyScenario against the active
+   *  domain's declared item schema; an undeclared collection is refused. */
+  z.object({ kind: z.literal("addCollectionItem"), collection: z.string().min(1), item: CollectionItemSchema }),
+  z.object({ kind: z.literal("updateCollectionItem"), collection: z.string().min(1), itemId: z.string().min(1), patch: z.record(z.string(), z.unknown()) }),
+  z.object({ kind: z.literal("removeCollectionItem"), collection: z.string().min(1), itemId: z.string().min(1) }),
 ]);
 export type ScenarioChange = z.infer<typeof ScenarioChangeSchema>;
 

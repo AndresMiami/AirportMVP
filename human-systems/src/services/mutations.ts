@@ -6,11 +6,10 @@
  */
 import { z } from "zod";
 import { DYNAMICS_ELIGIBLE_KINDS, EventSchema, type Event, type ExtensionEnvelope, type KillCriterion, type RelationshipKind, type SubjectId } from "@/types";
-import { categoryVocabulary, domainRegistry, refFor, resolveVariable, variableIdFor } from "@/model/domain";
+import { categoryVocabulary, collectionDefinitionFor, domainRegistry, refFor, resolveVariable, variableIdFor, type CollectionDefinition } from "@/model/domain";
 import {
   ConstraintSchema,
   HypothesisSchema,
-  IncomeSourceSchema,
   MemberSchema,
   ObservationSchema,
   RelationshipSchema,
@@ -20,7 +19,8 @@ import {
   type Constraint,
   type Hypothesis,
   type HypothesisStatus,
-  type IncomeSource,
+  type CollectionEnvelope,
+  type CollectionItem,
   type LoopAnnotation,
   type Member,
   type Observation,
@@ -52,7 +52,7 @@ export class MutationError extends Error {
 export function nextId(model: SystemModel, prefix: string): string {
   const taken = new Set<string>([
     ...model.variables.map((v) => v.id),
-    ...model.incomeSources.map((s) => s.id),
+    ...Object.values(model.collections).flatMap((c) => c.items.map((it) => it.id)),
     ...model.relationships.map((r) => r.id),
     ...model.constraints.map((c) => c.id),
     ...model.actions.map((a) => a.id),
@@ -83,7 +83,26 @@ export function slugId(name: string, fallback: string): string {
 function commit(model: SystemModel): SystemModel {
   const parsed = SystemModelSchema.safeParse(model);
   if (!parsed.success) throw new MutationError(`Invalid model: ${describe(parsed.error)}`);
+  const problem = collectionProblems(parsed.data);
+  if (problem) throw new MutationError(problem);
   return parsed.data;
+}
+
+/** Domain validation of DECLARED, domain-owned collections: each item must
+ *  match the pack's item schema. Undeclared or preserved collections are
+ *  opaque and never judged; an unregistered domain validates nothing. */
+export function collectionProblems(model: SystemModel): string | null {
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  if (!domain) return null;
+  for (const [name, envelope] of Object.entries(model.collections)) {
+    const def = collectionDefinitionFor(domain, name);
+    if (!def || envelope.origin !== "domain") continue;
+    for (const item of envelope.items) {
+      const r = def.itemSchema.safeParse(item);
+      if (!r.success) return `Invalid ${def.label.toLowerCase()} "${item.id}": ${describe(r.error)}`;
+    }
+  }
+  return null;
 }
 
 /** Validate one entity; a refusal is a MutationError naming the field. */
@@ -171,7 +190,13 @@ export function updateMember(model: SystemModel, id: string, patch: Partial<Omit
 /** Where a member is referenced as a subject, canonical or historical. */
 export interface MemberReferences {
   variables: number;
-  incomeSources: number;
+  /** References through DECLARED collections' subject fields, summed. */
+  collections: number;
+  /** Per-collection counts (declared collections only). */
+  byCollection: Record<string, number>;
+  /** Collections whose references cannot be verified here (undeclared or
+   *  preserved from an older format); they block hard deletion. */
+  unresolvedCollections: string[];
   constraints: number;
   actions: number;
   hypotheses: number;
@@ -182,9 +207,16 @@ export interface MemberReferences {
 }
 
 export function memberReferences(model: SystemModel, id: string): MemberReferences {
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  const byCollection: Record<string, number> = {};
+  for (const [name, envelope] of Object.entries(model.collections)) {
+    const def = collectionDefinitionFor(domain, name);
+    if (!def || envelope.origin !== "domain") continue;
+    byCollection[name] = envelope.items.filter((it) => def.subjectFields.some((f) => it[f] === id)).length;
+  }
   const refs = {
     variables: model.variables.filter((v) => v.subjectId === id).length,
-    incomeSources: model.incomeSources.filter((s) => s.earnerId === id).length,
+    collections: Object.values(byCollection).reduce((a, b) => a + b, 0),
     constraints: model.constraints.filter((c) => c.subjectId === id).length,
     actions: model.actions.filter((a) => a.subjectId === id).length,
     hypotheses: model.hypotheses.filter((h) => h.subjectId === id).length,
@@ -192,7 +224,7 @@ export function memberReferences(model: SystemModel, id: string): MemberReferenc
     observations: model.observations.filter((o) => o.subjectId === id).length,
     signatures: model.signatures.filter((s) => s.subjectId === id).length,
   };
-  return { ...refs, total: Object.values(refs).reduce((a, b) => a + b, 0) };
+  return { ...refs, byCollection, unresolvedCollections: unresolvedCollections(model), total: Object.values(refs).reduce((a, b) => a + b, 0) };
 }
 
 /** Archive a member: the id stays, every observation keeps naming them.
@@ -210,10 +242,16 @@ export function restoreMember(model: SystemModel, id: string): SystemModel {
 export function removeMember(model: SystemModel, id: string): SystemModel {
   if (!model.profile.members.some((m) => m.id === id)) throw new MutationError(`Unknown member "${id}"`);
   const refs = memberReferences(model, id);
+  if (refs.unresolvedCollections.length > 0) {
+    throw new MutationError(
+      `References in collection${refs.unresolvedCollections.length > 1 ? "s" : ""} ${refs.unresolvedCollections.join(", ")} cannot be verified in this domain; archive the member instead of deleting`,
+    );
+  }
   if (refs.total > 0) {
-    const parts = (Object.entries(refs) as [string, number][])
-      .filter(([k, n]) => k !== "total" && n > 0)
+    const parts = (Object.entries(refs) as [string, unknown][])
+      .filter(([k, n]) => typeof n === "number" && k !== "total" && k !== "collections" && n > 0)
       .map(([k, n]) => `${n} ${k}`)
+      .concat(Object.entries(refs.byCollection).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`))
       .join(", ");
     throw new MutationError(`${parts} reference this member; archive them instead so the history keeps its subject`);
   }
@@ -249,32 +287,83 @@ export function setDesiredAttractor(model: SystemModel, patch: Partial<Attractor
 }
 
 /* ------------------------------------------------------------------ */
-/* Income sources                                                      */
+/* Collections (domain-owned)                                          */
 /* ------------------------------------------------------------------ */
 
-export type IncomeSourceInput = Omit<IncomeSource, "id" | "evidence" | "notes" | "earner" | "earnerId"> &
-  Partial<Pick<IncomeSource, "id" | "evidence" | "notes" | "earner" | "earnerId">>;
-
-export function addIncomeSource(model: SystemModel, input: IncomeSourceInput): SystemModel {
-  const id = input.id ?? nextId(model, "inc");
-  if (model.incomeSources.some((s) => s.id === id)) throw new MutationError(`Income source "${id}" already exists`);
-  requireSubject(model, input.earnerId, "income source");
-  const source = parseOr(IncomeSourceSchema, { ...input, id }, "income source");
-  return commit({ ...model, incomeSources: [...model.incomeSources, source] });
+/** The declared definition of a collection on THIS model's domain, or a
+ *  refusal: an undeclared or opaque (legacy-preserved) collection is never
+ *  edited through typed tools, because its meaning is unknown here. */
+function requireDeclaredCollection(model: SystemModel, name: string): CollectionDefinition {
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  if (!domain) throw new MutationError(`Collection "${name}" cannot be edited: this system's domain "${model.domainDefinitionId}" is not available`);
+  const def = collectionDefinitionFor(domain, name);
+  if (!def) throw new MutationError(`Collection "${name}" is not declared by the ${domain.name} domain`);
+  const envelope = model.collections[name];
+  if (envelope && envelope.origin !== "domain") throw new MutationError(`Collection "${name}" holds records preserved from an older format; they are kept but cannot be edited here`);
+  return def;
 }
 
-export function updateIncomeSource(model: SystemModel, id: string, patch: Partial<Omit<IncomeSource, "id">>): SystemModel {
-  if (!model.incomeSources.some((s) => s.id === id)) throw new MutationError(`Unknown income source "${id}"`);
-  requireSubject(model, patch.earnerId, "income source");
-  return commit({
-    ...model,
-    incomeSources: model.incomeSources.map((s) => (s.id === id ? parseOr(IncomeSourceSchema, { ...s, ...patch }, "income source") : s)),
-  });
+function envelopeOf(model: SystemModel, name: string): CollectionEnvelope {
+  return model.collections[name] ?? { items: [], origin: "domain" };
 }
 
-export function removeIncomeSource(model: SystemModel, id: string): SystemModel {
-  if (!model.incomeSources.some((s) => s.id === id)) throw new MutationError(`Unknown income source "${id}"`);
-  return commit({ ...model, incomeSources: model.incomeSources.filter((s) => s.id !== id) });
+/** Items of a DECLARED, domain-owned collection (empty when none; never
+ *  the items of a preserved legacy envelope). */
+export function collectionItems<T extends CollectionItem = CollectionItem>(model: SystemModel, name: string): readonly T[] {
+  const envelope = model.collections[name];
+  if (!envelope || envelope.origin !== "domain") return [];
+  return envelope.items as T[];
+}
+
+function validateSubjectFields(model: SystemModel, def: CollectionDefinition, item: CollectionItem): void {
+  for (const field of def.subjectFields) {
+    const v = item[field];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "string") throw new MutationError(`${def.label}: field "${field}" must hold a subject id or null`);
+    requireSubject(model, v, def.label.toLowerCase());
+  }
+}
+
+export function addCollectionItem(model: SystemModel, name: string, item: Record<string, unknown>): SystemModel {
+  const def = requireDeclaredCollection(model, name);
+  const envelope = envelopeOf(model, name);
+  const id = typeof item.id === "string" && item.id ? item.id : nextId(model, name.replace(/s$/, "").slice(0, 3));
+  if (envelope.items.some((it) => it.id === id)) throw new MutationError(`${def.label}: "${id}" already exists`);
+  const parsed = parseOr(def.itemSchema, { ...item, id }, def.label.toLowerCase());
+  validateSubjectFields(model, def, parsed);
+  return commit({ ...model, collections: { ...model.collections, [name]: { ...envelope, items: [...envelope.items, parsed] } } });
+}
+
+export function updateCollectionItem(model: SystemModel, name: string, id: string, patch: Record<string, unknown>): SystemModel {
+  const def = requireDeclaredCollection(model, name);
+  const envelope = envelopeOf(model, name);
+  const current = envelope.items.find((it) => it.id === id);
+  if (!current) throw new MutationError(`Unknown ${def.label.toLowerCase()} "${id}"`);
+  const parsed = parseOr(def.itemSchema, { ...current, ...patch, id }, def.label.toLowerCase());
+  validateSubjectFields(model, def, parsed);
+  return commit({ ...model, collections: { ...model.collections, [name]: { ...envelope, items: envelope.items.map((it) => (it.id === id ? parsed : it)) } } });
+}
+
+export function removeCollectionItem(model: SystemModel, name: string, id: string): SystemModel {
+  const def = requireDeclaredCollection(model, name);
+  const envelope = envelopeOf(model, name);
+  if (!envelope.items.some((it) => it.id === id)) throw new MutationError(`Unknown ${def.label.toLowerCase()} "${id}"`);
+  const events = model.events.map((e) => ({
+    ...e,
+    links: { ...e.links, collectionItemRefs: e.links.collectionItemRefs.filter((r) => !(r.collection === name && r.id === id)) },
+  }));
+  return commit({ ...model, events, collections: { ...model.collections, [name]: { ...envelope, items: envelope.items.filter((it) => it.id !== id) } } });
+}
+
+/** Collections whose meaning this domain cannot resolve: undeclared or
+ *  preserved from an older format. Their subject references cannot be
+ *  verified, so they block hard deletion of a subject. */
+export function unresolvedCollections(model: SystemModel): string[] {
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  return Object.entries(model.collections)
+    .filter(([name, c]) => c.items.length > 0 && (c.origin !== "domain" || !collectionDefinitionFor(domain, name)))
+    .map(([name]) => name)
+    .sort();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1055,7 +1144,13 @@ function validateEventRefs(model: SystemModel, e: Event): void {
   for (const id of e.links.relationshipIds) requireRelationship(model, id);
   for (const id of e.links.hypothesisIds) requireHypothesis(model, id);
   for (const id of e.links.actionIds) if (!model.actions.some((a) => a.id === id)) throw new MutationError(`Unknown action "${id}"`);
-  for (const id of e.links.incomeSourceIds) if (!model.incomeSources.some((s) => s.id === id)) throw new MutationError(`Unknown income source "${id}"`);
+  for (const ref of e.links.collectionItemRefs) {
+    // Existence is structural (every item has an id), so it can be checked
+    // even for a preserved collection; meaning is not claimed either way.
+    const envelope = model.collections[ref.collection];
+    if (!envelope) throw new MutationError(`Unresolved reference: collection "${ref.collection}" is not present on this system`);
+    if (!envelope.items.some((it) => it.id === ref.id)) throw new MutationError(`Unresolved reference: no item "${ref.id}" in collection "${ref.collection}"`);
+  }
   for (const id of [...e.links.eventIds, ...e.outcomeEventIds]) {
     if (id !== e.id && !model.events.some((x) => x.id === id)) throw new MutationError(`Unknown event "${id}"`);
   }

@@ -90,7 +90,7 @@ export default function DashboardPage() {
   const balancing = loops.filter((l) => l.polarity === "balancing");
   const topLoop = [...loops].sort((a, b) => (b.pressure ?? -1) - (a.pressure ?? -1))[0];
   const inputVariableCount = model.variables.filter((v) => v.kind === "input").length;
-  const isEmpty = model.incomeSources.length === 0 && inputVariableCount === 0;
+  const isEmpty = Object.values(model.collections).every((c) => c.items.length === 0) && inputVariableCount === 0;
   const otherSystems = Math.max(0, models.length - 1);
 
   return (

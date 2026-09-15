@@ -177,7 +177,7 @@ export function compareScenario(baseModel: SystemModel, scenario: Scenario, opti
   });
 
   // Seeds for directional propagation: changed inputs plus derived values
-  // that moved because of them (income-source edits move derived values only).
+  // that moved because of them (collection edits move derived values only).
   const seeds = new Map<string, 1 | -1>(applied.changedVariables);
   for (const d of variableDeltas) {
     if (d.kind === "derived" && d.delta !== null && Math.abs(d.delta) > 1e-9) {

@@ -7,6 +7,7 @@
  * from a run.
  */
 import { describe, expect, it } from "vitest";
+import { addIncomeSource, incomeSourcesOf } from "@/services/household-income";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { horizonOfMonths, lagToMonths } from "@/calculations/lag";
@@ -106,7 +107,7 @@ const EXPECTED_BUFFER_MONTHS = RESERVES / ESSENTIAL;
 /* ------------------------------------------------------------------ */
 
 function addSource(m: SystemModel, s: (typeof SOURCES)[number]): SystemModel {
-  return M.addIncomeSource(m, { ...s, sourceType: "self_reported", confidence: 0.7 });
+  return addIncomeSource(m, { ...s, sourceType: "self_reported", confidence: 0.7 });
 }
 
 function addInput(
@@ -166,7 +167,7 @@ describe("blank household end to end (service + repository, no React)", () => {
     // 1. Blank system: derived records only, nothing entered, activated.
     let m = await service.createBlank({ name: "Test household", systemType: "household" });
     expect(m.id).toBe(SYSTEM_ID);
-    expect(m.incomeSources).toHaveLength(0);
+    expect(incomeSourcesOf(m)).toHaveLength(0);
     expect(m.relationships).toHaveLength(0);
     expect(m.variables.length).toBeGreaterThan(0);
     expect(m.variables.every((v) => v.kind === "derived")).toBe(true);
@@ -181,7 +182,7 @@ describe("blank household end to end (service + repository, no React)", () => {
 
     // 3. Income sources -> income-side derived values.
     for (const s of SOURCES) m = addSource(m, s);
-    expect(m.incomeSources).toHaveLength(SOURCES.length);
+    expect(incomeSourcesOf(m)).toHaveLength(SOURCES.length);
     let ev = evaluateSystem(m);
     expect(derivedValue(ev, DERIVED_IDS.totalIncome)).toBe(EXPECTED_TOTAL);
     expect(EXPECTED_TOTAL).toBe(5000);
@@ -335,7 +336,7 @@ describe("blank household end to end (service + repository, no React)", () => {
       description: "",
       changes: [
         { kind: "adjustVariable", variableId: PROT, delta: SCENARIO_HOURS_DELTA },
-        { kind: "setIncomeSourceAmount", incomeSourceId: GIG_ID, monthlyAmount: SCENARIO_GIG_AMOUNT },
+        { kind: "updateCollectionItem", collection: "incomeSources", itemId: GIG_ID, patch: { monthlyAmount: SCENARIO_GIG_AMOUNT } },
       ],
       horizonMonths: 12,
     };

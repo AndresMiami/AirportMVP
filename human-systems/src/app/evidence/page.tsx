@@ -17,7 +17,7 @@ export default function EvidencePage() {
   const { variables, derived, issues, model, allRelationships, variableById, observations, unassignedVariables } = evaluated;
   const counts = new Map<SourceType, number>();
   for (const v of variables) counts.set(v.sourceType, (counts.get(v.sourceType) ?? 0) + 1);
-  for (const s of model.incomeSources) counts.set(s.sourceType, (counts.get(s.sourceType) ?? 0) + 1);
+  for (const c of Object.values(model.collections)) for (const it of c.items) if (typeof it.sourceType === "string") counts.set(it.sourceType as SourceType, (counts.get(it.sourceType as SourceType) ?? 0) + 1);
   for (const r of model.relationships) counts.set(r.sourceType, (counts.get(r.sourceType) ?? 0) + 1);
   const lowConfidence = variables.filter((v) => v.confidence < 0.5).sort((a, b) => a.confidence - b.confidence);
   const nameOf = (id: string) => variableById.get(id)?.name ?? id;
@@ -217,7 +217,7 @@ export default function EvidencePage() {
                 <td className="text-xs font-mono">
                   {[
                     ...[...d.definition.inputs, ...d.definition.derivedInputs].map((i) => (i.from === "system" ? i.key : `${i.key} (same subject)`)),
-                    ...(d.definition.usesIncomeSources ? ["incomeSources[]"] : []),
+                    ...d.definition.collectionsRead.map((c) => `${c}[]`),
                   ].join(", ") || "—"}
                 </td>
                 <td className="text-xs">{d.definition.assumptionIds.join(", ") || "arithmetic only"}</td>

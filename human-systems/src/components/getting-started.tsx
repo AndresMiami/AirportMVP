@@ -47,7 +47,7 @@ export function setupSteps(model: SystemModel, evaluated: EvaluatedSystem): Setu
       href: "/income",
       screen: "Income sources",
       detail: "Each source with its own reliability, volatility and failure group. The household-level numbers are calculated from this list.",
-      done: model.incomeSources.length > 0,
+      done: (model.collections.incomeSources?.items.length ?? 0) > 0,
     },
     {
       id: "variables",

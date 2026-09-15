@@ -17,6 +17,7 @@ import {
   totalMonthlyIncome,
 } from "./calculations";
 import type { DerivedDefinition, DerivedInputRef } from "@/model/domain";
+import { INCOME_SOURCES, type IncomeSource } from "./income";
 import { DERIVED_IDS as D, INPUT_IDS as I } from "./keys";
 
 /** Every household formula is SYSTEM-scoped and reads system-scope keys:
@@ -36,9 +37,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([]),
     derivedInputs: sys([]),
-    usesIncomeSources: true,
+    collectionsRead: [INCOME_SOURCES],
     assumptionIds: [],
-    compute: (ctx) => (ctx.incomeSources.length ? totalMonthlyIncome(ctx.incomeSources) : null),
+    compute: (ctx) => { const s = ctx.collection<IncomeSource>(INCOME_SOURCES); return s.length ? totalMonthlyIncome(s) : null; },
   },
   {
     key: D.reliableFloor,
@@ -51,9 +52,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([]),
     derivedInputs: sys([]),
-    usesIncomeSources: true,
+    collectionsRead: [INCOME_SOURCES],
     assumptionIds: ["A1"],
-    compute: (ctx) => (ctx.incomeSources.length ? reliableIncomeFloor(ctx.incomeSources) : null),
+    compute: (ctx) => { const s = ctx.collection<IncomeSource>(INCOME_SOURCES); return s.length ? reliableIncomeFloor(s) : null; },
   },
   {
     key: D.monthlySurplus,
@@ -66,7 +67,7 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([I.essentialExpenses, I.discretionaryExpenses, I.monthlyDebtPayments]),
     derivedInputs: sys([D.totalIncome]),
-    usesIncomeSources: false,
+    collectionsRead: [],
     assumptionIds: [],
     compute: (ctx) => {
       const income = ctx.derived(D.totalIncome);
@@ -89,7 +90,7 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([I.essentialExpenses]),
     derivedInputs: sys([D.reliableFloor]),
-    usesIncomeSources: false,
+    collectionsRead: [],
     assumptionIds: ["A1"],
     compute: (ctx) => {
       const floor = ctx.derived(D.reliableFloor);
@@ -110,7 +111,7 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([I.liquidReserves, I.essentialExpenses]),
     derivedInputs: sys([]),
-    usesIncomeSources: false,
+    collectionsRead: [],
     assumptionIds: ["A2"],
     compute: (ctx) => {
       const res = ctx.value(I.liquidReserves);
@@ -131,9 +132,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([]),
     derivedInputs: sys([]),
-    usesIncomeSources: true,
+    collectionsRead: [INCOME_SOURCES],
     assumptionIds: ["A3"],
-    compute: (ctx) => incomeConcentration(ctx.incomeSources),
+    compute: (ctx) => incomeConcentration(ctx.collection<IncomeSource>(INCOME_SOURCES)),
     defaultReferenceRange: { min: 0, max: 1 },
   },
   {
@@ -147,9 +148,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([]),
     derivedInputs: sys([]),
-    usesIncomeSources: true,
+    collectionsRead: [INCOME_SOURCES],
     assumptionIds: ["A5"],
-    compute: (ctx) => incomeVolatility(ctx.incomeSources),
+    compute: (ctx) => incomeVolatility(ctx.collection<IncomeSource>(INCOME_SOURCES)),
     defaultReferenceRange: { min: 0, max: 1 },
   },
   {
@@ -163,9 +164,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([]),
     derivedInputs: sys([]),
-    usesIncomeSources: true,
+    collectionsRead: [INCOME_SOURCES],
     assumptionIds: ["A4"],
-    compute: (ctx) => failureCorrelation(ctx.incomeSources),
+    compute: (ctx) => failureCorrelation(ctx.collection<IncomeSource>(INCOME_SOURCES)),
     defaultReferenceRange: { min: 0, max: 1 },
   },
   {
@@ -179,9 +180,9 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([]),
     derivedInputs: sys([]),
-    usesIncomeSources: true,
+    collectionsRead: [INCOME_SOURCES],
     assumptionIds: ["A5"],
-    compute: (ctx) => replacementLatency(ctx.incomeSources),
+    compute: (ctx) => replacementLatency(ctx.collection<IncomeSource>(INCOME_SOURCES)),
     defaultReferenceRange: { min: 0, max: 6 },
   },
   {
@@ -195,7 +196,7 @@ export const HOUSEHOLD_DERIVED: DerivedDefinition[] = [
     scope: "system",
     inputs: sys([I.monthlyDebtPayments]),
     derivedInputs: sys([D.totalIncome]),
-    usesIncomeSources: false,
+    collectionsRead: [],
     assumptionIds: [],
     compute: (ctx) => {
       const income = ctx.derived(D.totalIncome);

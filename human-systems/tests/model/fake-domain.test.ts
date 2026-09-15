@@ -46,7 +46,7 @@ const WORKSHOP: DomainDefinition = {
         { key: "hours_per_order", from: "system" },
       ],
       derivedInputs: [],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const o = ctx.value("orders_per_month");
@@ -65,7 +65,7 @@ const WORKSHOP: DomainDefinition = {
       scope: "member",
       inputs: [{ key: "skill_level", from: "subject" }],
       derivedInputs: [],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const s = ctx.value("skill_level");
@@ -86,7 +86,7 @@ const WORKSHOP: DomainDefinition = {
         { key: "hours_per_month", from: "system" },
         { key: "capacity_hours", from: "subject" },
       ],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const total = ctx.derived("hours_per_month");

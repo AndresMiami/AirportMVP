@@ -9,6 +9,7 @@
  *   approximate time != exact time
  */
 import { describe, expect, it } from "vitest";
+import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
 import { exactDate, unknownTime } from "@/calculations/time";
 import { registerBuiltInDomains } from "@/domains";
 import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
@@ -18,7 +19,7 @@ import { createBlankModel } from "@/model/blank";
 import { domainRegistry, subjectRef, systemRef, resolveVariable, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
 import { resolveValue } from "@/model/history";
-import { migrateModel, migrateV3toV4 } from "@/model/migrations";
+import { migrateModel, migrateV3toV4, migrationOptionsFor } from "@/model/migrations";
 import { LocalStorageModelRepository, MemoryModelRepository, STORAGE_KEY, type KeyValueStorage } from "@/repositories";
 import { ModelService } from "@/services/model-service";
 import * as M from "@/services/mutations";
@@ -300,7 +301,7 @@ const WORKSHOP: DomainDefinition = {
       scope: "member",
       inputs: [{ key: "skill_level", from: "subject" }],
       derivedInputs: [],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const s = ctx.value("skill_level");
@@ -365,7 +366,7 @@ type Raw = Record<string, unknown>;
 /** A v3-shaped raw record: the v4 sample with histories folded back into
  *  currentValue / desiredValue / sourceType / confidence. */
 function buildV3(): Raw {
-  const v4 = JSON.parse(JSON.stringify(createSampleHousehold())) as Raw;
+  const v4 = foldCollectionsToV4(JSON.parse(JSON.stringify(createSampleHousehold())) as Raw);
   const variables = (v4.variables as Raw[]).map((v) => {
     const { values, targets, ...rest } = v;
     const latest = (values as Raw[]).filter((e) => e.status === "active").at(-1);
@@ -386,11 +387,11 @@ describe("migration v3 -> v4", () => {
   it("is refused by the v4 schema before migration and accepted after; 16. idempotent", () => {
     const v3 = buildV3();
     expect(SystemModelSchema.safeParse(v3).success).toBe(false);
-    const r = migrateModel(v3, { migratedAt: MIGRATED_AT });
+    const r = migrateModel(v3, migrationOptionsFor(v3, { migratedAt: MIGRATED_AT }));
     if (!r.ok) throw new Error(r.error);
     expect(r.migratedFrom).toBe(3);
-    expect(r.model.schemaVersion).toBe(4);
-    const again = migrateModel(r.model, { migratedAt: "2027-01-01T00:00:00.000Z" });
+    expect(r.model.schemaVersion).toBe(5);
+    const again = migrateModel(r.model, migrationOptionsFor(r.model, { migratedAt: "2027-01-01T00:00:00.000Z" }));
     if (!again.ok) throw new Error(again.error);
     expect(again.migratedFrom).toBeNull();
     expect(again.model).toEqual(r.model);
@@ -399,7 +400,7 @@ describe("migration v3 -> v4", () => {
 
   it("5. does not invent history: values are known from the record's last save, never earlier; nulls stay unknown", () => {
     const v3 = buildV3();
-    const r = migrateModel(v3, { migratedAt: MIGRATED_AT });
+    const r = migrateModel(v3, migrationOptionsFor(v3, { migratedAt: MIGRATED_AT }));
     if (!r.ok) throw new Error(r.error);
     const m = r.model;
     const lr = stored(m, INPUT_IDS.liquidReserves);
@@ -424,10 +425,10 @@ describe("migration v3 -> v4", () => {
       expect(earlier.variableById.get(id)!.currentValue, id).toBeNull();
     }
     expect(earlier.variables.every((v) => v.desiredValue === null)).toBe(true);
-    // DOCUMENTED 3b LIMITATION: income sources are not dated until 3d, so
-    // income-only derived values read today's sources whatever the as-of date.
+    // DOCUMENTED 3b LIMITATION: collection items are not dated until 3d, so
+    // collection-only derived values read today's items whatever the as-of date.
     expect(earlier.variableById.get(DERIVED_IDS.totalIncome)!.currentValue).toBe(4300);
-    expect(earlier.issues.some((i) => i.level === "info" && /income sources/.test(i.message))).toBe(true);
+    expect(earlier.issues.some((i) => i.level === "info" && /domain collections/.test(i.message))).toBe(true);
     // null current values got no entry (unknown stays unknown, nothing to preserve)
     const nulls = (v3.variables as Raw[]).filter((v) => v.kind === "input" && v.currentValue === null).map((v) => v.id as string);
     for (const id of nulls) expect(stored(m, id).values).toEqual([]);
@@ -435,7 +436,7 @@ describe("migration v3 -> v4", () => {
     expect(stored(m, DERIVED_IDS.floorRatio).targets[0]).toMatchObject({ desiredValue: 1.1, targetMode: "at_least", validBasis: "recorded" });
     expect(stored(m, DERIVED_IDS.floorRatio).values).toEqual([]);
     // without a usable updatedAt the migration instant is the floor
-    const noDate = migrateModel({ ...v3, updatedAt: "not a date" }, { migratedAt: MIGRATED_AT });
+    const noDate = migrateModel({ ...v3, updatedAt: "not a date" }, migrationOptionsFor(v3, { migratedAt: MIGRATED_AT }));
     if (!noDate.ok) throw new Error(noDate.error);
     expect(stored(noDate.model, INPUT_IDS.liquidReserves).values[0].recordedAt).toBe(MIGRATED_AT);
   });
@@ -443,9 +444,9 @@ describe("migration v3 -> v4", () => {
   it("changes nothing else: subjects, relationships, constraints, hypotheses, events, extensions and signatures survive byte for byte", () => {
     const v3 = buildV3();
     (v3.actions as Raw[])[0].extensions = { future: { schemaVersion: 1, payload: { a: [1, 2] } } };
-    const r = migrateModel(v3, { migratedAt: MIGRATED_AT });
+    const r = migrateModel(v3, migrationOptionsFor(v3, { migratedAt: MIGRATED_AT }));
     if (!r.ok) throw new Error(r.error);
-    for (const k of ["relationships", "constraints", "hypotheses", "events", "incomeSources", "observations", "signatures", "profile", "domainDefinitionId", "domainDefinitionVersion"] as const) {
+    for (const k of ["relationships", "constraints", "hypotheses", "observations", "signatures", "profile", "domainDefinitionId", "domainDefinitionVersion"] as const) {
       expect(r.model[k]).toEqual(v3[k]);
     }
     expect(r.model.actions[0].extensions).toEqual({ future: { schemaVersion: 1, payload: { a: [1, 2] } } });
@@ -466,11 +467,11 @@ describe("migration v3 -> v4", () => {
     s.setItem(STORAGE_KEY, JSON.stringify({ activeId: id, models: { [id]: v3 } }));
     const repo = new LocalStorageModelRepository(s);
     const loaded = await repo.load(id);
-    expect(loaded?.schemaVersion).toBe(4);
+    expect(loaded?.schemaVersion).toBe(5);
     expect(repo.reports.get(id)).toEqual({ id, ok: true, migratedFrom: 3 });
     expect((await repo.backupsFor(id))["3"]).toEqual(v3);
     const stored4 = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> };
-    expect(stored4.models[id].schemaVersion).toBe(4);
+    expect(stored4.models[id].schemaVersion).toBe(5);
 
     const bad = buildV3();
     (bad.variables as Raw[])[0].changeSpeed = "not_a_speed";
@@ -493,7 +494,7 @@ describe("19. export / import", () => {
     const text = await svcA.exportModel(m.id);
     const file = JSON.parse(text) as { format: string; schemaVersion: number; model: SystemModel };
     expect(file.format).toBe("human-systems-model");
-    expect(file.schemaVersion).toBe(4);
+    expect(file.schemaVersion).toBe(5);
     expect(file.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.values).toHaveLength(2);
 
     const repoB = new MemoryModelRepository();
@@ -523,7 +524,7 @@ describe("19. export / import", () => {
     expect(older.ok).toBe(true);
     if (!older.ok) return;
     expect(older.migratedFrom).toBe(3);
-    expect(older.model.schemaVersion).toBe(4);
+    expect(older.model.schemaVersion).toBe(5);
     expect(stored(older.model, INPUT_IDS.liquidReserves).values[0].validBasis).toBe("recorded");
 
     // duplicate id: refused, then replaced on request

@@ -8,8 +8,9 @@ import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge, Stat } f
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
 import { DERIVED_IDS } from "@/domains/household/keys";
 import { incomeShares } from "@/domains/household/calculations";
+import { addIncomeSource, incomeSourcesOf, removeIncomeSource, updateIncomeSource as updateIncomeSourceMutation } from "@/services/household-income";
+import type { IncomeSource } from "@/domains/household/income";
 import { resolveVariable, systemRef } from "@/model/domain";
-import * as mutations from "@/services/mutations";
 import { SourceTypeSchema, type Member, type SourceType } from "@/types";
 
 const SUMMARY = [
@@ -109,7 +110,7 @@ function Field({ id, label, children, hint }: { id: string; label: string; child
 /* ------------------------------------------------------------------ */
 
 export default function IncomePage() {
-  const { evaluated, apply, updateIncomeSource, lastError, clearError } = useModel();
+  const { evaluated, apply, lastError, clearError } = useModel();
   const ids = useId();
   const [errorOwner, setErrorOwner] = useState<string | null>(null);
   const [draft, setDraft] = useState<IncomeDraft>(EMPTY_DRAFT);
@@ -124,15 +125,19 @@ export default function IncomePage() {
   );
   const errorFor = useCallback((owner: string) => (errorOwner === owner && lastError ? lastError : null), [errorOwner, lastError]);
 
-  /** Inline table edits keep using the provider's updateIncomeSource; the owner
-   *  is recorded first so a refusal shows beside the row that caused it. */
+  /** Inline table edits go through the household wrapper over the generic
+   *  collection tools; the owner is recorded first so a refusal shows
+   *  beside the row that caused it. */
   const inlineEdit = useCallback(
-    (id: string, patch: Parameters<typeof updateIncomeSource>[0]) => {
+    (id: string, patch: Partial<IncomeSource> & { id: string }) => {
       setErrorOwner(`income:${id}`);
-      updateIncomeSource(patch);
+      const { id: _id, ...rest } = patch;
+      void _id;
+      apply((m) => updateIncomeSourceMutation(m, id, rest));
     },
-    [updateIncomeSource],
+    [apply],
   );
+  const incomeSources = evaluated ? incomeSourcesOf(evaluated.model) : [];
 
   /** Edits to the add form clear both the local validation message and the provider's last refusal. */
   const edit = useCallback(
@@ -148,8 +153,8 @@ export default function IncomePage() {
   const { model } = evaluated;
   const members = model.profile.members;
   const memberById = new Map(members.map((m) => [m.id, m]));
-  const shares = new Map(incomeShares(model.incomeSources).map((s) => [s.id, s.share]));
-  const existingGroups = Array.from(new Set(model.incomeSources.map((s) => s.correlationGroup))).sort();
+  const shares = new Map(incomeShares(incomeSources).map((s) => [s.id, s.share]));
+  const existingGroups = Array.from(new Set(incomeSources.map((s) => s.correlationGroup))).sort();
   const earnerLabel = (earnerId: string | null, fallback: string) => {
     if (earnerId === null) return fallback;
     const m = memberById.get(earnerId);
@@ -181,7 +186,7 @@ export default function IncomePage() {
     const sourceType = draft.sourceType;
     const earnerId = draft.earnerId === UNASSIGNED ? null : draft.earnerId;
     const ok = commit("income:add", (m) =>
-      mutations.addIncomeSource(m, {
+      addIncomeSource(m, {
         name,
         earnerId,
         earner: earnerId === null ? "" : (memberById.get(earnerId)?.label ?? ""),
@@ -212,8 +217,8 @@ export default function IncomePage() {
         title="Income sources"
         lede="Each source carries its own reliability, volatility and failure group, and names the member who earns it. The household-level numbers below are calculated from this list, never entered directly."
       />
-      <Card title={`Sources (${model.incomeSources.length})`}>
-        {model.incomeSources.length === 0 ? (
+      <Card title={`Sources (${incomeSources.length})`}>
+        {incomeSources.length === 0 ? (
           <p className="text-sm text-muted">No income sources recorded yet. The calculated household numbers fill in once one is added below.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -233,7 +238,7 @@ export default function IncomePage() {
                 </tr>
               </thead>
               <tbody>
-                {model.incomeSources.map((s) => (
+                {incomeSources.map((s) => (
                   <tr key={s.id}>
                     <td>
                       <div className="font-medium">{s.name}</div>
@@ -315,7 +320,7 @@ export default function IncomePage() {
                         label="Remove"
                         confirmLabel="Remove source"
                         message={`Remove ${s.name}? The calculated household numbers will change.`}
-                        onConfirm={() => commit(`income:${s.id}`, (m) => mutations.removeIncomeSource(m, s.id))}
+                        onConfirm={() => commit(`income:${s.id}`, (m) => removeIncomeSource(m, s.id))}
                       />
                       <ErrorLine msg={errorFor(`income:${s.id}`)} />
                     </td>

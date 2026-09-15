@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { addIncomeSource, incomeSourcesOf } from "@/services/household-income";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
@@ -11,7 +12,6 @@ import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import {
   addConstraint,
   addHypothesis,
-  addIncomeSource,
   addMember,
   addObservation,
   addRelationship,
@@ -572,11 +572,11 @@ describe("members / income / variables", () => {
       sourceType: "self_reported",
       confidence: 0.6,
     });
-    expect(m.incomeSources.at(-1)!.id).toBe("inc_1");
-    expect(m.incomeSources.at(-1)!.earner).toBe("");
+    expect(incomeSourcesOf(m).at(-1)!.id).toBe("inc_1");
+    expect(incomeSourcesOf(m).at(-1)!.earner).toBe("");
     expect(evaluateSystem(m).variableById.get(DERIVED_IDS.totalIncome)!.currentValue).toBe(before + 500);
     expect(evaluateSystem(base).variableById.get(DERIVED_IDS.totalIncome)!.currentValue).toBe(before);
-    expect(() => addIncomeSource(base, { ...m.incomeSources.at(-1)!, id: "inc_warehouse" })).toThrow(/already exists/);
+    expect(() => addIncomeSource(base, { ...incomeSourcesOf(m).at(-1)!, id: "inc_warehouse" })).toThrow(/already exists/);
   });
 
   it("addVariable slugs ids from the name and refuses reserved derived ids", () => {

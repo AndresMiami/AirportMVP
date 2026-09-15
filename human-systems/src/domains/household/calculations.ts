@@ -3,7 +3,7 @@
  * generic engine never imports this module).
  * Pure functions. Each cites the model assumption it rests on (domain/assumptions).
  */
-import type { IncomeSource } from "@/types";
+import type { IncomeSource } from "./income";
 
 const EPS = 1e-9;
 

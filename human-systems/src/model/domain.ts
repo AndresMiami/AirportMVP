@@ -12,8 +12,8 @@ import type { SignatureDefinition } from "@/types/signature";
 import {
   GENERIC_CATEGORIES,
   type ChangeSpeed,
+  type CollectionItem,
   type Constraint,
-  type IncomeSource,
   type SubjectId,
   type SystemType,
   type TargetMode,
@@ -21,6 +21,7 @@ import {
   type VariableCategory,
 } from "@/types";
 import type { ModelAssumption } from "@/domain/assumptions";
+import type { ZodType } from "zod";
 
 export type SubjectScope = "system" | "member";
 
@@ -50,13 +51,35 @@ export interface DerivedInputRef {
 }
 
 /** Values visible to a derived formula. Only DECLARED inputs resolve; an
- *  undeclared key is a definition bug and throws. */
+ *  undeclared key or collection is a definition bug and throws. */
 export interface DerivedContext {
   /** The subject this evaluation is for (system id or member id). */
   subjectId: SubjectId;
   value: (key: string) => number | null;
   derived: (key: string) => number | null;
-  incomeSources: readonly IncomeSource[];
+  /** Items of a collection the definition declared in `collectionsRead`
+   *  (typed by the domain that owns it). Empty when nothing is recorded. */
+  collection: <T extends CollectionItem = CollectionItem>(name: string) => readonly T[];
+  /** Minimum of the items' declared confidence field; null when the
+   *  collection is empty or declares no confidence field (never fabricated). */
+  collectionConfidence: (name: string) => number | null;
+}
+
+/** A collection a domain pack owns. The engine stores the envelope; the
+ *  pack owns the meaning. */
+export interface CollectionDefinition {
+  name: string;
+  label: string;
+  description?: string;
+  /** Item schema; must accept { id: string } plus the pack's fields. */
+  itemSchema: ZodType<CollectionItem>;
+  /** Item fields that hold a subject id (member id or null), so the engine
+   *  can check them and count references without knowing their meaning. */
+  subjectFields: string[];
+  /** Item field holding a 0..1 confidence, if the pack records one. */
+  confidenceField?: string;
+  /** Optional screen route for the collection (the nav lists it). */
+  route?: string;
 }
 
 export interface DerivedDefinition {
@@ -75,7 +98,8 @@ export interface DerivedDefinition {
   inputs: DerivedInputRef[];
   /** Earlier derived definitions the formula reads, each with its source. */
   derivedInputs: DerivedInputRef[];
-  usesIncomeSources: boolean;
+  /** Collections the formula reads (must be declared by the domain). */
+  collectionsRead: string[];
   assumptionIds: string[];
   compute: (ctx: DerivedContext) => number | null;
   defaultReferenceRange?: { min: number; max: number };
@@ -156,6 +180,8 @@ export interface DomainDefinition {
   signatureDefinition: SignatureDefinition;
   constraintTemplates: ConstraintTemplate[];
   eventTypes: string[];
+  /** Collections this domain owns (may be empty). */
+  collections?: CollectionDefinition[];
   /** Option-evaluation dimensions this domain declares (may be empty). */
   evaluationDimensions?: EvaluationDimension[];
   /** The domain's own model assumptions (ids unique across the registry). */
@@ -276,4 +302,10 @@ export function derivedDefinitionFor(domain: DomainDefinition, key: string): Der
 /** Variables whose subject has not been assigned. */
 export function unassignedVariables<V extends Pick<Variable, "subjectId">>(variables: readonly V[]): V[] {
   return variables.filter((v) => v.subjectId === null);
+}
+
+/** The declared collection definition, or undefined when the domain does
+ *  not declare it (an undeclared collection is opaque to the engine). */
+export function collectionDefinitionFor(domain: Pick<DomainDefinition, "collections"> | undefined, name: string): CollectionDefinition | undefined {
+  return domain?.collections?.find((c) => c.name === name);
 }

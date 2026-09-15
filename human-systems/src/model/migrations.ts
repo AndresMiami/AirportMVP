@@ -5,6 +5,7 @@
  * current SystemModelSchema; anything that fails is reported, never
  * half-loaded.
  */
+import { domainRegistry } from "@/model/domain";
 import { MODEL_SCHEMA_VERSION, SystemModelSchema, type SystemModel } from "@/types";
 
 type Raw = Record<string, unknown>;
@@ -188,17 +189,86 @@ export function migrateV3toV4(v3: Raw, options: { migratedAt?: string } = {}): R
   return { ...v3, schemaVersion: 4, variables };
 }
 
+/**
+ * v4 -> v5: domain-owned COLLECTIONS. Until v4 every model carried a
+ * universal `incomeSources` field. Dispatch is by schemaVersion only.
+ *  CASE A  the record's registered domain declares "incomeSources"
+ *          -> collections.incomeSources = { items, origin: "domain" }
+ *  CASE B  the domain does not declare it (or is unregistered) and the
+ *          field is empty -> the obsolete field is dropped; no collection
+ *  CASE C  the domain does not declare it (or is unregistered) and the
+ *          field holds records -> preserved verbatim under the same name
+ *          with origin "legacy_universal": never evaluated, never edited
+ *          through typed tools, exported and imported as is, never a
+ *          reason to call the model invalid.
+ * Event links `incomeSourceIds` become collectionItemRefs to
+ * "incomeSources", verbatim, in every case. Nothing else is touched.
+ */
+export function migrateV4toV5(v4: Raw, options: { declaredCollections?: ReadonlySet<string> } = {}): Raw {
+  const declared = options.declaredCollections ?? new Set<string>();
+  const { incomeSources: rawItems, ...rest } = v4;
+  const items = Array.isArray(rawItems) ? rawItems : [];
+  const collections: Raw = { ...(isRecord(v4.collections) ? (v4.collections as Raw) : {}) };
+  if (!Array.isArray(rawItems)) {
+    // No universal field to fold (already folded, or never present): the
+    // step is a no-op for collections, so running it twice changes nothing.
+  } else if (declared.has("incomeSources")) {
+    collections.incomeSources = { items, origin: "domain" };
+  } else if (items.length > 0) {
+    collections.incomeSources = {
+      items,
+      origin: "legacy_universal",
+      note: "Preserved from the schema-v4 universal incomeSources field. This domain does not declare it; the records are kept but not evaluated.",
+    };
+  }
+  const events = asArray(v4.events).map((e) => {
+    const links = isRecord(e.links) ? (e.links as Raw) : {};
+    const { incomeSourceIds, ...otherLinks } = links;
+    const legacy = Array.isArray(incomeSourceIds) ? incomeSourceIds : [];
+    const existing = Array.isArray(otherLinks.collectionItemRefs) ? (otherLinks.collectionItemRefs as Raw[]) : [];
+    return { ...e, links: { ...otherLinks, collectionItemRefs: [...existing, ...legacy.map((id) => ({ collection: "incomeSources", id }))] } };
+  });
+  return { ...rest, schemaVersion: 5, collections, events };
+}
+
 export interface MigrationOptions {
   /** Keys the domain declares system-scope; everything else stays unassigned. */
   systemScopeKeys?: ReadonlySet<string>;
   /** Clock for the v3 -> v4 step (tests pass a fixed instant). */
   migratedAt?: string;
+  /** Collections the record's REGISTERED domain declares (v4 -> v5). An
+   *  unregistered domain declares nothing, so its income data is
+   *  preserved as legacy. */
+  declaredCollections?: ReadonlySet<string>;
+}
+
+/**
+ * The migration options a stored record's REGISTERED domain implies: its
+ * system-scope keys (v2 -> v3) and its declared collections (v4 -> v5).
+ * Records that predate domain ids (schema 1-2) are household records by
+ * construction, so a missing `domainDefinitionId` resolves to "household".
+ * An unregistered domain implies nothing: nothing is attributed to the
+ * system scope and no collection is interpreted, only preserved.
+ * `extra` (e.g. the clock) is merged on top.
+ */
+export function migrationOptionsFor(raw: unknown, extra: MigrationOptions = {}): MigrationOptions {
+  const rec = isRecord(raw) ? raw : {};
+  const domainId = typeof rec.domainDefinitionId === "string" ? rec.domainDefinitionId : "household";
+  const version = typeof rec.domainDefinitionVersion === "number" ? rec.domainDefinitionVersion : undefined;
+  const domain = domainRegistry.get(domainId, version);
+  if (!domain) return { ...extra };
+  return {
+    systemScopeKeys: new Set(domain.variables.filter((v) => v.scope === "system").map((v) => v.key)),
+    declaredCollections: new Set((domain.collections ?? []).map((c) => c.name)),
+    ...extra,
+  };
 }
 
 const STEPS: Record<number, (raw: Raw, options: MigrationOptions) => Raw> = {
   1: (raw) => migrateV1toV2(raw),
   2: (raw, options) => migrateV2toV3(raw, options),
   3: (raw, options) => migrateV3toV4(raw, options),
+  4: (raw, options) => migrateV4toV5(raw, options),
 };
 
 export function migrateModel(input: unknown, options: MigrationOptions = {}): MigrationResult {

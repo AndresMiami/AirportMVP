@@ -1,11 +1,13 @@
 /**
- * Apply scenario changes to a model. Only INPUT variables and income
- * sources can be changed; derived variables are recomputed by evaluation.
+ * Apply scenario changes to a model. Only INPUT variables and declared
+ * domain collections can be changed; derived variables are recomputed by
+ * evaluation.
  * Returns a new model (the original is never mutated) plus a list of
  * changes that could not be applied.
  */
 import { exactDate } from "@/calculations/time";
 import { resolveValue } from "@/model/history";
+import { collectionDefinitionFor, domainRegistry } from "@/model/domain";
 import type { Scenario, ScenarioChange, SystemModel, ValueEntry } from "@/types";
 
 export interface ApplyOptions {
@@ -18,7 +20,8 @@ export interface AppliedScenario {
   rejected: { change: ScenarioChange; reason: string }[];
   /** Input variable ids whose value changed, with the sign of the change. */
   changedVariables: Map<string, 1 | -1>;
-  incomeSourcesChanged: boolean;
+  /** Names of declared collections the scenario changed (in memory only). */
+  collectionsChanged: string[];
 }
 
 export function applyScenario(base: SystemModel, scenario: Scenario, options: ApplyOptions = {}): AppliedScenario {
@@ -26,14 +29,35 @@ export function applyScenario(base: SystemModel, scenario: Scenario, options: Ap
   const model: SystemModel = {
     ...base,
     variables: base.variables.map((v) => ({ ...v, values: [...v.values] })),
-    incomeSources: base.incomeSources.map((s) => ({ ...s })),
+    collections: Object.fromEntries(Object.entries(base.collections).map(([name, c]) => [name, { ...c, items: c.items.map((it) => ({ ...it })) }])),
+  };
+  const domain = domainRegistry.get(base.domainDefinitionId, base.domainDefinitionVersion);
+  /** A collection may be changed only when the active domain declares it
+   *  and the stored envelope is the domain's (never a preserved legacy one). */
+  const declaredCollection = (change: ScenarioChange, name: string) => {
+    const def = collectionDefinitionFor(domain, name);
+    if (!domain) {
+      rejected.push({ change, reason: `Collection "${name}" cannot be changed: this system's domain is not available.` });
+      return null;
+    }
+    if (!def) {
+      rejected.push({ change, reason: `Collection "${name}" is not declared by this domain.` });
+      return null;
+    }
+    const envelope = model.collections[name] ?? { items: [], origin: "domain" as const };
+    if (envelope.origin !== "domain") {
+      rejected.push({ change, reason: `Collection "${name}" holds preserved records from an older format and cannot be changed here.` });
+      return null;
+    }
+    model.collections[name] = envelope;
+    return { def, envelope };
   };
   /** The value that applies now (the scenario is hypothetical: entries it
    *  appends live only in this in-memory copy and are never saved). */
   const currentOf = (v: SystemModel["variables"][number]) => resolveValue(v.values, now);
   const rejected: AppliedScenario["rejected"] = [];
   const changedVariables = new Map<string, 1 | -1>();
-  let incomeSourcesChanged = false;
+  const collectionsChanged = new Set<string>();
 
   const setVariable = (change: ScenarioChange, id: string, next: (current: number | null) => number) => {
     const v = model.variables.find((x) => x.id === id);
@@ -84,35 +108,52 @@ export function applyScenario(base: SystemModel, scenario: Scenario, options: Ap
         setVariable(change, change.variableId, (c) => (c ?? 0) + change.delta);
         break;
       }
-      case "setIncomeSourceAmount": {
-        const s = model.incomeSources.find((x) => x.id === change.incomeSourceId);
-        if (!s) {
-          rejected.push({ change, reason: `Unknown income source ${change.incomeSourceId}` });
+      case "addCollectionItem": {
+        const target = declaredCollection(change, change.collection);
+        if (!target) break;
+        if (target.envelope.items.some((it) => it.id === change.item.id)) {
+          rejected.push({ change, reason: `Item "${change.item.id}" already exists in ${change.collection}` });
           break;
         }
-        s.monthlyAmount = change.monthlyAmount;
-        incomeSourcesChanged = true;
+        const parsed = target.def.itemSchema.safeParse(change.item);
+        if (!parsed.success) {
+          rejected.push({ change, reason: `Item does not match the ${change.collection} schema: ${parsed.error.issues.map((i) => i.message).join("; ")}` });
+          break;
+        }
+        target.envelope.items.push(parsed.data);
+        collectionsChanged.add(change.collection);
         break;
       }
-      case "addIncomeSource":
-        if (model.incomeSources.some((x) => x.id === change.source.id)) {
-          rejected.push({ change, reason: `Income source ${change.source.id} already exists` });
-          break;
-        }
-        model.incomeSources.push({ ...change.source });
-        incomeSourcesChanged = true;
-        break;
-      case "removeIncomeSource": {
-        const idx = model.incomeSources.findIndex((x) => x.id === change.incomeSourceId);
+      case "updateCollectionItem": {
+        const target = declaredCollection(change, change.collection);
+        if (!target) break;
+        const idx = target.envelope.items.findIndex((it) => it.id === change.itemId);
         if (idx < 0) {
-          rejected.push({ change, reason: `Unknown income source ${change.incomeSourceId}` });
+          rejected.push({ change, reason: `Unknown item "${change.itemId}" in ${change.collection}` });
           break;
         }
-        model.incomeSources.splice(idx, 1);
-        incomeSourcesChanged = true;
+        const parsed = target.def.itemSchema.safeParse({ ...target.envelope.items[idx], ...change.patch, id: change.itemId });
+        if (!parsed.success) {
+          rejected.push({ change, reason: `Change does not match the ${change.collection} schema: ${parsed.error.issues.map((i) => i.message).join("; ")}` });
+          break;
+        }
+        target.envelope.items[idx] = parsed.data;
+        collectionsChanged.add(change.collection);
+        break;
+      }
+      case "removeCollectionItem": {
+        const target = declaredCollection(change, change.collection);
+        if (!target) break;
+        const idx = target.envelope.items.findIndex((it) => it.id === change.itemId);
+        if (idx < 0) {
+          rejected.push({ change, reason: `Unknown item "${change.itemId}" in ${change.collection}` });
+          break;
+        }
+        target.envelope.items.splice(idx, 1);
+        collectionsChanged.add(change.collection);
         break;
       }
     }
   }
-  return { model, rejected, changedVariables, incomeSourcesChanged };
+  return { model, rejected, changedVariables, collectionsChanged: [...collectionsChanged].sort() };
 }

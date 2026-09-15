@@ -12,7 +12,7 @@ import {
   replacementLatency,
   totalMonthlyIncome,
 } from "@/domains/household/calculations";
-import type { IncomeSource } from "@/types";
+import type { IncomeSource } from "@/domains/household/income";
 
 const src = (over: Partial<IncomeSource>): IncomeSource => ({
   id: "x",

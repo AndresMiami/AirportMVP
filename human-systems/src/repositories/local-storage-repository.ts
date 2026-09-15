@@ -4,8 +4,7 @@
  * build is upgraded (or rejected with a reason) before it reaches the UI.
  * The v1 single-model key is imported once and then removed.
  */
-import { domainRegistry } from "@/model/domain";
-import { migrateModel, type MigrationOptions } from "@/model/migrations";
+import { migrateModel, migrationOptionsFor } from "@/model/migrations";
 import { SystemModelSchema, type SystemModel } from "@/types";
 import { summarize } from "./memory-repository";
 import type { ModelRepository, ModelSummary } from "./model-repository";
@@ -83,19 +82,8 @@ export class LocalStorageModelRepository implements ModelRepository {
     this.storage.setItem(this.key, JSON.stringify(store));
   }
 
-  /** Keys the record's domain declares system-scope, so migration can
-   *  attribute ONLY those; everything else stays unassigned. */
-  private migrationOptions(raw: unknown): MigrationOptions {
-    const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const domainId = typeof rec.domainDefinitionId === "string" ? rec.domainDefinitionId : "household";
-    const version = typeof rec.domainDefinitionVersion === "number" ? rec.domainDefinitionVersion : undefined;
-    const domain = domainRegistry.get(domainId, version);
-    if (!domain) return {};
-    return { systemScopeKeys: new Set(domain.variables.filter((v) => v.scope === "system").map((v) => v.key)) };
-  }
-
   private materialize(id: string, raw: unknown): SystemModel | null {
-    const result = migrateModel(raw, this.migrationOptions(raw));
+    const result = migrateModel(raw, migrationOptionsFor(raw));
     if (!result.ok) {
       this.reports.set(id, { id, ok: false, migratedFrom: null, error: result.error });
       return null;

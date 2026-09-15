@@ -5,6 +5,7 @@
  * persistence -> same state, different dynamics -> reload.
  */
 import { describe, expect, it } from "vitest";
+import { addIncomeSource, updateIncomeSource } from "@/services/household-income";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { HOUSEHOLD_SIGNATURE_V1 } from "@/domains/household/signature-v1";
@@ -52,8 +53,8 @@ describe("fictional user: from incomplete observations to a compared history", (
     m = M.addObservation(m, { id: "o1", statement: "Ren earns about $2,400 a month from a warehouse job.", subjectId: "ren", sourceType: "self_reported", confidence: 0.7, dateOrPeriod: "2026" });
     m = M.addObservation(m, { id: "o2", statement: "Mai's home-care income depends mainly on one client.", subjectId: "mai", sourceType: "self_reported", confidence: 0.6 });
     m = M.addObservation(m, { id: "o3", statement: "Rent, food and utilities come to roughly $3,000 a month.", sourceType: "self_reported", confidence: 0.6 });
-    m = M.addIncomeSource(m, { id: "inc_ren", name: "Warehouse job", earner: "Ren", monthlyAmount: 2400, reliability: 0.85, volatility: 0.1, correlationGroup: "employer", replacementLatencyMonths: 2, sourceType: "self_reported", confidence: 0.7 });
-    m = M.addIncomeSource(m, { id: "inc_mai", name: "Home care (one client)", earner: "Mai", monthlyAmount: 1600, reliability: 0.5, volatility: 0.4, correlationGroup: "single_client", replacementLatencyMonths: 1.5, sourceType: "self_reported", confidence: 0.6 });
+    m = addIncomeSource(m, { id: "inc_ren", name: "Warehouse job", earner: "Ren", monthlyAmount: 2400, reliability: 0.85, volatility: 0.1, correlationGroup: "employer", replacementLatencyMonths: 2, sourceType: "self_reported", confidence: 0.7 });
+    m = addIncomeSource(m, { id: "inc_mai", name: "Home care (one client)", earner: "Mai", monthlyAmount: 1600, reliability: 0.5, volatility: 0.4, correlationGroup: "single_client", replacementLatencyMonths: 1.5, sourceType: "self_reported", confidence: 0.6 });
     m = M.addVariable(m, { id: INPUT_IDS.essentialExpenses, subjectId: "sys_ren", name: "Essential monthly expenses", category: "structure", changeSpeed: "slow", unit: "$/month", sourceType: "self_reported", confidence: 0.6, currentValue: 3000, referenceRange: { min: 0, max: 6000 } });
     m = M.addVariable(m, { id: INPUT_IDS.careerCapital, subjectId: "ren", name: "Career capital (index)", category: "asset", changeSpeed: "slow", unit: "index 0-100", sourceType: "self_reported", confidence: 0.35, currentValue: 30, referenceRange: { min: 0, max: 100 } });
     m = M.linkObservation(m, "o3", { kind: "variable", id: INPUT_IDS.essentialExpenses });
@@ -103,7 +104,7 @@ describe("fictional user: from incomplete observations to a compared history", (
     m = await svc.save(m);
 
     // 8-9. Income and buffer change; a second snapshot.
-    m = M.updateIncomeSource(m, "inc_ren", { monthlyAmount: 3200, reliability: 0.9 });
+    m = updateIncomeSource(m, "inc_ren", { monthlyAmount: 3200, reliability: 0.9 });
     m = M.updateVariable(m, INPUT_IDS.liquidReserves, { currentValue: 9000 });
     m = M.addSignatureSnapshot(m, computeSignature(evaluateSystem(m), { id: M.nextSignatureId(m), now: T2, mode: "current", subjectId: "ren", label: "Ren household 2026-09" }));
     m = await svc.save(m);

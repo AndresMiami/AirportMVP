@@ -180,10 +180,9 @@ function OutcomeList({
 /* ------------------------------------------------------------------ */
 
 /** Display order and wording of the per-entity reference counts. */
-const REFERENCE_KINDS: { key: Exclude<keyof MemberReferences, "total">; singular: string; plural: string }[] = [
+const REFERENCE_KINDS: { key: Exclude<keyof MemberReferences, "total" | "collections" | "byCollection" | "unresolvedCollections">; singular: string; plural: string }[] = [
   { key: "observations", singular: "observation", plural: "observations" },
   { key: "variables", singular: "variable", plural: "variables" },
-  { key: "incomeSources", singular: "income source", plural: "income sources" },
   { key: "constraints", singular: "constraint", plural: "constraints" },
   { key: "actions", singular: "action", plural: "actions" },
   { key: "hypotheses", singular: "hypothesis", plural: "hypotheses" },
@@ -194,6 +193,8 @@ const REFERENCE_KINDS: { key: Exclude<keyof MemberReferences, "total">; singular
 /** "3 observations · 2 variables", or "nothing yet". */
 function referencesText(refs: MemberReferences): string {
   const parts = REFERENCE_KINDS.filter((k) => refs[k.key] > 0).map((k) => `${refs[k.key]} ${refs[k.key] === 1 ? k.singular : k.plural}`);
+  for (const [name, n] of Object.entries(refs.byCollection)) if (n > 0) parts.push(`${n} ${name}`);
+  for (const name of refs.unresolvedCollections) parts.push(`references in ${name} not verifiable here`);
   return parts.length === 0 ? "nothing yet" : parts.join(" · ");
 }
 

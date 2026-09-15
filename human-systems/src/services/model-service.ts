@@ -9,8 +9,8 @@ import { registerBuiltInDomains } from "@/domains";
 import { createBlankModel } from "@/model/blank";
 import { domainRegistry } from "@/model/domain";
 import type { ModelRepository, ModelSummary } from "@/repositories";
-import { migrateModel, type MigrationOptions } from "@/model/migrations";
-import { SystemModelSchema, type IncomeSource, type SystemModel, type SystemType } from "@/types";
+import { migrateModel, type MigrationOptions, migrationOptionsFor } from "@/model/migrations";
+import { SystemModelSchema, type SystemModel, type SystemType } from "@/types";
 import * as M from "./mutations";
 
 /** The portable file: one system with its complete history. */
@@ -113,6 +113,8 @@ export class ModelService {
 
   async save(model: SystemModel): Promise<SystemModel> {
     const next = SystemModelSchema.parse({ ...model, updatedAt: this.now() });
+    const problem = M.collectionProblems(next);
+    if (problem) throw new Error(problem);
     await this.repo.save(next);
     return next;
   }
@@ -139,7 +141,7 @@ export class ModelService {
     if (!rec || rec.format !== EXPORT_FORMAT || !rec.model || typeof rec.model !== "object") {
       return { ok: false, error: `Not a ${EXPORT_FORMAT} file.` };
     }
-    const migrationOptions: MigrationOptions = options.migration ?? this.migrationOptionsFor(rec.model);
+    const migrationOptions: MigrationOptions = options.migration ?? migrationOptionsFor(rec.model, { migratedAt: this.now() });
     const result = migrateModel(rec.model, migrationOptions);
     if (!result.ok) return { ok: false, error: result.error };
     const existing = await this.repo.load(result.model.id);
@@ -150,25 +152,10 @@ export class ModelService {
     return { ok: true, model: result.model, migratedFrom: result.migratedFrom, replaced: existing !== null };
   }
 
-  private migrationOptionsFor(raw: unknown): MigrationOptions {
-    const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const domainId = typeof rec.domainDefinitionId === "string" ? rec.domainDefinitionId : "household";
-    const version = typeof rec.domainDefinitionVersion === "number" ? rec.domainDefinitionVersion : undefined;
-    const domain = domainRegistry.get(domainId, version);
-    return {
-      migratedAt: this.now(),
-      ...(domain ? { systemScopeKeys: new Set(domain.variables.filter((v) => v.scope === "system").map((v) => v.key)) } : {}),
-    };
-  }
-
   /** Convenience wrappers kept for the existing screens. */
   updateVariable(model: SystemModel, patch: M.VariablePatch & { id: string }): SystemModel {
     const { id, ...rest } = patch;
     return M.updateVariable(model, id, rest);
   }
 
-  updateIncomeSource(model: SystemModel, patch: Partial<IncomeSource> & { id: string }): SystemModel {
-    const { id, ...rest } = patch;
-    return M.updateIncomeSource(model, id, rest);
-  }
 }

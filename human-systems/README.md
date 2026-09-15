@@ -6,10 +6,13 @@ buffers, dependencies, constraints, and leverage. It is **not** a financial
 calculator and **not** a life coach. Every number carries a source type and
 a confidence; every formula is a labelled model assumption.
 
-Status: schema v4, migration 3b — the model has memory through time.
+Status: schema v5 — domain collections (Checkpoint 2 of the domain-agnostic
+cleanup): the household income sources are a DECLARED domain collection,
+not a universal field; records from other domains are preserved, never
+interpreted. Migration 3b gave the model memory through time.
 Input values and all targets are append-only histories; "current" is a
 view; `evaluateSystem(model, { asOf })` reconstructs values and targets at
-a past date (under today's structure and income sources, and it says so);
+a past date (under today's structure and domain collections, and it says so);
 a migrated value is known from its record's last save forward and never
 backfilled; derived variables are shells that never hold a typed value;
 one system exports and imports with its whole history. Migration 3a made

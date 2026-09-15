@@ -4,6 +4,7 @@
  * the normal lifecycle and keeps every reference intact.
  */
 import { describe, expect, it } from "vitest";
+import { addIncomeSource } from "@/services/household-income";
 import { registerBuiltInDomains } from "@/domains";
 import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
 import { createBlankModel } from "@/model/blank";
@@ -27,8 +28,8 @@ const variable = (m: SystemModel, subjectId: string | null, key = "career_capita
 /** One model per entity kind that references Sam, and the reference key it should show up under. */
 const CASES: Record<string, (m: SystemModel) => SystemModel> = {
   variables: (m) => variable(m, "sam"),
-  incomeSources: (m) =>
-    M.addIncomeSource(m, { name: "Job", monthlyAmount: 1000, earnerId: "sam", reliability: 0.5, volatility: 0.5, correlationGroup: "job", replacementLatencyMonths: 2, sourceType: "self_reported", confidence: 0.5 }),
+  collections: (m) =>
+    addIncomeSource(m, { name: "Job", monthlyAmount: 1000, earnerId: "sam", reliability: 0.5, volatility: 0.5, correlationGroup: "job", replacementLatencyMonths: 2, sourceType: "self_reported", confidence: 0.5 }),
   constraints: (m) => M.addConstraint(m, { name: "No nights", type: "hard", sourceType: "self_reported", confidence: 0.5, subjectId: "sam" }),
   actions: (m) => ({
     ...m,
@@ -56,7 +57,8 @@ describe("member deletion is refused by every referencing entity kind", () => {
       const refs = M.memberReferences(m, "sam");
       expect(refs[kind as keyof typeof refs]).toBe(1);
       expect(refs.total).toBe(1);
-      expect(() => M.removeMember(m, "sam")).toThrow(new RegExp(`1 ${kind}.*archive them instead`));
+      const named = kind === "collections" ? "incomeSources" : kind;
+      expect(() => M.removeMember(m, "sam")).toThrow(new RegExp(`1 ${named}.*archive them instead`));
       expect(m.profile.members.find((x) => x.id === "sam")).toBeDefined();
     });
   }
