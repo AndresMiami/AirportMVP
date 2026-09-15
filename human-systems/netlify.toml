@@ -10,7 +10,8 @@
 
 [build]
   command = "npm run build"
-  publish = ".next"
+  # Static export (next.config.ts sets output: "export"): plain HTML files.
+  publish = "out"
 
 [build.environment]
   NODE_VERSION = "22"
@@ -18,7 +19,13 @@
   NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
 
-# Netlify auto-detects Next.js and uses its Next runtime; no adapter or
-# plugin declaration is needed. All pages are static and all data lives in
-# the visitor's browser (localStorage): there are no serverless functions,
-# no environment secrets and no database for this site.
+# The site is a static export: no Next runtime, no serverless functions,
+# no environment secrets and no database. All data lives in the visitor's
+# browser (localStorage). Deep links work because every route is written
+# as its own folder with an index.html (trailingSlash).
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
