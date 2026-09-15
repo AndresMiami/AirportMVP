@@ -83,7 +83,7 @@ export const ASSUMPTIONS: ModelAssumption[] = [
     id: "A8",
     title: "Leverage score",
     statement:
-      "L = (impact x controllability x durability) / (max(cost, 0.05) x max(uncertainty, 0.05)). All five factors are 0..1 ordinal judgments. Only the RANK of scores is meaningful; the magnitude is not. Relationship strengths are likewise judgments, not estimated causal coefficients.",
+      "L = (impact x controllability x durability) / (max(cost, 0.05) x max(uncertainty, 0.05)). All five factors are 0..1 ordinal judgments. Only the RANK of scores is meaningful; the magnitude is not. Relationship strengths are likewise judgments, not estimated causal coefficients. This is a heuristic for ranking MEANS, never a decision rule: dividing by uncertainty treats unresolved uncertainty as a penalty, and 'cost' collapses capital, time and reversibility into one judgment (docs/FOUNDATIONS.md Part G keeps those dimensions apart).",
     status: "hypothesis",
     usedBy: ["leverageScore"],
   },

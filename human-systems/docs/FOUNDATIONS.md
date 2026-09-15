@@ -19,8 +19,11 @@ It has three parts that must never be confused with one another:
 
 Part D restates the operating principles of the original theory
 reconstruction, Part E defines the measurement boundary and the treatment
-of human meaning and intuition, and Part F is the backend constitution:
-the short invariant list every future decision is checked against.
+of human meaning and intuition, Part G sets the rules for decision-making
+under uncertainty (decisions are not outcomes, optionality has value, no
+fabricated probabilities, no prescriptive output), and Part F is the
+backend constitution: the short invariant list every future decision is
+checked against.
 
 ---
 
@@ -55,7 +58,13 @@ own:
    observed, when a value held, when a snapshot was taken, how long an
    effect takes (a lag). Structured time references compare by interval
    and are "not orderable" when no interval exists.
-8. **Data-engineering invariants.** Validated schemas, versioned
+8. **Decision theory basics.** A decision and its outcome are different
+   objects under uncertainty; hindsight and survivorship biases are
+   documented failure modes of judging one by the other; option value and
+   the asymmetry of reversible versus irreversible commitments are
+   established; maximising expected value and avoiding ruin are different
+   objectives (Part G.14).
+9. **Data-engineering invariants.** Validated schemas, versioned
    migrations with backups, immutable snapshots, pure mutations with
    cascading removal, subject attribution with an explicit unassigned
    state. These make the epistemic separations below enforceable rather
@@ -77,7 +86,13 @@ a measurement.
   qualitative reasoning aids with numbers attached.
 - **Leverage** (A8): five ordinal judgments multiplied and divided. Only
   the RANK is meaningful. It ranks options for the person; it never ranks
-  people.
+  people. It is a means-ranking heuristic, not a decision rule: dividing
+  by "uncertainty" treats unresolved uncertainty as a penalty, and "cost"
+  collapses capital, time and reversibility into one judgment (Part G.4
+  keeps those apart; a future bet profile is where they belong).
+- **Decision conventions** (Part G): the bet-dimension list, the four
+  retrospective categories, the four qualitative uncertainty levels and
+  the fear-of-choosing-wrong loop are ours.
 - **Signature normalisation, thresholds, bands and weights** (A19, A21,
   A23, A24): conventions chosen by whoever wrote the definition, versioned
   with it, and shown next to every value. Maturity "experimental" is the
@@ -393,6 +408,244 @@ Recorded here so future work resolves them deliberately:
   must label them as the person's own rating, and no engine rule may
   infer them.
 
+## Part G — Decision-making under uncertainty
+
+This part joins Part C.1 (human sovereignty: the person decides) and Part
+E (the measurement boundary: unknown stays unknown) to the fact that
+people make important decisions without knowing the future. It says what
+the engine may and may not do about that.
+
+### G.1 Decisions are not outcomes
+
+    decision quality != outcome quality
+    good outcome != good decision
+    bad outcome != bad decision
+
+A well-reasoned decision can produce a bad outcome through uncertainty,
+shocks or bad luck. A poorly reasoned decision can produce a good outcome
+through luck. The engine never judges a decision by what happened
+afterwards alone, never computes "decision quality" from an outcome, and
+never implies that a person could have known which choice would win.
+
+### G.2 What the engine helps with
+
+The engine does not answer "which choice is guaranteed to be right?" That
+guarantee does not exist. It helps the person answer:
+
+    Given what I know now, how can I choose so that
+    - the upside matters if I am right,
+    - the downside is survivable if I am wrong,
+    - important assumptions can be tested,
+    - I learn quickly,
+    - I preserve future choices,
+    - and the decision stays compatible with my values and hard constraints?
+
+It reduces BLIND uncertainty (what could be known and is not yet) and never
+pretends to remove IRREDUCIBLE uncertainty.
+
+    uncertainty != ignorance
+
+### G.3 The structure of a bet (grammar, not prediction)
+
+Any meaningful decision can be read as
+
+    current state + chosen action + known conditions + assumptions
+    + unknowns + external shocks -> outcome
+
+    X(t+1) = F( X(t), A(t), S(t), E(t), U(t) )
+
+with X the current state, A the deliberate action, S the known structure,
+E external events and shocks, and U unresolved uncertainty. This extends
+the theory's update rule (Part B) with U made explicit. It is a modeling
+grammar: F is never estimated, and the existence of the formula does not
+make any component measurable or forecastable.
+
+### G.4 Reversibility and optionality: the dimensions of a bet
+
+Two options with similar upside can be radically different decisions. One
+needs $100,000, a quit, a five-year lease and 18 months before anyone
+knows; the other costs $2,000, keeps the income, can be stopped at will and
+returns useful evidence in 30 days. These are not the same bet. The
+concepts the engine should eventually distinguish, and keep INSPECTABLE:
+
+- downside magnitude and downside survivability;
+- reversibility, ability to stop, ability to recover;
+- capital at risk, time at risk;
+- time until useful evidence arrives and the cost of learning;
+- optionality preserved; dependency created; concentration created;
+- upside if successful.
+
+They are never collapsed into one universal score. Each keeps the
+representation its evidence supports: an exact number, a range, an ordinal
+judgment, or plain text (Part E.2 classes).
+
+### G.5 Preserve the next decision
+
+    When the future cannot be known, prefer decisions that preserve
+    the ability to make good decisions later.
+    preserving optionality has value
+
+What can be preserved: cash, health, relationships, credibility, time,
+employability, mobility, legal options, learning capacity, alternative
+income sources, future strategic choices. Survival and optionality have
+value even when they do not maximise immediate expected return, and the
+engine never ranks an option above another solely on expected return.
+
+### G.6 Structured experimentation
+
+When a large irreversible decision contains major unknowns, the engine
+should help find smaller experiments that convert important unknowns into
+evidence:
+
+    UNKNOWN -> experiment -> OBSERVATION -> EVIDENCE
+            -> UPDATED BELIEF -> NEXT DECISION
+
+"Should I buy an $80,000 food truck?" decomposes into: will people buy the
+food, at what price, what is the real gross margin, how much demand
+repeats, which locations work, can employees operate it, is the workload
+sustainable for this owner. A pop-up, a rented kitchen or a short pilot
+can answer several of those before the irreversible commitment. The
+engine therefore reasons about the COST OF COMMITMENT versus the COST OF
+LEARNING, and a test that answers a question cheaply is itself a
+first-class action.
+
+### G.7 Assumptions must be visible
+
+Before a major decision the engine helps separate KNOWN FACTS from
+ESTIMATES from ASSUMPTIONS from UNKNOWN QUESTIONS. These map onto what the
+schema already records: source type (`measured`, `observed` are facts;
+`estimated`, `self_reported` are estimates; `ai_inferred` is an
+interpretation; `unknown` is unknown), hypothesis status for assumptions,
+and questions for unknowns. "This business needs $20,000 a month to work"
+prompts: where did the number come from, is it observed, calculated,
+estimated or guessed, what depends on it, what if it is 20% lower, how
+cheaply can it be tested. No assumption is ever hidden inside a
+recommendation, because there is no recommendation (G.13).
+
+### G.8 Fear of the wrong decision (a working hypothesis)
+
+A possible structure:
+
+    fear of choosing wrong -> search for certainty -> delay, endless
+    research, repeated switching -> little accumulated real-world
+    evidence -> continued uncertainty -> greater fear.
+
+This is a working structural hypothesis, not a psychological law. The
+engine may help a person recognise such a loop when THEIR history supports
+it (switching frequency, time since the last real-world test, evidence
+accumulated). It never diagnoses the person, never equates caution with
+pathology, and never labels waiting as irrational: sometimes waiting is
+the right decision. It examines the STRUCTURE of the delay, not the person.
+
+### G.9 Retrospective decision review
+
+After an outcome, a review distinguishes at least:
+
+1. DECISION FAILURE: important evidence was available and ignored,
+   assumptions were unjustified, or the downside exceeded what the person
+   could survive.
+2. UNCERTAINTY / BAD OUTCOME: the reasoning was defensible with the
+   information available; an uncertain event produced an unfavourable
+   result.
+3. LEARNING FAILURE: new evidence appeared after the decision and the
+   person or the system failed to update, or kept defending the original
+   trajectory.
+4. GOOD OUTCOME FROM A WEAK DECISION: a risky or poorly supported decision
+   happened to succeed. Success alone never validates the reasoning.
+
+The classification is the person's, recorded with its evidence; the engine
+may show what was known, assumed and expected at decision time (the
+record is the defence against hindsight bias), but it never computes the
+category.
+
+### G.10 Survivorship bias
+
+"That entrepreneur became wealthy, therefore their initial path was
+correct" is not an inference the engine, the AI layer or any domain
+content may make. Visible winners are part of a sample whose losers are
+not visible. Decision quality is never inferred from survivor examples,
+and no domain definition may encode a "successful people did X" rule.
+
+### G.11 Identity and escalation
+
+    action != identity
+    experiment failure != human failure
+
+"I bought a food truck" must not become "I am a food-truck entrepreneur"
+inside the model. Actions, interventions and experiments stay events and
+hypotheses attached to a subject; they never become attributes of the
+person (Part C.4). When evidence weakens a hypothesis, stopping or
+changing direction is a rational update, and the product makes it easier
+to say "the hypothesis changed" than "I was stupid": a rejected hypothesis
+is a normal, recorded state, not a failure mark.
+
+### G.12 Probabilities and false precision
+
+    UNKNOWN != PROBABILITY
+
+No probability is ever fabricated. If trustworthy historical data support
+an estimate, it carries its source, sample and uncertainty. Otherwise
+uncertainty is stated qualitatively:
+
+    relatively known | partially known | highly uncertain | unresolved
+
+or as an explicit range where evidence supports one. "I don't know" is
+never rendered as "there is a 63% chance", by a screen, by a formula, or
+by the AI layer. The existing 0..1 `confidence` fields are ordinal
+judgments of evidential support (Part B), displayed as worded levels; they
+are not probabilities of an outcome and must never be presented as such.
+
+### G.13 Values still govern the decision
+
+Even perfect probabilities would not determine the choice. Two people may
+rationally decide differently because their responsibilities, reserves,
+health, dependents, risk tolerance, moral commitments, values and purposes
+differ.
+
+    external evidence + current structure + human values -> decision context
+
+The engine illuminates the decision context. The person decides. The
+product should eventually be able to say, for a decision the person is
+weighing:
+
+    Here is what we know.
+    Here is what we are assuming.
+    Here is what remains unknown.
+    Here is what could happen if this fails.
+    Here is how much of that downside your current structure can absorb.
+    Here is how reversible this decision is.
+    Here is how long it may take before reality provides useful evidence.
+    Here is a smaller experiment that could answer an important question.
+    Here are the values and constraints you previously said matter.
+
+It never ends with "therefore you must do X". There is no recommendation
+output in the engine, the services, the screens or the AI contract, and
+ranking is always over means against the person's own targets with every
+dimension inspectable.
+
+### G.14 What is grounded and what is ours
+
+Grounded (Part A): the separation of decision from outcome under
+uncertainty and the resulting hindsight and survivorship biases are
+well-documented in decision theory and the study of judgment; option value
+and the asymmetry of reversible versus irreversible commitments are
+established concepts; the difference between maximising expected value
+and avoiding ruin is a known result (a sequence of bets with a
+non-survivable downside has a different long-run outcome than its
+per-bet expectation suggests). Our conventions (Part B): the particular
+list of bet dimensions in G.4, the four review categories in G.9, the four
+qualitative uncertainty levels in G.12, the fear loop in G.8, and any
+future ordinal scale for reversibility or survivability. The leverage
+formula (A8) is a heuristic for ranking means; it is not a decision rule
+and does not represent reversibility or survivability.
+
+### G.15 Product philosophy
+
+Human Systems Dynamics does not remove uncertainty from life. That is
+impossible. It helps a person SEE uncertainty, STRUCTURE it, REDUCE it
+where evidence can, SURVIVE what cannot be removed, LEARN from outcomes,
+and preserve enough freedom to choose again.
+
 ## Part F — Backend constitution
 
 Short invariants that guide every schema, AI, domain and UI decision.
@@ -406,6 +659,14 @@ Tests pin the ones that can be tested; the rest are review criteria.
     model != person
     optimization != meaning
     understanding vulnerability != permission to exploit it
+    decision quality != outcome quality
+    good outcome != good decision
+    bad outcome != bad decision
+    uncertainty != ignorance
+    unknown != probability
+    action != identity
+    experiment failure != human failure
+    preserving optionality has value
     the model serves the person
     human judgment retains final authority
 
@@ -424,9 +685,22 @@ Consequences a reviewer checks on every change:
 - No profile leaves the person's control. No silent repurposing. Inferred
   and entered information stay distinguishable.
 - Language describes conditions, never the person.
+- No prescriptive output: nothing computes, renders or proposes "you
+  should / you must / do X". Rankings are over means, against the
+  person's own targets, with every dimension inspectable and no
+  bet-dimension collapsed into one number.
+- No fabricated probability: an unknown is shown as unknown or as a
+  qualitative level; a confidence is an ordinal judgment of support, never
+  a probability of an outcome.
+- No decision judged by its outcome alone: a retrospective classification
+  is the person's, recorded with what was known at the time; the engine
+  never computes it and never turns an action into an attribute of the
+  person.
 
 ---
 
 Revision history: 2026-09-14 — first edition, integrating the theory
 reconstruction (Part D) with the measurement boundary, human meaning,
-sovereignty, anti-exploitation and constitution sections.
+sovereignty, anti-exploitation and constitution sections. 2026-09-15 —
+Part G, decision-making under uncertainty, and the eight constitution
+lines it adds; A8 relabelled as a means-ranking heuristic.

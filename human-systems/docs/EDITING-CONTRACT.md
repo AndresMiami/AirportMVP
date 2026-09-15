@@ -28,6 +28,25 @@ constitution (Part F) and the measurement boundary (Part E.2).
 - Inferred (`ai_inferred`, `estimated`) and entered (`self_reported`,
   `measured`, `observed`) information are visually distinguishable
   everywhere a value is shown.
+- No screen recommends. A screen may show what is known, assumed and
+  unknown, what could happen if an option fails, how reversible it is,
+  how long until evidence arrives, which smaller test could answer a
+  question, and which values and constraints the person recorded. It
+  never ends with "therefore do X", never marks an option as "the right
+  choice", and never manufactures urgency.
+- Bet dimensions stay separate on screen (FOUNDATIONS G.4): no total that
+  folds downside, reversibility, capital or time at risk, time until
+  evidence and upside into one number. Where the utility weighted total
+  is shown, it is labelled as the person's own weights over their own
+  judgments and shown beside the vector, never alone.
+- No probability wording. A screen never says "N% chance"; it shows the
+  qualitative level or the range the evidence supports, and it shows
+  `confidence` as a worded level of support, never as odds of an outcome.
+- Outcomes are compared with EXPECTATIONS (an intervention's `expected`,
+  a hypothesis's `predictions`), never rendered as a verdict on the
+  decision or the person. A rejected hypothesis reads "the hypothesis
+  changed", never as a failure mark; caution and waiting are never
+  labelled irrational.
 
 ## Flow
 

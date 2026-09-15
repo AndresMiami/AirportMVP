@@ -20,9 +20,20 @@ const CONSTITUTION = [
   "model != person",
   "optimization != meaning",
   "understanding vulnerability != permission to exploit it",
+  "decision quality != outcome quality",
+  "good outcome != good decision",
+  "bad outcome != bad decision",
+  "uncertainty != ignorance",
+  "unknown != probability",
+  "action != identity",
+  "experiment failure != human failure",
+  "preserving optionality has value",
   "the model serves the person",
   "human judgment retains final authority",
 ];
+
+/** Prescriptive or probabilistic phrasing no screen, prompt or engine text may carry. */
+const PRESCRIPTIVE = /\b(you should|you must|we recommend|the right choice|therefore (you|do)|% chance|percent chance|probability of success)\b/i;
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {
@@ -40,6 +51,7 @@ describe("foundations", () => {
       "Part B — Modeling conventions and hypotheses",
       "Part C — Normative design principles",
       "Limits of quantification, human meaning, and sovereignty",
+      "Part G — Decision-making under uncertainty",
       "Part F — Backend constitution",
     ]) {
       expect(doc, heading).toContain(heading);
@@ -58,10 +70,25 @@ describe("foundations", () => {
     for (const line of CONSTITUTION) expect(claude, line).toContain(line);
   });
 
-  it("the AI prompt keeps human meaning and intuition qualitative", () => {
+  it("the AI prompt keeps human meaning and intuition qualitative and never prescribes or states odds", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("HUMAN MEANING");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("Never classify an intuition");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("never the person");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("You never recommend, advise or prescribe");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("You never state a probability");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("never judge a past decision by its outcome alone");
+  });
+
+  it("no screen, component, engine or domain text prescribes a choice or states odds of an outcome", () => {
+    const offenders: string[] = [];
+    for (const dir of ["src/app", "src/components", "src/model", "src/calculations", "src/scenarios", "src/signatures", "src/domains", "src/services"]) {
+      for (const file of walk(path.join(ROOT, dir))) {
+        const src = readFileSync(file, "utf8");
+        const m = PRESCRIPTIVE.exec(src);
+        if (m) offenders.push(`${path.relative(ROOT, file)}: "${m[0]}"`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it("no schema or domain declares a numeric field or variable for meaning, spirituality, intuition, faith or a personality type", () => {

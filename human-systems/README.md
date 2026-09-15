@@ -26,7 +26,7 @@ exercises the review contract).
 ```bash
 npm install --legacy-peer-deps   # vitest 4 + npm's peer resolver need the flag
 npm run dev                      # http://localhost:3000
-npm test                         # vitest, 248 tests
+npm test                         # vitest, 250 tests
 npm run typecheck
 npm run lint
 npm run build
@@ -45,7 +45,12 @@ anti-exploitation, data minimisation). Its constitution in one breath:
 unknown ≠ zero, observation ≠ interpretation, association ≠ causation,
 immeasurable ≠ nonexistent, pattern ≠ identity, model ≠ person,
 optimization ≠ meaning, understanding vulnerability ≠ permission to exploit
-it, the model serves the person, human judgment retains final authority.
+it, decision quality ≠ outcome quality, unknown ≠ probability, action ≠
+identity, preserving optionality has value, the model serves the person,
+human judgment retains final authority. Part G (decision-making under
+uncertainty) is why the product has no recommendation output: it shows
+what is known, assumed, unknown, survivable, reversible and testable, and
+the person decides.
 
 ## Architecture
 

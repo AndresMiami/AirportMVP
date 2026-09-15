@@ -349,6 +349,46 @@ Cross-cutting (tests/architecture, tests/calculations/unknown-not-zero, new test
     scenario and dashboard screens render counts and vectors only (source
     grep test).
 
+## Q. Decision / experiment seam (FOUNDATIONS Part G; future, not scheduled)
+
+No decision engine is built. This section records how each concept in
+Part G maps onto the schema TODAY and the smallest seam to preserve, so
+3b–3d do not close a door. Representation follows the evidence class:
+exact number, range, ordinal judgment, or text; nothing here becomes one
+score.
+
+| Concept | Today | Smallest future seam |
+|---|---|---|
+| Decision | `Event.kind = "decision"` with `occurred`, subject, observations, links | keep; a decision links the hypotheses/assumptions it rested on (`links.hypothesisIds` exists) |
+| Experiment / intervention | `Event.kind = "intervention"` with `status`, `expected[]`, `outcomeEventIds` | keep; an experiment is an intervention whose `expected` names the unknown it tests; no new entity |
+| Hypothesis | `Hypothesis` with predictions, disconfirming conditions, review log, kill criteria | keep |
+| Assumption | a `Hypothesis` of kind `general` today | a future `kind: "assumption"` value plus `dependsOnVariableIds` (which numbers it rests on) — an enum extension, no migration of meaning |
+| Unknown / question | domain `question` per variable; AI `questions_to_reduce_uncertainty` (qualitative gain) | a future `Unknown` entity `{question, subjectId, status open/answered, observationIds, variableKey?}`; until then observations with a "question" marker are enough |
+| Expected signal | `Event.expected[]` (variable, direction, by) and `Hypothesis.predictions[]` | keep both; do not add magnitudes unless a range with evidence |
+| Observed outcome | `Event.kind = "outcome"` and `outcomeEventIds` | keep; the comparison expected-vs-observed is about the HYPOTHESIS, never about decision quality |
+| Kill / reconsideration criterion | `KillCriterion` (engine reads, person sets status) | keep |
+| Reversibility | `utility.reversibility` -1..1 today (a collapsed judgment) | future ordinal `reversible / costly_to_reverse / irreversible` inside a bet profile, never a decimal |
+| Resources at risk | `Action.cost` 0..1 today | future `capitalAtRisk` as a money range (class 1) and `timeAtRisk` as a Lag; both inspectable |
+| Time until evidence | none | future Lag range on the intervention: `evidenceExpectedWithin` |
+| Recovery requirement | none | future text + links to the constraints/buffers it would consume (class 3 or class 1 per field) |
+| Linked human constraints | `Action.requirements` vs `Constraint` dimensions; `links.constraintIds` on observations | keep; a decision event may link constraints |
+| Linked human values | Observation (verbatim) or hard Constraint without `check` | keep as the only representation (Part E.2); never a weight |
+| Alternative paths preserved | none | future `preservesActionIds[]` / `foreclosesActionIds[]` on an action or decision event; qualitative |
+| Retrospective review | `Hypothesis.reviewLog` | future person-authored `DecisionReview {decisionEventId, category (the four of G.9), note, observationIds, at}`; never computed |
+| Uncertainty level | numeric `confidence` everywhere | future qualitative enum `relatively_known / partially_known / highly_uncertain / unresolved` as an alternative representation; not a replacement migration |
+
+Where these would live: a versioned `Action.extensions["bet-profile"]`
+envelope (section J) for the per-option dimensions, and the event /
+hypothesis entities for the rest. Nothing enters the universal engine
+that assumes a business; the commercial-pool validation stays fixture
+data (section L), and its logic — large commitment → identify assumptions
+→ low-cost test → evidence → updated belief → decide on the larger
+commitment — is the worked example of G.6, not engine code.
+
+Postponed with it: any ranking that reads the bet profile, any
+"expected value" arithmetic, any automatic experiment generator, any
+probability field.
+
 ## N. Migration risks (revised)
 
 As in revision 1, plus: (a) migrated systems lose all loops until edges

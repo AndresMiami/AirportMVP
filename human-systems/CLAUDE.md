@@ -30,6 +30,14 @@ change is reviewed against it. Its constitution:
     model != person
     optimization != meaning
     understanding vulnerability != permission to exploit it
+    decision quality != outcome quality
+    good outcome != good decision
+    bad outcome != bad decision
+    uncertainty != ignorance
+    unknown != probability
+    action != identity
+    experiment failure != human failure
+    preserving optionality has value
     the model serves the person
     human judgment retains final authority
 
@@ -44,7 +52,17 @@ or a third party's objective); inferred and entered information stay
 distinguishable; nothing is repurposed silently; language describes
 conditions, never the person. A new numeric field about a person must say
 which measurement-boundary class (FOUNDATIONS Part E.2) it belongs to, and
-class 3 (human meaning) never gets a number.
+class 3 (human meaning) never gets a number. NO PRESCRIPTIVE OUTPUT
+(FOUNDATIONS Part G): no engine, service, screen or AI contract may
+compute, render or propose "you should / you must / do X"; rankings are
+over means against the person's own targets with every dimension
+inspectable and no bet dimension (downside, reversibility, capital or
+time at risk, time until evidence, optionality) collapsed into one
+number; no probability is ever fabricated (unknown stays unknown or a
+qualitative level; confidence is ordinal support, not a probability of an
+outcome); no decision is ever judged by its outcome alone, and a
+retrospective classification is the person's, never computed; an action
+or experiment never becomes an attribute of the person.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /
