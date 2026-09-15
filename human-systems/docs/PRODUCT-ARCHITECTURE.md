@@ -403,7 +403,7 @@ that already has to move; the proposal kernel precedes the shell because
 every capture write and every persistence question is a review card;
 Groups sit with the kernel because the Map is a primary screen.
 
-## 17. Product surface (APPROVED DIRECTION, not implemented)
+## 16. Product surface (APPROVED DIRECTION, not implemented)
 
     THE ENGINE MAY BE COMPLEX.
     THE USER EXPERIENCE SHOULD NOT FEEL COMPLEX.
@@ -431,7 +431,7 @@ Ordinary statements are the interface, and the shell translates them:
 Nobody is asked to know what a hypothesis, a TemporalRef, a source type,
 a persistence indicator or a snapshot is.
 
-### 17.1 The normal interaction
+### 16.1 The normal interaction
 
 A reply is never a verdict. Its shape is:
 
@@ -448,7 +448,7 @@ by default:
     "you said"   "from your document"   "estimated"   "AI interpretation"
     "fairly sure" / "rough"  instead of 0.85 / 0.4
 
-### 17.2 Four places, everything else is progressive disclosure
+### 16.2 Four places, everything else is progressive disclosure
 
 Primary navigation converges on HOME, MAP, HISTORY, LIBRARY. There is no
 primary navigation item for variables, constraints, relationships,
@@ -545,7 +545,7 @@ is thrown away; it is where people inspect the machinery, and it is not
 the everyday workflow. The current sixteen routes become Library and
 Details, which is what avoids a rewrite.
 
-### 17.3 Progressive disclosure (a UI principle)
+### 16.3 Progressive disclosure (a UI principle)
 
     Level 1  ordinary language
              "Customer concentration stayed high."
@@ -559,7 +559,7 @@ Same engine, different depth. Every Level 1 sentence has a Level 2 and a
 Level 3 behind it, and no Level 1 sentence claims more than Level 3
 supports (the forbidden persistence phrases apply at every level).
 
-### 17.4 Onboarding
+### 16.4 Onboarding
 
 Never schema setup. It begins:
 
@@ -573,14 +573,14 @@ configuration page. The same interface serves "why do I keep ending up in
 the same financial situation" and "what keeps Miami real estate strong and
 what could break that pattern".
 
-### 17.5 Visual identity
+### 16.5 Visual identity
 
 Closer to a chat, a notebook, a mind map and a timeline than to the
 dashboard-style analytical application the codebase started as. The
 design language is written down as a short document at the step that
 builds the shell, so screens are built to it rather than restyled after.
 
-## 16. What this architecture never does
+## 17. What this architecture never does
 
 No AI arithmetic as stored truth. No silent mutation. No proposal outside
 the typed vocabulary. No hidden objective. No universal score, no
