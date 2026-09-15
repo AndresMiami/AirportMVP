@@ -47,10 +47,12 @@ immeasurable ≠ nonexistent, pattern ≠ identity, model ≠ person,
 optimization ≠ meaning, understanding vulnerability ≠ permission to exploit
 it, decision quality ≠ outcome quality, unknown ≠ probability, action ≠
 identity, preserving optionality has value, the model serves the person,
-human judgment retains final authority. Part G (decision-making under
-uncertainty) is why the product has no recommendation output: it shows
-what is known, assumed, unknown, survivable, reversible and testable, and
-the person decides.
+source ≠ truth, human judgment retains final authority. Part G
+(decision-making under uncertainty) is why the product issues no
+authoritative prescription: it shows what is known, assumed, unknown,
+survivable, reversible and testable; a comparison appears only when the
+person asks and with its reasons and assumptions visible; the person
+decides.
 
 ## Architecture
 

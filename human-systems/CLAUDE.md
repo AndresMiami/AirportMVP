@@ -35,6 +35,7 @@ change is reviewed against it. Its constitution:
     bad outcome != bad decision
     uncertainty != ignorance
     unknown != probability
+    source != truth
     action != identity
     experiment failure != human failure
     preserving optionality has value
@@ -52,17 +53,28 @@ or a third party's objective); inferred and entered information stay
 distinguishable; nothing is repurposed silently; language describes
 conditions, never the person. A new numeric field about a person must say
 which measurement-boundary class (FOUNDATIONS Part E.2) it belongs to, and
-class 3 (human meaning) never gets a number. NO PRESCRIPTIVE OUTPUT
-(FOUNDATIONS Part G): no engine, service, screen or AI contract may
-compute, render or propose "you should / you must / do X"; rankings are
-over means against the person's own targets with every dimension
-inspectable and no bet dimension (downside, reversibility, capital or
-time at risk, time until evidence, optionality) collapsed into one
-number; no probability is ever fabricated (unknown stays unknown or a
-qualitative level; confidence is ordinal support, not a probability of an
-outcome); no decision is ever judged by its outcome alone, and a
-retrospective classification is the person's, never computed; an action
-or experiment never becomes an attribute of the person.
+class 3 (human meaning) never gets a number. SOURCE != TRUTH: a source
+type (measured, observed, self_reported, calculated, estimated,
+ai_inferred, unknown) records provenance only; no code or copy treats
+measured/observed as fact or self_reported as an estimate, and no large
+truth-status schema is added. NO AUTHORITATIVE PRESCRIPTION (FOUNDATIONS
+G.13): no engine, service, screen or AI contract may compute, render or
+propose "you must / you should / the correct decision is X" unasked or
+as a verdict; a person-REQUESTED conditional comparison ("given the
+goals, constraints and evidence you supplied, option B is currently
+better supported on these dimensions...") is allowed only when it is
+grounded in the person's stated objectives and constraints, its reasons
+are inspectable, its assumptions and unknowns are visible, uncertainty is
+preserved, no hidden objective is optimised, and the person retains final
+authority; ranking is analysis, not command; rankings are over means
+against the person's own targets with every dimension inspectable and no
+bet dimension (downside, reversibility, capital or time at risk, time
+until evidence, optionality) collapsed into one number; no probability
+is ever fabricated (unknown stays unknown or a qualitative level;
+confidence is ordinal support, not a probability of an outcome); no
+decision is ever judged by its outcome alone, and a retrospective
+classification is the person's, never computed; an action or experiment
+never becomes an attribute of the person.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /

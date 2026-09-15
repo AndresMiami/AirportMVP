@@ -25,6 +25,7 @@ const CONSTITUTION = [
   "bad outcome != bad decision",
   "uncertainty != ignorance",
   "unknown != probability",
+  "source != truth",
   "action != identity",
   "experiment failure != human failure",
   "preserving optionality has value",
@@ -59,6 +60,10 @@ describe("foundations", () => {
     for (const line of CONSTITUTION) expect(doc, line).toContain(line);
     // the measurement boundary's three classes
     for (const cls of ["Measurable / estimable", "Interpretive", "Human meaning"]) expect(doc).toContain(cls);
+    // Part G corrections: provenance is not truth; prescription is conditional, never authoritative
+    expect(doc).toContain("NO AUTHORITATIVE PRESCRIPTION");
+    expect(doc).toContain("records PROVENANCE, the origin of a value, never its truth");
+    expect(doc).not.toMatch(/`measured`, `observed` are facts/);
   });
 
   it("the principal developer guidance references the foundation", () => {
@@ -74,7 +79,9 @@ describe("foundations", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("HUMAN MEANING");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("Never classify an intuition");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("never the person");
-    expect(ANALYSIS_SYSTEM_PROMPT).toContain("You never recommend, advise or prescribe");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("You never issue an authoritative prescription");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("Only when the person explicitly asks for help choosing");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("A source type is provenance, not truth");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("You never state a probability");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("never judge a past decision by its outcome alone");
   });

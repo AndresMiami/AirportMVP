@@ -25,15 +25,22 @@ constitution (Part F) and the measurement boundary (Part E.2).
   person's own targets, constraints, weights and hypothesis status. No
   screen nudges toward engagement, retention, conversion or any third
   party's interest, and no screen manufactures urgency from the data.
-- Inferred (`ai_inferred`, `estimated`) and entered (`self_reported`,
-  `measured`, `observed`) information are visually distinguishable
-  everywhere a value is shown.
-- No screen recommends. A screen may show what is known, assumed and
+- Source types are shown as PROVENANCE, never as truth: `ai_inferred`,
+  `estimated`, `calculated`, `self_reported`, `measured`, `observed` and
+  `unknown` are visually distinguishable everywhere a value is shown, and
+  no screen labels a measured or observed value "fact" or a self-reported
+  value "estimate" on the strength of its source type alone; confidence
+  and evidence sit beside it.
+- No screen prescribes. A screen may show what is known, assumed and
   unknown, what could happen if an option fails, how reversible it is,
   how long until evidence arrives, which smaller test could answer a
   question, and which values and constraints the person recorded. It
   never ends with "therefore do X", never marks an option as "the right
-  choice", and never manufactures urgency.
+  choice", and never manufactures urgency. A conditional comparison
+  ("given your stated goals and constraints, B is better supported on
+  these dimensions") may appear only where the person explicitly asked
+  for help choosing, with its reasons, assumptions and unknowns on the
+  same screen (FOUNDATIONS G.13); it is analysis, never a verdict.
 - Bet dimensions stay separate on screen (FOUNDATIONS G.4): no total that
   folds downside, reversibility, capital or time at risk, time until
   evidence and upside into one number. Where the utility weighted total

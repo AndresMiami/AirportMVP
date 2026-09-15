@@ -319,7 +319,9 @@ classes, and the class decides what the engine may do with it.
 ratios and calculations are reasonably defensible. Income, hours, reserves,
 dates of events, counts of sources, a lag. These may carry values, units,
 confidence, reference ranges and may enter formulas. Estimates carry
-`estimated` or `self_reported` provenance and, where possible, a range.
+`estimated` provenance and, where possible, a range; a self-report is a
+direct statement by the person and may be exact or approximate. Source
+type records ORIGIN, never truth (G.7).
 
 **2. Interpretive.** Hypotheses such as "financial pressure may reinforce
 short-horizon decision making." These are readings that gain or lose
@@ -512,15 +514,35 @@ first-class action.
 ### G.7 Assumptions must be visible
 
 Before a major decision the engine helps separate KNOWN FACTS from
-ESTIMATES from ASSUMPTIONS from UNKNOWN QUESTIONS. These map onto what the
-schema already records: source type (`measured`, `observed` are facts;
-`estimated`, `self_reported` are estimates; `ai_inferred` is an
-interpretation; `unknown` is unknown), hypothesis status for assumptions,
-and questions for unknowns. "This business needs $20,000 a month to work"
-prompts: where did the number come from, is it observed, calculated,
-estimated or guessed, what depends on it, what if it is 20% lower, how
-cheaply can it be tested. No assumption is ever hidden inside a
-recommendation, because there is no recommendation (G.13).
+ESTIMATES from ASSUMPTIONS from UNKNOWN QUESTIONS.
+
+    source != truth
+
+`SourceType` records PROVENANCE, the origin of a value, never its truth
+status:
+
+    measured       obtained through a measurement process
+    observed       a recorded observation
+    self_reported  stated directly by the person
+    calculated     produced by a defined calculation from its inputs
+    estimated      an explicit estimate
+    ai_inferred    a model interpretation
+    unknown        source or claim unresolved
+
+Any of these can still be uncertain. A measurement can be wrong, an
+observation can be mistaken, a self-report may be a direct report rather
+than an estimate, and a calculation is only as good as its inputs. Whether
+something counts as a known fact, an estimate or an assumption is a
+judgment the person makes with the provenance, the confidence and the
+evidence in view; the engine shows those three and never derives "fact"
+from a source type. Assumptions live as hypotheses with a status; unknown
+questions live as questions. "This business needs $20,000 a month to
+work" prompts: where did the number come from, is it measured, observed,
+self-reported, calculated, estimated or guessed, how confident is that
+source, what depends on it, what if it is 20% lower, how cheaply can it
+be tested. No assumption is ever hidden inside a conclusion: every
+conditional comparison (G.13) lists the assumptions and unknowns it rests
+on. No larger truth-status schema is introduced by this rule.
 
 ### G.8 Fear of the wrong decision (a working hypothesis)
 
@@ -618,10 +640,41 @@ weighing:
     Here is a smaller experiment that could answer an important question.
     Here are the values and constraints you previously said matter.
 
-It never ends with "therefore you must do X". There is no recommendation
-output in the engine, the services, the screens or the AI contract, and
-ranking is always over means against the person's own targets with every
-dimension inspectable.
+It never ends with "therefore you must do X".
+
+    NO AUTHORITATIVE PRESCRIPTION.
+
+The product never behaves as if it knows what a person ought to value, and
+never issues an unsolicited or authoritative instruction. Forbidden, in
+any surface:
+
+    "You must choose B."
+    "This is objectively the correct life decision."
+    "You should sacrifice value X because the model scores Y higher."
+
+This is not a ban on useful analytical conclusions. When the person
+EXPLICITLY asks for help choosing, conditional comparison is permitted:
+
+    "Given the goals, constraints and evidence you supplied, option B is
+     currently better supported on these dimensions: ..."
+    "This option violates fewer of your stated hard constraints."
+    "This experiment preserves more optionality while answering the same
+     unknown."
+    "This conclusion depends on assumptions A, B and C."
+
+and only when ALL of the following hold:
+
+- it is grounded in the person's stated objectives and constraints;
+- its reasons are inspectable, dimension by dimension;
+- the important assumptions and unknowns it rests on are visible;
+- uncertainty is preserved (no fabricated probability, no collapsed
+  score);
+- no hidden objective is optimised;
+- the person retains final authority.
+
+Ranking remains analysis, not command. Today no surface produces a
+conditional comparison; when one is built it is a requested, conditional
+statement in the form above, never a verdict.
 
 ### G.14 What is grounded and what is ours
 
@@ -664,6 +717,7 @@ Tests pin the ones that can be tested; the rest are review criteria.
     bad outcome != bad decision
     uncertainty != ignorance
     unknown != probability
+    source != truth
     action != identity
     experiment failure != human failure
     preserving optionality has value
@@ -685,10 +739,14 @@ Consequences a reviewer checks on every change:
 - No profile leaves the person's control. No silent repurposing. Inferred
   and entered information stay distinguishable.
 - Language describes conditions, never the person.
-- No prescriptive output: nothing computes, renders or proposes "you
-  should / you must / do X". Rankings are over means, against the
+- No authoritative prescription: nothing computes, renders or proposes
+  "you must / you should / the correct decision is X" unasked or as a
+  verdict. A person-requested conditional comparison is allowed only
+  under the six conditions of G.13. Rankings are over means, against the
   person's own targets, with every dimension inspectable and no
   bet-dimension collapsed into one number.
+- Source ≠ truth: a source type records provenance; no rule treats
+  `measured` or `observed` as fact, or `self_reported` as an estimate.
 - No fabricated probability: an unknown is shown as unknown or as a
   qualitative level; a confidence is an ordinal judgment of support, never
   a probability of an outcome.
@@ -703,4 +761,7 @@ Revision history: 2026-09-14 — first edition, integrating the theory
 reconstruction (Part D) with the measurement boundary, human meaning,
 sovereignty, anti-exploitation and constitution sections. 2026-09-15 —
 Part G, decision-making under uncertainty, and the eight constitution
-lines it adds; A8 relabelled as a means-ranking heuristic.
+lines it adds; A8 relabelled as a means-ranking heuristic. Corrections
+on approval: G.7 source ≠ truth (provenance is origin, never fact
+status); G.13 NO AUTHORITATIVE PRESCRIPTION with person-requested
+conditional comparison permitted under six conditions.
