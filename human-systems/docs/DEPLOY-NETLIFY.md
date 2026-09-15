@@ -15,15 +15,18 @@ same GitHub repository; the base directory keeps them independent.
    now. Once the branch is merged, switch this to `main`.
 4. **Base directory**: `human-systems`  ← this is the important setting.
 5. **Build command**: `npm run build` (pre-filled from `human-systems/netlify.toml`).
-6. **Publish directory**: `.next` (pre-filled).
+6. **Publish directory**: `out` (pre-filled). The app is a static export:
+   `next build` writes plain HTML into `out/` and Netlify serves it with
+   no server runtime.
 7. Leave environment variables empty. This site needs none: no functions,
    no database, no keys. Everything the person enters stays in their
    browser.
 8. Deploy.
 
-Netlify detects Next.js and uses its Next runtime automatically. The
-`NPM_FLAGS = "--legacy-peer-deps"` setting in `netlify.toml` matches the
-local install command.
+The `NPM_FLAGS = "--legacy-peer-deps"` setting in `netlify.toml` matches
+the local install command. If a deploy ever shows Netlify's own "Page not
+found" at the root, check that the publish directory is `out` (not
+`.next`) and that the base directory is `human-systems`.
 
 ## What stays separate from LinkMia
 
@@ -51,3 +54,7 @@ left empty. Until then, the monorepo plus base directory is simpler.
 ## Checks before each deploy
 
     npm run typecheck && npm run lint && npm test && npm run build
+
+To look at the exported site locally, serve the `out/` folder with any
+static server (for example `npx serve out`); `next start` does not apply
+to a static export.
