@@ -111,6 +111,9 @@ Hypotheses are never facts; loops are hypotheses with a status. Snapshots
 are immutable. No universal score, no probability of success, no
 prediction, no personality type. The person is the final decision-maker.
 
-Working docs: docs/FOUNDATIONS.md (the foundation, above), README.md
-(architecture), docs/EDITING-CONTRACT.md (how screens change the model),
+Working docs: docs/FOUNDATIONS.md (the foundation, above),
+docs/PRODUCT-ARCHITECTURE.md (the approved direction: structured core +
+freeform shell; human defines, AI proposes, engine owns state — ROADMAP
+sections are not implemented), README.md (architecture),
+docs/EDITING-CONTRACT.md (how screens change the model),
 src/domain/assumptions.ts (every formula's epistemic status).

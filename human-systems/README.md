@@ -95,6 +95,7 @@ tests/            vitest; tests/architecture pins the model layer UI-free and
                   the engine free of concrete domain imports; tests/model/
                   fake-domain proves a second domain needs no engine change
 docs/FOUNDATIONS.md       the foundation: grounded math, conventions, principles
+docs/PRODUCT-ARCHITECTURE.md the approved direction (structured core + freeform shell)
 docs/EDITING-CONTRACT.md  how screens change the model
 docs/SCHEMA-V3-PROPOSAL.md the staged v3 plan (3a shipped; 3b–3d pending)
 ```
