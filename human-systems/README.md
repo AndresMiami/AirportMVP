@@ -26,7 +26,7 @@ exercises the review contract).
 ```bash
 npm install --legacy-peer-deps   # vitest 4 + npm's peer resolver need the flag
 npm run dev                      # http://localhost:3000
-npm test                         # vitest, 250 tests
+npm test                         # vitest, 249 tests
 npm run typecheck
 npm run lint
 npm run build
