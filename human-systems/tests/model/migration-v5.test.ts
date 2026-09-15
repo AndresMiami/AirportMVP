@@ -17,6 +17,7 @@
  *
  * Dispatch is by `schemaVersion` only: a v5 record carrying an `incomeSources`
  * field is NOT re-migrated (the field is simply not part of the v5 schema).
+ * Corrupt v4 inputs are covered by migration-v5-corrupt.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
@@ -317,8 +318,10 @@ describe("schema v5 migration: incomeSources -> collections", () => {
     const v4 = householdV4();
     const opts = migrationOptionsFor(v4);
     const once = migrateV4toV5(v4, opts);
-    const twice = migrateV4toV5(once, opts);
-    expect(twice).toEqual(once);
+    // The step itself has no defined transformation for its own output (a
+    // v5 shape is not a v4 shape): it refuses rather than re-folding;
+    // idempotence lives in migrateModel's dispatch by schemaVersion.
+    expect(() => migrateV4toV5(once, opts)).toThrow(/must not carry a "collections" field/);
     const m = migrate(v4);
     const again = migrateModel(m, migrationOptionsFor(m, { migratedAt: "2027-01-01T00:00:00.000Z" }));
     if (!again.ok) throw new Error(again.error);

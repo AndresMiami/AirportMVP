@@ -345,9 +345,20 @@ bump. Checkpoint 2 (collections seam + schema v5 migration) is DONE:
 add/update/remove collection scenario ops, and `migrateV4toV5` folding the
 universal `incomeSources` field by the record's REGISTERED domain
 (household -> declared collection; other registered domain -> dropped when
-empty, preserved as legacy when not; unregistered -> preserved). Checkpoint
-3 (screens, service defaults, neutral-domain proof) remains. The plan below
-is kept as written; steps 1 to 5 are complete.
+empty, preserved as legacy when not; unregistered -> preserved). The v4 ->
+v5 step refuses malformed input instead of sanitizing it (corrupt data is
+not permission to drop or repair it; the record fails and nothing is
+stored). Checkpoint 3 (screens, service defaults, neutral-domain proof)
+remains. The plan below is kept as written; steps 1 to 5 are complete.
+
+RECORDED FOR CHECKPOINT 3 (not fixed in Checkpoint 2): the generic
+Evidence page scans every collection item for a property named
+`sourceType` and casts it to the universal provenance enum. The collection
+declaration never said that field carries provenance, so the screen is
+interpreting a domain field on its own. Checkpoint 3 resolves it either
+through explicit collection metadata (a declared provenance field, the way
+`confidenceField` is declared) or by removing the generic interpretation;
+the storage layer needs no change.
 
 The universal engine still carries household shape. Smallest refactor,
 each step a separate PR:

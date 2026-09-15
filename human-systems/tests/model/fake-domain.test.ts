@@ -5,6 +5,7 @@
  * through the engine-owned registry.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
 import { createBlankModel } from "@/model/blank";
 import { domainRegistry, resolveVariable, subjectRef, systemRef, variableIdFor, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
@@ -183,7 +184,9 @@ describe("a second minimal domain works without engine changes", () => {
     m = M.addVariable(m, input("Orders per month", "orders_per_month", "shop", 20));
     m = M.addVariable(m, { ...input("Skill level", "skill_level", "ana", 4), id: "skill_level" });
     // Pretend the record predates attribution (v2 ids doubled as keys).
-    const v2 = JSON.parse(JSON.stringify(m)) as Record<string, unknown>;
+    // Folded to the pre-v5 storage shape first: a v2 record never carried
+    // `collections`, and the v4 -> v5 step refuses one that does.
+    const v2 = foldCollectionsToV4(JSON.parse(JSON.stringify(m)) as Record<string, unknown>);
     v2.schemaVersion = 2;
     for (const v of v2.variables as Record<string, unknown>[]) {
       delete v.subjectId;

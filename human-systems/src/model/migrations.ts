@@ -190,6 +190,22 @@ export function migrateV3toV4(v3: Raw, options: { migratedAt?: string } = {}): R
 }
 
 /**
+ * A migration step refusing its input: the record is not the shape that
+ * version's contract promised, so the step has no defined transformation
+ * for it. `migrateModel` turns it into the ordinary failure result; the
+ * repository and the importer then store nothing.
+ */
+export class MigrationStepError extends Error {
+  constructor(
+    readonly fromVersion: number,
+    message: string,
+  ) {
+    super(`Migration v${fromVersion} -> v${fromVersion + 1} refused: ${message}`);
+    this.name = "MigrationStepError";
+  }
+}
+
+/**
  * v4 -> v5: domain-owned COLLECTIONS. Until v4 every model carried a
  * universal `incomeSources` field. Dispatch is by schemaVersion only.
  *  CASE A  the record's registered domain declares "incomeSources"
@@ -203,16 +219,38 @@ export function migrateV3toV4(v3: Raw, options: { migratedAt?: string } = {}): R
  *          reason to call the model invalid.
  * Event links `incomeSourceIds` become collectionItemRefs to
  * "incomeSources", verbatim, in every case. Nothing else is touched.
+ *
+ * SHAPE CONTRACT (no silent sanitization): corrupt v4 data is not
+ * permission to drop or repair it. The step validates the shape of every
+ * field it reads or reconstructs against the v4 contract, transforms only
+ * those, preserves everything else, and REFUSES (MigrationStepError)
+ * anything present but malformed. Absence is honoured only where v4 made
+ * the field optional:
+ *   incomeSources            required array in v4  -> absent or non-array: refused
+ *   events                   default [] in v4      -> absent: []; non-array: refused
+ *   events[i]                object                -> non-object entry: refused
+ *   events[i].links          default {} in v4      -> absent: {}; non-object: refused
+ *   links.incomeSourceIds    default [] of strings -> absent: []; non-array or
+ *                                                     non-string entry: refused
+ *   collections, links.collectionItemRefs          -> v5 fields; present on a v4
+ *                                                     record: refused (the step
+ *                                                     would otherwise merge or
+ *                                                     overwrite them)
+ * Item contents are never interpreted here; the final v5 validation
+ * judges them (a non-object item or a missing id fails the whole record).
  */
 export function migrateV4toV5(v4: Raw, options: { declaredCollections?: ReadonlySet<string> } = {}): Raw {
+  const refuse = (message: string): never => {
+    throw new MigrationStepError(4, message);
+  };
   const declared = options.declaredCollections ?? new Set<string>();
+  if ("collections" in v4) refuse('a schema-v4 record must not carry a "collections" field');
   const { incomeSources: rawItems, ...rest } = v4;
-  const items = Array.isArray(rawItems) ? rawItems : [];
-  const collections: Raw = { ...(isRecord(v4.collections) ? (v4.collections as Raw) : {}) };
-  if (!Array.isArray(rawItems)) {
-    // No universal field to fold (already folded, or never present): the
-    // step is a no-op for collections, so running it twice changes nothing.
-  } else if (declared.has("incomeSources")) {
+  if (!("incomeSources" in v4)) refuse('"incomeSources" is missing (schema v4 required it)');
+  if (!Array.isArray(rawItems)) refuse(`"incomeSources" must be an array, got ${describeShape(rawItems)}`);
+  const items = rawItems as unknown[];
+  const collections: Raw = {};
+  if (declared.has("incomeSources")) {
     collections.incomeSources = { items, origin: "domain" };
   } else if (items.length > 0) {
     collections.incomeSources = {
@@ -221,14 +259,30 @@ export function migrateV4toV5(v4: Raw, options: { declaredCollections?: Readonly
       note: "Preserved from the schema-v4 universal incomeSources field. This domain does not declare it; the records are kept but not evaluated.",
     };
   }
-  const events = asArray(v4.events).map((e) => {
-    const links = isRecord(e.links) ? (e.links as Raw) : {};
+  const rawEvents = v4.events === undefined ? [] : v4.events;
+  if (!Array.isArray(rawEvents)) refuse(`"events" must be an array, got ${describeShape(rawEvents)}`);
+  const events = (rawEvents as unknown[]).map((e, i) => {
+    if (!isRecord(e)) refuse(`events[${i}] must be an object, got ${describeShape(e)}`);
+    const event = e as Raw;
+    const rawLinks = event.links === undefined ? {} : event.links;
+    if (!isRecord(rawLinks)) refuse(`events[${i}].links must be an object, got ${describeShape(rawLinks)}`);
+    const links = rawLinks as Raw;
+    if ("collectionItemRefs" in links) refuse(`events[${i}].links must not carry "collectionItemRefs" on a schema-v4 record`);
     const { incomeSourceIds, ...otherLinks } = links;
-    const legacy = Array.isArray(incomeSourceIds) ? incomeSourceIds : [];
-    const existing = Array.isArray(otherLinks.collectionItemRefs) ? (otherLinks.collectionItemRefs as Raw[]) : [];
-    return { ...e, links: { ...otherLinks, collectionItemRefs: [...existing, ...legacy.map((id) => ({ collection: "incomeSources", id }))] } };
+    const legacy = incomeSourceIds === undefined ? [] : incomeSourceIds;
+    if (!Array.isArray(legacy)) refuse(`events[${i}].links.incomeSourceIds must be an array, got ${describeShape(legacy)}`);
+    (legacy as unknown[]).forEach((id, j) => {
+      if (typeof id !== "string") refuse(`events[${i}].links.incomeSourceIds[${j}] must be a string, got ${describeShape(id)}`);
+    });
+    return { ...event, links: { ...otherLinks, collectionItemRefs: (legacy as string[]).map((id) => ({ collection: "incomeSources", id })) } };
   });
   return { ...rest, schemaVersion: 5, collections, events };
+}
+
+function describeShape(x: unknown): string {
+  if (x === null) return "null";
+  if (Array.isArray(x)) return "an array";
+  return typeof x === "object" ? "an object" : typeof x === "string" ? `the string ${JSON.stringify(x)}` : `a ${typeof x}`;
 }
 
 export interface MigrationOptions {
@@ -283,7 +337,14 @@ export function migrateModel(input: unknown, options: MigrationOptions = {}): Mi
   while (version < MODEL_SCHEMA_VERSION) {
     const step = STEPS[version];
     if (!step) return { ok: false, error: `No migration from version ${version}` };
-    raw = step(raw, options);
+    try {
+      raw = step(raw, options);
+    } catch (e) {
+      // A step that refuses its input is an ordinary failure: nothing is
+      // stored. Any other exception is a bug and propagates unchanged.
+      if (e instanceof MigrationStepError) return { ok: false, error: e.message };
+      throw e;
+    }
     version += 1;
   }
   const parsed = SystemModelSchema.safeParse(raw);
