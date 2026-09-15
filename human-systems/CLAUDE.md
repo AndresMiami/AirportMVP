@@ -41,6 +41,12 @@ change is reviewed against it. Its constitution:
     preserving optionality has value
     the model serves the person
     human judgment retains final authority
+    current != historical
+    recordedAt != effectiveAt
+    missing history != permission to backfill
+    target change != state change
+    derived != entered
+    approximate time != exact time
 
 Consequences for code: no universal score, probability of success,
 prediction or personality type; no numeric field for meaning, spirituality,
@@ -74,7 +80,20 @@ is ever fabricated (unknown stays unknown or a qualitative level;
 confidence is ordinal support, not a probability of an outcome); no
 decision is ever judged by its outcome alone, and a retrospective
 classification is the person's, never computed; an action or experiment
-never becomes an attribute of the person.
+never becomes an attribute of the person. MEMORY THROUGH TIME (3b,
+FOUNDATIONS Part F): the stored truth of an input variable is its
+append-only value history and of any variable its target history;
+"current" is a VIEW resolved at a clock instant (src/model/history.ts);
+an entry is never edited in place (a correction supersedes, a retraction
+marks, nothing is deleted); a migrated value is known from the record's
+last save forward and NEVER backfilled; an as-of query before the first
+orderable entry is UNKNOWN; approximate or unorderable time stays as
+written and is never sorted by guess; two entries that disagree for the
+same start are reported as ambiguous, not chosen between; derived
+variables are shells that never hold a typed value; as-of evaluation
+reconstructs values and targets only, under today's graph and today's
+income sources, and stored snapshots remain the record of a past whole
+model.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /

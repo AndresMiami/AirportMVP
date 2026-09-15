@@ -291,8 +291,10 @@ describe("blank household end to end (service + repository, no React)", () => {
     // 7. Desired states -> structural gap.
     m = M.updateVariable(m, FP, { desiredValue: DESIRED_PRESSURE, targetMode: "at_most" });
     m = M.updateVariable(m, PROT, { desiredValue: DESIRED_HOURS, targetMode: "at_least" });
-    m = service.updateVariable(m, { id: DERIVED_IDS.floorRatio, desiredValue: DESIRED_FLOOR_RATIO, targetMode: "at_least", currentValue: 99 });
-    expect(m.variables.find((v) => v.id === DERIVED_IDS.floorRatio)!.currentValue).toBeNull(); // derived value protected
+    // A derived variable never takes an entered value: the edit is refused outright, then applied without it.
+    expect(() => service.updateVariable(m, { id: DERIVED_IDS.floorRatio, desiredValue: DESIRED_FLOOR_RATIO, targetMode: "at_least", currentValue: 99 })).toThrow(/never takes an entered value/);
+    m = service.updateVariable(m, { id: DERIVED_IDS.floorRatio, desiredValue: DESIRED_FLOOR_RATIO, targetMode: "at_least" });
+    expect(m.variables.find((v) => v.id === DERIVED_IDS.floorRatio)!.values).toEqual([]); // derived shells hold no value entries
     ev = evaluateSystem(m);
     const expectedDirection = (mode: "at_least" | "at_most", current: number, desired: number): "up" | "down" | "none" => {
       const raw = desired - current;
@@ -357,7 +359,7 @@ describe("blank household end to end (service + repository, no React)", () => {
     expect(cmp.gapsShrinking).toBeGreaterThanOrEqual(1);
     expect(cmp.gapsGrowing).toBe(0);
     expect(cmp.openGapsBefore).toBe(ev.gap.openCount);
-    expect(m.variables.find((v) => v.id === PROT)!.currentValue).toBe(HOURS); // base untouched
+    expect(M.currentValueOf(m.variables.find((v) => v.id === PROT)!)).toBe(HOURS); // base untouched
 
     // Directional (A12): reliable_floor rises -> 1-week negative edge -> pressure down.
     const fp = cmp.directional.find((p) => p.variableId === FP)!;

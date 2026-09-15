@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useModel } from "@/components/model-provider";
 
 const LINKS: { href: string; label: string; group?: string }[] = [
   { href: "/", label: "Dashboard" },
@@ -21,6 +22,30 @@ const LINKS: { href: string; label: string; group?: string }[] = [
   { href: "/evidence", label: "Evidence / assumptions" },
 ];
 
+/** Small persistent reminder, on every page, that the values shown are
+ *  from a past date. Cleared with the × control or from the dashboard. */
+export function AsOfPill() {
+  const { asOf, setAsOf } = useModel();
+  if (!asOf) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-warn bg-warn-soft text-warn px-2 py-0.5 text-xs whitespace-nowrap"
+      role="status"
+    >
+      Values as of {asOf.slice(0, 10)}
+      <button
+        type="button"
+        className="ml-0.5 rounded-full px-1 leading-none hover:bg-background"
+        aria-label="Back to today"
+        title="Back to today"
+        onClick={() => setAsOf(null)}
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
 export function Nav() {
   const pathname = usePathname();
   return (
@@ -28,6 +53,9 @@ export function Nav() {
       <div className="px-4 py-4 border-b border-border">
         <div className="font-semibold">Human Systems Lens</div>
         <div className="text-xs text-muted mt-0.5">Structural scenario analysis, not prediction</div>
+        <div className="mt-2 empty:hidden">
+          <AsOfPill />
+        </div>
       </div>
       <ul className="flex md:flex-col overflow-x-auto md:overflow-visible text-sm">
         {LINKS.map((l) => {

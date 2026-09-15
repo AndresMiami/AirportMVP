@@ -1,8 +1,8 @@
 "use client";
-import { useCallback, useId, useState } from "react";
-import { NumberField } from "@/components/fields";
+import { Fragment, useCallback, useId, useState } from "react";
 import { useModel, type ModelMutation } from "@/components/model-provider";
 import { fmtValue } from "@/components/format";
+import { AppliesAsOfField, BTN_SAVE, BTN_SMALL, HistoryToggle, ResolutionHint, TargetEditor, ValueHistoryList, validFromDate, todayIso } from "@/components/history";
 import { ConfirmButton } from "@/components/system-switcher";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
 import { CATEGORY_META, SOURCE_TYPE_META } from "@/domain/vocabulary";
@@ -159,13 +159,142 @@ function Field({ id, label, children, hint }: { id: string; label: string; child
 }
 
 /* ------------------------------------------------------------------ */
+/* Inline value editor: records a NEW value entry (value, provenance,   */
+/* when it applies, note). Earlier entries stay in the history.        */
+/* ------------------------------------------------------------------ */
+
+function ValueEditor({ variable, onSave, error }: { variable: Variable; onSave: (input: mutations.RecordValueInput) => boolean; error: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [sourceType, setSourceType] = useState<SourceType>(variable.sourceType);
+  const [confidence, setConfidence] = useState("");
+  const [date, setDate] = useState("");
+  const [note, setNote] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const ids = useId();
+
+  const begin = () => {
+    setValue(variable.currentValue === null ? "" : String(variable.currentValue));
+    setSourceType(variable.valueEntry?.sourceType ?? "self_reported");
+    setConfidence(variable.valueEntry ? String(variable.valueEntry.confidence) : "");
+    setDate(todayIso());
+    setNote("");
+    setLocalError(null);
+    setOpen(true);
+  };
+  const save = () => {
+    const parsedValue = parseOptionalNumber("Value", value, {});
+    if ("error" in parsedValue) return setLocalError(parsedValue.error);
+    const parsedConfidence = parseNumber("Confidence", confidence, { min: 0, max: 1 });
+    if ("error" in parsedConfidence) return setLocalError(parsedConfidence.error);
+    setLocalError(null);
+    const ok = onSave({
+      value: parsedValue.value,
+      sourceType,
+      confidence: parsedConfidence.value,
+      valid: validFromDate(date),
+      ...(note.trim() ? { note: note.trim() } : {}),
+    });
+    if (ok) setOpen(false);
+  };
+
+  return (
+    <div className="flex flex-col gap-1 items-start">
+      <div className="flex items-center gap-2">
+        <span className="tabular-nums text-accent">{fmtValue(variable.currentValue, variable.unit)}</span>
+        {!open ? (
+          <button type="button" className={BTN_SMALL} onClick={begin}>
+            {variable.values.length === 0 ? "Record value" : "Change"}
+          </button>
+        ) : null}
+      </div>
+      <ResolutionHint state={variable.valueResolution} />
+      {open ? (
+        <div className="rounded border border-border bg-background p-2 space-y-2 text-xs" role="group" aria-label={`New value for ${variable.name}`}>
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label htmlFor={`${ids}-value`} className="block text-xs text-muted">
+                Value ({variable.unit})
+              </label>
+              <input
+                id={`${ids}-value`}
+                type="number"
+                className="w-28 tabular-nums"
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value);
+                  setLocalError(null);
+                }}
+              />
+            </div>
+            <div>
+              <label htmlFor={`${ids}-source`} className="block text-xs text-muted">
+                Source type
+              </label>
+              <select id={`${ids}-source`} className="text-xs" value={sourceType} onChange={(e) => setSourceType(e.target.value as SourceType)}>
+                {SOURCE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {SOURCE_TYPE_META[t].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor={`${ids}-confidence`} className="block text-xs text-muted">
+                Confidence (0–1)
+              </label>
+              <input
+                id={`${ids}-confidence`}
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                className="w-20 tabular-nums"
+                value={confidence}
+                onChange={(e) => {
+                  setConfidence(e.target.value);
+                  setLocalError(null);
+                }}
+              />
+            </div>
+            <AppliesAsOfField value={date} onChange={setDate} />
+            <div>
+              <label htmlFor={`${ids}-note`} className="block text-xs text-muted">
+                Note (optional)
+              </label>
+              <input id={`${ids}-note`} type="text" className="w-40" value={note} onChange={(e) => setNote(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={BTN_SAVE} onClick={save}>
+              Save value
+            </button>
+            <button type="button" className={BTN_SMALL} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <span className="text-muted">Leave the value empty to record that it is unknown from this date. Earlier values stay in the history.</span>
+          </div>
+          {localError ? (
+            <div className="text-neg" role="alert">
+              {localError}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <ErrorLine msg={error} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
 export default function VariablesPage() {
-  const { evaluated, apply, updateVariable, lastError, clearError } = useModel();
+  const { evaluated, apply, lastError, clearError } = useModel();
   const ids = useId();
   const [open, setOpen] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   const [errorOwner, setErrorOwner] = useState<string | null>(null);
   const [draft, setDraft] = useState<VariableDraft>(EMPTY_DRAFT);
   const [formError, setFormError] = useState<string | null>(null);
@@ -181,16 +310,6 @@ export default function VariablesPage() {
     [apply],
   );
   const errorFor = useCallback((owner: string) => (errorOwner === owner && lastError ? lastError : null), [errorOwner, lastError]);
-
-  /** Inline table edits keep using the provider's updateVariable; the owner
-   *  is recorded first so a refusal shows beside the row that caused it. */
-  const inlineEdit = useCallback(
-    (patch: Parameters<typeof updateVariable>[0]) => {
-      setErrorOwner(`var:${patch.id}`);
-      updateVariable(patch);
-    },
-    [updateVariable],
-  );
 
   /** Edits to the add form clear both the local validation message and the provider's last refusal. */
   const edit = useCallback(
@@ -322,7 +441,7 @@ export default function VariablesPage() {
     <div>
       <PageHeader
         title="Structural variables"
-        lede="Every variable records whose it is, where its value came from and how confident that value is. Calculated variables cannot be edited directly; change their inputs instead. Desired values are always editable."
+        lede="Every variable records whose it is, where its value came from and how confident that value is. Changing a value or a target records a new entry with the date it applies as of; earlier entries stay in the variable's History. Calculated variables cannot be edited directly; change their inputs instead. Targets are always editable."
       />
       {unassignedVariables.length > 0 ? (
         <div className="mb-4">
@@ -359,113 +478,141 @@ export default function VariablesPage() {
                 </thead>
                 <tbody>
                   {groups.get(c)!.map((v) => (
-                    <tr key={v.id}>
-                      <td>
-                        <div className="font-medium">{v.name}</div>
-                        {v.description ? <div className="text-xs text-muted max-w-xs">{v.description}</div> : null}
-                      </td>
-                      <td>
-                        {v.kind === "derived" ? (
-                          <span className="text-xs text-muted">system (calculated)</span>
-                        ) : (
-                          <div className="flex flex-col gap-1 items-start">
-                            <select
-                              aria-label={`Subject of ${v.name}`}
-                              className="text-xs"
-                              value={v.subjectId ?? UNASSIGNED}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                commit(`var:${v.id}`, (m) => mutations.assignVariableSubject(m, v.id, value === UNASSIGNED ? null : value));
-                              }}
-                            >
-                              <option value={model.id}>whole system</option>
-                              {members.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {memberOptionLabel(m)}
-                                </option>
-                              ))}
-                              <option value={UNASSIGNED}>unassigned</option>
-                              {v.subjectId !== null && v.subjectId !== model.id && !members.some((m) => m.id === v.subjectId) ? (
-                                <option value={v.subjectId}>{subjectLabel(v.subjectId, model)}</option>
+                    <Fragment key={v.id}>
+                      <tr>
+                        <td>
+                          <div className="font-medium">{v.name}</div>
+                          {v.description ? <div className="text-xs text-muted max-w-xs">{v.description}</div> : null}
+                        </td>
+                        <td>
+                          {v.kind === "derived" ? (
+                            <span className="text-xs text-muted">system (calculated)</span>
+                          ) : (
+                            <div className="flex flex-col gap-1 items-start">
+                              <select
+                                aria-label={`Subject of ${v.name}`}
+                                className="text-xs"
+                                value={v.subjectId ?? UNASSIGNED}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  commit(`var:${v.id}`, (m) => mutations.assignVariableSubject(m, v.id, value === UNASSIGNED ? null : value));
+                                }}
+                              >
+                                <option value={model.id}>whole system</option>
+                                {members.map((m) => (
+                                  <option key={m.id} value={m.id}>
+                                    {memberOptionLabel(m)}
+                                  </option>
+                                ))}
+                                <option value={UNASSIGNED}>unassigned</option>
+                                {v.subjectId !== null && v.subjectId !== model.id && !members.some((m) => m.id === v.subjectId) ? (
+                                  <option value={v.subjectId}>{subjectLabel(v.subjectId, model)}</option>
+                                ) : null}
+                              </select>
+                              {v.subjectId === null ? <UnassignedBadge /> : null}
+                            </div>
+                          )}
+                          <ErrorLine msg={errorFor(`var:${v.id}`)} />
+                        </td>
+                        <td className="text-xs">{v.changeSpeed}</td>
+                        <td>
+                          {v.kind === "derived" ? (
+                            <span className="tabular-nums" title="Calculated; edit its inputs">
+                              {fmtValue(v.currentValue, v.unit)}
+                            </span>
+                          ) : (
+                            <div className="flex flex-col gap-1 items-start">
+                              <ValueEditor
+                                variable={v}
+                                onSave={(input) => commit(`val:${v.id}`, (m) => mutations.recordValue(m, v.id, input))}
+                                error={errorFor(`val:${v.id}`)}
+                              />
+                              {v.values.length > 0 ? (
+                                <HistoryToggle
+                                  open={historyOpen === v.id}
+                                  controls={`${ids}-history-${v.id}`}
+                                  count={v.values.length}
+                                  onToggle={() => setHistoryOpen(historyOpen === v.id ? null : v.id)}
+                                />
                               ) : null}
-                            </select>
-                            {v.subjectId === null ? <UnassignedBadge /> : null}
-                          </div>
-                        )}
-                      </td>
-                      <td className="text-xs">{v.changeSpeed}</td>
-                      <td>
-                        {v.kind === "derived" ? (
-                          <span className="tabular-nums" title="Calculated; edit its inputs">
-                            {fmtValue(v.currentValue, v.unit)}
-                          </span>
-                        ) : (
-                          <NumberField value={v.currentValue} nullable onCommit={(n) => inlineEdit({ id: v.id, currentValue: n })} ariaLabel={`Current ${v.name}`} />
-                        )}
-                      </td>
-                      <td>
-                        <div className="flex items-center gap-1">
-                          <select
-                            aria-label={`Target mode ${v.name}`}
-                            className="text-xs w-12 px-1"
-                            value={v.targetMode}
-                            title="at least (floor) / at most (ceiling) / exact"
-                            onChange={(e) => inlineEdit({ id: v.id, targetMode: e.target.value as typeof v.targetMode })}
-                          >
-                            <option value="at_least">≥</option>
-                            <option value="at_most">≤</option>
-                            <option value="exact">=</option>
-                          </select>
-                          <NumberField value={v.desiredValue} nullable onCommit={(n) => inlineEdit({ id: v.id, desiredValue: n })} ariaLabel={`Desired ${v.name}`} />
-                        </div>
-                        <ErrorLine msg={errorFor(`var:${v.id}`)} />
-                      </td>
-                      <td className="text-xs text-muted">{v.unit}</td>
-                      <td>
-                        <div className="flex flex-col gap-1 items-start">
-                          <SourceBadge sourceType={v.sourceType} />
-                          <ConfidenceBadge confidence={v.confidence} />
-                          <CategoryBadge category={v.category} />
-                        </div>
-                      </td>
-                      <td className="text-xs">
-                        {v.kind === "derived" ? (
-                          <span className="text-muted">formula {v.formulaId}</span>
-                        ) : v.evidence.length === 0 ? (
-                          <span className="text-neg">none recorded</span>
-                        ) : (
-                          <button type="button" className="underline" onClick={() => setOpen(open === v.id ? null : v.id)}>
-                            {v.evidence.length} item{v.evidence.length > 1 ? "s" : ""}
-                          </button>
-                        )}
-                        {open === v.id ? (
-                          <ul className="mt-1 space-y-1 max-w-xs">
-                            {v.evidence.map((e, i) => (
-                              <li key={i}>
-                                <SourceBadge sourceType={e.sourceType} /> {e.text}
-                              </li>
-                            ))}
-                            {v.notes ? <li className="text-muted">Note: {v.notes}</li> : null}
-                          </ul>
-                        ) : null}
-                      </td>
-                      <td>
-                        {v.kind === "derived" ? (
-                          <span className="text-xs text-muted">calculated — cannot be removed</span>
-                        ) : (
-                          <ConfirmButton
-                            label="Remove"
-                            confirmLabel="Remove variable"
-                            message={`Remove ${v.name}? This also removes ${
-                              relationshipsTouching(v.id) === 0
-                                ? "any relationships touching it (none today)"
-                                : `the ${relationshipsTouching(v.id)} relationship${relationshipsTouching(v.id) > 1 ? "s" : ""} touching it`
-                            } and clears links to it from observations and actions.`}
-                            onConfirm={() => commit(`var:${v.id}`, (m) => mutations.removeVariable(m, v.id))}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <TargetEditor
+                            variable={v}
+                            onSave={(d) =>
+                              commit(`tgt:${v.id}`, (m) =>
+                                mutations.updateVariable(m, v.id, { desiredValue: d.desiredValue, targetMode: d.targetMode, valid: d.valid, note: d.note }),
+                              )
+                            }
+                            error={errorFor(`tgt:${v.id}`)}
                           />
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="text-xs text-muted">{v.unit}</td>
+                        <td>
+                          <div className="flex flex-col gap-1 items-start">
+                            <SourceBadge sourceType={v.sourceType} />
+                            <ConfidenceBadge confidence={v.confidence} />
+                            <CategoryBadge category={v.category} />
+                          </div>
+                        </td>
+                        <td className="text-xs">
+                          {v.kind === "derived" ? (
+                            <span className="text-muted">formula {v.formulaId}</span>
+                          ) : v.evidence.length === 0 ? (
+                            <span className="text-neg">none recorded</span>
+                          ) : (
+                            <button type="button" className="underline" onClick={() => setOpen(open === v.id ? null : v.id)}>
+                              {v.evidence.length} item{v.evidence.length > 1 ? "s" : ""}
+                            </button>
+                          )}
+                          {open === v.id ? (
+                            <ul className="mt-1 space-y-1 max-w-xs">
+                              {v.evidence.map((e, i) => (
+                                <li key={i}>
+                                  <SourceBadge sourceType={e.sourceType} /> {e.text}
+                                </li>
+                              ))}
+                              {v.notes ? <li className="text-muted">Note: {v.notes}</li> : null}
+                            </ul>
+                          ) : null}
+                        </td>
+                        <td>
+                          {v.kind === "derived" ? (
+                            <span className="text-xs text-muted">calculated — cannot be removed</span>
+                          ) : (
+                            <ConfirmButton
+                              label="Remove"
+                              confirmLabel="Remove variable"
+                              message={`Remove ${v.name}? This also removes ${
+                                relationshipsTouching(v.id) === 0
+                                  ? "any relationships touching it (none today)"
+                                  : `the ${relationshipsTouching(v.id)} relationship${relationshipsTouching(v.id) > 1 ? "s" : ""} touching it`
+                              } and clears links to it from observations and actions.`}
+                              onConfirm={() => commit(`var:${v.id}`, (m) => mutations.removeVariable(m, v.id))}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                      {historyOpen === v.id && v.kind === "input" ? (
+                        <tr>
+                          <td colSpan={9} className="bg-background">
+                            <div className="text-xs font-medium mb-1">History of {v.name} — values, newest first</div>
+                            <ValueHistoryList
+                              id={`${ids}-history-${v.id}`}
+                              variable={v}
+                              onRetract={(entryId, reason) => commit(`hist:${v.id}`, (m) => mutations.retractValue(m, v.id, entryId, reason))}
+                            />
+                            <ErrorLine msg={errorFor(`hist:${v.id}`)} />
+                            <p className="text-xs text-muted mt-1">
+                              Current is the newest entry that applies today. Retracting keeps the entry in the list, marked retracted, and the next applicable entry becomes current.
+                              Targets have their own history on the Desired state page.
+                            </p>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

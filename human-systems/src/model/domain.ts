@@ -201,7 +201,7 @@ export function refFor(key: string, subjectId: SubjectId, systemId: string): Var
  * is never matched: nobody has said whose it is, so it feeds no
  * computation until assigned.
  */
-export function resolveVariable(variables: readonly Variable[], systemId: string, ref: VariableRef): Variable | undefined {
+export function resolveVariable<V extends Pick<Variable, "key" | "subjectId">>(variables: readonly V[], systemId: string, ref: VariableRef): V | undefined {
   const subject = ref.scope === "system" ? systemId : ref.subjectId;
   // Runtime guard behind the type: a non-string subject (null smuggled in
   // from untyped data) must never match the unassigned rows.
@@ -224,6 +224,6 @@ export function derivedDefinitionFor(domain: DomainDefinition, key: string): Der
 }
 
 /** Variables whose subject has not been assigned. */
-export function unassignedVariables(variables: readonly Variable[]): Variable[] {
+export function unassignedVariables<V extends Pick<Variable, "subjectId">>(variables: readonly V[]): V[] {
   return variables.filter((v) => v.subjectId === null);
 }

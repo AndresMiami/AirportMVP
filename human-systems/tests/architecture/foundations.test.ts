@@ -31,6 +31,12 @@ const CONSTITUTION = [
   "preserving optionality has value",
   "the model serves the person",
   "human judgment retains final authority",
+  "current != historical",
+  "recordedAt != effectiveAt",
+  "missing history != permission to backfill",
+  "target change != state change",
+  "derived != entered",
+  "approximate time != exact time",
 ];
 
 /** Prescriptive or probabilistic phrasing no screen, prompt or engine text may carry. */

@@ -8,7 +8,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { evaluateSystem, type EvaluatedSystem } from "@/model/evaluate";
 import { LocalStorageModelRepository, type ModelSummary } from "@/repositories";
-import { ModelService, MutationError } from "@/services";
+import { ModelService, MutationError, type ImportResult } from "@/services";
 import type { IncomeSource, SystemModel, SystemType, Variable } from "@/types";
 
 export type ModelMutation = (model: SystemModel) => SystemModel;
@@ -28,6 +28,12 @@ interface ModelContextValue {
   /** Migration notice for the active model, if it was upgraded on load. */
   migratedFrom: number | null;
   models: ModelSummary[];
+  /** "View as of": an ISO date (YYYY-MM-DD, the end of that day) or an ISO
+   *  instant. Values and targets are resolved as they applied then; the
+   *  structure stays today's. null = today. Reset whenever the active
+   *  system changes. */
+  asOf: string | null;
+  setAsOf: (date: string | null) => void;
   /** Apply a pure mutation; returns false (and sets lastError) on refusal. */
   apply: (mutation: ModelMutation) => boolean;
   updateVariable: (patch: Partial<Variable> & { id: string }) => void;
@@ -37,6 +43,11 @@ interface ModelContextValue {
   switchModel: (id: string) => Promise<void>;
   deleteModel: (id: string) => Promise<void>;
   resetToSample: () => Promise<void>;
+  /** JSON text of the active system with its whole history. */
+  exportModel: () => Promise<string>;
+  /** Validate, store and activate an exported file. Nothing is stored when
+   *  the result is not ok; an existing id is refused unless `replace`. */
+  importModel: (text: string, replace: boolean) => Promise<ImportResult>;
 }
 
 const ModelContext = createContext<ModelContextValue | null>(null);
@@ -51,6 +62,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
   const [seeded, setSeeded] = useState(false);
   const [migratedFrom, setMigratedFrom] = useState<number | null>(null);
   const [models, setModels] = useState<ModelSummary[]>([]);
+  const [asOf, setAsOfState] = useState<string | null>(null);
 
   const refreshList = useCallback(async () => {
     if (!serviceRef.current) return;
@@ -131,6 +143,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       setSeeded(wasSeeded);
       setMigratedFrom(repoRef.current?.reports.get(next.id)?.migratedFrom ?? null);
       setLastError(null);
+      setAsOfState(null);
       await refreshList();
     },
     [refreshList],
@@ -167,7 +180,32 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     await activate(await serviceRef.current.resetSample(), true);
   }, [activate]);
 
-  const evaluated = useMemo(() => (model ? evaluateSystem(model) : null), [model]);
+  const exportModel = useCallback<ModelContextValue["exportModel"]>(async () => {
+    if (!serviceRef.current || !model) throw new Error("No active system to export.");
+    return serviceRef.current.exportModel(model.id);
+  }, [model]);
+
+  const importModel = useCallback<ModelContextValue["importModel"]>(
+    async (text, replace) => {
+      if (!serviceRef.current) return { ok: false, error: "Storage is not ready yet." };
+      const result = await serviceRef.current.importModel(text, { replace });
+      if (result.ok) {
+        // Same path as switchModel: the service marks it active and the
+        // stored copy is what the provider holds from now on.
+        const stored = await serviceRef.current.switchActive(result.model.id);
+        await activate(stored, false);
+        setMigratedFrom(result.migratedFrom);
+      }
+      return result;
+    },
+    [activate],
+  );
+
+  const setAsOf = useCallback<ModelContextValue["setAsOf"]>((date) => {
+    setAsOfState(date && date.trim() !== "" ? date.trim() : null);
+  }, []);
+
+  const evaluated = useMemo(() => (model ? evaluateSystem(model, asOf ? { asOf } : {}) : null), [model, asOf]);
 
   const value = useMemo<ModelContextValue>(
     () => ({
@@ -181,6 +219,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       isSample: model?.id === "sample_household_okafor_reyes",
       migratedFrom,
       models,
+      asOf,
+      setAsOf,
       apply,
       updateVariable,
       updateIncomeSource,
@@ -189,6 +229,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       switchModel,
       deleteModel,
       resetToSample,
+      exportModel,
+      importModel,
     }),
     [
       status,
@@ -199,6 +241,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       seeded,
       migratedFrom,
       models,
+      asOf,
+      setAsOf,
       apply,
       updateVariable,
       updateIncomeSource,
@@ -207,6 +251,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       switchModel,
       deleteModel,
       resetToSample,
+      exportModel,
+      importModel,
     ],
   );
 

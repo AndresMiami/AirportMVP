@@ -125,7 +125,20 @@ Relationship += kind: "unclassified" | "causal_hypothesis" | "association" | "de
 - Display: unclassified and association edges stay visible in the map in
   a distinct muted style with the label "not a causal claim".
 
-## D. Time (3a events; 3b values and targets)
+## D. Time (3a events; 3b values and targets) — 3b SHIPPED
+
+3b status (2026-09-15): shipped as schema v4. Field names as built:
+`ValueEntry { id, value, range?, valid, validBasis: asserted|recorded,
+observed?, recordedAt, sourceType, confidence, evidence, observationIds,
+note, status: active|superseded|retracted, supersedesId?, retractedAt?,
+retractReason? }`, `TargetEntry { id, desiredValue, targetMode, valid,
+validBasis, recordedAt, note, status, supersedesId?, retractedAt?,
+retractReason? }`; `Variable.values` / `Variable.targets`;
+`evaluateSystem(model, { now, asOf, includeArchivedMembers })`; derived
+shells; `ModelService.exportModel` / `importModel`. Deviations from the
+text below: `validBasis` was added so a migrated or undated entry says it
+is known from its recording instant and never earlier; income sources are
+NOT dated (3d), so as-of evaluation reads today's sources and says so.
 
 Structured temporal reference, used by events, observations and value
 entries; the original wording is always preserved:

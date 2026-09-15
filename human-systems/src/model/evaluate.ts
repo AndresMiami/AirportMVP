@@ -32,6 +32,32 @@ import type {
 } from "@/types";
 import { computeDerivedVariables, type DerivedComputation } from "./derived";
 import { domainRegistry, unassignedVariables, type DomainDefinition } from "./domain";
+import { describeResolution, normalizeInstant, resolveVariableAt } from "./history";
+
+export interface EvaluateOptions {
+  /** The clock: "current" means the latest entry applying at this instant.
+   *  Defaults to the real clock. */
+  now?: string;
+  /** Reconstruct VALUES and TARGETS as they applied at this instant (ISO
+   *  instant, or a date meaning the end of that day). The structural graph
+   *  (relationships, constraints, hypotheses, domain definition) is NOT
+   *  versioned and stays as it is now; stored snapshots remain the
+   *  authoritative record of a past complete model. */
+  asOf?: string;
+  /** Compute member-scope derived values for archived members too (their
+   *  shells and histories are always kept; computation is opt-in). */
+  includeArchivedMembers?: boolean;
+}
+
+export interface EvaluationClock {
+  now: string;
+  /** null when evaluating the present. */
+  asOf: string | null;
+  /** The instant values and targets were resolved at. */
+  valuesAsOf: string;
+  /** Always "current": the graph is not reconstructed. */
+  structureAsOf: "current";
+}
 
 export interface EvaluatedLoop extends FeedbackLoop {
   annotation?: LoopAnnotation;
@@ -70,7 +96,7 @@ export interface ObservationIndex {
 }
 
 export interface ModelIssue {
-  level: "error" | "warning";
+  level: "error" | "warning" | "info";
   message: string;
 }
 
@@ -78,6 +104,7 @@ export interface EvaluatedSystem {
   model: SystemModel;
   /** The domain definition the system was evaluated under. */
   domain: DomainDefinition;
+  clock: EvaluationClock;
   /** Inputs untouched + derived recomputed. */
   variables: Variable[];
   variableById: Map<string, Variable>;
@@ -106,11 +133,35 @@ export interface EvaluatedSystem {
   issues: ModelIssue[];
 }
 
-export function evaluateSystem(model: SystemModel): EvaluatedSystem {
+export function evaluateSystem(model: SystemModel, options: EvaluateOptions = {}): EvaluatedSystem {
   const issues: ModelIssue[] = [];
   const domain = domainRegistry.require(model.domainDefinitionId, model.domainDefinitionVersion);
-  const activeMemberIds = model.profile.members.filter((m) => m.status === "active").map((m) => m.id);
-  const { variables, computations } = computeDerivedVariables(model.variables, model.incomeSources, domain.derived, model.id, activeMemberIds);
+  const now = options.now ?? new Date().toISOString();
+  const asOf = options.asOf ? normalizeInstant(options.asOf) : null;
+  const valuesAsOf = asOf ?? now;
+  const clock: EvaluationClock = { now, asOf, valuesAsOf, structureAsOf: "current" };
+  const memberIds = model.profile.members.filter((m) => options.includeArchivedMembers || m.status === "active").map((m) => m.id);
+  const inputs = model.variables.filter((v) => v.kind === "input").map((v) => resolveVariableAt(v, valuesAsOf));
+  const shells = model.variables.filter((v) => v.kind === "derived");
+  const { variables, computations } = computeDerivedVariables(inputs, shells, model.incomeSources, domain.derived, model.id, memberIds, valuesAsOf);
+  if (asOf) {
+    issues.push({
+      level: "info",
+      message: `Values and targets as of ${asOf.slice(0, 10)}; relationships, constraints, hypotheses, income sources and the domain definition are today's. A stored snapshot is the record of the whole model at a past date.`,
+    });
+  }
+  const ambiguous = inputs.filter((v) => v.valueResolution === "ambiguous" || v.targetResolution === "ambiguous");
+  for (const v of ambiguous) {
+    const which = v.valueResolution === "ambiguous" ? "value" : "target";
+    issues.push({ level: "warning", message: `${v.name}: ${describeResolution("ambiguous")} (${which} history).` });
+  }
+  const unorderableOnly = inputs.filter((v) => v.valueResolution === "unorderable_only");
+  if (unorderableOnly.length > 0) {
+    issues.push({
+      level: "warning",
+      message: `${unorderableOnly.map((v) => v.name).slice(0, 4).join(", ")}${unorderableOnly.length > 4 ? ", …" : ""}: recorded values have no orderable time, so they stay unknown for calculation until a time is given.`,
+    });
+  }
   const variableById = new Map(variables.map((v) => [v.id, v]));
   const unassigned = unassignedVariables(variables);
   if (unassigned.length > 0) {
@@ -226,6 +277,7 @@ export function evaluateSystem(model: SystemModel): EvaluatedSystem {
   return {
     model,
     domain,
+    clock,
     variables,
     variableById,
     derived: computations,

@@ -56,12 +56,12 @@ describe("scenarios", () => {
     const r = applyScenario(m, scenario([{ kind: "adjustVariable", variableId: INPUT_IDS.liquidReserves, delta: 5000 }]));
     expect(r.rejected).toHaveLength(1);
     expect(r.rejected[0].reason).toMatch(/no current value/);
-    expect(r.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.currentValue).toBeNull();
+    expect(M.currentValueOf(r.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!)).toBeNull();
     expect(r.changedVariables.size).toBe(0);
     // Setting a value is the honest path.
     const set = applyScenario(m, scenario([{ kind: "setVariable", variableId: INPUT_IDS.liquidReserves, value: 5000 }]));
     expect(set.rejected).toEqual([]);
-    expect(set.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.currentValue).toBe(5000);
+    expect(M.currentValueOf(set.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!)).toBe(5000);
   });
   it("projections are skipped, with the missing inputs named, instead of zero-filled", () => {
     const full = compareScenario(createSampleHousehold(), scenario([]));

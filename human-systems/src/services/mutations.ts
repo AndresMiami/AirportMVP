@@ -28,8 +28,14 @@ import {
   type StructuralSignature,
   type SystemModel,
   type SystemProfile,
-  type Variable,
+  type StoredVariable,
+  type TargetEntry,
+  type TargetMode,
+  type TemporalRef,
+  type ValueEntry,
 } from "@/types";
+import { missingDerivedShells } from "@/model/derived";
+import { resolveTarget, resolveValue } from "@/model/history";
 
 export class MutationError extends Error {
   constructor(message: string) {
@@ -94,7 +100,7 @@ function describe(error: z.ZodError): string {
   return `${path}${issue.message}`;
 }
 
-function requireVariable(model: SystemModel, id: string): Variable {
+function requireVariable(model: SystemModel, id: string): StoredVariable {
   const v = model.variables.find((x) => x.id === id);
   if (!v) throw new MutationError(`Unknown variable "${id}"`);
   return v;
@@ -136,7 +142,19 @@ export function addMember(model: SystemModel, input: { id?: string; label: strin
   const id = input.id ?? nextId(model, "member");
   if (model.profile.members.some((m) => m.id === id)) throw new MutationError(`Member "${id}" already exists`);
   const member = parseOr(MemberSchema, { id, label: input.label, role: input.role ?? "" }, "member");
-  return commit({ ...model, profile: { ...model.profile, members: [...model.profile.members, member] } });
+  const withMember = { ...model, profile: { ...model.profile, members: [...model.profile.members, member] } };
+  return commit(ensureDerivedShells(withMember));
+}
+
+/** Materialize the derived SHELLS the domain defines for the system and
+ *  every member (active or archived) that lack one, so notes and targets
+ *  can be stored on them. Shells never hold value entries. Pure and
+ *  idempotent. */
+export function ensureDerivedShells(model: SystemModel): SystemModel {
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  if (!domain) return model;
+  const missing = missingDerivedShells(model.variables, domain.derived, model.id, model.profile.members.map((m) => m.id));
+  return missing.length === 0 ? model : { ...model, variables: [...model.variables, ...missing] };
 }
 
 export function updateMember(model: SystemModel, id: string, patch: Partial<Omit<Member, "id">>): SystemModel {
@@ -263,18 +281,25 @@ export function removeIncomeSource(model: SystemModel, id: string): SystemModel 
 /* Variables                                                           */
 /* ------------------------------------------------------------------ */
 
-export type VariableInput = Pick<Variable, "name" | "category" | "changeSpeed" | "unit" | "sourceType" | "confidence"> & {
+export type VariableInput = Pick<StoredVariable, "name" | "category" | "changeSpeed" | "unit"> & {
   /** Whose variable; null = unassigned. Required so nobody defaults it. */
   subjectId: SubjectId | null;
   /** Definition key; defaults to a slug of the name. */
   key?: string;
+  /** Provenance of the initial value entry (required when currentValue is given). */
+  sourceType?: ValueEntry["sourceType"];
+  confidence?: number;
+  /** Initial value / target, recorded as the first history entries. */
+  currentValue?: number | null;
+  desiredValue?: number | null;
+  /** When the initial value applies (default: the recording instant, basis "recorded"). */
+  valid?: TemporalRef;
+  recordedAt?: string;
 } & Partial<
     Pick<
-      Variable,
+      StoredVariable,
       | "id"
       | "description"
-      | "currentValue"
-      | "desiredValue"
       | "targetMode"
       | "evidence"
       | "controllability"
@@ -299,23 +324,31 @@ export function addVariable(model: SystemModel, input: VariableInput): SystemMod
   if (existing) throw new MutationError(`${existing.name} already holds key "${key}" for that subject`);
   const id = input.id ?? uniqueId(model, input.subjectId === null ? uniqueSlug(model, key) : variableIdFor(key, input.subjectId, model.id));
   if (model.variables.some((v) => v.id === id)) throw new MutationError(`Variable "${id}" already exists`);
+  const { currentValue, desiredValue, sourceType, confidence, valid, recordedAt, ...rest } = input;
   const variable = parseOr(VariableSchema, {
     description: "",
-    currentValue: null,
-    desiredValue: null,
     targetMode: "exact",
     evidence: [],
     controllability: 0.5,
     durability: 0.5,
     estimatedCostToChange: 0.5,
     notes: "",
-    ...input,
+    ...rest,
     id,
     key,
     kind: "input",
     formulaId: undefined,
+    values: [],
+    targets: [],
   }, "variable");
-  return commit({ ...model, variables: [...model.variables, variable] });
+  let next = commit({ ...model, variables: [...model.variables, variable] });
+  if (currentValue !== undefined) {
+    next = recordValue(next, id, { value: currentValue, sourceType: sourceType ?? "unknown", confidence: confidence ?? 0, valid, recordedAt });
+  }
+  if (desiredValue !== undefined) {
+    next = recordTarget(next, id, { desiredValue, targetMode: rest.targetMode, valid, recordedAt });
+  }
+  return next;
 }
 
 function uniqueSlug(model: SystemModel, base: string): string {
@@ -330,25 +363,245 @@ function uniqueId(model: SystemModel, base: string): string {
   return uniqueSlug(model, base);
 }
 
-/** Derived variables keep their computed fields protected: only desired
- *  value, target mode, notes and judgments may change. */
-export function updateVariable(model: SystemModel, id: string, patch: Partial<Omit<Variable, "id">>): SystemModel {
+/* ---- value history --------------------------------------------------- */
+
+export interface RecordValueInput {
+  value: number | null;
+  sourceType: ValueEntry["sourceType"];
+  confidence: number;
+  /** When the value applies. Omitted = the recording instant with basis
+   *  "recorded" (known from now on; onset not stated). Given = basis
+   *  "asserted", approximate or unknown time preserved as such. */
+  valid?: TemporalRef;
+  observed?: TemporalRef;
+  recordedAt?: string;
+  evidence?: ValueEntry["evidence"];
+  observationIds?: string[];
+  range?: ValueEntry["range"];
+  note?: string;
+}
+
+function entryId(existing: readonly { id: string }[], base: string, prefix: string): string {
+  const taken = new Set(existing.map((e) => e.id));
+  let n = existing.length + 1;
+  while (taken.has(`${base}__${prefix}${n}`)) n += 1;
+  return `${base}__${prefix}${n}`;
+}
+
+function validFor(valid: TemporalRef | undefined, recordedAt: string): { valid: TemporalRef; validBasis: ValueEntry["validBasis"] } {
+  if (valid) return { valid, validBasis: "asserted" };
+  return { valid: { kind: "instant", start: recordedAt, precision: "datetime", text: `as recorded ${recordedAt.slice(0, 10)}` }, validBasis: "recorded" };
+}
+
+function replaceVariable(model: SystemModel, id: string, next: StoredVariable): SystemModel {
+  return commit({ ...model, variables: model.variables.map((v) => (v.id === id ? parseOr(VariableSchema, next, "variable") : v)) });
+}
+
+/** Append a value entry. History is append-only: nothing earlier changes. */
+export function recordValue(model: SystemModel, variableId: string, input: RecordValueInput): SystemModel {
+  const v = requireVariable(model, variableId);
+  if (v.kind === "derived") throw new MutationError(`${v.name} is calculated and never takes an entered value`);
+  for (const obsId of input.observationIds ?? []) requireObservation(model, obsId);
+  const recordedAt = input.recordedAt ?? new Date().toISOString();
+  const entry: ValueEntry = {
+    id: entryId([...v.values, ...v.targets], v.id, "v"),
+    value: input.value,
+    ...(input.range ? { range: input.range } : {}),
+    ...validFor(input.valid, recordedAt),
+    ...(input.observed ? { observed: input.observed } : {}),
+    recordedAt,
+    sourceType: input.sourceType,
+    confidence: input.confidence,
+    evidence: input.evidence ?? [],
+    observationIds: input.observationIds ?? [],
+    note: input.note ?? "",
+    status: "active",
+  };
+  return replaceVariable(model, variableId, { ...v, values: [...v.values, entry] });
+}
+
+/** Correct an erroneous entry: a NEW entry replaces it (supersedesId), the
+ *  old one is kept as superseded. Fields not in the patch carry over. */
+export function correctValue(
+  model: SystemModel,
+  variableId: string,
+  entryId_: string,
+  patch: Partial<Omit<RecordValueInput, "recordedAt">> & { recordedAt?: string; reason?: string },
+): SystemModel {
+  const v = requireVariable(model, variableId);
+  const old = v.values.find((e) => e.id === entryId_);
+  if (!old) throw new MutationError(`Unknown value entry "${entryId_}"`);
+  if (old.status !== "active") throw new MutationError(`Value entry "${entryId_}" is already ${old.status}`);
+  const recordedAt = patch.recordedAt ?? new Date().toISOString();
+  const validPart = patch.valid ? { valid: patch.valid, validBasis: "asserted" as const } : { valid: old.valid, validBasis: old.validBasis };
+  const entry: ValueEntry = {
+    ...old,
+    id: entryId([...v.values, ...v.targets], v.id, "v"),
+    value: patch.value !== undefined ? patch.value : old.value,
+    ...(patch.range !== undefined ? { range: patch.range } : old.range ? { range: old.range } : {}),
+    ...validPart,
+    ...(patch.observed ? { observed: patch.observed } : old.observed ? { observed: old.observed } : {}),
+    recordedAt,
+    sourceType: patch.sourceType ?? old.sourceType,
+    confidence: patch.confidence ?? old.confidence,
+    evidence: patch.evidence ?? old.evidence,
+    observationIds: patch.observationIds ?? old.observationIds,
+    note: patch.note ?? (patch.reason ? `Correction: ${patch.reason}` : old.note),
+    status: "active",
+    supersedesId: old.id,
+  };
+  delete (entry as Partial<ValueEntry>).retractedAt;
+  delete (entry as Partial<ValueEntry>).retractReason;
+  const values = v.values.map((e) => (e.id === old.id ? { ...e, status: "superseded" as const } : e));
+  return replaceVariable(model, variableId, { ...v, values: [...values, entry] });
+}
+
+/** Withdraw an entry. It stays in the history, marked retracted. */
+export function retractValue(model: SystemModel, variableId: string, entryId_: string, reason: string, at?: string): SystemModel {
+  const v = requireVariable(model, variableId);
+  const old = v.values.find((e) => e.id === entryId_);
+  if (!old) throw new MutationError(`Unknown value entry "${entryId_}"`);
+  if (old.status === "retracted") throw new MutationError(`Value entry "${entryId_}" is already retracted`);
+  if (!reason.trim()) throw new MutationError("A retraction needs a reason");
+  const values = v.values.map((e) => (e.id === old.id ? { ...e, status: "retracted" as const, retractedAt: at ?? new Date().toISOString(), retractReason: reason } : e));
+  return replaceVariable(model, variableId, { ...v, values });
+}
+
+/* ---- target history -------------------------------------------------- */
+
+export interface RecordTargetInput {
+  desiredValue: number | null;
+  targetMode?: TargetMode;
+  valid?: TemporalRef;
+  recordedAt?: string;
+  note?: string;
+}
+
+export function recordTarget(model: SystemModel, variableId: string, input: RecordTargetInput): SystemModel {
+  const v = requireVariable(model, variableId);
+  const recordedAt = input.recordedAt ?? new Date().toISOString();
+  const entry: TargetEntry = {
+    id: entryId([...v.values, ...v.targets], v.id, "t"),
+    desiredValue: input.desiredValue,
+    targetMode: input.targetMode ?? v.targetMode,
+    ...validFor(input.valid, recordedAt),
+    recordedAt,
+    note: input.note ?? "",
+    status: "active",
+  };
+  return replaceVariable(model, variableId, { ...v, targets: [...v.targets, entry] });
+}
+
+export function correctTarget(
+  model: SystemModel,
+  variableId: string,
+  entryId_: string,
+  patch: Partial<RecordTargetInput> & { reason?: string },
+): SystemModel {
+  const v = requireVariable(model, variableId);
+  const old = v.targets.find((e) => e.id === entryId_);
+  if (!old) throw new MutationError(`Unknown target entry "${entryId_}"`);
+  if (old.status !== "active") throw new MutationError(`Target entry "${entryId_}" is already ${old.status}`);
+  const recordedAt = patch.recordedAt ?? new Date().toISOString();
+  const validPart = patch.valid ? { valid: patch.valid, validBasis: "asserted" as const } : { valid: old.valid, validBasis: old.validBasis };
+  const entry: TargetEntry = {
+    ...old,
+    id: entryId([...v.values, ...v.targets], v.id, "t"),
+    desiredValue: patch.desiredValue !== undefined ? patch.desiredValue : old.desiredValue,
+    targetMode: patch.targetMode ?? old.targetMode,
+    ...validPart,
+    recordedAt,
+    note: patch.note ?? (patch.reason ? `Correction: ${patch.reason}` : old.note),
+    status: "active",
+    supersedesId: old.id,
+  };
+  delete (entry as Partial<TargetEntry>).retractedAt;
+  delete (entry as Partial<TargetEntry>).retractReason;
+  const targets = v.targets.map((e) => (e.id === old.id ? { ...e, status: "superseded" as const } : e));
+  return replaceVariable(model, variableId, { ...v, targets: [...targets, entry] });
+}
+
+export function retractTarget(model: SystemModel, variableId: string, entryId_: string, reason: string, at?: string): SystemModel {
+  const v = requireVariable(model, variableId);
+  const old = v.targets.find((e) => e.id === entryId_);
+  if (!old) throw new MutationError(`Unknown target entry "${entryId_}"`);
+  if (old.status === "retracted") throw new MutationError(`Target entry "${entryId_}" is already retracted`);
+  if (!reason.trim()) throw new MutationError("A retraction needs a reason");
+  const targets = v.targets.map((e) => (e.id === old.id ? { ...e, status: "retracted" as const, retractedAt: at ?? new Date().toISOString(), retractReason: reason } : e));
+  return replaceVariable(model, variableId, { ...v, targets });
+}
+
+/** Current value / target of a STORED variable at an instant (screens use
+ *  the evaluated view; mutations and tests use this). */
+export function currentValueOf(v: StoredVariable, now: string = new Date().toISOString()): number | null {
+  return resolveValue(v.values, now).entry?.value ?? null;
+}
+export function currentTargetOf(v: StoredVariable, now: string = new Date().toISOString()): number | null {
+  return resolveTarget(v.targets, now).entry?.desiredValue ?? null;
+}
+
+/* ---- update ----------------------------------------------------------- */
+
+export type VariablePatch = Partial<Omit<StoredVariable, "id" | "values" | "targets" | "kind" | "formulaId">> & {
+  /** Convenience: records a NEW value entry (never edits history). */
+  currentValue?: number | null;
+  sourceType?: ValueEntry["sourceType"];
+  confidence?: number;
+  /** Convenience: records a NEW target entry. */
+  desiredValue?: number | null;
+  /** When the new value/target applies (default: recording instant, basis "recorded"). */
+  valid?: TemporalRef;
+  recordedAt?: string;
+  note?: string;
+};
+
+/** Derived variables keep their computed fields protected: only target,
+ *  target mode, notes and judgments may change. A currentValue /
+ *  desiredValue in the patch APPENDS a history entry; it never rewrites
+ *  an earlier one. */
+export function updateVariable(model: SystemModel, id: string, patch: VariablePatch): SystemModel {
   const current = requireVariable(model, id);
-  const merged: Variable = { ...current, ...patch, id };
+  const { currentValue, sourceType, confidence, desiredValue, valid, recordedAt, note, ...fields } = patch;
+  const merged: StoredVariable = { ...current, ...fields, id, values: current.values, targets: current.targets };
   if (current.kind === "derived") {
     merged.kind = "derived";
-    merged.currentValue = current.currentValue;
-    merged.sourceType = "calculated";
-    merged.confidence = current.confidence;
     merged.formulaId = current.formulaId;
     merged.unit = current.unit;
     merged.key = current.key;
     merged.subjectId = current.subjectId;
   } else {
     merged.kind = "input";
-    if (patch.subjectId !== undefined) requireSubject(model, patch.subjectId, "variable");
+    if (fields.subjectId !== undefined) requireSubject(model, fields.subjectId, "variable");
   }
-  return commit({ ...model, variables: model.variables.map((v) => (v.id === id ? parseOr(VariableSchema, merged, "variable") : v)) });
+  let next = replaceVariable(model, id, merged);
+  if (currentValue !== undefined || sourceType !== undefined || confidence !== undefined) {
+    if (current.kind === "derived") throw new MutationError(`${current.name} is calculated and never takes an entered value`);
+    const latest = resolveValue(current.values, recordedAt ?? new Date().toISOString()).entry;
+    // A provenance-only patch re-asserts the value that applies now under
+    // the new provenance; it never edits the earlier entry.
+    const value = currentValue !== undefined ? currentValue : (latest?.value ?? null);
+    if (currentValue !== undefined || latest) {
+      next = recordValue(next, id, {
+        value,
+        sourceType: sourceType ?? latest?.sourceType ?? "unknown",
+        confidence: confidence ?? latest?.confidence ?? 0,
+        valid,
+        recordedAt,
+        note,
+      });
+    }
+  }
+  if (desiredValue !== undefined || (fields.targetMode !== undefined && current.targets.some((t) => t.status === "active"))) {
+    const latest = resolveTarget(current.targets, recordedAt ?? new Date().toISOString()).entry;
+    next = recordTarget(next, id, {
+      desiredValue: desiredValue !== undefined ? desiredValue : (latest?.desiredValue ?? null),
+      targetMode: fields.targetMode ?? latest?.targetMode ?? merged.targetMode,
+      valid,
+      recordedAt,
+      note,
+    });
+  }
+  return next;
 }
 
 /** Removes an input variable and everything that pointed at it:
@@ -708,11 +961,12 @@ export function setKillCriterionStatus(
 
 /** Engine READING of a numeric criterion against the variable's value:
  *  "triggered" / "cleared" / "unknown". It never writes the status. */
-export function readKillCriterion(model: SystemModel, criterion: KillCriterion): "triggered" | "cleared" | "unknown" {
+export function readKillCriterion(model: SystemModel, criterion: KillCriterion, now: string = new Date().toISOString()): "triggered" | "cleared" | "unknown" {
   if (!criterion.variableId || !criterion.comparator || criterion.threshold === undefined) return "unknown";
   const v = model.variables.find((x) => x.id === criterion.variableId);
-  if (!v || v.currentValue === null) return "unknown";
-  const x = v.currentValue;
+  if (!v || v.kind === "derived") return "unknown";
+  const x = currentValueOf(v, now);
+  if (x === null) return "unknown";
   const t = criterion.threshold;
   const hit =
     criterion.comparator === "lt" ? x < t : criterion.comparator === "lte" ? x <= t : criterion.comparator === "gt" ? x > t : x >= t;

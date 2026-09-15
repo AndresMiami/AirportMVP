@@ -723,6 +723,12 @@ Tests pin the ones that can be tested; the rest are review criteria.
     preserving optionality has value
     the model serves the person
     human judgment retains final authority
+    current != historical
+    recordedAt != effectiveAt
+    missing history != permission to backfill
+    target change != state change
+    derived != entered
+    approximate time != exact time
 
 Consequences a reviewer checks on every change:
 
@@ -754,6 +760,16 @@ Consequences a reviewer checks on every change:
   is the person's, recorded with what was known at the time; the engine
   never computes it and never turns an action into an attribute of the
   person.
+- Memory through time (3b): values and targets are append-only histories
+  and "current" is a view; nothing is edited in place or deleted (a
+  correction supersedes, a retraction marks); a migrated value is known
+  from its record's last save forward and never backfilled; an as-of
+  query before the first orderable entry is unknown; approximate or
+  unorderable time is kept as written and never ordered by guess; a
+  disagreement for the same start is surfaced as ambiguous; a derived
+  variable never holds a typed value; as-of evaluation reconstructs
+  values and targets under today's structure and today's income sources,
+  and says so; stored snapshots remain the record of a past whole model.
 
 ---
 
@@ -764,4 +780,5 @@ Part G, decision-making under uncertainty, and the eight constitution
 lines it adds; A8 relabelled as a means-ranking heuristic. Corrections
 on approval: G.7 source ≠ truth (provenance is origin, never fact
 status); G.13 NO AUTHORITATIVE PRESCRIPTION with person-requested
-conditional comparison permitted under six conditions.
+conditional comparison permitted under six conditions. Migration 3b
+added the six memory-through-time lines to Part F.

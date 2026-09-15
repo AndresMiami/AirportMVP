@@ -3,6 +3,7 @@
  * derived-variable records (so ratios appear as soon as inputs exist), no
  * relationships, no interpretations of any kind.
  */
+import { MODEL_SCHEMA_VERSION } from "@/types";
 import { SystemModelSchema, type SystemModel, type SystemType } from "@/types";
 import { defaultDerivedVariable } from "./derived";
 import type { DomainDefinition } from "./domain";
@@ -20,7 +21,7 @@ export interface BlankModelOptions {
 
 export function createBlankModel(opts: BlankModelOptions): SystemModel {
   return SystemModelSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: MODEL_SCHEMA_VERSION,
     id: opts.id,
     domainDefinitionId: opts.domain.id,
     domainDefinitionVersion: opts.domain.version,

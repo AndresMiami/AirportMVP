@@ -285,12 +285,26 @@ export default function EvidencePage() {
         </table>
       </Card>
 
-      {issues.length > 0 ? (
+      {issues.some((i) => i.level === "info") ? (
+        <Card title="Notes on this view" className="mt-4">
+          <ul className="text-sm text-muted space-y-1">
+            {issues
+              .filter((i) => i.level === "info")
+              .map((i, k) => (
+                <li key={k}>{i.message}</li>
+              ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      {issues.some((i) => i.level !== "info") ? (
         <Card title="Model issues" className="mt-4" tone="warn">
           <ul className="text-sm space-y-1">
-            {issues.map((i, k) => (
-              <li key={k}>{i.message}</li>
-            ))}
+            {issues
+              .filter((i) => i.level !== "info")
+              .map((i, k) => (
+                <li key={k}>{i.message}</li>
+              ))}
           </ul>
         </Card>
       ) : null}

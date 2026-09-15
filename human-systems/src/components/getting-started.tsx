@@ -71,7 +71,7 @@ export function setupSteps(model: SystemModel, evaluated: EvaluatedSystem): Setu
       href: "/desired",
       screen: "Desired state",
       detail: "A target value on any variable, meant as a floor, a ceiling or an exact point.",
-      done: model.variables.some((v) => v.desiredValue !== null),
+      done: model.variables.some((v) => v.targets.some((t) => t.status === "active" && t.desiredValue !== null)),
     },
     {
       id: "loops",

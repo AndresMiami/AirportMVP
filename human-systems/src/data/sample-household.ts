@@ -8,6 +8,7 @@ import { loopIdFor } from "@/calculations/graph";
 import { registerBuiltInDomains } from "@/domains";
 import { HOUSEHOLD_DERIVED } from "@/domains/household/derived";
 import { DERIVED_IDS, HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION, INPUT_IDS } from "@/domains/household/keys";
+import { exactDate } from "@/calculations/time";
 import { defaultDerivedVariable } from "@/model/derived";
 import {
   SystemModelSchema,
@@ -20,7 +21,10 @@ import {
   type Observation,
   type Relationship,
   type SystemModel,
-  type Variable,
+  type SourceType,
+  type StoredVariable,
+  type TargetEntry,
+  type ValueEntry,
 } from "@/types";
 
 const D = DERIVED_IDS;
@@ -45,16 +49,35 @@ const DANI_KEYS = new Set<string>([
   "schedule_flexibility",
 ]);
 
-type InputSpec = Omit<Variable, "kind" | "formulaId" | "evidence" | "notes" | "description" | "targetMode" | "key" | "subjectId"> & {
+/** The fixture's authored clock: every sample value is asserted to apply
+ *  from this date and was recorded then. */
+const SAMPLE_VALID_FROM = "2026-09-01";
+const SAMPLE_RECORDED_AT = "2026-09-01T12:00:00.000Z";
+
+type InputSpec = Omit<StoredVariable, "kind" | "formulaId" | "evidence" | "notes" | "description" | "targetMode" | "key" | "subjectId" | "values" | "targets"> & {
+  currentValue: number | null;
+  desiredValue: number | null;
+  sourceType: SourceType;
+  confidence: number;
   description?: string;
-  evidence?: Variable["evidence"];
+  evidence?: StoredVariable["evidence"];
   notes?: string;
-  targetMode?: Variable["targetMode"];
+  targetMode?: StoredVariable["targetMode"];
   key?: string;
   subjectId?: string | null;
 };
 
-function input(spec: InputSpec): Variable {
+function input(spec: InputSpec): StoredVariable {
+  const { currentValue, desiredValue, sourceType, confidence, ...rest } = spec;
+  const valid = exactDate(SAMPLE_VALID_FROM, "since September 2026 (sample)");
+  const values: ValueEntry[] =
+    currentValue === null
+      ? []
+      : [{ id: `${spec.id}__v1`, value: currentValue, valid, validBasis: "asserted", recordedAt: SAMPLE_RECORDED_AT, sourceType, confidence, evidence: [], observationIds: [], note: "", status: "active" }];
+  const targets: TargetEntry[] =
+    desiredValue === null
+      ? []
+      : [{ id: `${spec.id}__t1`, desiredValue, targetMode: spec.targetMode ?? "exact", valid, validBasis: "asserted", recordedAt: SAMPLE_RECORDED_AT, note: "", status: "active" }];
   return {
     kind: "input",
     description: "",
@@ -63,11 +86,13 @@ function input(spec: InputSpec): Variable {
     targetMode: "exact",
     key: spec.key ?? spec.id,
     subjectId: spec.subjectId !== undefined ? spec.subjectId : DANI_KEYS.has(spec.id) ? "dani" : SAMPLE_SYSTEM_ID,
-    ...spec,
-  } as Variable;
+    ...rest,
+    values,
+    targets,
+  } as StoredVariable;
 }
 
-const ev = (text: string, sourceType: Variable["sourceType"] = "self_reported") => ({
+const ev = (text: string, sourceType: SourceType = "self_reported") => ({
   text,
   sourceType,
   recordedAt: "2026-09-01",
@@ -123,7 +148,7 @@ export function createSampleHousehold(): SystemModel {
     },
   ];
 
-  const inputs: Variable[] = [
+  const inputs: StoredVariable[] = [
     input({
       id: I.essentialExpenses,
       targetMode: "at_most",
@@ -569,11 +594,15 @@ export function createSampleHousehold(): SystemModel {
     [D.reliableFloor]: { desiredValue: 3740, impact: 0.9, notes: "1.1 x desired essential expenses." },
     [D.totalIncome]: { desiredValue: 5000 },
   };
-  const derived: Variable[] = HOUSEHOLD_DERIVED.map((def) => ({
-    ...defaultDerivedVariable(def, SAMPLE_SYSTEM_ID, SAMPLE_SYSTEM_ID),
-    ...(derivedDesired[def.key] ?? {}),
-    notes: derivedDesired[def.key]?.notes ?? "",
-  }));
+  const derived: StoredVariable[] = HOUSEHOLD_DERIVED.map((def) => {
+    const want = derivedDesired[def.key];
+    const shell = defaultDerivedVariable(def, SAMPLE_SYSTEM_ID, SAMPLE_SYSTEM_ID);
+    const targets: TargetEntry[] =
+      want && want.desiredValue !== null
+        ? [{ id: `${shell.id}__t1`, desiredValue: want.desiredValue, targetMode: shell.targetMode, valid: exactDate(SAMPLE_VALID_FROM, "since September 2026 (sample)"), validBasis: "asserted", recordedAt: SAMPLE_RECORDED_AT, note: "", status: "active" }]
+        : [];
+    return { ...shell, ...(want?.impact !== undefined ? { impact: want.impact } : {}), notes: want?.notes ?? "", targets };
+  });
 
   const lag = (value: number, unit: Lag["unit"]): Lag => ({ value, unit });
   const rel = (
@@ -1032,7 +1061,7 @@ export function createSampleHousehold(): SystemModel {
   ];
 
   const model: SystemModel = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     domainDefinitionId: HOUSEHOLD_DOMAIN_ID,
     domainDefinitionVersion: HOUSEHOLD_DOMAIN_VERSION,
     id: SAMPLE_SYSTEM_ID,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { currentValueOf } from "@/services/mutations";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
@@ -18,8 +19,8 @@ describe("applyScenario", () => {
       { kind: "setVariable", variableId: INPUT_IDS.protectedHours, value: 17 },
     ]));
     expect(JSON.stringify(base)).toBe(before);
-    expect(r.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.currentValue).toBe(12800);
-    expect(r.model.variables.find((v) => v.id === INPUT_IDS.protectedHours)!.currentValue).toBe(17);
+    expect(currentValueOf(r.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!)).toBe(12800);
+    expect(currentValueOf(r.model.variables.find((v) => v.id === INPUT_IDS.protectedHours)!)).toBe(17);
     expect(r.changedVariables.get(INPUT_IDS.liquidReserves)).toBe(1);
     expect(r.rejected).toEqual([]);
   });

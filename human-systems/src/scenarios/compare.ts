@@ -140,10 +140,16 @@ function buildProjections(
   return { projections, skipped };
 }
 
-export function compareScenario(baseModel: SystemModel, scenario: Scenario): ScenarioComparison {
-  const base = evaluateSystem(baseModel);
-  const applied = applyScenario(baseModel, scenario);
-  const result = evaluateSystem(applied.model);
+export interface CompareOptions {
+  /** The clock (defaults to the real clock); both evaluations share it. */
+  now?: string;
+}
+
+export function compareScenario(baseModel: SystemModel, scenario: Scenario, options: CompareOptions = {}): ScenarioComparison {
+  const now = options.now ?? new Date().toISOString();
+  const base = evaluateSystem(baseModel, { now });
+  const applied = applyScenario(baseModel, scenario, { now });
+  const result = evaluateSystem(applied.model, { now });
 
   const variableDeltas: VariableDelta[] = base.variables.map((v) => {
     const after = result.variableById.get(v.id);

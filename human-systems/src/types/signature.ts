@@ -230,6 +230,10 @@ export const StructuralSignatureSchema = z.object({
   /** The subject this signature describes: the system id or a member id. */
   subjectId: SubjectIdSchema,
   createdAt: z.string(),
+  /** The instant values and targets were resolved at. null = the clock at
+   *  creation; a past instant marks an as-of reconstruction under the
+   *  structure of createdAt (relationships are not versioned). */
+  valuesAsOf: z.string().nullable().optional(),
   schemaVersion: z.literal(SIGNATURE_SCHEMA_VERSION),
   /** Which definition (and version) produced it. */
   definitionId: z.string(),

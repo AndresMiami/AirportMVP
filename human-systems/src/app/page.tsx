@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useId } from "react";
 import { GettingStarted } from "@/components/getting-started";
 import { useModel } from "@/components/model-provider";
 import { fmtPct, fmtValue } from "@/components/format";
@@ -24,12 +25,53 @@ const HEADLINE_KEYS: { key: string; scope: SubjectScope }[] = [
   { key: INPUT_IDS.majorPaths, scope: "member" },
 ];
 
+const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50";
+
+/** Today's calendar date in the browser's zone, as the date input expects it. */
+function todayIso(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** "View as of": a date input plus a way back to today. The date input
+ *  cannot pick a future day; the engine treats a date as the end of that
+ *  day. Display and input only: it changes how values are READ, never what
+ *  is stored. */
+function ViewAsOfControl({ asOf, setAsOf }: { asOf: string | null; setAsOf: (d: string | null) => void }) {
+  const id = useId();
+  const today = todayIso();
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <label htmlFor={id} className="text-muted">
+        View as of
+      </label>
+      <input
+        id={id}
+        type="date"
+        max={today}
+        value={asOf ? asOf.slice(0, 10) : ""}
+        onChange={(e) => {
+          const v = e.target.value;
+          setAsOf(v && v <= today ? v : null);
+        }}
+      />
+      <button type="button" className={BTN} disabled={!asOf} onClick={() => setAsOf(null)}>
+        Back to today
+      </button>
+      {asOf ? null : <span className="text-muted">Showing today&apos;s values.</span>}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
-  const { status, evaluated, isSample, migratedFrom, models, resetToSample, error } = useModel();
+  const { status, evaluated, isSample, migratedFrom, models, resetToSample, error, asOf, setAsOf } = useModel();
   if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
   if (status === "loading" || !evaluated) return <Loading />;
 
   const { model, loops, gap, issues, unassignedVariables } = evaluated;
+  const infoNotes = issues.filter((i) => i.level === "info");
+  const problems = issues.filter((i) => i.level !== "info");
   const activeMembers = model.profile.members.filter((m) => m.status === "active");
   /** Headline variables present in this system, labelled per member where the key is per person. */
   const headline: { variable: Variable; label: string }[] = [];
@@ -57,9 +99,36 @@ export default function DashboardPage() {
         <SystemSwitcher compact />
       </div>
 
+      <div className="mb-4">
+        <ViewAsOfControl asOf={asOf} setAsOf={setAsOf} />
+      </div>
+
+      {asOf ? (
+        <div className="mb-4">
+          <Card tone="warn" title="Showing a past date">
+            <p className="text-sm">
+              Showing values and targets as of <span className="font-medium tabular-nums">{asOf.slice(0, 10)}</span>. Relationships, constraints,
+              hypotheses and calculations use today&apos;s structure. A saved snapshot is the record of the whole system at a past date.
+            </p>
+            <p className="text-xs text-muted mt-1">Anything not recorded by that date shows as unknown, never as a later value.</p>
+            <button type="button" className={`${BTN} mt-2`} onClick={() => setAsOf(null)}>
+              Back to today
+            </button>
+          </Card>
+        </div>
+      ) : null}
+
+      {infoNotes.length > 0 ? (
+        <div className="mb-4 space-y-2">
+          {infoNotes.map((i, k) => (
+            <Note key={k}>{i.message}</Note>
+          ))}
+        </div>
+      ) : null}
+
       <PageHeader
         title={model.profile.name}
-        lede="Current system versus desired system. Values on the left are what the model holds today; values on the right are the stated targets. Every number carries a source type and a confidence on the Structural variables page."
+        lede={`Current system versus desired system. Values on the left are what the model ${asOf ? `held as of ${asOf.slice(0, 10)}` : "holds today"}; values on the right are the ${asOf ? "targets recorded by then" : "stated targets"}. Every number carries a source type and a confidence on the Structural variables page.`}
       />
 
       {migratedFrom !== null ? (
@@ -177,11 +246,11 @@ export default function DashboardPage() {
             </Link>
           </Card>
           <Card title="Model health">
-            {issues.length === 0 ? (
+            {problems.length === 0 ? (
               <div className="text-sm">No structural issues detected.</div>
             ) : (
               <ul className="text-xs space-y-1">
-                {issues.map((i, k) => (
+                {problems.map((i, k) => (
                   <li key={k} className={i.level === "error" ? "text-neg" : "text-warn"}>
                     {i.message}
                   </li>

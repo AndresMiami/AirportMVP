@@ -7,7 +7,7 @@
  * calculated variables only; no members, income, variables, relationships
  * or constraints are assumed on its behalf.
  */
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useModel } from "@/components/model-provider";
 import { Note } from "@/components/ui";
 import { SAMPLE_MODEL_ID } from "@/services";
@@ -66,17 +66,48 @@ export function ConfirmButton({
   );
 }
 
+/** Today's calendar date in the browser's zone, for the export file name. */
+function todayIso(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Hand the browser a file to save. The object URL is revoked once the
+ *  click has been dispatched. */
+function downloadText(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** The service refuses an id that is already stored; the wording is its. */
+function isAlreadyExists(error: string): boolean {
+  return /already exists/i.test(error);
+}
+
 function fmtSaved(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
-  const { model, models, isSample, migratedFrom, createBlank, switchModel, deleteModel, resetToSample } = useModel();
+  const { model, models, isSample, migratedFrom, createBlank, switchModel, deleteModel, resetToSample, exportModel, importModel } =
+    useModel();
   const ids = useId();
   const [open, setOpen] = useState(!compact);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Export / import feedback, inline: a one-line notice or an error. */
+  const [transferNote, setTransferNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  /** A file whose id is already stored, waiting for an explicit Replace. */
+  const [pendingReplace, setPendingReplace] = useState<{ text: string; fileName: string } | null>(null);
   const [name, setName] = useState("");
   const [systemType, setSystemType] = useState<SystemType>("household");
   const [location, setLocation] = useState("");
@@ -97,6 +128,50 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const doExport = () =>
+    void run(async () => {
+      setTransferNote(null);
+      const text = await exportModel();
+      downloadText(`${model.id}-${todayIso()}.json`, text);
+      setTransferNote({ tone: "ok", text: `Exported ${model.profile.name} (${model.id}-${todayIso()}.json).` });
+    });
+
+  const doCopy = () =>
+    void run(async () => {
+      setTransferNote(null);
+      const text = await exportModel();
+      if (!navigator.clipboard) throw new Error("This browser does not offer clipboard access here; use Export instead.");
+      await navigator.clipboard.writeText(text);
+      setTransferNote({ tone: "ok", text: `Copied ${model.profile.name} as JSON to the clipboard.` });
+    });
+
+  /** One import attempt. An id that is already stored is never overwritten
+   *  here: it parks the file behind an explicit Replace instead. */
+  const finishImport = async (text: string, replace: boolean, fileName: string) => {
+    const result = await importModel(text, replace);
+    if (result.ok) {
+      setPendingReplace(null);
+      setTransferNote({
+        tone: "ok",
+        text: `Imported ${result.model.profile.name}${result.replaced ? " (replaced the stored copy)" : ""}${
+          result.migratedFrom !== null ? " (upgraded from an older format)" : ""
+        }.`,
+      });
+    } else if (!replace && isAlreadyExists(result.error)) {
+      setPendingReplace({ text, fileName });
+    } else {
+      setPendingReplace(null);
+      setTransferNote({ tone: "error", text: result.error });
+    }
+  };
+
+  const onFileChosen = (file: File | null) => {
+    if (!file) return;
+    setTransferNote(null);
+    setPendingReplace(null);
+    void run(async () => finishImport(await file.text(), false, file.name));
   };
 
   const submitBlank = () => {
@@ -231,6 +306,62 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
               A blank system starts with its profile and the calculated variables only. Members, income, variables, relationships and
               constraints are added by hand; nothing is assumed.
             </p>
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <h3 className="text-xs font-semibold text-muted mb-2">Export / import</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className={BTN} disabled={busy} onClick={doExport}>
+                Export this system
+              </button>
+              <button type="button" className={BTN} disabled={busy} onClick={doCopy}>
+                Copy as JSON
+              </button>
+              <button type="button" className={BTN} disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                Import from file…
+              </button>
+              <input
+                ref={fileInputRef}
+                id={`${ids}-import`}
+                type="file"
+                accept=".json,application/json"
+                className="sr-only"
+                aria-label="Import a system from a JSON file"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  e.target.value = "";
+                  onFileChosen(file);
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted mt-1">
+              An export is one system with its whole history, as a JSON file named {model.id}-{todayIso()}.json. An import is checked
+              before anything is stored; a file that fails the check stores nothing.
+            </p>
+            {pendingReplace ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs" role="group" aria-label="Replace an existing system">
+                <span className="text-warn">
+                  A system with this id already exists. Replace it? Its stored history will be overwritten.
+                  {pendingReplace.fileName ? ` (${pendingReplace.fileName})` : ""}
+                </span>
+                <button
+                  type="button"
+                  className={`${BTN} border-neg text-neg`}
+                  disabled={busy}
+                  onClick={() => void run(() => finishImport(pendingReplace.text, true, pendingReplace.fileName))}
+                >
+                  Replace
+                </button>
+                <button type="button" className={BTN} disabled={busy} onClick={() => setPendingReplace(null)}>
+                  Cancel
+                </button>
+              </div>
+            ) : null}
+            {transferNote ? (
+              <p className={`mt-2 text-xs ${transferNote.tone === "error" ? "text-neg" : "text-desired"}`} role={transferNote.tone === "error" ? "alert" : "status"}>
+                {transferNote.text}
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">

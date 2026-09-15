@@ -1,12 +1,37 @@
 "use client";
-import { NumberField } from "@/components/fields";
+import { Fragment, useCallback, useId, useState } from "react";
+import { HistoryToggle, TargetEditor, TargetHistoryList } from "@/components/history";
 import { HypothesisStatusBadge } from "@/components/loop-list";
-import { useModel } from "@/components/model-provider";
+import { useModel, type ModelMutation } from "@/components/model-provider";
 import { fmtValue } from "@/components/format";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
+import * as mutations from "@/services/mutations";
+import type { Variable } from "@/types";
+
+/** Inline refusal message for one control. */
+function ErrorLine({ msg }: { msg: string | null }) {
+  return msg ? (
+    <div className="text-xs text-neg mt-1" role="alert">
+      {msg}
+    </div>
+  ) : null;
+}
 
 export default function DesiredPage() {
-  const { evaluated, replaceModel, updateVariable } = useModel();
+  const { evaluated, replaceModel, apply, lastError } = useModel();
+  const ids = useId();
+  const [historyOpen, setHistoryOpen] = useState<string | null>(null);
+  const [errorOwner, setErrorOwner] = useState<string | null>(null);
+
+  const commit = useCallback(
+    (owner: string, mutation: ModelMutation): boolean => {
+      setErrorOwner(owner);
+      return apply(mutation);
+    },
+    [apply],
+  );
+  const errorFor = useCallback((owner: string) => (errorOwner === owner && lastError ? lastError : null), [errorOwner, lastError]);
+
   if (!evaluated) return <Loading />;
   const { model, variables, loops } = evaluated;
   const d = model.desiredAttractor;
@@ -16,11 +41,48 @@ export default function DesiredPage() {
   const reinforcing = pressing.filter((l) => l.status !== "rejected");
   const rejectedCount = pressing.length - reinforcing.length;
 
+  /** A target edit records a NEW target entry; the earlier ones stay in the history. */
+  const targetEditor = (v: Variable) => (
+    <TargetEditor
+      variable={v}
+      onSave={(draft) =>
+        commit(`tgt:${v.id}`, (m) =>
+          mutations.updateVariable(m, v.id, { desiredValue: draft.desiredValue, targetMode: draft.targetMode, valid: draft.valid, note: draft.note }),
+        )
+      }
+      error={errorFor(`tgt:${v.id}`)}
+    />
+  );
+  const historyToggle = (v: Variable) =>
+    v.targets.length > 0 ? (
+      <HistoryToggle
+        open={historyOpen === v.id}
+        controls={`${ids}-history-${v.id}`}
+        count={v.targets.length}
+        onToggle={() => setHistoryOpen(historyOpen === v.id ? null : v.id)}
+      />
+    ) : null;
+  const historyPanel = (v: Variable) =>
+    historyOpen === v.id ? (
+      <div className="rounded border border-border bg-background p-2">
+        <div className="text-xs font-medium mb-1">History of targets for {v.name} — newest first</div>
+        <TargetHistoryList
+          id={`${ids}-history-${v.id}`}
+          variable={v}
+          onRetract={(entryId, reason) => commit(`hist:${v.id}`, (m) => mutations.retractTarget(m, v.id, entryId, reason))}
+        />
+        <ErrorLine msg={errorFor(`hist:${v.id}`)} />
+        <p className="text-xs text-muted mt-1">
+          The current target is the newest entry that applies today. Retracting keeps the entry in the list, marked retracted, and the next applicable entry becomes current.
+        </p>
+      </div>
+    ) : null;
+
   return (
     <div>
       <PageHeader
         title="Desired state"
-        lede="The structural state the person wants the system to settle into. Desired values live on the same variables as current values; setting one here is the same as editing it on the Variables page."
+        lede="The structural state the person wants the system to settle into. Desired values live on the same variables as current values; setting one here is the same as editing it on the Variables page. Changing a goal records a new target with the date it applies as of — earlier targets stay in the history."
       />
       <Card tone="desired" title="As described">
         <textarea
@@ -41,6 +103,7 @@ export default function DesiredPage() {
       </Card>
       <div className="grid gap-4 md:grid-cols-2 mt-4">
         <Card title={`Targets set (${withTargets.length})`}>
+          <p className="text-xs text-muted mb-2">Earlier targets stay in the history: open a variable&apos;s History to see every target it has had and when each applied.</p>
           <table className="data">
             <thead>
               <tr>
@@ -51,15 +114,25 @@ export default function DesiredPage() {
             </thead>
             <tbody>
               {withTargets.map((v) => (
-                <tr key={v.id}>
-                  <td>
-                    {v.name} <span className="text-xs text-muted">({v.unit})</span>
-                  </td>
-                  <td className="tabular-nums text-accent">{fmtValue(v.currentValue, v.unit)}</td>
-                  <td>
-                    <NumberField value={v.desiredValue} nullable onCommit={(n) => updateVariable({ id: v.id, desiredValue: n })} ariaLabel={`Desired ${v.name}`} />
-                  </td>
-                </tr>
+                <Fragment key={v.id}>
+                  <tr>
+                    <td>
+                      {v.name} <span className="text-xs text-muted">({v.unit})</span>
+                    </td>
+                    <td className="tabular-nums text-accent">{fmtValue(v.currentValue, v.unit)}</td>
+                    <td>
+                      <div className="flex flex-col gap-1 items-start">
+                        {targetEditor(v)}
+                        {historyToggle(v)}
+                      </div>
+                    </td>
+                  </tr>
+                  {historyOpen === v.id ? (
+                    <tr>
+                      <td colSpan={3}>{historyPanel(v)}</td>
+                    </tr>
+                  ) : null}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -91,11 +164,19 @@ export default function DesiredPage() {
             </div>
           </Card>
           <Card title={`No target yet (${withoutTargets.length})`}>
-            <ul className="text-sm space-y-1">
+            <ul className="text-sm space-y-2">
               {withoutTargets.map((v) => (
-                <li key={v.id} className="flex items-center gap-2">
-                  <span className="flex-1">{v.name}</span>
-                  <NumberField value={null} nullable onCommit={(n) => updateVariable({ id: v.id, desiredValue: n })} ariaLabel={`Desired ${v.name}`} />
+                <li key={v.id} className="flex flex-col gap-1">
+                  <div className="flex flex-wrap items-start gap-2">
+                    <span className="flex-1 min-w-32">
+                      {v.name} <span className="text-xs text-muted">({v.unit})</span>
+                    </span>
+                    <div className="flex flex-col gap-1 items-start">
+                      {targetEditor(v)}
+                      {historyToggle(v)}
+                    </div>
+                  </div>
+                  {historyPanel(v)}
                 </li>
               ))}
             </ul>

@@ -1,3 +1,5 @@
+import * as M from "@/services/mutations";
+import { evaluateSystem } from "@/model/evaluate";
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
@@ -88,14 +90,15 @@ describe("ModelService", () => {
   it("updateVariable protects computed fields on derived variables", () => {
     const svc = new ModelService(new MemoryModelRepository());
     const m = createSampleHousehold();
-    const next = svc.updateVariable(m, { id: DERIVED_IDS.floorRatio, currentValue: 42, desiredValue: 1.3, sourceType: "measured", confidence: 1 });
+    expect(() => svc.updateVariable(m, { id: DERIVED_IDS.floorRatio, currentValue: 42, sourceType: "measured", confidence: 1 })).toThrow(/never takes an entered value/);
+    const next = svc.updateVariable(m, { id: DERIVED_IDS.floorRatio, desiredValue: 1.3 });
     const fr = next.variables.find((v) => v.id === DERIVED_IDS.floorRatio)!;
-    expect(fr.desiredValue).toBe(1.3);
-    expect(fr.currentValue).toBeNull(); // stored derived values are never authoritative
-    expect(fr.sourceType).toBe("calculated");
+    expect(M.currentTargetOf(fr)).toBe(1.3);
+    expect(fr.values).toEqual([]); // a derived shell never stores a value entry
+    expect(evaluateSystem(next).variableById.get(DERIVED_IDS.floorRatio)!.sourceType).toBe("calculated");
     const input = svc.updateVariable(m, { id: INPUT_IDS.liquidReserves, currentValue: 5000 });
-    expect(input.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.currentValue).toBe(5000);
-    expect(m.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.currentValue).toBe(2800);
+    expect(M.currentValueOf(input.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!)).toBe(5000);
+    expect(M.currentValueOf(m.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!)).toBe(2800);
   });
 
   it("save stamps updatedAt and validates", async () => {
@@ -104,6 +107,6 @@ describe("ModelService", () => {
     const m = createSampleHousehold();
     const saved = await svc.save(m);
     expect(saved.updatedAt).toBe(clock());
-    await expect(svc.save({ ...m, variables: [{ ...m.variables[0], confidence: 3 }] })).rejects.toThrow();
+    await expect(svc.save({ ...m, variables: [{ ...m.variables[0], controllability: 3 }] })).rejects.toThrow();
   });
 });

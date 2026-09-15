@@ -18,6 +18,7 @@ import {
   EvidenceSchema,
   LagSchema,
   SourceTypeSchema,
+  type SourceType,
   SubjectIdSchema,
   TargetModeSchema,
   TemporalRefSchema,
@@ -74,6 +75,78 @@ export const ReferenceRangeSchema = z
   .refine((r) => r.max > r.min, { message: "max must exceed min" });
 export type ReferenceRange = z.infer<typeof ReferenceRangeSchema>;
 
+/* ---- Value and target history (schema v4) ---------------------------
+ * The stored truth for an INPUT variable is its append-only history of
+ * value entries; the stored truth for any variable's goal is its history
+ * of target entries. "Current value" and "current target" are VIEWS
+ * resolved by model/history.ts at a clock instant. Five clocks stay
+ * apart: `recordedAt` (when the app recorded the entry), `valid` (when the
+ * value is asserted to apply), `observed` (when it was observed, if that
+ * differs), an event's `occurred`, a snapshot's `createdAt`/`valuesAsOf`,
+ * and a relationship's lag. None is ever substituted for another.
+ * -------------------------------------------------------------------- */
+
+/** Where `valid` came from: the person asserted when the value applied,
+ *  or the app only knows when it was recorded and uses that instant as the
+ *  earliest defensible time (never earlier). */
+export const ValidBasisSchema = z.enum(["asserted", "recorded"]);
+export type ValidBasis = z.infer<typeof ValidBasisSchema>;
+
+/** active = counts for resolution; superseded = replaced by a correction
+ *  (the correcting entry names it); retracted = withdrawn by the person.
+ *  Nothing is ever deleted from a history. */
+export const HistoryEntryStatusSchema = z.enum(["active", "superseded", "retracted"]);
+export type HistoryEntryStatus = z.infer<typeof HistoryEntryStatusSchema>;
+
+export const ValueRangeSchema = z.object({ low: z.number(), high: z.number() }).refine((r) => r.high >= r.low, { message: "high must be at least low" });
+
+export const ValueEntrySchema = z.object({
+  id: z.string().min(1),
+  /** null = the person recorded that the value is unknown at this time. */
+  value: z.number().nullable(),
+  /** Optional range the evidence supports (seam; not yet used by formulas). */
+  range: ValueRangeSchema.optional(),
+  /** When the value is asserted to apply. Approximate or unknown time is
+   *  preserved as such and never turned into an exact date. */
+  valid: TemporalRefSchema,
+  validBasis: ValidBasisSchema,
+  /** When it was observed, if that differs from when it applied. */
+  observed: TemporalRefSchema.optional(),
+  /** When the app recorded this entry (ISO instant). */
+  recordedAt: z.string().min(1),
+  sourceType: SourceTypeSchema,
+  confidence: unitInterval,
+  evidence: z.array(EvidenceSchema).default([]),
+  observationIds: z.array(z.string()).default([]),
+  note: z.string().default(""),
+  status: HistoryEntryStatusSchema.default("active"),
+  /** Set on a correcting entry: the entry it replaces. */
+  supersedesId: z.string().optional(),
+  retractedAt: z.string().optional(),
+  retractReason: z.string().optional(),
+});
+export type ValueEntry = z.infer<typeof ValueEntrySchema>;
+
+export const TargetEntrySchema = z.object({
+  id: z.string().min(1),
+  /** null = the target was cleared from this time on. */
+  desiredValue: z.number().nullable(),
+  targetMode: TargetModeSchema,
+  valid: TemporalRefSchema,
+  validBasis: ValidBasisSchema,
+  recordedAt: z.string().min(1),
+  note: z.string().default(""),
+  status: HistoryEntryStatusSchema.default("active"),
+  supersedesId: z.string().optional(),
+  retractedAt: z.string().optional(),
+  retractReason: z.string().optional(),
+});
+export type TargetEntry = z.infer<typeof TargetEntrySchema>;
+
+/** The STORED variable record. No current value, no current target, no
+ *  provenance of its own: those are views over `values` / `targets`. A
+ *  derived variable is a SHELL here (notes, targets, judgments) and never
+ *  carries value entries; its value is always recomputed. */
 export const VariableSchema = z.object({
   id: z.string().min(1),
   /** Definition key inside the active domain (e.g. "career_capital").
@@ -89,14 +162,14 @@ export const VariableSchema = z.object({
   kind: VariableKindSchema.default("input"),
   /** Present only for derived variables: the formula id in model/derived.ts. */
   formulaId: z.string().optional(),
-  currentValue: z.number().nullable(),
-  desiredValue: z.number().nullable(),
+  /** Append-only value history (inputs only; always empty on a derived shell). */
+  values: z.array(ValueEntrySchema).default([]),
+  /** Append-only target history. */
+  targets: z.array(TargetEntrySchema).default([]),
+  /** Default target mode for new targets and when no target entry exists. */
   targetMode: TargetModeSchema.default("exact"),
   unit: z.string(),
-  sourceType: SourceTypeSchema,
-  /** 0..1 confidence in currentValue. Derived variables inherit the
-   *  minimum confidence of their inputs. */
-  confidence: unitInterval,
+  /** Variable-level evidence kept from before v4; new evidence attaches to entries. */
   evidence: z.array(EvidenceSchema).default([]),
   /** Leverage factors, all 0..1 ordinal judgments (see calculations/leverage). */
   controllability: unitInterval,
@@ -111,8 +184,43 @@ export const VariableSchema = z.object({
   /** Plausible band used to normalise gaps across different units. */
   referenceRange: ReferenceRangeSchema.optional(),
   notes: z.string().default(""),
+}).superRefine((v, ctx) => {
+  if (v.kind === "derived" && v.values.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["values"], message: "a calculated variable never stores value entries; its value is recomputed" });
+  }
+  const ids = new Set<string>();
+  for (const e of [...v.values, ...v.targets]) {
+    if (ids.has(e.id)) ctx.addIssue({ code: "custom", path: ["values"], message: `duplicate history entry id "${e.id}"` });
+    ids.add(e.id);
+  }
 });
-export type Variable = z.infer<typeof VariableSchema>;
+export type StoredVariable = z.infer<typeof VariableSchema>;
+
+/** How a current value / target was resolved from its history. */
+export const HistoryResolutionStateSchema = z.enum([
+  "resolved", // one active, orderable entry applies at the instant
+  "no_entries", // nothing recorded
+  "before_first", // the instant is earlier than every orderable entry: unknown, never the later value
+  "unorderable_only", // only entries without an orderable time exist: preserved, not used
+  "ambiguous", // two active entries start at the same time with different values
+]);
+export type HistoryResolutionState = z.infer<typeof HistoryResolutionStateSchema>;
+
+/** The resolved VIEW of a variable at a clock instant. This is what every
+ *  calculation, screen and signature reads. currentValue / desiredValue /
+ *  sourceType / confidence are never stored; they come from the entry
+ *  that applies (or, for a derived variable, from the formula). */
+export type Variable = StoredVariable & {
+  currentValue: number | null;
+  desiredValue: number | null;
+  sourceType: SourceType;
+  confidence: number;
+  /** The entries the view rests on (null when none applies). */
+  valueEntry: ValueEntry | null;
+  targetEntry: TargetEntry | null;
+  valueResolution: HistoryResolutionState;
+  targetResolution: HistoryResolutionState;
+};
 
 /* ------------------------------------------------------------------ */
 /* Income sources                                                      */
@@ -486,7 +594,7 @@ export const SystemProfileSchema = z.object({
 export type SystemProfile = z.infer<typeof SystemProfileSchema>;
 
 /** Bump when the stored shape changes; add a step in model/migrations. */
-export const MODEL_SCHEMA_VERSION = 3;
+export const MODEL_SCHEMA_VERSION = 4;
 
 export const SystemModelSchema = z.object({
   schemaVersion: z.literal(MODEL_SCHEMA_VERSION),

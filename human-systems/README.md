@@ -6,7 +6,14 @@ buffers, dependencies, constraints, and leverage. It is **not** a financial
 calculator and **not** a life coach. Every number carries a source type and
 a confidence; every formula is a labelled model assumption.
 
-Status: schema v3, migration 3a — the engine is domain-agnostic. Every
+Status: schema v4, migration 3b — the model has memory through time.
+Input values and all targets are append-only histories; "current" is a
+view; `evaluateSystem(model, { asOf })` reconstructs values and targets at
+a past date (under today's structure and income sources, and it says so);
+a migrated value is known from its record's last save forward and never
+backfilled; derived variables are shells that never hold a typed value;
+one system exports and imports with its whole history. Migration 3a made
+the engine domain-agnostic. Every
 variable, constraint, action, hypothesis, event and income source names its
 SUBJECT (a member, the whole system, or explicitly UNASSIGNED — never a
 guessed household); domain definitions (variables, formulas, projections,
@@ -117,6 +124,11 @@ Rules the code enforces:
   never deleted: history keeps its subject.
 - There is no universal score: the gap screen reports counts and vectors
   only (`meanNormalizedGap` does not exist).
+- History is never edited in place: recording appends, a correction
+  supersedes, a retraction marks, nothing is deleted. An as-of query
+  before the first orderable entry is unknown, never the later value.
+  Approximate or unorderable time stays as written. Two entries that
+  disagree for the same start are reported as ambiguous, not chosen.
 - Relationship strength is a model judgment, never an estimated causal
   coefficient. A loop is a hypothesis with a status; "accepted" means a
   working reading, not proof. Observations are kept verbatim and never

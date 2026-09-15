@@ -150,13 +150,13 @@ describe("LagSchema", () => {
 
 describe("SystemModelSchema", () => {
   it("pins the schema version and rejects v1 objects", () => {
-    expect(MODEL_SCHEMA_VERSION).toBe(3);
+    expect(MODEL_SCHEMA_VERSION).toBe(4);
     const sample = createSampleHousehold();
     expect(SystemModelSchema.safeParse(sample).success).toBe(true);
     expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 1 }).success).toBe(false);
     expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 2 }).success).toBe(false);
-    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 4 }).success).toBe(false);
-    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: "3" }).success).toBe(false);
+    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 3 }).success).toBe(false);
+    expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: "4" }).success).toBe(false);
   });
   it("defaults signatures/events to [] and REQUIRES a domain definition reference", () => {
     const { signatures: _s, events: _e, observations: _o, hypotheses: _h, ...rest } = createSampleHousehold();

@@ -26,6 +26,9 @@ import {
   removeConstraint,
   removeHypothesis,
   archiveMember,
+  currentTargetOf,
+  currentValueOf,
+  type VariablePatch,
   memberReferences,
   removeMember,
   removeObservation,
@@ -581,7 +584,8 @@ describe("members / income / variables", () => {
     const v = m.variables.find((x) => x.id === "care_load")!;
     expect(v).toBeDefined();
     expect(v.kind).toBe("input");
-    expect(v.currentValue).toBeNull();
+    expect(currentValueOf(v)).toBeNull();
+    expect(v.values).toEqual([]);
     expect(v.controllability).toBe(0.5);
     expect(v.formulaId).toBeUndefined();
     // A second "Care load" for the SAME subject is a duplicate key and is refused; unassigned ones get a suffix.
@@ -620,29 +624,29 @@ describe("members / income / variables", () => {
 
   it("updateVariable protects derived fields but allows desiredValue on them", () => {
     const base = createSampleHousehold();
+    // An entered value on a derived variable is refused outright (derived != entered).
+    expect(() => updateVariable(base, DERIVED_IDS.floorRatio, { currentValue: 42, sourceType: "measured", confidence: 1 })).toThrow(/never takes an entered value/);
     const m = updateVariable(base, DERIVED_IDS.floorRatio, {
-      currentValue: 42,
-      sourceType: "measured",
-      confidence: 1,
       desiredValue: 1.3,
       kind: "input",
       unit: "bananas",
       notes: "noted",
-    });
+    } as unknown as VariablePatch);
     const fr = m.variables.find((v) => v.id === DERIVED_IDS.floorRatio)!;
     const original = base.variables.find((v) => v.id === DERIVED_IDS.floorRatio)!;
-    expect(fr.desiredValue).toBe(1.3);
+    expect(currentTargetOf(fr)).toBe(1.3);
+    expect(fr.targets).toHaveLength(2); // the sample's target stays; the new one is appended
     expect(fr.notes).toBe("noted");
-    expect(fr.currentValue).toBe(original.currentValue);
-    expect(fr.sourceType).toBe("calculated");
-    expect(fr.confidence).toBe(original.confidence);
+    expect(fr.values).toEqual([]);
+    expect(evaluateSystem(m).variableById.get(DERIVED_IDS.floorRatio)!.sourceType).toBe("calculated");
     expect(fr.kind).toBe("derived");
     expect(fr.unit).toBe(original.unit);
     expect(fr.formulaId).toBe(original.formulaId);
     // Inputs accept a new value and cannot be promoted to derived.
-    const input = updateVariable(base, INPUT_IDS.liquidReserves, { currentValue: 5000, kind: "derived" });
+    const input = updateVariable(base, INPUT_IDS.liquidReserves, { currentValue: 5000, kind: "derived" } as unknown as VariablePatch);
     const lr = input.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!;
-    expect(lr.currentValue).toBe(5000);
+    expect(currentValueOf(lr)).toBe(5000);
+    expect(lr.values).toHaveLength(2); // history kept: the old value entry is still there
     expect(lr.kind).toBe("input");
     expect(evaluateSystem(input).variableById.get(DERIVED_IDS.bufferMonths)!.currentValue).toBeCloseTo(5000 / 3600, 9);
     // NOTE: field-level validation (VariableSchema.parse) runs before commit(),

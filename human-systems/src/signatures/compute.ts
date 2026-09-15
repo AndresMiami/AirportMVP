@@ -229,6 +229,7 @@ export function computeSignature(evaluated: EvaluatedSystem, opts: ComputeSignat
     systemId: evaluated.model.id,
     subjectId,
     createdAt: opts.now,
+    valuesAsOf: evaluated.clock.asOf,
     schemaVersion: 1,
     definitionId: definition.id,
     definitionVersion: definition.version,

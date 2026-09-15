@@ -134,14 +134,71 @@ export function migrateV2toV3(v2: Raw, options: { systemScopeKeys?: ReadonlySet<
   };
 }
 
+/**
+ * v3 -> v4: value and target HISTORY. Each input currentValue becomes ONE
+ * value entry and each desiredValue ONE target entry. NO HISTORY IS
+ * INVENTED: the entry's `valid` is the instant the record was last saved
+ * (`updatedAt`, else the migration instant) with `validBasis: "recorded"`,
+ * meaning "known from here on; when it began is not recorded". Earlier
+ * as-of queries resolve to unknown. A null currentValue / desiredValue
+ * stays unknown and gets no entry. Derived variables become shells (no
+ * value entries; their targets migrate). Everything else is untouched.
+ */
+export function migrateV3toV4(v3: Raw, options: { migratedAt?: string } = {}): Raw {
+  const migratedAt = options.migratedAt ?? new Date().toISOString();
+  const recordedAt = typeof v3.updatedAt === "string" && !Number.isNaN(Date.parse(v3.updatedAt)) ? v3.updatedAt : migratedAt;
+  const valid = { kind: "instant", start: recordedAt, precision: "datetime", text: `as recorded ${recordedAt.slice(0, 10)}` };
+  const note = "Migrated from schema v3: the value as known when the record was last saved. When it began is not recorded.";
+  const variables = asArray(v3.variables).map((v) => {
+    if (Array.isArray(v.values) && Array.isArray(v.targets)) return v; // already v4-shaped
+    const { currentValue, desiredValue, sourceType, confidence, ...rest } = v;
+    const id = typeof v.id === "string" ? v.id : "";
+    const isDerived = v.kind === "derived";
+    const values: Raw[] = [];
+    if (!isDerived && typeof currentValue === "number") {
+      values.push({
+        id: `${id}__v1`,
+        value: currentValue,
+        valid,
+        validBasis: "recorded",
+        recordedAt,
+        sourceType: typeof sourceType === "string" ? sourceType : "unknown",
+        confidence: typeof confidence === "number" ? confidence : 0,
+        evidence: [],
+        observationIds: [],
+        note,
+        status: "active",
+      });
+    }
+    const targets: Raw[] = [];
+    if (typeof desiredValue === "number") {
+      targets.push({
+        id: `${id}__t1`,
+        desiredValue,
+        targetMode: typeof v.targetMode === "string" ? v.targetMode : "exact",
+        valid,
+        validBasis: "recorded",
+        recordedAt,
+        note: "Migrated from schema v3: the target as known when the record was last saved.",
+        status: "active",
+      });
+    }
+    return { ...rest, values, targets };
+  });
+  return { ...v3, schemaVersion: 4, variables };
+}
+
 export interface MigrationOptions {
   /** Keys the domain declares system-scope; everything else stays unassigned. */
   systemScopeKeys?: ReadonlySet<string>;
+  /** Clock for the v3 -> v4 step (tests pass a fixed instant). */
+  migratedAt?: string;
 }
 
 const STEPS: Record<number, (raw: Raw, options: MigrationOptions) => Raw> = {
   1: (raw) => migrateV1toV2(raw),
   2: (raw, options) => migrateV2toV3(raw, options),
+  3: (raw, options) => migrateV3toV4(raw, options),
 };
 
 export function migrateModel(input: unknown, options: MigrationOptions = {}): MigrationResult {

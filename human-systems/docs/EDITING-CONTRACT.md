@@ -1,4 +1,4 @@
-# Editing contract (schema v3)
+# Editing contract (schema v4)
 
 How UI screens change the model. Read this before writing an editor, and
 read docs/FOUNDATIONS.md before this: every screen is bound by its
@@ -65,7 +65,60 @@ screen  --apply(mutation)-->  ModelProvider  --service.save-->  repository (loca
 
 - `useModel()` (src/components/model-provider.tsx) gives `model`, `evaluated`,
   `apply(fn)`, `lastError`, `clearError`, `models`, `isSample`, `migratedFrom`,
-  `createBlank`, `switchModel`, `deleteModel`, `resetToSample`.
+  `createBlank`, `switchModel`, `deleteModel`, `resetToSample`, plus (3b)
+  `asOf` / `setAsOf(date | null)` (evaluate values and targets as of a past
+  date; reset on every system switch) and `exportModel()` /
+  `importModel(text, replace)`.
+
+## Values and targets are histories (schema v4)
+
+- A stored input variable has NO current value: it has `values`, an
+  append-only list of value entries, and every variable has `targets`, an
+  append-only list of target entries. `evaluated.variables` /
+  `variableById` give the resolved VIEW (`currentValue`, `desiredValue`,
+  `targetMode`, `sourceType`, `confidence`, `valueEntry`, `targetEntry`,
+  `valueResolution`, `targetResolution`). Screens read the view and write
+  through the mutations; they never touch `values` / `targets` directly.
+- Recording: `recordValue(model, id, {value, sourceType, confidence, valid?,
+  observed?, recordedAt?, evidence?, observationIds?, range?, note?})` and
+  `recordTarget(model, id, {desiredValue, targetMode?, valid?, note?})`.
+  `valid` is WHEN THE VALUE APPLIES (a TemporalRef, exact, approximate,
+  range or unknown, kept as written); omit it and the entry is known from
+  the recording instant on (`validBasis: "recorded"`) — never earlier.
+  `recordedAt` is when the app recorded it. The two are different clocks;
+  a screen shows both ("Applies as of …", "Recorded on …").
+- `updateVariable(model, id, patch)` keeps its convenience fields:
+  `currentValue`, `sourceType`, `confidence`, `desiredValue`, `targetMode`
+  APPEND entries (with optional `valid`, `recordedAt`, `note`); they never
+  rewrite an earlier entry.
+- Correction of a wrong entry: `correctValue` / `correctTarget` append a
+  new entry that names the old one (`supersedesId`); the old one becomes
+  `superseded`. Withdrawal: `retractValue` / `retractTarget` need a reason
+  and mark the entry `retracted`. Nothing is ever deleted from a history.
+- Resolution (src/model/history.ts): among active entries with an
+  orderable time whose start is at or before the instant, the latest start
+  wins; a date-only instant means the end of that day. Before the first
+  orderable entry: UNKNOWN (`before_first`), never the later value. Only
+  unorderable entries: UNKNOWN (`unorderable_only`), the entries are kept
+  and reported. Same start, different values: AMBIGUOUS, nothing chosen,
+  a warning issue names the variable; the person corrects or retracts.
+- Derived variables are SHELLS: notes, targets and judgments only; a value
+  entry on one fails validation and `recordValue` refuses it. `addMember`
+  materializes member-scope shells (`ensureDerivedShells`). An archived
+  member's shells and histories are kept; their derived values are
+  computed only with `includeArchivedMembers`.
+- `evaluateSystem(model, { now?, asOf?, includeArchivedMembers? })`:
+  `asOf` reconstructs VALUES and TARGETS at that instant under TODAY'S
+  relationships, constraints, hypotheses, domain definition AND income
+  sources (income is not dated until 3d); `evaluated.clock` says which
+  instant was used and `evaluated.issues` carries an "info" note. A stored
+  signature snapshot (now stamped `valuesAsOf`) remains the record of a
+  whole past model.
+- Export / import: `ModelService.exportModel(id)` returns one system with
+  its complete history as JSON; `importModel(text, {replace})` validates
+  and migrates BEFORE storing, stores nothing on failure, and refuses an
+  existing id unless `replace` is true.
+
 - `apply(fn)` runs a PURE mutation `fn: (model) => model` from
   `src/services/mutations.ts`, persists the result, and returns `true`; a
   refused edit sets `lastError` and returns `false`. Screens must show
