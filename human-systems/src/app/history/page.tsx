@@ -18,6 +18,7 @@ import {
   DiscoveryError,
   dayMonthYear,
   describeInterval,
+  encodePatternRef,
   explorePatternText,
   formatValue,
   historySentenceFor,
@@ -89,8 +90,25 @@ function RecordRow({ item, lens, description, model, explorable = false }: { ite
           {sentences.headline}
           {subject ? <span className="text-xs text-muted"> · {subject}</span> : null}
         </p>
-        <span className="flex gap-1.5">
-          {explorable ? (
+        <span className="flex flex-wrap gap-1.5">
+          {explorable && lens === "repeated" ? (
+            // EXACT recurrence hands off to /explore, one link per repeated value; an unassigned record cannot be explored
+            d.subjectId === null ? (
+              <button type="button" className={BTN} disabled title="Assign this record to a subject before exploring its surrounding context.">
+                Explore this pattern
+              </button>
+            ) : (
+              d.repeatedValues.map((rv) => (
+                <Link
+                  key={rv.value}
+                  href={`/explore?${encodePatternRef({ variableId: d.variableId, subjectId: d.subjectId, interval: { from: d.interval.requested.from, to: d.interval.requested.to }, repeatedValue: rv.value, occurrenceTimes: rv.applicationTimes })}`}
+                  className={BTN}
+                >
+                  Explore this pattern{d.repeatedValues.length > 1 ? ` (${formatValue(rv.value, d.unit)})` : ""}
+                </Link>
+              ))
+            )
+          ) : explorable ? (
             <button type="button" className={BTN} aria-expanded={explore} onClick={() => setExplore((x) => !x)}>
               Explore this pattern
             </button>

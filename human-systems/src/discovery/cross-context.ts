@@ -245,8 +245,10 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
   const nUnusableC = nC - conUsable.length;
   const unresolvedCases = occ.filter((c) => !usable(c)).length + nUnusableC;
   const unresolvedKinds = [...occ, ...con].filter((c) => !usable(c)).reduce<Record<string, number>>((acc, c) => ({ ...acc, [c.basis]: (acc[c.basis] ?? 0) + 1 }), {});
-  const KIND_WORDS: Record<string, string> = { carried_forward_only: "only an older value standing", unknown: "recorded as unknown or not recorded", ambiguous: "conflicting records for the same time", varied_within_extent: "varied within the occurrence period" };
-  const breakdown = Object.entries(unresolvedKinds).map(([k, n]) => `${n} ${KIND_WORDS[k] ?? k}`).join(", ");
+  // Counts are of relevant CASES (occurrence or contrast readings), never of
+  // source records: one conflict can carry into several later readings.
+  const KIND_WORDS: Record<string, string> = { carried_forward_only: "with only an older value standing", unknown: "recorded as unknown or not recorded", ambiguous: "with conflicting records for the same time", varied_within_extent: "that varied within the occurrence period" };
+  const breakdown = Object.entries(unresolvedKinds).map(([k, n]) => `${n} case${n === 1 ? "" : "s"} ${KIND_WORDS[k] ?? k}`).join(", ");
   const readable = `${conUsable.length} readable contrast time${conUsable.length === 1 ? "" : "s"}`;
   const others = `${nUnusableC} other contrast time${nUnusableC === 1 ? " is" : "s are"} unresolved`;
   let statement: string;

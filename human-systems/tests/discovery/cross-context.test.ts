@@ -145,7 +145,7 @@ describe("crossContext", () => {
     expect(b.statement).toBe("buffer was recorded at 1.5 months at all 4 occurrences and different at all 3 contrast times; this distinguishes the recorded cases. Recorded together is not caused by.");
     const h = cond(r, "health_cover");
     expect(h).toMatchObject({ atOccurrences: "insufficient", occurrenceUsable: 2, occurrenceTotal: 4 });
-    expect(h.statement).toBe("health_cover is unresolved in 4 of 7 relevant cases (2 of 4 occurrences readable; 3 recorded as unknown or not recorded, 1 only an older value standing); not enough evidence to compare.");
+    expect(h.statement).toBe("health_cover is unresolved in 4 of 7 relevant cases (2 of 4 occurrences readable; 3 cases recorded as unknown or not recorded, 1 case with only an older value standing); not enough evidence to compare.");
     expect(r.groups).toMatchObject({ differingAtOccurrences: ["work_arrangement"], backgroundComplete: expect.arrayContaining(["autonomy_pref"]), differentiatingComplete: ["buffer"], insufficientAtOccurrences: expect.arrayContaining(["health_cover"]) });
   });
 
@@ -317,9 +317,9 @@ describe("crossContext", () => {
       expect(rr.groups.differingAtOccurrences).not.toContain(id);
       expect(rr.groups.insufficientAtOccurrences).toContain(id);
     }
-    expect(cond(rr, "varied_z").statement).toMatch(/1 varied within the occurrence period/);
+    expect(cond(rr, "varied_z").statement).toMatch(/1 case that varied within the occurrence period/);
     // the February conflict also carries into the April contrast through the resolver: two ambiguous readings
-    expect(cond(rr, "amb_z").statement).toMatch(/2 conflicting records for the same time/);
+    expect(cond(rr, "amb_z").statement).toMatch(/2 cases with conflicting records for the same time/); // cases, not source records
     // the two situations are explained differently
     const codes = rr.caveats.map((c) => c.code);
     expect(codes).toContain("varied_within_extent");

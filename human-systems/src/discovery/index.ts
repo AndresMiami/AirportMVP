@@ -10,3 +10,5 @@ export * from "./describe-snapshots";
 export * from "./language";
 export * from "./describe-interval";
 export * from "./cross-context";
+export * from "./pattern-ref";
+export * from "./linked-hypotheses";

@@ -10,6 +10,7 @@ import { HOUSEHOLD_CATEGORIES, HOUSEHOLD_EVALUATION_DIMENSIONS } from "./evaluat
 import { INCOME_SOURCES, IncomeSourceSchema } from "./income";
 import { HOUSEHOLD_DERIVED } from "./derived";
 import { HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION } from "./keys";
+import { HOUSEHOLD_EXPLANATION_CATALOGUE } from "./explanation-catalogue";
 import { HOUSEHOLD_PRESENTATION } from "./presentation";
 import { HOUSEHOLD_PROJECTIONS } from "./projections";
 import { HOUSEHOLD_SIGNATURE_V1 } from "./signature-v1";
@@ -64,6 +65,7 @@ export const HOUSEHOLD_DOMAIN: DomainDefinition = {
     },
   ],
   presentation: HOUSEHOLD_PRESENTATION,
+  explanationCatalogue: HOUSEHOLD_EXPLANATION_CATALOGUE,
   categories: HOUSEHOLD_CATEGORIES,
   evaluationDimensions: HOUSEHOLD_EVALUATION_DIMENSIONS,
   assumptions: HOUSEHOLD_ASSUMPTIONS,

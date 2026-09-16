@@ -466,7 +466,17 @@ capture surface corrects this when it replaces that screen.
    explanatory "Explore this pattern" card that writes nothing). Remaining
    from this item: questions gated by explicit approval, the Attractor
    page rename, and the proposal step behind "Explore this pattern" (the
-   proposal / approval kernel, item 4).
+   proposal / approval kernel, item 4). EXPLORE steps 1-2 DONE:
+   `crossContext` (occurrence vs contrast slices with their own extents;
+   asserted / recorded-basis / range coverage vs carried-forward / unknown
+   / ambiguous / varied-within-extent; common vs differing; background /
+   differentiating / mixed only with COMPLETE contrast coverage, partial
+   coverage never filed as a distinction; absence is not difference) and
+   the read-only `/explore` screen with the domain-owned
+   `explanationCatalogue` (questions under three generic loci, never
+   candidates), deterministic hypothesis links, per-viewer drafts and an
+   inert Investigate control. Steps 3-4 (proposals through the kernel;
+   household orientation synthesis) wait.
 3. 3c evidence convergence on the clean vocabulary.
 4. Proposal / approval kernel (`MutationProposal`, dry-run diff, review
    cards with the two confirmation levels, provenance and `proposedBy`

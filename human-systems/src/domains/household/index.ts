@@ -7,3 +7,4 @@ export * from "./constraint-templates";
 export * from "./definition";
 export * from "./income";
 export * from "./presentation";
+export * from "./explanation-catalogue";

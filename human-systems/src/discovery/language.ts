@@ -54,6 +54,22 @@ export function explorePatternText(facts: Pick<EvidenceFacts, "exactRepetition" 
   return [...leads, ...around, EXPLORE_PATTERN_CAUTION].join(" ");
 }
 
+/** Shown under a locus heading with no chosen or linked candidate. Never a prompt in disguise. */
+export const NO_GROUNDED_CANDIDATE = "No grounded candidate of this kind yet.";
+
+/** The inert "Investigate this explanation" control's explanation. */
+export const INVESTIGATE_INERT_TEXT = "Investigating an explanation will propose a hypothesis for your review; that review step is not built yet, so nothing is created from here.";
+
+/** The seven Explore questions, in order, as the screen shows them. */
+export const EXPLORE_QUESTIONS = [
+  "This kept happening.",
+  "What was different each time?",
+  "What was the same each time?",
+  "What was also true when this did not happen?",
+  "What is still unresolved?",
+  "Possible explanations to investigate",
+] as const;
+
 /** A presentation lens: the section a sentence is written for. The
  *  underlying description is unchanged; only the sentence differs. */
 export type HistoryLens = VariableHistoryDescription["summaryClass"];

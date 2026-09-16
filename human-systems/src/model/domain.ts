@@ -106,6 +106,31 @@ export interface ScenarioPreset {
   deltas: { key: string; scope: SubjectScope; delta: number }[];
 }
 
+/** Where a candidate explanation places the generator, relative to the
+ *  subject whose pattern is being explored. The ONLY explanation semantics
+ *  the engine knows; a domain names them in its own words ("person",
+ *  "environment", "interaction") and never gets a universal ontology. */
+export type Locus = "internal_to_subject" | "external_to_subject" | "interaction";
+
+/** A domain-owned PROMPT for a possible explanation: a question to
+ *  consider, never a pre-created candidate or hypothesis. The engine never
+ *  branches on `id`. */
+export interface ExplanationPrompt {
+  id: string;
+  locus: Locus;
+  /** Ordinary-language question ("Could the work available have been mostly contract or gig work?"). */
+  question: string;
+  /** Optional hint in the domain's words. */
+  hint?: string;
+}
+
+/** Optional domain vocabulary for "Explore this pattern": labels for the
+ *  three generic loci and prompts to consider. Configuration only. */
+export interface ExplanationCatalogue {
+  locusLabels?: Partial<Record<Locus, string>>;
+  prompts: ExplanationPrompt[];
+}
+
 /** Presentation configuration a domain may supply for the generic
  *  screens. Configuration only: the engine never reads it, and nothing in
  *  it changes a calculation. */
@@ -226,6 +251,19 @@ export interface DomainDefinition {
   promptFragment?: PromptFragment;
   /** Optional presentation configuration for the generic screens. */
   presentation?: DomainPresentation;
+  /** Optional prompts for "Explore this pattern" (questions, not candidates). */
+  explanationCatalogue?: ExplanationCatalogue;
+}
+
+export const DEFAULT_LOCUS_LABELS: Record<Locus, string> = {
+  internal_to_subject: "Internal to the subject",
+  external_to_subject: "External to the subject",
+  interaction: "Interaction",
+};
+
+/** The domain's word for a locus, or the generic one. */
+export function locusLabel(domain: Pick<DomainDefinition, "explanationCatalogue"> | undefined, locus: Locus): string {
+  return domain?.explanationCatalogue?.locusLabels?.[locus] ?? DEFAULT_LOCUS_LABELS[locus];
 }
 
 /** The plural word for subjects in this domain. */

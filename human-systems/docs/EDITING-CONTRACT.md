@@ -243,6 +243,27 @@ between; a value that still resolves is the model's state, never an
 observation in the period; low variation is the A23 display convention
 and only with a reference range; nothing names a cause.
 
+## Explore screen (structural discovery step 2, read-only)
+
+`/explore` opens from a "repeated" History row (exact recurrence only) with
+a `PatternRef` in the URL (`encodePatternRef` / `decodePatternRef`; a
+malformed reference is refused, never repaired) and renders `crossContext`:
+occurrences and contrasts with their own temporal extents, what differed,
+what was the same, what was also true when the pattern did not happen,
+what is unresolved (missing != conflicting != varied within a broad period
+!= only an older value standing != incomplete contrast evidence), and
+possible explanations. Candidates come ONLY from the person's own drafts
+(per-viewer browser storage, never the model) and from hypotheses linked
+to the record deterministically (`linkedHypotheses`: predictions, kill
+criteria, relationships, observations; never wording). The domain's
+`explanationCatalogue` supplies QUESTIONS under the three generic loci
+(`internal_to_subject`, `external_to_subject`, `interaction`, labelled in
+the domain's words); a question becomes a candidate only when the person
+writes one from it. A heading with nothing grounded shows "No grounded
+candidate of this kind yet." "Investigate this explanation" is inert until
+the proposal / approval kernel exists. No mutation, no confidence, no
+ranking, no score.
+
 ## Domain-driven screens (Checkpoint 3)
 
 Generic screens read the ACTIVE DOMAIN (`evaluated.domain`) for every word
