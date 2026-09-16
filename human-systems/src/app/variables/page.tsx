@@ -455,7 +455,7 @@ export default function VariablesPage() {
       {inputCount === 0 ? (
         <div className="mb-4">
           <Note>
-            No input variables recorded yet. The calculated variables below already exist and fill in from the income list and from inputs added with the form further down.
+            No input variables recorded yet. The calculated variables below already exist and fill in from the domain&apos;s collections and from inputs added with the form further down.
           </Note>
         </div>
       ) : null}
@@ -625,7 +625,7 @@ export default function VariablesPage() {
       <div className="mt-4">
         <Card title="Add a standard input from the domain">
           <p className="text-xs text-muted mb-2">
-            The {domain.name} domain defines its inputs by key and subject: household-level keys belong to the whole system, per-person keys to one member. The calculated
+            The {domain.name} domain defines its inputs by key and subject: system-level keys belong to the whole system, per-{domain.subjectLabel.toLowerCase()} keys to one {domain.subjectLabel.toLowerCase()}. The calculated
             variables and the compounding step models read them through those keys. Adding one here creates it with NO value and no provenance; enter the value in the table
             once it exists. Standard inputs not yet present for the whole system and its active members: {missingStandardTotal}.
           </p>
@@ -689,7 +689,7 @@ export default function VariablesPage() {
                 id={`${ids}-name`}
                 type="text"
                 className="w-full"
-                placeholder="e.g. Rent as share of income"
+                placeholder="e.g. Fixed costs as a share of inflow"
                 value={draft.name}
                 onChange={(e) => edit({ name: e.target.value })}
                 onKeyDown={onEnter}

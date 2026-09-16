@@ -5,7 +5,8 @@ import { createSampleHousehold } from "@/data/sample-household";
 import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
 import { LocalStorageModelRepository, LEGACY_V1_KEY, STORAGE_KEY, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { MemoryModelRepository } from "@/repositories/memory-repository";
-import { ModelService, SAMPLE_MODEL_ID } from "@/services/model-service";
+import { ModelService } from "@/services/model-service";
+import { HOUSEHOLD_APP, householdServiceOptions } from "@/bootstrap/household-app";
 
 class FakeStorage implements KeyValueStorage {
   data = new Map<string, string>();
@@ -61,10 +62,10 @@ describe("ModelService", () => {
   const clock = () => "2026-09-14T12:00:00.000Z";
 
   it("seeds the sample when storage is empty and reloads it afterwards", async () => {
-    const svc = new ModelService(new MemoryModelRepository(), { now: clock });
+    const svc = new ModelService(new MemoryModelRepository(), householdServiceOptions({ now: clock }));
     const first = await svc.loadActiveOrSeed();
     expect(first.seeded).toBe(true);
-    expect(first.model.id).toBe(SAMPLE_MODEL_ID);
+    expect(first.model.id).toBe(HOUSEHOLD_APP.seed.id);
     const second = await svc.loadActiveOrSeed();
     expect(second.seeded).toBe(false);
     expect(second.model.id).toBe(first.model.id);
@@ -72,18 +73,18 @@ describe("ModelService", () => {
 
   it("creates a blank system, activates it, lists both, and switches back", async () => {
     const repo = new MemoryModelRepository();
-    const svc = new ModelService(repo, { now: clock, newId: () => "sys_test" });
+    const svc = new ModelService(repo, householdServiceOptions({ now: clock, newId: () => "sys_test" }));
     await svc.loadActiveOrSeed();
-    const blank = await svc.createBlank({ name: "Real household", systemType: "household" });
+    const blank = await svc.createBlank({ name: "Real household", systemType: "household", domainId: HOUSEHOLD_APP.defaultDomain.id });
     expect(blank.id).toBe("sys_test");
     expect(blank.relationships).toEqual([]);
     expect(blank.variables.every((v) => v.kind === "derived")).toBe(true);
     expect(await repo.getActiveId()).toBe("sys_test");
-    expect((await svc.listModels()).map((m) => m.id).sort()).toEqual([SAMPLE_MODEL_ID, "sys_test"]);
-    const back = await svc.switchActive(SAMPLE_MODEL_ID);
-    expect(back.id).toBe(SAMPLE_MODEL_ID);
+    expect((await svc.listModels()).map((m) => m.id).sort()).toEqual([HOUSEHOLD_APP.seed.id, "sys_test"]);
+    const back = await svc.switchActive(HOUSEHOLD_APP.seed.id);
+    expect(back.id).toBe(HOUSEHOLD_APP.seed.id);
     await svc.deleteModel("sys_test");
-    expect((await svc.listModels()).map((m) => m.id)).toEqual([SAMPLE_MODEL_ID]);
+    expect((await svc.listModels()).map((m) => m.id)).toEqual([HOUSEHOLD_APP.seed.id]);
     await expect(svc.switchActive("sys_test")).rejects.toThrow();
   });
 

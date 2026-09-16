@@ -4,7 +4,7 @@
  * the normal lifecycle and keeps every reference intact.
  */
 import { describe, expect, it } from "vitest";
-import { addIncomeSource } from "@/services/household-income";
+import { addIncomeSource } from "@/features/household/income";
 import { registerBuiltInDomains } from "@/domains";
 import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
 import { createBlankModel } from "@/model/blank";

@@ -6,10 +6,14 @@ buffers, dependencies, constraints, and leverage. It is **not** a financial
 calculator and **not** a life coach. Every number carries a source type and
 a confidence; every formula is a labelled model assumption.
 
-Status: schema v5 — domain collections (Checkpoint 2 of the domain-agnostic
-cleanup): the household income sources are a DECLARED domain collection,
-not a universal field; records from other domains are preserved, never
-interpreted. Migration 3b gave the model memory through time.
+Status: schema v5, domain-agnostic cleanup COMPLETE (Checkpoints 1-3):
+the household income sources are a DECLARED domain collection, not a
+universal field; records from other domains are preserved, never
+interpreted; the generic service, screens, navigation, creation flow and
+prompt assembly know no household (the application configures the
+household product in `src/bootstrap/household-app.ts`, and a neutral
+domain runs the whole engine with every household module mocked to throw).
+Migration 3b gave the model memory through time.
 Input values and all targets are append-only histories; "current" is a
 view; `evaluateSystem(model, { asOf })` reconstructs values and targets at
 a past date (under today's structure and domain collections, and it says so);

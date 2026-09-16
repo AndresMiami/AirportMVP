@@ -1,10 +1,9 @@
 /**
- * Typed wrappers over the generic collection tools for the household
- * income-source collection. They live in the SERVICES layer (not the
- * domain pack, which stays a leaf that only supplies configuration):
- * screens and tests keep their vocabulary, the engine sees only a
- * declared collection. Checkpoint 3 decides whether screens keep calling
- * these or drive the generic collection screen from the definition.
+ * HOUSEHOLD FEATURE: typed wrappers over the generic collection tools for
+ * the income-source collection. A feature module sits ABOVE the generic
+ * services and the domain pack (feature -> services, feature -> pack) and
+ * is imported only by household application code (the /income route and
+ * tests). Nothing generic imports it; the domain pack stays a leaf.
  */
 import { INCOME_SOURCES, type IncomeSource } from "@/domains/household/income";
 import * as M from "@/services/mutations";

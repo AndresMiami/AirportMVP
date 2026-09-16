@@ -6,24 +6,9 @@ import { useModel } from "@/components/model-provider";
 import { fmtPct, fmtValue } from "@/components/format";
 import { SystemSwitcher } from "@/components/system-switcher";
 import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
-import { DERIVED_IDS, INPUT_IDS, OTHER_KEYS } from "@/domains/household/keys";
-import { resolveVariable, subjectRef, systemRef, type SubjectScope } from "@/model/domain";
+import { resolveVariable, subjectRef, systemRef } from "@/model/domain";
+import { subjectsOf } from "@/model/subjects";
 import type { Variable } from "@/types";
-
-/** Headline keys of the household domain. System-scope keys resolve once;
- *  member-scope keys resolve once per active member. */
-const HEADLINE_KEYS: { key: string; scope: SubjectScope }[] = [
-  { key: DERIVED_IDS.floorRatio, scope: "system" },
-  { key: DERIVED_IDS.bufferMonths, scope: "system" },
-  { key: DERIVED_IDS.reliableFloor, scope: "system" },
-  { key: DERIVED_IDS.monthlySurplus, scope: "system" },
-  { key: DERIVED_IDS.incomeConcentration, scope: "system" },
-  { key: DERIVED_IDS.failureCorrelation, scope: "system" },
-  { key: OTHER_KEYS.financialPressure, scope: "system" },
-  { key: INPUT_IDS.protectedHours, scope: "member" },
-  { key: INPUT_IDS.careerCapital, scope: "member" },
-  { key: INPUT_IDS.majorPaths, scope: "member" },
-];
 
 const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50";
 
@@ -65,17 +50,19 @@ function ViewAsOfControl({ asOf, setAsOf }: { asOf: string | null; setAsOf: (d: 
 }
 
 export default function DashboardPage() {
-  const { status, evaluated, isSample, migratedFrom, models, resetToSample, error, asOf, setAsOf } = useModel();
+  const { status, evaluated, isSample, seedLabel, migratedFrom, models, resetToSample, error, asOf, setAsOf } = useModel();
   if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
   if (status === "loading" || !evaluated) return <Loading />;
 
   const { model, loops, gap, issues, unassignedVariables } = evaluated;
   const infoNotes = issues.filter((i) => i.level === "info");
   const problems = issues.filter((i) => i.level !== "info");
-  const activeMembers = model.profile.members.filter((m) => m.status === "active");
-  /** Headline variables present in this system, labelled per member where the key is per person. */
+  const activeMembers = subjectsOf(model);
+  /** Headline variables the ACTIVE DOMAIN names (presentation configuration),
+   *  present in this system; system keys resolve once, member keys once per
+   *  active subject. A domain without headline keys shows none. */
   const headline: { variable: Variable; label: string }[] = [];
-  for (const { key, scope } of HEADLINE_KEYS) {
+  for (const { key, scope } of evaluated.domain.presentation?.headlineKeys ?? []) {
     if (scope === "system") {
       const v = resolveVariable(evaluated.variables, model.id, systemRef(key));
       if (v) headline.push({ variable: v, label: v.name });
@@ -142,7 +129,7 @@ export default function DashboardPage() {
       {isSample ? (
         <div className="mb-4">
           <Note>
-            This is the fictional sample household. Edit values on the Income and Variables pages; changes stay in this browser only.{" "}
+            This is the {seedLabel ?? "fictional sample"}. Edit values on its pages; changes stay in this browser only.{" "}
             <button type="button" className="underline" onClick={() => void resetToSample()}>
               Reset to sample
             </button>
@@ -177,7 +164,7 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card tone="current" title={<span className="text-accent">CURRENT SYSTEM</span>}>
           {isEmpty ? (
-            <p className="text-sm text-muted">No values yet. The calculated variables fill in once income sources and input variables exist.</p>
+            <p className="text-sm text-muted">No values yet. The calculated variables fill in once the domain&apos;s records and input variables exist.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
               {headline.map(({ variable: v, label }) => (

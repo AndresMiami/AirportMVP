@@ -7,7 +7,7 @@ import { useModel } from "@/components/model-provider";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
 import { assumptionsFor } from "@/domain/assumptions";
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
-import type { HypothesisStatus, SourceType } from "@/types";
+import { SourceTypeSchema, type HypothesisStatus, type SourceType } from "@/types";
 
 const HYPOTHESIS_STATUSES: HypothesisStatus[] = ["proposed", "accepted", "rejected", "uncertain"];
 
@@ -17,7 +17,19 @@ export default function EvidencePage() {
   const { variables, derived, issues, model, allRelationships, variableById, observations, unassignedVariables } = evaluated;
   const counts = new Map<SourceType, number>();
   for (const v of variables) counts.set(v.sourceType, (counts.get(v.sourceType) ?? 0) + 1);
-  for (const c of Object.values(model.collections)) for (const it of c.items) if (typeof it.sourceType === "string") counts.set(it.sourceType as SourceType, (counts.get(it.sourceType as SourceType) ?? 0) + 1);
+  // Collection provenance is counted ONLY through the domain's declaration:
+  // the active domain declares the collection, the declaration names a
+  // provenanceField, the envelope is domain-owned, and the value parses as
+  // a SourceType. A field that merely happens to be called "sourceType"
+  // in an opaque or undeclared collection is never interpreted.
+  for (const def of evaluated.domain.collections ?? []) {
+    const envelope = model.collections[def.name];
+    if (!def.provenanceField || !envelope || envelope.origin !== "domain") continue;
+    for (const it of envelope.items) {
+      const parsed = SourceTypeSchema.safeParse(it[def.provenanceField]);
+      if (parsed.success) counts.set(parsed.data, (counts.get(parsed.data) ?? 0) + 1);
+    }
+  }
   for (const r of model.relationships) counts.set(r.sourceType, (counts.get(r.sourceType) ?? 0) + 1);
   const lowConfidence = variables.filter((v) => v.confidence < 0.5).sort((a, b) => a.confidence - b.confidence);
   const nameOf = (id: string) => variableById.get(id)?.name ?? id;
@@ -35,7 +47,7 @@ export default function EvidencePage() {
         lede="What kind of knowledge each number rests on, which formulas the calculated values use, and the model assumptions behind those formulas. None of the assumptions are established scientific laws."
       />
       <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Provenance mix (variables, income sources, edges)">
+        <Card title="Provenance mix (variables, collection records, edges)">
           <table className="data">
             <tbody>
               {(Object.keys(SOURCE_TYPE_META) as SourceType[]).map((t) => (

@@ -7,7 +7,7 @@
  * from a run.
  */
 import { describe, expect, it } from "vitest";
-import { addIncomeSource, incomeSourcesOf } from "@/services/household-income";
+import { addIncomeSource, incomeSourcesOf } from "@/features/household/income";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { horizonOfMonths, lagToMonths } from "@/calculations/lag";
@@ -165,7 +165,7 @@ describe("blank household end to end (service + repository, no React)", () => {
     const service = new ModelService(repo, { now: () => NOW, newId: () => SYSTEM_ID });
 
     // 1. Blank system: derived records only, nothing entered, activated.
-    let m = await service.createBlank({ name: "Test household", systemType: "household" });
+    let m = await service.createBlank({ name: "Test household", systemType: "household", domainId: "household" });
     expect(m.id).toBe(SYSTEM_ID);
     expect(incomeSourcesOf(m)).toHaveLength(0);
     expect(m.relationships).toHaveLength(0);

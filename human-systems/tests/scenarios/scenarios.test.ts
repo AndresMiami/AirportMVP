@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { incomeSourcesOf } from "@/services/household-income";
+import { incomeSourcesOf } from "@/features/household/income";
 import { currentValueOf } from "@/services/mutations";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();

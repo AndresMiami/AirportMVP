@@ -64,8 +64,11 @@ screen  --apply(mutation)-->  ModelProvider  --service.save-->  repository (loca
 ```
 
 - `useModel()` (src/components/model-provider.tsx) gives `model`, `evaluated`,
-  `apply(fn)`, `lastError`, `clearError`, `models`, `isSample`, `migratedFrom`,
-  `createBlank`, `switchModel`, `deleteModel`, `resetToSample`, plus (3b)
+  `apply(fn)`, `lastError`, `clearError`, `models`, `isSample`, `seedId`,
+  `seedLabel`, `availableDomains`, `defaultDomain`, `migratedFrom`,
+  `createBlank({name, systemType, domainId, domainVersion?, location?})`
+  (the domain is EXPLICIT; the kind is a label), `switchModel`,
+  `deleteModel`, `resetToSample` (the application's seed), plus (3b)
   `asOf` / `setAsOf(date | null)` (evaluate values and targets as of a past
   date; reset on every system switch) and `exportModel()` /
   `importModel(text, replace)`.
@@ -143,7 +146,9 @@ null. A collection preserved from an older format (`origin:
 never evaluated, never edited here, and it blocks hard deletion of a member
 (`memberReferences(...).unresolvedCollections`). The household pack's typed
 wrappers (`addIncomeSource`, `updateIncomeSource`, `removeIncomeSource`,
-`incomeSourcesOf`) live in `src/services/household-income.ts`. Schema-valid
+`incomeSourcesOf`) live in `src/features/household/income.ts` (a FEATURE
+module above the generic services; only household application code imports
+it). Schema-valid
 is not domain-valid: `collectionProblems(model)` names the first invalid
 item of a declared collection; `commit` and `ModelService.save` refuse it,
 `evaluateSystem` withholds that collection from calculations with a warning.
@@ -223,6 +228,22 @@ Stored as `{value, unit}` with unit days | weeks | months | years. Use
 `formatLag(lag)` for display, `lagToMonths` only for arithmetic,
 `horizonOfMonths` / `formatMonths` for cumulative values. Never show a lag
 in a unit the person did not choose without saying so.
+
+## Domain-driven screens (Checkpoint 3)
+
+Generic screens read the ACTIVE DOMAIN (`evaluated.domain`) for every word
+or list that depends on the kind of system: `subjectLabel` /
+`subjectLabelPluralOf(domain)` for subjects (the stored field stays
+`profile.members`; read it through `subjectsOf(model)`), `kinds` as
+datalist SUGGESTIONS for the kind label (any label is allowed and never
+implies the domain), `collections[].route/label` for navigation,
+`collections[].onboarding` for getting-started steps,
+`collections[].scenarioFields` for direct item edits in the scenario
+screen, `collections[].provenanceField` for provenance counts, and
+`presentation.headlineKeys` / `presentation.scenarioPresets` for the
+dashboard and the presets. A screen never imports `@/domains/household`;
+the one household route (`/income`) and the household feature module are
+the documented exceptions, pinned by tests/architecture.
 
 ## Wording
 

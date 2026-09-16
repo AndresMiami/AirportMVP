@@ -68,7 +68,7 @@ export const SOURCE_TYPE_META: Record<
   },
   self_reported: {
     label: "Self-reported",
-    description: "Stated by the person about themselves or their household.",
+    description: "Stated by someone inside the system about it.",
     trust: 2,
   },
   observed: {

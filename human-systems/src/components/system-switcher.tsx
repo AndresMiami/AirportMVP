@@ -4,14 +4,15 @@
  * creating a blank one, loading or resetting the fictional sample, and
  * deleting. Display and input only: every change goes through the
  * provider's service methods. A blank system carries the profile and the
- * calculated variables only; no members, income, variables, relationships
- * or constraints are assumed on its behalf.
+ * calculated variables only; no subjects, records, variables, relationships
+ * or constraints are assumed on its behalf. A new system names its DOMAIN
+ * explicitly (from the registered definitions); its KIND is a free label
+ * the domain merely suggests and never implies the domain.
  */
 import { useId, useRef, useState } from "react";
 import { useModel } from "@/components/model-provider";
 import { Note } from "@/components/ui";
-import { SAMPLE_MODEL_ID } from "@/services";
-import type { SystemType } from "@/types";
+import { subjectLabelPluralOf } from "@/model/domain";
 
 const BTN =
   "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50 disabled:hover:border-border";
@@ -97,7 +98,7 @@ function fmtSaved(iso: string): string {
 }
 
 export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
-  const { model, models, isSample, migratedFrom, createBlank, switchModel, deleteModel, resetToSample, exportModel, importModel } =
+  const { model, models, isSample, seedId, migratedFrom, createBlank, switchModel, deleteModel, resetToSample, exportModel, importModel, availableDomains, defaultDomain } =
     useModel();
   const ids = useId();
   const [open, setOpen] = useState(!compact);
@@ -109,13 +110,17 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
   /** A file whose id is already stored, waiting for an explicit Replace. */
   const [pendingReplace, setPendingReplace] = useState<{ text: string; fileName: string } | null>(null);
   const [name, setName] = useState("");
-  const [systemType, setSystemType] = useState<SystemType>("household");
+  const [domainKey, setDomainKey] = useState(`${defaultDomain.id}@${defaultDomain.version}`);
+  const [kind, setKind] = useState<string | null>(null);
   const [location, setLocation] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   if (!model) return null;
 
-  const sampleStored = models.some((m) => m.id === SAMPLE_MODEL_ID);
+  const sampleStored = seedId !== null && models.some((m) => m.id === seedId);
+  const selectedDomain = availableDomains.find((d) => `${d.id}@${d.version}` === domainKey) ?? availableDomains[0];
+  /** The kind: what the person typed, else the selected domain's first suggestion. */
+  const kindValue = kind ?? selectedDomain?.kinds[0]?.id ?? "";
   const sorted = [...models].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 
   const run = async (action: () => Promise<void>) => {
@@ -180,10 +185,19 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
       setFormError("A system needs a name.");
       return;
     }
+    if (!selectedDomain) {
+      setFormError("No domain is registered; a system cannot be created.");
+      return;
+    }
+    if (!kindValue.trim()) {
+      setFormError("A system needs a kind (a short label; the domain suggests some).");
+      return;
+    }
     setFormError(null);
     void run(async () => {
-      await createBlank({ name: trimmed, systemType, location: location.trim() || undefined });
+      await createBlank({ name: trimmed, systemType: kindValue.trim(), domainId: selectedDomain.id, domainVersion: selectedDomain.version, location: location.trim() || undefined });
       setName("");
+      setKind(null);
       setLocation("");
     });
   };
@@ -227,7 +241,7 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
                     <tr key={m.id} className={active ? "bg-accent-soft" : ""}>
                       <td>
                         <span className="font-medium">{m.name}</span>
-                        {m.id === SAMPLE_MODEL_ID ? <span className={`${TAG} ml-2`}>fictional sample</span> : null}
+                        {seedId !== null && m.id === seedId ? <span className={`${TAG} ml-2`}>fictional sample</span> : null}
                         {active ? <span className={`${TAG} ml-2 text-accent border-accent`}>active</span> : null}
                       </td>
                       <td className="text-xs">{m.systemType}</td>
@@ -273,19 +287,44 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
                 />
               </div>
               <div>
-                <label htmlFor={`${ids}-type`} className="block text-xs text-muted">
-                  Type
+                <label htmlFor={`${ids}-domain`} className="block text-xs text-muted">
+                  Domain
                 </label>
-                <select id={`${ids}-type`} value={systemType} onChange={(e) => setSystemType(e.target.value as SystemType)}>
-                  <option value="individual">individual</option>
-                  <option value="household">household</option>
-                  <option value="organization" disabled>
-                    organization (not yet supported)
-                  </option>
-                  <option value="country" disabled>
-                    country (not yet supported)
-                  </option>
+                <select
+                  id={`${ids}-domain`}
+                  value={domainKey}
+                  onChange={(e) => {
+                    setDomainKey(e.target.value);
+                    setKind(null);
+                  }}
+                >
+                  {availableDomains.map((d) => (
+                    <option key={`${d.id}@${d.version}`} value={`${d.id}@${d.version}`}>
+                      {d.name}
+                    </option>
+                  ))}
                 </select>
+              </div>
+              <div>
+                <label htmlFor={`${ids}-kind`} className="block text-xs text-muted">
+                  Kind
+                </label>
+                <input
+                  id={`${ids}-kind`}
+                  type="text"
+                  className="w-36"
+                  list={`${ids}-kinds`}
+                  value={kindValue}
+                  placeholder={selectedDomain?.kinds[0]?.label ?? "any label"}
+                  onChange={(e) => setKind(e.target.value)}
+                />
+                <datalist id={`${ids}-kinds`}>
+                  {(selectedDomain?.kinds ?? []).map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label}
+                    </option>
+                  ))}
+                </datalist>
               </div>
               <div>
                 <label htmlFor={`${ids}-location`} className="block text-xs text-muted">
@@ -303,8 +342,9 @@ export function SystemSwitcher({ compact = false }: { compact?: boolean }) {
               ) : null}
             </div>
             <p className="text-xs text-muted mt-1">
-              A blank system starts with its profile and the calculated variables only. Members, income, variables, relationships and
-              constraints are added by hand; nothing is assumed.
+              A blank system starts with its profile and the {selectedDomain ? selectedDomain.name : "domain"}&apos;s calculated variables only.{" "}
+              {selectedDomain ? subjectLabelPluralOf(selectedDomain) : "Subjects"}, records, variables, relationships and constraints are added by hand; nothing is
+              assumed. The kind is a label the domain suggests; any label is allowed and it never changes the domain.
             </p>
           </div>
 

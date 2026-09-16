@@ -334,7 +334,7 @@ The shell exists to feed and expose the cycle:
   resolution plug into the same READ and PROPOSE tools without changing
   the shell.
 
-## 13. Domain-agnostic cleanup before the shell (IN PROGRESS)
+## 13. Domain-agnostic cleanup before the shell (DONE)
 
 Checkpoint 1 (vocabulary, calculation moves, assumption split, evaluation
 dimensions, categories, prompt seam) is DONE without a schema version
@@ -348,17 +348,65 @@ universal `incomeSources` field by the record's REGISTERED domain
 empty, preserved as legacy when not; unregistered -> preserved). The v4 ->
 v5 step refuses malformed input instead of sanitizing it (corrupt data is
 not permission to drop or repair it; the record fails and nothing is
-stored). Checkpoint 3 (screens, service defaults, neutral-domain proof)
-remains. The plan below is kept as written; steps 1 to 5 are complete.
+stored). Checkpoint 3 (generic screens + service default cleanup +
+neutral-domain proof) is DONE, with no schema change: "the generic engine
+does not require a household" now holds through services, components,
+screens, navigation, the creation flow, prompt assembly and the
+architecture tests. What moved:
 
-RECORDED FOR CHECKPOINT 3 (not fixed in Checkpoint 2): the generic
-Evidence page scans every collection item for a property named
-`sourceType` and casts it to the universal provenance enum. The collection
-declaration never said that field carries provenance, so the screen is
-interpreting a domain field on its own. Checkpoint 3 resolves it either
-through explicit collection metadata (a declared provenance field, the way
-`confidenceField` is declared) or by removing the generic interpretation;
-the storage layer needs no change.
+- `ModelService` knows no domain and no sample. `createBlank` REQUIRES a
+  `domainId` (the kind is a free label and never implies the domain);
+  the seed for an empty store is a `SeedConfig {id, label, create}` in
+  `ServiceOptions`; without one an empty store is an error, never an
+  invented system; `resetSample` became `resetSeed`. The APPLICATION
+  chooses the household product: `src/bootstrap/household-app.ts`
+  registers the built-in domains, supplies the fictional sample as the
+  seed and names the default domain for the creation form. The React
+  provider is the composition root that injects it.
+- `src/features/household/income.ts` holds the household income wrappers
+  (feature -> services, feature -> pack; nothing generic imports it).
+- Collection provenance is declared, never guessed: `CollectionDefinition.
+  provenanceField` (household: `"sourceType"`); the Evidence page counts
+  it only for a declared, domain-owned collection whose value parses as a
+  SourceType. Opaque or undeclared collections contribute nothing.
+- Presentation is configuration: `CollectionDefinition.onboarding` and
+  `scenarioFields`, `DomainDefinition.presentation` (`headlineKeys`,
+  `scenarioPresets`), `subjectLabelPlural`. The household pack supplies
+  exactly the keys, presets and steps the screens used to hard-code; the
+  engine never reads any of it.
+- Navigation lists a collection screen only because the active domain
+  declares `route` + `label`; getting-started words the subject step from
+  `subjectLabel` and derives collection steps from declared collections;
+  the creation form lists registered domains and suggests `domain.kinds`
+  through a datalist (any label allowed); the profile shows the fixed
+  domain and edits the kind as a label; constraint-check dimension
+  suggestions come from the domain's templates and the system's own
+  actions.
+- `profile.members` stays the stored field (not migrated); generic code
+  reads it through `subjectsOf(model)` and words it with the domain's
+  subject label.
+- Proofs: `tests/model/neutral-domain.test.ts` runs a two-input/one-ratio
+  domain through creation, histories, derived values, loops, signature,
+  scenarios, export/import and prompt assembly with every household
+  module, the sample, the bootstrap and the feature mocked to THROW on
+  load; `tests/architecture/domain-layering.test.ts` pins that the only
+  files importing household code are `domains/index.ts`,
+  `data/sample-household.ts`, `bootstrap/household-app.ts`,
+  `features/household/income.ts`, `app/income/page.tsx` (the declared
+  household collection route) and the provider's single bootstrap import.
+
+Intentional household-specific application files after the cleanup:
+`src/domains/household/*` (the pack), `src/data/sample-household.ts`,
+`src/bootstrap/household-app.ts`, `src/features/household/income.ts`,
+`src/app/income/page.tsx`. The plan below is kept as written; steps 1 to
+5 are complete. This was the last domain-agnostic cleanup checkpoint.
+
+FUTURE STORAGE HARDENING (recorded, not scheduled): `unreadable store !=
+empty store`. `LocalStorageModelRepository.read()` treats malformed
+top-level store JSON as an empty store, and an unreadable pre-store legacy
+record is dropped. Both predate the migration work and are not domain
+questions; once real users hold years of history, an unreadable store
+must be reported and preserved, never silently replaced by an empty one.
 
 The universal engine still carries household shape. Smallest refactor,
 each step a separate PR:

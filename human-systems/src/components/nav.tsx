@@ -3,10 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useModel } from "@/components/model-provider";
 
+/** Generic screens. Collection screens are NOT listed here: a link to one
+ *  exists only because the active domain declares a collection with a
+ *  `route` and a `label` (inserted after the profile). */
 const LINKS: { href: string; label: string; group?: string }[] = [
   { href: "/", label: "Dashboard" },
   { href: "/profile", label: "System profile" },
-  { href: "/income", label: "Income sources" },
   { href: "/variables", label: "Structural variables" },
   { href: "/feedback-map", label: "Feedback map" },
   { href: "/constraints", label: "Constraints" },
@@ -48,6 +50,11 @@ export function AsOfPill() {
 
 export function Nav() {
   const pathname = usePathname();
+  const { evaluated } = useModel();
+  const collectionLinks = (evaluated?.domain.collections ?? [])
+    .filter((c): c is typeof c & { route: string } => typeof c.route === "string" && c.route.length > 0)
+    .map((c) => ({ href: c.route, label: c.label }));
+  const links = [...LINKS.slice(0, 2), ...collectionLinks, ...LINKS.slice(2)];
   return (
     <nav className="border-b md:border-b-0 md:border-r border-border bg-surface md:w-60 md:min-h-screen shrink-0">
       <div className="px-4 py-4 border-b border-border">
@@ -58,7 +65,7 @@ export function Nav() {
         </div>
       </div>
       <ul className="flex md:flex-col overflow-x-auto md:overflow-visible text-sm">
-        {LINKS.map((l) => {
+        {links.map((l) => {
           const active = pathname === l.href;
           return (
             <li key={l.href}>

@@ -1,11 +1,14 @@
 /**
- * Application service: which system is active, loading with migration,
- * seeding the sample when nothing exists, creating blank systems, and
+ * Generic application service: which system is active, loading with
+ * migration, seeding when nothing exists, creating blank systems, and
  * saving. All model EDITS are pure functions in ./mutations; the UI
  * composes them and hands the result to `save`.
+ *
+ * The service knows NO concrete domain and NO sample: which domains are
+ * registered, which seed fills an empty store and which domain the UI
+ * pre-selects are APPLICATION configuration (src/bootstrap), passed in as
+ * options. `createBlank` requires an explicit domain id.
  */
-import { createSampleHousehold } from "@/data/sample-household";
-import { registerBuiltInDomains } from "@/domains";
 import { createBlankModel } from "@/model/blank";
 import { domainRegistry } from "@/model/domain";
 import type { ModelRepository, ModelSummary } from "@/repositories";
@@ -29,18 +32,30 @@ export type ImportResult =
   | { ok: true; model: SystemModel; migratedFrom: number | null; replaced: boolean }
   | { ok: false; error: string };
 
-export const SAMPLE_MODEL_ID = "sample_household_okafor_reyes";
+/** A seed the application supplies for an empty store: a fixed id (so it
+ *  can be recognised and reset) and a factory. The service never knows
+ *  what the seed describes. */
+export interface SeedConfig {
+  id: string;
+  /** Short human label for notices ("fictional sample household"). */
+  label: string;
+  create: () => SystemModel;
+}
 
 export interface ServiceOptions {
   /** Injectable clock so tests stay deterministic. */
   now?: () => string;
   /** Injectable id source for new systems. */
   newId?: () => string;
+  /** What fills an empty store. Without it, an empty store is an error the
+   *  caller must handle (nothing is invented). */
+  seed?: SeedConfig;
 }
 
 export class ModelService {
   private readonly now: () => string;
   private readonly newId: () => string;
+  private readonly seed: SeedConfig | null;
 
   constructor(
     private readonly repo: ModelRepository,
@@ -48,10 +63,20 @@ export class ModelService {
   ) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.newId = options.newId ?? (() => `sys_${Date.now().toString(36)}`);
-    registerBuiltInDomains();
+    this.seed = options.seed ?? null;
   }
 
-  /** The active model, or the first stored one, or a freshly seeded sample. */
+  /** The configured seed's id, or null when the application supplies none. */
+  get seedId(): string | null {
+    return this.seed?.id ?? null;
+  }
+
+  get seedLabel(): string | null {
+    return this.seed?.label ?? null;
+  }
+
+  /** The active model, or the first stored one, or a freshly created seed.
+   *  Throws when the store is empty and no seed is configured. */
   async loadActiveOrSeed(): Promise<{ model: SystemModel; seeded: boolean }> {
     const activeId = await this.repo.getActiveId();
     if (activeId) {
@@ -66,7 +91,8 @@ export class ModelService {
         return { model: m, seeded: false };
       }
     }
-    const model = createSampleHousehold();
+    if (!this.seed) throw new Error("Nothing is stored and no seed is configured for this application.");
+    const model = this.seed.create();
     await this.repo.save(model);
     await this.repo.setActiveId(model.id);
     return { model, seeded: true };
@@ -83,15 +109,18 @@ export class ModelService {
     return m;
   }
 
+  /** A blank system under an EXPLICIT domain. The kind (`systemType`) is a
+   *  human label and never implies the domain. */
   async createBlank(input: {
     name: string;
     systemType: SystemType;
+    domainId: string;
+    domainVersion?: number;
     location?: string;
     currency?: string;
-    domainId?: string;
-    domainVersion?: number;
   }): Promise<SystemModel> {
-    const { domainId = "household", domainVersion, ...rest } = input;
+    const { domainId, domainVersion, ...rest } = input;
+    if (!domainId) throw new Error("A new system needs a domain id.");
     const domain = domainRegistry.require(domainId, domainVersion);
     const model = createBlankModel({ id: this.newId(), now: this.now(), domain, ...rest });
     await this.repo.save(model);
@@ -99,9 +128,10 @@ export class ModelService {
     return model;
   }
 
-  /** (Re)creates the fictional sample under its fixed id and activates it. */
-  async resetSample(): Promise<SystemModel> {
-    const model = createSampleHousehold();
+  /** (Re)creates the configured seed under its fixed id and activates it. */
+  async resetSeed(): Promise<SystemModel> {
+    if (!this.seed) throw new Error("No seed is configured for this application.");
+    const model = this.seed.create();
     await this.repo.save(model);
     await this.repo.setActiveId(model.id);
     return model;

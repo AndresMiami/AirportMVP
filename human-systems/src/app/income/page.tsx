@@ -8,7 +8,7 @@ import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge, Stat } f
 import { SOURCE_TYPE_META } from "@/domain/vocabulary";
 import { DERIVED_IDS } from "@/domains/household/keys";
 import { incomeShares } from "@/domains/household/calculations";
-import { addIncomeSource, incomeSourcesOf, removeIncomeSource, updateIncomeSource as updateIncomeSourceMutation } from "@/services/household-income";
+import { addIncomeSource, incomeSourcesOf, removeIncomeSource, updateIncomeSource as updateIncomeSourceMutation } from "@/features/household/income";
 import type { IncomeSource } from "@/domains/household/income";
 import { resolveVariable, systemRef } from "@/model/domain";
 import { SourceTypeSchema, type Member, type SourceType } from "@/types";

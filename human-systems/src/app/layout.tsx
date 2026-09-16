@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "Human Systems Lens",
   description:
-    "Structural analysis of a personal or household system: slow variables, feedback loops, buffers and leverage.",
+    "Structural analysis of a system: slow variables, feedback loops, buffers and leverage.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

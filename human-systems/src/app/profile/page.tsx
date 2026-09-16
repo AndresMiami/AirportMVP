@@ -3,6 +3,7 @@ import { useCallback, useId, useState } from "react";
 import { useModel, type ModelMutation } from "@/components/model-provider";
 import { ConfirmButton, SystemSwitcher } from "@/components/system-switcher";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
+import { subjectLabelPluralOf } from "@/model/domain";
 import * as mutations from "@/services/mutations";
 import { memberReferences, type MemberReferences } from "@/services/mutations";
 import type { AttractorDescription } from "@/types";
@@ -22,6 +23,7 @@ function TextField({
   className = "",
   placeholder,
   ariaLabel,
+  list,
 }: {
   id?: string;
   value: string;
@@ -30,6 +32,8 @@ function TextField({
   className?: string;
   placeholder?: string;
   ariaLabel?: string;
+  /** id of a datalist of suggestions (any value stays allowed). */
+  list?: string;
 }) {
   const [text, setText] = useState(value);
   // Resync the draft when the committed value changes from outside
@@ -46,6 +50,7 @@ function TextField({
     <input
       id={id}
       type="text"
+      list={list}
       aria-label={ariaLabel}
       className={className}
       placeholder={placeholder}
@@ -226,6 +231,9 @@ export default function ProfilePage() {
 
   if (!model || !evaluated) return <Loading />;
   const p = model.profile;
+  const { domain } = evaluated;
+  const subjectSingular = domain.subjectLabel;
+  const subjectPlural = subjectLabelPluralOf(domain);
 
   const addMember = () => {
     const label = newLabel.trim();
@@ -279,7 +287,7 @@ export default function ProfilePage() {
     <div>
       <PageHeader
         title="System profile"
-        lede="Who and what the model describes. The MVP supports individual and household systems; the schema already carries organization and country so they can be added without a rewrite. Text fields save when they lose focus."
+        lede={`Who and what the model describes. This system uses the ${domain.name} domain; its kind is a label the domain suggests and never changes the domain. Text fields save when they lose focus.`}
       />
 
       <div className="mb-4">
@@ -303,27 +311,28 @@ export default function ProfilePage() {
           </dd>
 
           <dt className="text-muted pt-1">
-            <label htmlFor={`${ids}-type`}>System type</label>
+            <label htmlFor={`${ids}-type`}>Kind of system</label>
           </dt>
           <dd>
-            <select
+            <TextField
               id={`${ids}-type`}
               value={p.systemType}
-              onChange={(e) => {
-                const systemType = e.target.value as typeof p.systemType;
-                commit("profile:type", (m) => mutations.updateProfile(m, { systemType }));
-              }}
-            >
-              <option value="individual">individual</option>
-              <option value="household">household</option>
-              <option value="organization" disabled>
-                organization (not yet supported)
-              </option>
-              <option value="country" disabled>
-                country (not yet supported)
-              </option>
-            </select>
+              list={`${ids}-kinds`}
+              onCommit={(systemType) => commit("profile:type", (m) => mutations.updateProfile(m, { systemType }))}
+            />
+            <datalist id={`${ids}-kinds`}>
+              {domain.kinds.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </datalist>
+            <p className="text-xs text-muted mt-1">A label ({domain.kinds.map((k) => k.label).join(", ")} are the {domain.name} domain&apos;s suggestions); any label is allowed.</p>
             <ErrorLine msg={errorFor("profile:type")} />
+          </dd>
+          <dt className="text-muted pt-1">Domain</dt>
+          <dd>
+            <span className="text-sm">{domain.name}</span> <span className="text-xs text-muted">(definition {domain.id} v{domain.version}; fixed for this system)</span>
           </dd>
 
           <dt className="text-muted pt-1">
@@ -363,9 +372,9 @@ export default function ProfilePage() {
       </Card>
 
       <div className="mt-4">
-        <Card title={`Members (${p.members.length})`}>
+        <Card title={`${subjectPlural} (${p.members.length})`}>
           {p.members.length === 0 ? (
-            <p className="text-sm text-muted mb-3">No members recorded yet. Variables, income sources, constraints and observations can name a member as their subject once one exists.</p>
+            <p className="text-sm text-muted mb-3">No {subjectPlural.toLowerCase()} recorded yet. Variables, collection records, constraints and observations can name a {subjectSingular.toLowerCase()} as their subject once one exists.</p>
           ) : (
             <div className="overflow-x-auto mb-3">
               <table className="data">
@@ -419,7 +428,7 @@ export default function ProfilePage() {
                               <ConfirmButton
                                 label="Archive"
                                 confirmLabel="Archive member"
-                                message={`Archive ${m.label}? Their id and everything naming them are kept; they are marked as no longer part of the household.`}
+                                message={`Archive ${m.label}? The id and everything naming it are kept; ${m.label} is marked as no longer part of the system.`}
                                 onConfirm={() => commit(`member:${m.id}`, (mm) => mutations.archiveMember(mm, m.id))}
                               />
                             )}
@@ -503,8 +512,8 @@ export default function ProfilePage() {
           </div>
           <div className="mt-3">
             <Note>
-              Archiving is the normal way a member leaves: their id stays and everything naming them keeps its subject. Delete is offered only while nothing references a member; once
-              a variable, income source, constraint, observation or other record names them, archive instead.
+              Archiving is the normal way a {subjectSingular.toLowerCase()} leaves: the id stays and everything naming it keeps its subject. Delete is offered only while nothing references a{" "}
+              {subjectSingular.toLowerCase()}; once a variable, collection record, constraint, observation or other record names one, archive instead.
             </Note>
           </div>
         </Card>

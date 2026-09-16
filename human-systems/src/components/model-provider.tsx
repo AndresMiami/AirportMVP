@@ -6,6 +6,8 @@
  * storage or the calculation library directly.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { HOUSEHOLD_APP, householdServiceOptions } from "@/bootstrap/household-app";
+import { domainRegistry, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem, type EvaluatedSystem } from "@/model/evaluate";
 import { LocalStorageModelRepository, type ModelSummary } from "@/repositories";
 import { ModelService, MutationError, type ImportResult } from "@/services";
@@ -23,8 +25,15 @@ interface ModelContextValue {
   evaluated: EvaluatedSystem | null;
   /** True when the sample was seeded because nothing was stored. */
   seededFromSample: boolean;
-  /** True when the active model is the fictional sample. */
+  /** True when the active model is the application's seed (the fictional sample). */
   isSample: boolean;
+  /** The seed's id and short label, from application configuration. */
+  seedId: string | null;
+  seedLabel: string | null;
+  /** Domains registered for this application, for the creation form. */
+  availableDomains: DomainDefinition[];
+  /** The domain the creation form pre-selects (application configuration). */
+  defaultDomain: { id: string; version: number };
   /** Migration notice for the active model, if it was upgraded on load. */
   migratedFrom: number | null;
   models: ModelSummary[];
@@ -38,7 +47,7 @@ interface ModelContextValue {
   apply: (mutation: ModelMutation) => boolean;
   updateVariable: (patch: Partial<Variable> & { id: string }) => void;
   replaceModel: (model: SystemModel) => void;
-  createBlank: (input: { name: string; systemType: SystemType; location?: string }) => Promise<void>;
+  createBlank: (input: { name: string; systemType: SystemType; domainId: string; domainVersion?: number; location?: string }) => Promise<void>;
   switchModel: (id: string) => Promise<void>;
   deleteModel: (id: string) => Promise<void>;
   resetToSample: () => Promise<void>;
@@ -62,6 +71,13 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
   const [migratedFrom, setMigratedFrom] = useState<number | null>(null);
   const [models, setModels] = useState<ModelSummary[]>([]);
   const [asOf, setAsOfState] = useState<string | null>(null);
+  // Application configuration is static: resolved once on first render
+  // (registering the built-in domains), never re-derived in an effect.
+  const [appOptions] = useState(() => householdServiceOptions());
+  const seed = useMemo(() => ({ id: appOptions.seed?.id ?? null, label: appOptions.seed?.label ?? null }), [appOptions]);
+  // The registry is populated by householdServiceOptions() above, so the
+  // list is read once per provider instance (state initializer, no deps).
+  const [availableDomains] = useState<DomainDefinition[]>(() => domainRegistry.list());
 
   const refreshList = useCallback(async () => {
     if (!serviceRef.current) return;
@@ -72,7 +88,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     // localStorage is only available in the browser, so the service is
     // created inside the effect and the first render shows "loading".
     const repo = new LocalStorageModelRepository(window.localStorage);
-    const service = new ModelService(repo);
+    const service = new ModelService(repo, appOptions);
     repoRef.current = repo;
     serviceRef.current = service;
     service
@@ -88,7 +104,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
         setError(e instanceof Error ? e.message : String(e));
         setStatus("error");
       });
-  }, []);
+  }, [appOptions]);
 
   const persist = useCallback(
     (next: SystemModel) => {
@@ -168,7 +184,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
 
   const resetToSample = useCallback<ModelContextValue["resetToSample"]>(async () => {
     if (!serviceRef.current) return;
-    await activate(await serviceRef.current.resetSample(), true);
+    await activate(await serviceRef.current.resetSeed(), true);
   }, [activate]);
 
   const exportModel = useCallback<ModelContextValue["exportModel"]>(async () => {
@@ -207,7 +223,11 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       model,
       evaluated,
       seededFromSample: seeded,
-      isSample: model?.id === "sample_household_okafor_reyes",
+      isSample: model !== null && seed.id !== null && model.id === seed.id,
+      seedId: seed.id,
+      seedLabel: seed.label,
+      availableDomains,
+      defaultDomain: HOUSEHOLD_APP.defaultDomain,
       migratedFrom,
       models,
       asOf,
@@ -242,6 +262,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       resetToSample,
       exportModel,
       importModel,
+      seed,
+      availableDomains,
     ],
   );
 

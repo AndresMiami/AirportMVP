@@ -5,7 +5,7 @@
  * persistence -> same state, different dynamics -> reload.
  */
 import { describe, expect, it } from "vitest";
-import { addIncomeSource, updateIncomeSource } from "@/services/household-income";
+import { addIncomeSource, updateIncomeSource } from "@/features/household/income";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { HOUSEHOLD_SIGNATURE_V1 } from "@/domains/household/signature-v1";
@@ -45,7 +45,7 @@ describe("fictional user: from incomplete observations to a compared history", (
   it("walks the loop end to end", async () => {
     const storage = new FakeStorage();
     const svc = new ModelService(new LocalStorageModelRepository(storage), { now: () => T2, newId: () => "sys_ren" });
-    let m = await svc.createBlank({ name: "Ren's household", systemType: "household" });
+    let m = await svc.createBlank({ name: "Ren's household", systemType: "household", domainId: "household" });
     m = M.addMember(m, { id: "ren", label: "Ren", role: "adult" });
     m = M.addMember(m, { id: "mai", label: "Mai", role: "adult" });
 

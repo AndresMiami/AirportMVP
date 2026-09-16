@@ -10,6 +10,7 @@ import { HOUSEHOLD_CATEGORIES, HOUSEHOLD_EVALUATION_DIMENSIONS } from "./evaluat
 import { INCOME_SOURCES, IncomeSourceSchema } from "./income";
 import { HOUSEHOLD_DERIVED } from "./derived";
 import { HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION } from "./keys";
+import { HOUSEHOLD_PRESENTATION } from "./presentation";
 import { HOUSEHOLD_PROJECTIONS } from "./projections";
 import { HOUSEHOLD_SIGNATURE_V1 } from "./signature-v1";
 import { HOUSEHOLD_VARIABLES } from "./variables";
@@ -44,6 +45,7 @@ export const HOUSEHOLD_DOMAIN: DomainDefinition = {
     { id: "household", label: "Household" },
   ],
   subjectLabel: "Person",
+  subjectLabelPlural: "People",
   collections: [
     {
       name: INCOME_SOURCES,
@@ -52,9 +54,16 @@ export const HOUSEHOLD_DOMAIN: DomainDefinition = {
       itemSchema: IncomeSourceSchema,
       subjectFields: ["earnerId"],
       confidenceField: "confidence",
+      provenanceField: "sourceType",
       route: "/income",
+      onboarding: {
+        title: "Add income sources",
+        detail: "Each source with its own reliability, volatility and failure group. The household-level numbers are calculated from this list.",
+      },
+      scenarioFields: [{ field: "monthlyAmount", label: "Monthly amount", min: 0 }],
     },
   ],
+  presentation: HOUSEHOLD_PRESENTATION,
   categories: HOUSEHOLD_CATEGORIES,
   evaluationDimensions: HOUSEHOLD_EVALUATION_DIMENSIONS,
   assumptions: HOUSEHOLD_ASSUMPTIONS,

@@ -500,7 +500,7 @@ function DisconfirmingConditions({
           id={inputId}
           type="text"
           className="max-w-md flex-1 min-w-[14rem]"
-          placeholder="e.g. savings still fall after three months of the new income"
+          placeholder="e.g. the reserve still falls three months after the change"
           value={text}
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}

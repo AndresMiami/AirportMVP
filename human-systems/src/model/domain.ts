@@ -78,8 +78,42 @@ export interface CollectionDefinition {
   subjectFields: string[];
   /** Item field holding a 0..1 confidence, if the pack records one. */
   confidenceField?: string;
-  /** Optional screen route for the collection (the nav lists it). */
+  /** Item field holding the item's provenance (a SourceType), if the pack
+   *  records one. The generic layer counts provenance ONLY through this
+   *  declaration, never by finding a field that happens to be so named. */
+  provenanceField?: string;
+  /** Optional screen route for the collection (the nav lists it under
+   *  `label` when the active domain declares the collection). */
   route?: string;
+  /** Presentation metadata (optional): how the generic screens present
+   *  this collection. The engine never reads it. */
+  onboarding?: {
+    /** Getting-started step title ("Add income sources"). */
+    title: string;
+    /** One-line explanation for the step. */
+    detail: string;
+  };
+  /** Numeric item fields a scenario may set directly (the generic scenario
+   *  screen offers one field per item; the change is updateCollectionItem). */
+  scenarioFields?: { field: string; label: string; min?: number }[];
+}
+
+/** A scenario preset a domain offers: KEYS with explicit scope, never
+ *  variable ids; each key is resolved for the chosen subject at click time. */
+export interface ScenarioPreset {
+  name: string;
+  description: string;
+  deltas: { key: string; scope: SubjectScope; delta: number }[];
+}
+
+/** Presentation configuration a domain may supply for the generic
+ *  screens. Configuration only: the engine never reads it, and nothing in
+ *  it changes a calculation. */
+export interface DomainPresentation {
+  /** Variables the dashboard shows first (system keys once, member keys per
+   *  active subject). Absent keys are skipped. */
+  headlineKeys?: { key: string; scope: SubjectScope }[];
+  scenarioPresets?: ScenarioPreset[];
 }
 
 export interface DerivedDefinition {
@@ -167,11 +201,14 @@ export interface DomainDefinition {
   version: number;
   name: string;
   description: string;
-  /** Suggested kinds of system for a picker ("household", "market"); the
-   *  engine never interprets them and any label is allowed. */
+  /** SUGGESTED kinds of system for a picker; the engine never interprets
+   *  them, any label is allowed, and a kind never implies a domain (the
+   *  domain is chosen explicitly and stored as domainDefinitionId). */
   kinds: { id: SystemType; label: string }[];
   /** What the domain calls a subject ("Person", "Segment", "Unit"). */
   subjectLabel: string;
+  /** Plural of subjectLabel ("People"); defaults to subjectLabel + "s". */
+  subjectLabelPlural?: string;
   /** Categories added to the generic vocabulary. */
   categories?: CategoryDefinition[];
   variables: VariableDefinition[];
@@ -187,6 +224,13 @@ export interface DomainDefinition {
   /** The domain's own model assumptions (ids unique across the registry). */
   assumptions?: ModelAssumption[];
   promptFragment?: PromptFragment;
+  /** Optional presentation configuration for the generic screens. */
+  presentation?: DomainPresentation;
+}
+
+/** The plural word for subjects in this domain. */
+export function subjectLabelPluralOf(domain: Pick<DomainDefinition, "subjectLabel" | "subjectLabelPlural">): string {
+  return domain.subjectLabelPlural ?? `${domain.subjectLabel}s`;
 }
 
 /** The category words a domain accepts: generic plus its own. */

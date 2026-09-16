@@ -6,3 +6,4 @@ export * from "./signature-v1";
 export * from "./constraint-templates";
 export * from "./definition";
 export * from "./income";
+export * from "./presentation";

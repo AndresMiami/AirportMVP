@@ -100,7 +100,21 @@ a collection a domain does not declare, or one preserved from the v4
 universal field under another domain, is kept opaque: exported, never
 evaluated, never edited by typed tools, never a reason to call the model
 invalid. Migration dispatches on `schemaVersion` only, never on field
-presence.
+presence; a v4 record that is present but malformed in a field the step
+reads is REFUSED (typed MigrationStepError -> ordinary failure, nothing
+stored), never sanitized. DOMAIN-AGNOSTIC (Checkpoint 3): the generic
+service knows no domain and no sample (`createBlank` requires a domainId;
+the seed is injected from `src/bootstrap/household-app.ts`, the ONLY
+place the household product is chosen); generic screens read every
+domain-dependent word or list from the active domain (subjectLabel,
+kinds as suggestions, collection route/label/onboarding/scenarioFields/
+provenanceField, presentation.headlineKeys/scenarioPresets); the only
+files allowed to import household code are the pack itself,
+`domains/index.ts`, `data/sample-household.ts`,
+`bootstrap/household-app.ts`, `features/household/income.ts`,
+`app/income/page.tsx` and the provider's single bootstrap import
+(tests/architecture pins the list; tests/model/neutral-domain proves a
+neutral domain runs with household modules mocked to throw).
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /

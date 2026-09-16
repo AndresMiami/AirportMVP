@@ -33,7 +33,7 @@ import { LocalStorageModelRepository, STORAGE_KEY, type KeyValueStorage } from "
 import { MemoryModelRepository } from "@/repositories/memory-repository";
 import { ModelService } from "@/services/model-service";
 import * as M from "@/services/mutations";
-import { addIncomeSource, incomeSourcesOf } from "@/services/household-income";
+import { addIncomeSource, incomeSourcesOf } from "@/features/household/income";
 import { MODEL_SCHEMA_VERSION, SystemModelSchema, type SystemModel } from "@/types";
 
 type Raw = Record<string, unknown>;

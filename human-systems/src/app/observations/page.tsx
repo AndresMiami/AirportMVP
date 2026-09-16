@@ -305,7 +305,7 @@ export default function ObservationsPage() {
         >
           <p className="text-sm">Something noticed or reported, kept as stated. Never a value, never a judgment.</p>
           <p className="text-xs text-muted mt-2">
-            Example: &ldquo;Mother&apos;s HHA income depends primarily on one client.&rdquo; The sentence is recorded verbatim; what it
+            Example: &ldquo;Most of the inflow depends on a single source.&rdquo; The sentence is recorded verbatim; what it
             means for the model is decided elsewhere.
           </p>
         </Card>
