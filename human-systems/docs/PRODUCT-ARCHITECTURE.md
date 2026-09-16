@@ -639,11 +639,43 @@ capture surface corrects this when it replaces that screen.
    Variable stays prohibited until that mutation contract is cleaned; (2)
    `addObservation` requires a numeric confidence — AI -> Observation
    stays blocked until its confidence semantics are deliberately resolved,
-   never by making a person invent a number. Remaining: 5C output schema
-   and task mock, 5D proposal bridge (whitelist: addHypothesis,
-   addDisconfirmingCondition, addKillCriterion statement-only), 5E
-   Explore AI drafts through the Step 4 path, 5F first external provider
-   behind the manifest panel.
+   never by making a person invent a number. STEP 5C DONE — TRANSPORT BOUNDARY +
+   STRICT AI OUTPUT CONTRACT + TASK MOCK. Three identities, never
+   conflated: `sourceRevisionHash` (which local model state the context
+   came from; LOCAL audit only), `contextHash` = hash(canonical(
+   `providerPayload`)) where the provider payload is task + items and
+   nothing else (no manifest, no exclusion bookkeeping, no revision, no
+   clock; an edit to an excluded subject or to a note changes the source
+   revision but not the payload or the hash), and (later) the AI output
+   item id. SENSITIVITY IS TRANSITIVE through one decision: a sensitive
+   variable is withheld directly and through every composite that carries
+   it (derived formulas reading it, relationships naming it, the pattern,
+   the whole Explore comparison when any condition, context reading or
+   nearby event is sensitive, hypotheses and observations linking it);
+   composites are withheld WHOLE, never trimmed, and the manifest says so
+   ("Explore comparison withheld because it contains sensitive context");
+   explicit `includeSensitive` sends the complete item unchanged. The new
+   contract (`src/ai/response.ts`) is strict and task-enveloped:
+   Extraction (verbatim quote of a cited textual source, always
+   directly_stated = the source says it, not that it is true),
+   Interpretation and CandidateExplanation (interpretive / tentative /
+   unresolved only; no cause, proof or odds claims; `forPattern` must be a
+   supplied pattern item), Question (targets, why it matters; no gain
+   ranking), Summary (every section cites supplied refs); unknown keys,
+   a contextHash mismatch, an uncited ref, a paraphrased quote, a
+   disallowed kind or a forbidden claim rejects the WHOLE response; the
+   schema declares no confidence, probability, odds, strength, lag or
+   information-gain field. `AiTaskProvider.run(payload, contextHash)` is
+   the seam; `MockAiTaskProvider` answers each task deterministically with
+   neutral wording and validates its own output. The /ai screen renders
+   the provider payload literally, the manifest separately as "What was
+   intentionally left out", and the mock's validated output under "Mock
+   interpretation — nothing will be added to your model"; the legacy
+   analysis is collapsed. Remaining: 5D proposal bridge (whitelist:
+   addHypothesis, addDisconfirmingCondition, addKillCriterion
+   statement-only; person-completed fields; AI output item id as the
+   origin reference beside ProposalAuthor), 5E Explore AI drafts through
+   the Step 4 path, 5F first external provider behind the payload panel.
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.

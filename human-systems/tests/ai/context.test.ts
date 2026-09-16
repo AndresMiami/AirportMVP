@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { AI_TASKS, AiContextError, TASK_POLICIES, buildAiContext, contentHash, hashedContent, refId, type ContextItem } from "@/ai/context";
+import { AI_TASKS, AiContextError, TASK_POLICIES, buildAiContext, canonical, contentHash, contextHashOf, hashedContent, providerPayload, refId, type ContextItem } from "@/ai/context";
 import { contextSubjectsFor, crossContext } from "@/discovery/cross-context";
 import { domainRegistry } from "@/model/domain";
 import * as M from "@/services/mutations";
@@ -56,7 +56,7 @@ describe("context identity", () => {
     expect(a.builtAt).not.toBe(b.builtAt);
     expect(hashedContent(a)).not.toContain(a.builtAt);
     expect(a.contextHash).toMatch(/^[0-9a-f]{16}$/);
-    expect(a.revisionHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(a.sourceRevisionHash).toMatch(/^[0-9a-f]{16}$/);
     expect(hashedContent(a).length).toBeLessThan(JSON.stringify(m).length); // the model itself is never embedded
   });
 
@@ -70,6 +70,98 @@ describe("context identity", () => {
     expect(buildAiContext(m, "extract_statements", sel, { now: NOW }).contextHash).not.toBe(base);
     expect(buildAiContext(m, "interpret_free_text", { ...sel, userText: "other text" }, { now: NOW }).contextHash).not.toBe(base);
     expect(contentHash("a")).not.toBe(contentHash("b"));
+  });
+});
+
+describe("transport boundary: local audit != provider payload", () => {
+  it("the provider payload is task + items only; the manifest, sourceRevisionHash, builtAt and exclusion bookkeeping never appear; contextHash = hash(canonical(payload))", () => {
+    const m = system();
+    const ctx = buildAiContext(m, "interpret_free_text", { subjectId: "p1", userText: "t", asOf: "2026-09-01" }, { now: NOW });
+    const payload = providerPayload(ctx);
+    expect(Object.keys(payload).sort()).toEqual(["items", "task", "version"]);
+    const text = canonical(payload);
+    expect(text).not.toContain(ctx.sourceRevisionHash);
+    expect(text).not.toContain(ctx.builtAt);
+    expect(text).not.toContain("subjectsExcluded");
+    expect(text).not.toContain("sensitiveExcluded");
+    expect(text).not.toContain("another subject; not part of this task");
+    expect(text).not.toContain("\"p2\""); // the excluded subject's id is not sent merely to say it was excluded
+    expect(ctx.contextHash).toBe(contextHashOf(payload));
+    expect(ctx.contextHash).toBe(contentHash(text));
+    expect(hashedContent(ctx)).toBe(text);
+  });
+
+  it("editing an EXCLUDED subject changes the source revision but not the payload or the contextHash; a note-only edit changes neither payload nor hash; an included value change changes both", () => {
+    const m = system();
+    const sel = { subjectId: "p1", userText: "t", asOf: "2026-09-01" };
+    const a = buildAiContext(m, "interpret_free_text", sel, { now: NOW });
+    // p2's record changes (out of scope)
+    const other = m.variables.find((v) => v.id === "other_subject")!;
+    const p2edit = { ...m, variables: m.variables.map((v) => (v.id === "other_subject" ? { ...v, values: other.values.map((e) => ({ ...e, value: 42 })) } : v)) };
+    const b = buildAiContext(p2edit, "interpret_free_text", sel, { now: NOW });
+    expect(b.sourceRevisionHash).not.toBe(a.sourceRevisionHash);
+    expect(providerPayload(b)).toEqual(providerPayload(a));
+    expect(b.contextHash).toBe(a.contextHash);
+    // a note on an INCLUDED record
+    const noteEdit = { ...m, variables: m.variables.map((v) => (v.id === "buffer" ? { ...v, notes: "a different SECRET NOTE" } : v)) };
+    const c = buildAiContext(noteEdit, "interpret_free_text", sel, { now: NOW });
+    expect(c.sourceRevisionHash).not.toBe(a.sourceRevisionHash);
+    expect(providerPayload(c)).toEqual(providerPayload(a));
+    expect(c.contextHash).toBe(a.contextHash);
+    // an included value
+    const buf = m.variables.find((v) => v.id === "buffer")!;
+    const valueEdit = { ...m, variables: m.variables.map((v) => (v.id === "buffer" ? { ...v, values: buf.values.map((e) => ({ ...e, value: 9 })) } : v)) };
+    const d = buildAiContext(valueEdit, "interpret_free_text", sel, { now: NOW });
+    expect(providerPayload(d)).not.toEqual(providerPayload(a));
+    expect(d.contextHash).not.toBe(a.contextHash);
+  });
+});
+
+describe("transitive sensitivity", () => {
+  /** buffer is sensitive; it is a context condition in the Explore comparison and an endpoint of a relationship. */
+  function sensitiveWorld() {
+    let m = system();
+    m = M.addRelationship(m, { id: "rel_buf", sourceVariableId: "buffer", targetVariableId: "health_cover", direction: "positive", strength: 0.5, lag: { value: 1, unit: "months" }, confidence: 0.6, sourceType: "self_reported", kind: "causal_hypothesis" });
+    m = M.addHypothesis(m, { id: "hyp_rel", statement: "About the buffer edge", relationshipIds: ["rel_buf"] });
+    m = M.addObservation(m, { id: "obs_buf", statement: "Buffer note", sourceType: "self_reported", confidence: 0.5, subjectId: "p1", links: { variableIds: ["buffer"], relationshipIds: [], constraintIds: [], hypothesisIds: [] } });
+    domainRegistry.register({ ...CC_DOMAIN, version: 7, aiContext: { sensitive: { variableKeys: ["buffer"] } } });
+    return { ...m, domainDefinitionVersion: 7 };
+  }
+  const mentionsBuffer = (text: string) => /"buffer"|variable:buffer|\bbuffer\b/.test(text);
+
+  it("a sensitive variable cannot appear directly, through a relationship, through the pattern payload, through the Explore comparison, or through linked observations and hypotheses", () => {
+    const m = sensitiveWorld();
+    const explore = buildAiContext(m, "suggest_explanations_for_pattern", { pattern: CC_PATTERN, observationIds: ["obs_buf"] }, { now: NOW });
+    expect(mentionsBuffer(hashedContent(explore))).toBe(false);
+    expect(explore.items.some((i) => i.kind === "cross_context")).toBe(false); // withheld WHOLE, never trimmed
+    expect(explore.manifest.withheld).toContain("Explore comparison withheld because it contains sensitive context; it is never sent trimmed.");
+    expect(explore.manifest.sensitiveExcluded).toEqual(expect.arrayContaining([refId({ kind: "cross_context", pattern: CC_PATTERN }), "observation:obs_buf"]));
+    expect(explore.items.some((i) => i.kind === "pattern")).toBe(true); // the pattern variable itself is not sensitive
+    const sum = buildAiContext(m, "summarize_model", { subjectIds: ["p1"], asOf: "2026-09-01" }, { now: NOW });
+    expect(mentionsBuffer(hashedContent(sum))).toBe(false);
+    expect(sum.items.some((i) => i.id === "relationship:rel_buf")).toBe(false);
+    expect(sum.items.some((i) => i.id === "hypothesis:hyp_rel")).toBe(false);
+    expect(sum.manifest.withheld).toEqual(expect.arrayContaining([expect.stringMatching(/Relationship rel_buf withheld/), expect.stringMatching(/Hypothesis hyp_rel withheld/)]));
+    // a sensitive PATTERN variable withholds pattern and comparison alike
+    domainRegistry.register({ ...CC_DOMAIN, version: 8, aiContext: { sensitive: { variableKeys: ["income_stability"] } } });
+    const ex8 = buildAiContext({ ...m, domainDefinitionVersion: 8 }, "suggest_explanations_for_pattern", { pattern: CC_PATTERN }, { now: NOW });
+    expect(ex8.items.some((i) => i.kind === "pattern" || i.kind === "cross_context")).toBe(false);
+    expect(hashedContent(ex8)).not.toContain("income_stability");
+  });
+
+  it("explicit includeSensitive restores every withheld item COMPLETE and unchanged", () => {
+    const m = sensitiveWorld();
+    const hidden = buildAiContext(m, "suggest_explanations_for_pattern", { pattern: CC_PATTERN }, { now: NOW });
+    const shown = buildAiContext(m, "suggest_explanations_for_pattern", { pattern: CC_PATTERN, includeSensitive: true }, { now: NOW });
+    const cc = shown.items.find((i) => i.kind === "cross_context")!;
+    const direct = crossContext(m, CC_PATTERN, { contextSubjectIds: contextSubjectsFor(m, CC_PATTERN, CC_DOMAIN) });
+    expect(direct.ok).toBe(true);
+    if (!direct.ok) return;
+    expect((cc.payload.result as { conditions: unknown }).conditions).toEqual(direct.conditions);
+    expect((cc.payload.result as { groups: unknown }).groups).toEqual(direct.groups);
+    expect(shown.manifest.sensitiveExcluded).toEqual([]);
+    expect(shown.manifest.withheld).toEqual([]);
+    expect(shown.contextHash).not.toBe(hidden.contextHash);
   });
 });
 

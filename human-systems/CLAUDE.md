@@ -180,8 +180,19 @@ Explore comparison as an INPUT (never recomputed), a manifest of what was
 included, excluded and why, and a contextHash over content only (never the
 clock; "values as of" is explicit content). Epistemic states for AI output
 are directly_stated / interpretive / tentative / unresolved, never numbers.
-The legacy /ai screen is read-only; nothing AI-derived reaches the model
-except through the proposal kernel. AI -> Variable and AI -> Observation
+THREE IDENTITIES (5C): sourceRevisionHash (local model state, audit
+only) != contextHash (= hash of the provider payload, which is task +
+items and nothing else: no manifest, revision, clock or exclusion
+bookkeeping ever crosses the transport boundary) != the AI output item
+id. Sensitivity is TRANSITIVE and composites are withheld whole, never
+trimmed. AI output (src/ai/response.ts) is strict and task-enveloped:
+extractions quote a cited source verbatim and are directly_stated (says
+it, not true); interpretations and candidate explanations are
+interpretive / tentative / unresolved and may not claim cause, proof or
+odds; every ref must exist in the exact payload; one bad item rejects the
+whole response; the schema has no numeric epistemic field. The legacy /ai
+screen is read-only; nothing AI-derived reaches the model except through
+the proposal kernel. AI -> Variable and AI -> Observation
 stay blocked by canonical-mutation seams (manufactured 0.5 judgments and
 sourceType unknown / confidence 0 in addVariable; required numeric
 confidence in addObservation), recorded in docs/PRODUCT-ARCHITECTURE.md.

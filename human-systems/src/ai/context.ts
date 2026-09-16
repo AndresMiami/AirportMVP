@@ -13,6 +13,19 @@
  * Explore comparison) enter as items; the AI is never asked to recompute
  * them. No provider, no network, no AI output schema lives here.
  *
+ * THREE IDENTITIES (Step 5C), never conflated:
+ *   sourceRevisionHash  which local model state the context was built from (LOCAL audit only)
+ *   contextHash         hash(canonical(providerPayload)): exactly what a provider would receive
+ *   output item id      (later) which AI interpretation a proposal came from
+ * The provider payload is the ONLY object a provider may receive: task and
+ * items. The manifest (what was excluded and why), the source revision and
+ * builtAt are local audit information and never cross that boundary.
+ * SENSITIVITY IS TRANSITIVE: a sensitive variable is withheld directly and
+ * through every composite item that carries it (derived, relationship,
+ * pattern, Explore comparison, hypothesis, observation links) unless the
+ * call explicitly includes sensitive material; a composite is withheld
+ * WHOLE, never trimmed (a trimmed comparison would misstate the engine).
+ *
  * Epistemic vocabulary for later AI output (never mapped to numbers):
  *   directly_stated  the supplied source explicitly says it (NOT true, verified or certain)
  *   interpretive     a reading of the source, named as such
@@ -134,31 +147,50 @@ export interface AiContextManifest {
   exclusions: string[];
   /** Sensitive items (domain-configured) left out; present only when not explicitly included. */
   sensitiveExcluded: string[];
-  /** Length of the canonical serialization of the hashed content. */
+  /** Plain words for composite items withheld because a constituent is sensitive. */
+  withheld: string[];
+  /** Length of the canonical provider payload. */
   approxChars: number;
+}
+
+/** The ONLY object a provider may receive. No manifest, no revision, no clock, no exclusion bookkeeping. */
+export interface AiProviderPayload {
+  version: 1;
+  task: AiTask;
+  items: ContextItem[];
 }
 
 export interface AiContext {
   task: AiTask;
   systemId: string;
-  /** Digest of the kernel revision the context was built from (contentHash
-   *  of revisionOf(model)); identifies the model state without carrying the
-   *  whole serialization (which would smuggle notes into the context). */
-  revisionHash: string;
   items: ContextItem[];
+  /** LOCAL audit: what was left out and why. Never sent. */
   manifest: AiContextManifest;
-  /** hash(task, systemId, revisionHash, items, manifest). NEVER includes builtAt. */
+  /** LOCAL audit: digest of the kernel revision (contentHash of revisionOf(model)). Never sent, never hashed into contextHash. */
+  sourceRevisionHash: string;
+  /** hash(canonical(providerPayload(this))): identical provider-visible payload -> identical hash. */
   contextHash: string;
-  /** Metadata only: excluded from the hash. */
+  /** Metadata only: never sent, never hashed. */
   builtAt: string;
 }
 
-/** The identity a future AI call record / output reference would carry, so AI
- *  content origin can be recorded independently of ProposalAuthor. */
+/** The identity a future LOCAL call record carries, so AI content origin can
+ *  be recorded independently of ProposalAuthor. Only contextHash is
+ *  provider-visible. Never canonical model state. */
 export interface AiCallIdentity {
   task: AiTask;
   contextHash: string;
-  revisionHash: string;
+  sourceRevisionHash: string;
+}
+
+/** The provider-visible payload: task and items only. Pure. */
+export function providerPayload(ctx: Pick<AiContext, "task" | "items">): AiProviderPayload {
+  return { version: 1, task: ctx.task, items: ctx.items };
+}
+
+/** contextHash = hash(canonical(providerPayload)). */
+export function contextHashOf(payload: AiProviderPayload): string {
+  return contentHash(canonical(payload));
 }
 
 export interface TaskSelection {
@@ -232,7 +264,7 @@ export function contentHash(text: string): string {
 /* ------------------------------------------------------------------ */
 
 /** Digest of the kernel's revision (the exact canonical model minus updatedAt). */
-export function revisionHashOf(model: SystemModel): string {
+export function sourceRevisionHashOf(model: SystemModel): string {
   const { updatedAt: _u, ...rest } = model;
   void _u;
   return contentHash(canonical(rest));
@@ -282,11 +314,30 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
   const allows = (k: ContextItemKind) => policy.kinds.includes(k);
   const sensitiveKinds = new Set(domain?.aiContext?.sensitive?.itemKinds ?? []);
   const sensitiveKeys = new Set(domain?.aiContext?.sensitive?.variableKeys ?? []);
+  const sensitiveVariableIds = new Set(model.variables.filter((v) => sensitiveKinds.has("variable") || sensitiveKeys.has(v.key)).map((v) => v.id));
+  const sensitiveRelationshipIds = new Set(model.relationships.filter((r) => sensitiveKinds.has("relationship") || sensitiveVariableIds.has(r.sourceVariableId) || sensitiveVariableIds.has(r.targetVariableId)).map((r) => r.id));
+  /** Everything an item carries that sensitivity can attach to. */
+  interface Constituents {
+    variableIds?: readonly string[];
+    relationshipIds?: readonly string[];
+    eventIds?: readonly string[];
+    observationIds?: readonly string[];
+    ownKind: ContextItemKind;
+  }
+  /** ONE deterministic sensitivity decision, applied before transport. */
+  const isSensitive = (c: Constituents): boolean =>
+    sensitiveKinds.has(c.ownKind) ||
+    (c.variableIds ?? []).some((id) => sensitiveVariableIds.has(id)) ||
+    (c.relationshipIds ?? []).some((id) => sensitiveRelationshipIds.has(id)) ||
+    ((c.eventIds ?? []).length > 0 && sensitiveKinds.has("event")) ||
+    ((c.observationIds ?? []).length > 0 && sensitiveKinds.has("observation"));
   const sensitiveExcluded: string[] = [];
+  const withheld: string[] = [];
   const items: ContextItem[] = [];
-  const push = (item: ContextItem, sensitive = false) => {
-    if (sensitive && !selection.includeSensitive) {
+  const push = (item: ContextItem, constituents: Constituents, withheldWords?: string) => {
+    if (isSensitive(constituents) && !selection.includeSensitive) {
       sensitiveExcluded.push(item.id);
+      if (withheldWords) withheld.push(withheldWords);
       return;
     }
     items.push(item);
@@ -296,11 +347,12 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
   if ((allows("value") || allows("derived")) && !selection.asOf) throw new AiContextError(`Task ${task} needs an explicit "values as of" instant in the selection`);
   const asOf = selection.asOf ?? "";
   const wantVariable = (v: StoredVariable) => inScope(v.subjectId) && (!selection.variableIds || selection.variableIds.includes(v.id));
-  const isSensitiveVariable = (v: StoredVariable) => sensitiveKinds.has("variable") || sensitiveKeys.has(v.key);
+  const keyToId = new Map(model.variables.map((v) => [`${v.key}\u0000${v.subjectId ?? ""}`, v.id]));
+  const idsForKeys = (keys: readonly string[], subjectId: string | null) => keys.flatMap((k) => [keyToId.get(`${k}\u0000${subjectId ?? ""}`), keyToId.get(`${k}\u0000${model.id}`)].filter((x): x is string => typeof x === "string"));
 
   // ---- system ----
   if (allows("system")) {
-    push({ ref: { kind: "system", id: model.id }, id: refId({ kind: "system", id: model.id }), kind: "system", subjectId: model.id, payload: { name: model.profile.name, systemType: model.profile.systemType, domainId: model.domainDefinitionId, domainVersion: model.domainDefinitionVersion, subjects: scope.map((id) => ({ id, label: subjectLabel(id), role: id === model.id ? "system" : "member" })) } });
+    push({ ref: { kind: "system", id: model.id }, id: refId({ kind: "system", id: model.id }), kind: "system", subjectId: model.id, payload: { name: model.profile.name, systemType: model.profile.systemType, domainId: model.domainDefinitionId, domainVersion: model.domainDefinitionVersion, subjects: scope.map((id) => ({ id, label: subjectLabel(id), role: id === model.id ? "system" : "member" })) } }, { ownKind: "system" });
   }
 
   // ---- variables, values, derived ----
@@ -308,24 +360,24 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
   const derivedById = new Map((evaluated?.derived ?? []).map((d) => [d.variable.id, d]));
   for (const v of [...model.variables].sort((a, b) => a.id.localeCompare(b.id))) {
     if (!wantVariable(v)) continue;
-    const sensitive = isSensitiveVariable(v);
+    const own: Constituents = { ownKind: "variable", variableIds: [v.id] };
     if (allows("variable")) {
       const ref: ContextRef = { kind: "variable", id: v.id };
-      push({ ref, id: refId(ref), kind: "variable", subjectId: v.subjectId, payload: { name: v.name, unit: v.unit, category: v.category, changeSpeed: v.changeSpeed, kind: v.kind, subject: subjectLabel(v.subjectId), storedJudgments: { note: STORED_JUDGMENT_NOTE, controllability: v.controllability, durability: v.durability, estimatedCostToChange: v.estimatedCostToChange, ...(v.impact !== undefined ? { impact: v.impact } : {}) } } }, sensitive);
+      push({ ref, id: refId(ref), kind: "variable", subjectId: v.subjectId, payload: { name: v.name, unit: v.unit, category: v.category, changeSpeed: v.changeSpeed, kind: v.kind, subject: subjectLabel(v.subjectId), storedJudgments: { note: STORED_JUDGMENT_NOTE, controllability: v.controllability, durability: v.durability, estimatedCostToChange: v.estimatedCostToChange, ...(v.impact !== undefined ? { impact: v.impact } : {}) } } }, own);
     }
     if (v.kind === "input" && allows("value")) {
       const resolved = resolveVariableAt(v, asOf);
       const basis = valueBasisOf(v, resolved, asOf);
       if (task === "suggest_questions_to_reduce_uncertainty" && basis === "recorded_here") continue; // only what is uncertain
       const ref: ContextRef = { kind: "value", variableId: v.id, asOf };
-      push({ ref, id: refId(ref), kind: "value", subjectId: v.subjectId, payload: { variable: v.name, unit: v.unit, value: basis === "recorded_here" || basis === "carried_forward" ? resolved.currentValue : null, basis, resolution: resolved.valueResolution, ...(resolved.valueEntry ? { entryId: resolved.valueEntry.id, appliesFrom: temporalInterval(resolved.valueEntry.valid)?.start ?? null, validBasis: resolved.valueEntry.validBasis, sourceType: resolved.valueEntry.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: resolved.valueEntry.confidence } } : {}), ...(basis === "carried_forward" ? { note: "the resolver carries an earlier record forward; nothing was recorded at this instant" } : {}) } }, sensitive);
+      push({ ref, id: refId(ref), kind: "value", subjectId: v.subjectId, payload: { variable: v.name, unit: v.unit, value: basis === "recorded_here" || basis === "carried_forward" ? resolved.currentValue : null, basis, resolution: resolved.valueResolution, ...(resolved.valueEntry ? { entryId: resolved.valueEntry.id, appliesFrom: temporalInterval(resolved.valueEntry.valid)?.start ?? null, validBasis: resolved.valueEntry.validBasis, sourceType: resolved.valueEntry.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: resolved.valueEntry.confidence } } : {}), ...(basis === "carried_forward" ? { note: "the resolver carries an earlier record forward; nothing was recorded at this instant" } : {}) } }, { ...own, ownKind: "value" });
     }
     if (v.kind === "derived" && allows("derived")) {
       const d = derivedById.get(v.id);
       if (!d) continue;
       if (task === "suggest_questions_to_reduce_uncertainty" && d.missingInputs.length === 0) continue;
       const ref: ContextRef = { kind: "derived", variableId: v.id, asOf };
-      push({ ref, id: refId(ref), kind: "derived", subjectId: v.subjectId, payload: { variable: v.name, unit: v.unit, value: d.variable.currentValue, basis: "calculated" as ValueBasis, missingInputs: d.missingInputs, assumptionIds: d.definition.assumptionIds, formula: d.definition.description, minInputConfidence: d.variable.currentValue === null ? null : d.variable.confidence } }, sensitive);
+      push({ ref, id: refId(ref), kind: "derived", subjectId: v.subjectId, payload: { variable: v.name, unit: v.unit, value: d.variable.currentValue, basis: "calculated" as ValueBasis, missingInputs: d.missingInputs, assumptionIds: d.definition.assumptionIds, formula: d.definition.description, minInputConfidence: d.variable.currentValue === null ? null : d.variable.confidence } }, { ownKind: "derived", variableIds: [v.id, ...idsForKeys([...d.definition.inputs, ...d.definition.derivedInputs].map((i) => i.key), v.subjectId)] }, `Calculated value “${v.name}” withheld because it reads a sensitive variable.`);
     }
   }
 
@@ -337,7 +389,7 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
       if (selection.observationIds && !selection.observationIds.includes(o.id)) continue;
       if (task === "suggest_explanations_for_pattern" && !selection.observationIds?.includes(o.id)) continue; // only the selected ones
       const ref: ContextRef = { kind: "observation", id: o.id };
-      push({ ref, id: refId(ref), kind: "observation", subjectId: subject, payload: { statement: o.statement, when: o.dateOrPeriod || null, sourceType: o.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: o.confidence }, subject: subjectLabel(subject), links: o.links } }, sensitiveKinds.has("observation"));
+      push({ ref, id: refId(ref), kind: "observation", subjectId: subject, payload: { statement: o.statement, when: o.dateOrPeriod || null, sourceType: o.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: o.confidence }, subject: subjectLabel(subject), links: o.links } }, { ownKind: "observation", variableIds: o.links.variableIds, relationshipIds: o.links.relationshipIds }, `Observation ${o.id} withheld because it links to sensitive material.`);
     }
   }
   if (allows("event")) {
@@ -347,7 +399,7 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
       if (task === "suggest_explanations_for_pattern" && !selection.eventIds?.includes(e.id)) continue;
       const ref: ContextRef = { kind: "event", id: e.id };
       const iv = temporalInterval(e.occurred);
-      push({ ref, id: refId(ref), kind: "event", subjectId: e.subjectId, payload: { title: e.title, kind: e.kind, type: e.type, occurred: { text: e.occurred.text || null, start: iv?.start ?? null, end: iv?.end ?? null, precision: e.occurred.precision, kind: e.occurred.kind }, sourceType: e.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: e.confidence }, subject: subjectLabel(e.subjectId) } }, sensitiveKinds.has("event"));
+      push({ ref, id: refId(ref), kind: "event", subjectId: e.subjectId, payload: { title: e.title, kind: e.kind, type: e.type, occurred: { text: e.occurred.text || null, start: iv?.start ?? null, end: iv?.end ?? null, precision: e.occurred.precision, kind: e.occurred.kind }, sourceType: e.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: e.confidence }, subject: subjectLabel(e.subjectId) } }, { ownKind: "event", variableIds: e.links.variableIds, relationshipIds: e.links.relationshipIds }, `Event ${e.id} withheld because it links to sensitive material.`);
     }
   }
 
@@ -357,7 +409,7 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
     for (const r of [...model.relationships].sort((a, b) => a.id.localeCompare(b.id))) {
       if (!inScope(varSubject.get(r.sourceVariableId) ?? null) || !inScope(varSubject.get(r.targetVariableId) ?? null)) continue;
       const ref: ContextRef = { kind: "relationship", id: r.id };
-      push({ ref, id: refId(ref), kind: "relationship", subjectId: null, payload: { from: refId({ kind: "variable", id: r.sourceVariableId }), to: refId({ kind: "variable", id: r.targetVariableId }), direction: r.direction, kind: r.kind, enabled: r.enabled, participatesInDynamics: r.participatesInDynamics, storedJudgments: { note: STORED_JUDGMENT_NOTE, strength: r.strength, lag: r.lag, confidence: r.confidence }, sourceType: r.sourceType } }, sensitiveKinds.has("relationship"));
+      push({ ref, id: refId(ref), kind: "relationship", subjectId: null, payload: { from: refId({ kind: "variable", id: r.sourceVariableId }), to: refId({ kind: "variable", id: r.targetVariableId }), direction: r.direction, kind: r.kind, enabled: r.enabled, participatesInDynamics: r.participatesInDynamics, storedJudgments: { note: STORED_JUDGMENT_NOTE, strength: r.strength, lag: r.lag, confidence: r.confidence }, sourceType: r.sourceType } }, { ownKind: "relationship", variableIds: [r.sourceVariableId, r.targetVariableId] }, `Relationship ${r.id} withheld because it names a sensitive variable.`);
     }
   }
   if (allows("constraint")) {
@@ -365,7 +417,7 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
       const subject = c.subjectId === undefined || c.subjectId === "" ? null : c.subjectId;
       if (subject !== null && !inScope(subject)) continue;
       const ref: ContextRef = { kind: "constraint", id: c.id };
-      push({ ref, id: refId(ref), kind: "constraint", subjectId: subject, payload: { name: c.name, type: c.type, check: c.check ?? null, softPenalty: c.softPenalty, sourceType: c.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: c.confidence } } }, sensitiveKinds.has("constraint"));
+      push({ ref, id: refId(ref), kind: "constraint", subjectId: subject, payload: { name: c.name, type: c.type, check: c.check ?? null, softPenalty: c.softPenalty, sourceType: c.sourceType, storedConfidence: { note: STORED_JUDGMENT_NOTE, value: c.confidence } } }, { ownKind: "constraint" });
     }
   }
   if (allows("hypothesis")) {
@@ -373,7 +425,7 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
       if (h.subjectId !== null && !inScope(h.subjectId)) continue;
       if (task === "suggest_questions_to_reduce_uncertainty" && h.confidence !== null && h.disconfirmingConditions.length > 0) continue;
       const ref: ContextRef = { kind: "hypothesis", id: h.id };
-      push({ ref, id: refId(ref), kind: "hypothesis", subjectId: h.subjectId, payload: { statement: h.statement, status: h.status, confidence: h.confidence === null ? "not assessed" : { note: STORED_JUDGMENT_NOTE, value: h.confidence }, disconfirmingConditions: h.disconfirmingConditions, relationshipIds: h.relationshipIds, subject: subjectLabel(h.subjectId) } }, sensitiveKinds.has("hypothesis"));
+      push({ ref, id: refId(ref), kind: "hypothesis", subjectId: h.subjectId, payload: { statement: h.statement, status: h.status, confidence: h.confidence === null ? "not assessed" : { note: STORED_JUDGMENT_NOTE, value: h.confidence }, disconfirmingConditions: h.disconfirmingConditions, relationshipIds: h.relationshipIds, subject: subjectLabel(h.subjectId) } }, { ownKind: "hypothesis", relationshipIds: h.relationshipIds, variableIds: [...h.predictions.map((x) => x.variableId), ...h.killCriteria.map((k) => k.variableId)].filter((x): x is string => typeof x === "string"), observationIds: [...h.supportingObservationIds, ...h.contradictingObservationIds] }, `Hypothesis ${h.id} withheld because it references sensitive material.`);
     }
   }
 
@@ -384,17 +436,21 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
     if (allows("pattern")) {
       const history = y && y.kind === "input" ? describeVariableHistory(y, p.interval) : null;
       const ref: ContextRef = { kind: "pattern", pattern: p };
-      push({ ref, id: refId(ref), kind: "pattern", subjectId: p.subjectId, payload: { variable: y?.name ?? p.variableId, unit: y?.unit ?? "", repeatedValue: p.repeatedValue, occurrenceTimes: p.occurrenceTimes, interval: p.interval, historyFacts: history ? { applicationTimes: history.applicationTimes, repeatedValues: history.repeatedValues, facts: history.facts, caveats: history.caveats.map((c) => c.code) } : null } });
+      push({ ref, id: refId(ref), kind: "pattern", subjectId: p.subjectId, payload: { variable: y?.name ?? p.variableId, unit: y?.unit ?? "", repeatedValue: p.repeatedValue, occurrenceTimes: p.occurrenceTimes, interval: p.interval, historyFacts: history ? { applicationTimes: history.applicationTimes, repeatedValues: history.repeatedValues, facts: history.facts, caveats: history.caveats.map((c) => c.code) } : null } }, { ownKind: "pattern", variableIds: [p.variableId] }, "Pattern withheld because its variable is sensitive.");
     }
     if (allows("cross_context")) {
       const r = crossContext(model, p, { contextSubjectIds: contextSubjectsFor(model, p, domain) });
       const ref: ContextRef = { kind: "cross_context", pattern: p };
-      push({ ref, id: refId(ref), kind: "cross_context", subjectId: p.subjectId, payload: r.ok ? { note: "deterministic Explore comparison; classifications are the engine's, never to be recomputed", result: stripForContext(r) } : { unresolved: r.reason, message: r.message } });
+      // every constituent the comparison embeds: the pattern variable, every context condition, every nearby event
+      const embedded: Constituents = r.ok
+        ? { ownKind: "cross_context", variableIds: [p.variableId, ...r.conditions.map((c) => c.variableId), ...[...r.occurrences, ...r.contrasts].flatMap((sl) => sl.context.map((c) => c.variableId))], eventIds: [...r.occurrences, ...r.contrasts].flatMap((sl) => sl.eventsNear.map((e) => e.id)) }
+        : { ownKind: "cross_context", variableIds: [p.variableId] };
+      push({ ref, id: refId(ref), kind: "cross_context", subjectId: p.subjectId, payload: r.ok ? { note: "deterministic Explore comparison; classifications are the engine's, never to be recomputed", result: stripForContext(r) } : { unresolved: r.reason, message: r.message } }, embedded, "Explore comparison withheld because it contains sensitive context; it is never sent trimmed.");
     }
     if (allows("catalogue_prompt") && domain?.explanationCatalogue) {
       for (const q of domain.explanationCatalogue.prompts) {
         const ref: ContextRef = { kind: "catalogue_prompt", domainId: domain.id, domainVersion: domain.version, promptId: q.id };
-        push({ ref, id: refId(ref), kind: "catalogue_prompt", subjectId: null, payload: { question: q.question, locus: q.locus, hint: q.hint ?? null } });
+        push({ ref, id: refId(ref), kind: "catalogue_prompt", subjectId: null, payload: { question: q.question, locus: q.locus, hint: q.hint ?? null } }, { ownKind: "catalogue_prompt" });
       }
     }
   }
@@ -403,7 +459,7 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
   if (allows("user_text") && selection.userText?.trim()) {
     const text = selection.userText;
     const ref: ContextRef = { kind: "user_text", textHash: contentHash(text) };
-    push({ ref, id: refId(ref), kind: "user_text", subjectId: selection.subjectId ?? model.id, payload: { text, aboutSubject: subjectLabel(selection.subjectId ?? model.id), sourceType: "self_reported" } });
+    push({ ref, id: refId(ref), kind: "user_text", subjectId: selection.subjectId ?? model.id, payload: { text, aboutSubject: subjectLabel(selection.subjectId ?? model.id), sourceType: "self_reported" } }, { ownKind: "user_text" });
   }
 
   // ---- manifest ----
@@ -419,12 +475,9 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
     "browser drafts are not included",
     ...policy.kinds.length < 14 ? [`item kinds outside this task's allowlist are excluded (allowed: ${policy.kinds.join(", ")})`] : [],
   ];
-  const manifest: AiContextManifest = { task, included, subjectsIncluded: scope, subjectsExcluded, exclusions, sensitiveExcluded, approxChars: 0 };
-  const systemId = model.id;
-  const revisionHash = revisionHashOf(model);
-  const hashed = canonical({ task, systemId, revisionHash, items, manifest: { ...manifest, approxChars: undefined } });
-  manifest.approxChars = hashed.length;
-  return { task, systemId, revisionHash, items, manifest, contextHash: contentHash(hashed), builtAt: options.now ?? new Date().toISOString() };
+  const payload = providerPayload({ task, items });
+  const manifest: AiContextManifest = { task, included, subjectsIncluded: scope, subjectsExcluded, exclusions, sensitiveExcluded, withheld, approxChars: canonical(payload).length };
+  return { task, systemId: model.id, items, manifest, sourceRevisionHash: sourceRevisionHashOf(model), contextHash: contextHashOf(payload), builtAt: options.now ?? new Date().toISOString() };
 }
 
 /** The Explore result minus nothing semantic: entry ids and readings stay; the
@@ -433,9 +486,9 @@ function stripForContext(r: CrossContext): Record<string, unknown> {
   return { pattern: r.pattern, variableName: r.variableName, unit: r.unit, window: r.window, occurrences: r.occurrences, contrasts: r.contrasts, contrastNote: r.contrastNote, conditions: r.conditions, groups: r.groups, statements: r.statements, caveats: r.caveats.map((c) => c.code) };
 }
 
-/** Everything the hash covers, for the "what would be sent" panel. */
+/** Exactly what a provider would receive, canonical text (the hashed content). */
 export function hashedContent(ctx: AiContext): string {
-  return canonical({ task: ctx.task, systemId: ctx.systemId, revisionHash: ctx.revisionHash, items: ctx.items, manifest: { ...ctx.manifest, approxChars: undefined } });
+  return canonical(providerPayload(ctx));
 }
 
 export function domainOf(model: SystemModel): DomainDefinition | undefined {
