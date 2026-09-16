@@ -6,3 +6,6 @@
 export * from "./errors";
 export * from "./interval";
 export * from "./describe-history";
+export * from "./describe-snapshots";
+export * from "./language";
+export * from "./describe-interval";
