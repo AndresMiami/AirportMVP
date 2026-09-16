@@ -481,6 +481,34 @@ capture surface corrects this when it replaces that screen.
 4. Proposal / approval kernel (`MutationProposal`, dry-run diff, review
    cards with the two confirmation levels, provenance and `proposedBy`
    stamping, scripted mock adapter) + organisational Groups (section 8).
+   KERNEL STEP 1 DONE (core only, no UI): `src/kernel` — proposal types
+   (author person / ai / system_feature, basis refs, nine states:
+   proposed, reviewed, approved, applying, applied, failed, rejected,
+   stale, superseded); a registry of the 13 ordinary, fully
+   materializable mutation kinds (shape check only, the mutation is the
+   authority in dry-run); materialization freezes ids and clocks so the
+   reviewed request IS the approved request; revision = exact canonical
+   serialization minus `updatedAt`; dry-run on a clone with the
+   exhaustive mechanical diff (every top-level key, pinned), semantic
+   description built on the diff, "nothing else changes" only when the
+   diff proves it, the pinned consequence table (`readKillCriterion`
+   absent, `setKillCriterionStatus` consequential, unknown kinds
+   consequential); the review fingerprint (materialized request, diff,
+   semantic diff, resolved basis, warnings, consequence class, expected
+   outputs — a basis observation's changed statement makes the proposal
+   stale even with an identical mutation diff; an unrelated change only
+   advances `lastValidatedRevision`, `createdAgainstRevision` is
+   immutable); the separate proposal ledger (memory + localStorage, an
+   unreadable ledger is never emptied); `ModelService.saveIfRevision`
+   over the repositories' synchronous compare-and-write; the two-phase
+   approval (ledger applying with expected base + result revisions ->
+   guarded save -> ledger applied; stale / conflict / persistence
+   failure write nothing) and startup recovery of `applying` proposals
+   (current == expected result -> reconciled applied; current == base ->
+   commit never landed; otherwise recovery conflict). Remaining: the
+   review inbox / card and provider update (Step 2), the nullable
+   hypothesis confidence migration (Step 3), Explore -> proposal (Step
+   4), AI proposals (Step 5).
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.

@@ -28,6 +28,17 @@ export interface ModelExport {
   model: SystemModel;
 }
 
+/** A guarded save was refused because the stored revision differed. Nothing was written. */
+export class RevisionConflictError extends Error {
+  constructor(
+    readonly expected: string | null,
+    readonly current: string | null,
+  ) {
+    super("The stored model changed since it was reviewed; nothing was written.");
+    this.name = "RevisionConflictError";
+  }
+}
+
 export type ImportResult =
   | { ok: true; model: SystemModel; migratedFrom: number | null; replaced: boolean }
   | { ok: false; error: string };
@@ -142,11 +153,34 @@ export class ModelService {
   }
 
   async save(model: SystemModel): Promise<SystemModel> {
+    const next = this.finalize(model);
+    await this.repo.save(next);
+    return next;
+  }
+
+  /** The persistence contract shared by save and saveIfRevision: stamp the
+   *  commit clock, validate the schema, validate declared collections. */
+  private finalize(model: SystemModel): SystemModel {
     const next = SystemModelSchema.parse({ ...model, updatedAt: this.now() });
     const problem = M.collectionProblems(next);
     if (problem) throw new Error(problem);
-    await this.repo.save(next);
     return next;
+  }
+
+  /** Guarded write for the proposal kernel: same validation as save, then
+   *  the repository's compare-and-write. `updatedAt` is commit metadata and
+   *  takes no part in the revision. Throws RevisionConflictError (nothing
+   *  written) when the stored revision differs. */
+  async saveIfRevision(candidate: SystemModel, expectedRevision: string | null, revisionOf: (m: SystemModel | null) => string | null): Promise<SystemModel> {
+    const next = this.finalize(candidate);
+    const result = await this.repo.saveIfRevision(next, expectedRevision, revisionOf);
+    if (!result.ok) throw new RevisionConflictError(expectedRevision, result.currentRevision);
+    return next;
+  }
+
+  /** The stored model, or null. */
+  load(id: string): Promise<SystemModel | null> {
+    return this.repo.load(id);
   }
 
   /** Serialize one stored system, history and all, as a portable JSON string. */

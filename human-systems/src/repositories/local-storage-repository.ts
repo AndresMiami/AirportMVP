@@ -7,7 +7,7 @@
 import { migrateModel, migrationOptionsFor } from "@/model/migrations";
 import { SystemModelSchema, type SystemModel } from "@/types";
 import { summarize } from "./memory-repository";
-import type { ModelRepository, ModelSummary } from "./model-repository";
+import type { GuardedSaveResult, ModelRepository, ModelSummary } from "./model-repository";
 
 export const STORAGE_KEY = "human-systems.store.v2";
 export const LEGACY_V1_KEY = "human-systems.model.v1";
@@ -124,6 +124,19 @@ export class LocalStorageModelRepository implements ModelRepository {
     const store = this.read();
     store.models[validated.id] = validated;
     this.write(store);
+  }
+
+  async saveIfRevision(model: SystemModel, expectedRevision: string | null, revisionOf: (m: SystemModel | null) => string | null): Promise<GuardedSaveResult> {
+    const validated = SystemModelSchema.parse(model);
+    // localStorage is synchronous: read, compare and write in one turn.
+    const store = this.read();
+    const raw = store.models[validated.id];
+    const stored = raw === undefined ? null : SystemModelSchema.safeParse(raw);
+    const current = stored === null ? null : stored.success ? revisionOf(stored.data) : `unreadable:${validated.id}`;
+    if (current !== expectedRevision) return { ok: false, currentRevision: current };
+    store.models[validated.id] = validated;
+    this.write(store);
+    return { ok: true };
   }
 
   /** Pre-migration copies kept for a model (by the schema version they had). */

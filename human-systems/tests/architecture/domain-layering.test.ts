@@ -10,7 +10,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /** Directories that make up the generic engine. */
-const ENGINE_DIRS = ["types", "domain", "calculations", "model", "scenarios", "signatures", "discovery", "repositories", "ai"];
+const ENGINE_DIRS = ["types", "domain", "calculations", "model", "scenarios", "signatures", "discovery", "kernel", "repositories", "ai"];
 const FORBIDDEN = [/from\s+["']@\/domains(\/|["'])/, /from\s+["'](\.\.\/)+domains\//, /from\s+["'].*\/household\//];
 
 function walk(dir: string): string[] {
@@ -94,7 +94,7 @@ describe("domain layering", () => {
 
   it("engine, services, repositories and ai have ZERO household, sample, bootstrap or feature imports", () => {
     const offenders: string[] = [];
-    for (const d of ["types", "domain", "calculations", "model", "scenarios", "signatures", "discovery", "repositories", "services", "ai"]) {
+    for (const d of ["types", "domain", "calculations", "model", "scenarios", "signatures", "discovery", "kernel", "repositories", "services", "ai"]) {
       for (const file of walk(path.join(root, d))) {
         const src = readFileSync(file, "utf8");
         const imports = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[0]);

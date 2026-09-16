@@ -142,6 +142,20 @@ context is read over it; the engine knows only three loci (internal /
 external to the subject, interaction) and a domain supplies QUESTIONS,
 never candidates; hypotheses are linked by explicit links, never wording;
 no candidate is created, ranked, scored or given a confidence.
+PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
+future write by an AI, a feature or a person outside the existing forms
+is a `MutationProposal` over REGISTERED ordinary mutation kinds;
+materialization freezes ids and clocks so reviewed request = materialized
+request = dry-run request = approval request; the revision is the exact
+canonical serialization minus `updatedAt`; the review fingerprint covers
+what the person reviewed (diff, semantic diff, RESOLVED basis, warnings,
+consequence class, expected outputs), so a changed basis makes the
+proposal stale even when the mutation diff is identical; approval is
+two-phase through the proposal ledger and `ModelService.saveIfRevision`
+(canonical state changes ONLY after the guarded save succeeds; stale,
+conflict and persistence failure write nothing; `applying` proposals are
+reconciled on startup from the stored revision, never guessed). The
+consequence table is pinned code, never the proposer's choice.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /
