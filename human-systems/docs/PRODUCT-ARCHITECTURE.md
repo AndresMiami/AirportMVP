@@ -745,6 +745,42 @@ capture surface corrects this when it replaces that screen.
    now says a candidate explanation can be sent to review as a proposal.
    Discovery math, proposal semantics and canonical schemas are
    untouched; 5E/5F remain paused.
+   STEP 6A.1 DONE — VISUAL CONVERGENCE FROM THE REVIEWED HOME
+   SCREENSHOTS (the four-place shell is approved and frozen; engines,
+   proposal semantics, AI contracts, History/Explore math, schemas and
+   navigation architecture untouched). The hierarchy is now: write
+   first, one thing worth noticing, anything requiring a decision. The
+   capture surface is the unmistakable first focus in the narrow
+   notebook column: no microphone until voice input exists, no resize
+   handle (the textarea auto-grows from a comfortable minimum), and no
+   disabled button — "Reflect on this" with a small Demo badge appears
+   only after the person types, captioned "Demo response · nothing is
+   saved to your notebook." The fictional-sample note moved to the quiet
+   context line at the bottom with the Library link. The as-of pill and
+   the Home banner were consolidated into ONE slim strip under the
+   primary navigation on every page (`AsOfStrip`: "Viewing June 1, 2025 ·
+   Back to today"); no page shows two as-of notices; storage errors keep
+   their prominent notice. Home shows at most ONE recurrence, the
+   strongest, worded by a Home-specific formatter over the same engine
+   facts (`recurrenceSentence` / `homeQuantity` in
+   src/features/home/cards.ts: "Total debt was $4,000 on 7 recorded
+   dates between February 2025 and June 2026."; currency leads with the
+   sign, placeholder units vanish) with "Explore what was happening →",
+   then a quiet "N more patterns in History →"; the History engine's
+   sentence and its record / application-time counts stay in History and
+   Details. Empty states render nothing; the review card renders only
+   with open proposals; working explanations are a compact flat line
+   ("You're investigating 4 explanations", one truncated example, "View
+   all →"). Labels are sentence case; muted text is darker
+   (`--muted: #4d5966`) with relaxed line-height; cards carry a subtle
+   border and no shadow. Pinned by tests/architecture/shell.test.ts and
+   tests/features/home-cards.test.ts; Chromium desktop + mobile verified
+   no horizontal overflow, one as-of notice, no microphone, no empty
+   cards, one recurrence card with "$4,000", the more-patterns link to
+   History, the actionable proposal card, and every primary destination
+   plus Library reachable. Next: look at Home again and decide whether
+   one would actually sit down and type into it — before any other
+   screen is redesigned.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

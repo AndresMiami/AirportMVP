@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useModel } from "@/components/model-provider";
+import { longDate } from "@/features/home/cards";
 
 const LINKS: { href: string; label: string; matches: (path: string) => boolean }[] = [
   { href: "/", label: "Home", matches: (p) => p === "/" },
@@ -14,18 +15,25 @@ const LINKS: { href: string; label: string; matches: (path: string) => boolean }
   { href: "/library", label: "Library", matches: (p) => p !== "/" && !p.startsWith("/history") && !p.startsWith("/explore") && !p.startsWith("/map") && !p.startsWith("/feedback-map") },
 ];
 
-/** Small persistent reminder, on every page, that the values shown are
- *  from a past date. Cleared with the × control or from Home. */
-export function AsOfPill() {
+/** The ONE as-of treatment (Step 6A.1): a slim strip under the primary
+ *  navigation on every page while the values shown are from a past
+ *  date. No page shows a second as-of notice; storage errors keep their
+ *  own prominent notice. */
+export function AsOfStrip() {
   const { asOf, setAsOf } = useModel();
   if (!asOf) return null;
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-warn bg-warn-soft text-warn px-2 py-0.5 text-xs whitespace-nowrap" role="status">
-      Values as of {asOf.slice(0, 10)}
-      <button type="button" className="ml-0.5 rounded-full px-1 leading-none hover:bg-background" aria-label="Back to today" title="Back to today" onClick={() => setAsOf(null)}>
-        ×
-      </button>
-    </span>
+    <div className="border-b border-warn/30 bg-warn-soft text-warn" role="status" data-testid="as-of-strip">
+      <div className="mx-auto flex max-w-3xl items-center justify-center gap-2 px-4 py-1.5 text-sm">
+        <span>
+          Viewing <span className="font-medium">{longDate(asOf)}</span>
+        </span>
+        <span aria-hidden="true">·</span>
+        <button type="button" className="underline underline-offset-2 hover:opacity-80" onClick={() => setAsOf(null)}>
+          Back to today
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -38,8 +46,7 @@ export function Nav() {
           <span className="sm:hidden">Lens</span>
           <span className="hidden sm:inline">Human Systems Lens</span>
         </Link>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <AsOfPill />
+        <div className="flex items-center">
           <ul className="flex gap-1 text-sm">
             {LINKS.map((l) => {
               const active = l.matches(pathname);
@@ -54,6 +61,7 @@ export function Nav() {
           </ul>
         </div>
       </div>
+      <AsOfStrip />
     </nav>
   );
 }

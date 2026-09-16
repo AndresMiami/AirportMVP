@@ -216,8 +216,22 @@ src/features/home/cards.ts from existing systems only (History-engine
 repetition -> Explore, ledger open count -> /proposals, non-rejected
 hypotheses). Home speaks ordinary language: never "structural gap",
 "attractor", "model health", "variables", "recurrence set" or
-"cross-context" there. History, Explore and Review await visual review
-before further simplification.
+"cross-context" there. VISUAL CONVERGENCE (6A.1, from reviewed
+screenshots): the notebook is the product — Home shows ONE strongest
+repetition worded for people by `recurrenceSentence` ("Total debt was
+$4,000 on 7 recorded dates between February 2025 and June 2026."; the
+History engine keeps its own sentence and its record/application-time
+counts, which never appear on Home) plus a quiet "N more patterns in
+History" link; absence renders nothing (no empty-state cards); the
+review card appears only with open proposals; working explanations are a
+compact line with one truncated example; the action ("Reflect on this"
+with a Demo badge) appears only after typing, the writing surface
+auto-grows with no resize handle and no microphone until voice exists;
+the ONE as-of treatment is the slim `AsOfStrip` under the primary
+navigation on every page ("Viewing June 1, 2025 · Back to today"),
+never a second banner; storage errors keep their own notice. History,
+Explore, Map and Review await their own visual review before further
+simplification.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

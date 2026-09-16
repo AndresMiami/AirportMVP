@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { describeVariableHistory, historySentenceFor } from "@/discovery";
-import { openProposalCount, recurrenceCards, workingHypotheses } from "@/features/home/cards";
+import { homeQuantity, longDate, monthName, openProposalCount, recurrenceCards, recurrenceOverview, recurrenceSentence, workingHypotheses } from "@/features/home/cards";
 import type { MutationProposal } from "@/kernel";
 import { createBlankModel } from "@/model/blank";
 import * as M from "@/services/mutations";
@@ -46,6 +46,40 @@ describe("recurrenceCards", () => {
     const blank = createBlankModel({ id: "sys_b", name: "B", systemType: "unit", now: "2026-01-01T00:00:00.000Z", domain: CC_DOMAIN });
     expect(recurrenceCards(blank, "2026-09-16")).toEqual([]);
     expect(recurrenceCards(ccSystem(), "2024-01-01")).toEqual([]);
+  });
+});
+
+describe("Home wording (6A.1) over the engine's facts", () => {
+  it("formats quantities for people: currency leads with the sign, placeholder units vanish, other units follow the number", () => {
+    expect(homeQuantity(4000, "$")).toBe("$4,000");
+    expect(homeQuantity(150, "$/month")).toBe("$150 a month");
+    expect(homeQuantity(-250.5, "$")).toBe("-$250.5");
+    expect(homeQuantity(5, "u")).toBe("5");
+    expect(homeQuantity(0.8, "")).toBe("0.8");
+    expect(homeQuantity(1.5, "months")).toBe("1.5 months");
+    expect(homeQuantity(12345.678, "index 0-1")).toBe("12,345.68 index 0-1");
+  });
+  it("says what repeated, how many recorded dates, and the calendar span — never record counts or application times", () => {
+    const times = ["2026-06-01T00:00:00.000Z", "2025-02-10T00:00:00.000Z", "2025-07-10T00:00:00.000Z", "2026-01-10T00:00:00.000Z"];
+    expect(recurrenceSentence("Total debt", 4000, "$", times)).toBe("Total debt was $4,000 on 4 recorded dates between February 2025 and June 2026.");
+    expect(recurrenceSentence("Buffer", 1.5, "months", ["2025-02-10", "2025-02-20"])).toBe("Buffer was 1.5 months on 2 recorded dates in February 2025.");
+    expect(recurrenceSentence("X", 1, "", ["2025-02-10"])).toBe("X was 1 on one recorded date in February 2025.");
+    const card = recurrenceCards(ccSystem(), "2026-09-16", 10).find((c) => c.variableId === "income_stability")!;
+    expect(card.sentence).toBe("income_stability was 5 on 4 recorded dates between February 2025 and June 2026.");
+    expect(card.sentence).not.toMatch(/dated records|application times|distinct/);
+    expect(card.headline).toMatch(/was recorded on 4 dates/); // History keeps its own sentence
+  });
+  it("dates read as calendar words, from the ISO fields only", () => {
+    expect(monthName("2025-06-01")).toBe("June 2025");
+    expect(longDate("2025-06-01")).toBe("June 1, 2025");
+    expect(longDate("2026-12-25T23:59:00.000Z")).toBe("December 25, 2026");
+  });
+  it("Home gets one strongest pattern and a count of the rest; nothing when nothing repeats", () => {
+    const o = recurrenceOverview(ccSystem(), "2026-09-16");
+    expect(o.strongest?.variableId).toBe("autonomy_pref");
+    expect(o.more).toBe(recurrenceCards(ccSystem(), "2026-09-16", 100).length - 1);
+    expect(o.more).toBeGreaterThan(1);
+    expect(recurrenceOverview(ccSystem(), "2024-01-01")).toEqual({ strongest: null, more: 0 });
   });
 });
 

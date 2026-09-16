@@ -25,14 +25,34 @@ describe("Home", () => {
     expect(home).toMatch(/Write what&apos;s on your mind\. You don&apos;t need to organize it first\./);
     expect(home).toMatch(/human-systems\.home-draft\.v1/);
     expect(home).not.toMatch(/@\/services\/mutations|\bapply\(|replaceModel|\.save\(|proposals\.create/);
-    expect(home).toMatch(/recurrenceCards\(model/);
+    expect(home).toMatch(/recurrenceOverview\(model/);
     expect(home).toMatch(/openProposalCount\(ledger\)/);
     expect(home).toMatch(/workingHypotheses\(model\)/);
-    expect(home).toMatch(/Reflection demo/);
     expect(home).not.toMatch(/structural gap|attractor|model health|cross-context|recurrence set/i);
     const cards = read("src/features/home/cards.ts");
     expect(cards).toMatch(/describeVariableHistory\(/);
     expect(cards).not.toMatch(/from "react"|@\/domains|@\/services/);
+  });
+
+  it("6A.1 hierarchy: one pattern with Home wording, no empty-state cards, no microphone, no resize handle, the action only after typing, one as-of treatment, sentence-case labels", () => {
+    const home = read("src/app/page.tsx");
+    expect(home).toMatch(/patterns\.strongest\.sentence/);
+    expect(home).not.toMatch(/\.headline|\.details\[/);
+    expect(home).toMatch(/more patterns? in History/);
+    expect(home).not.toMatch(/Nothing is waiting for your decision|Nothing has repeated|not investigating anything yet/);
+    expect(home).not.toMatch(/🎤|Voice input|aria-hidden="true"/);
+    expect(home).toMatch(/resize-none/);
+    expect(home).not.toMatch(/resize-y/);
+    expect(home).toMatch(/hasText \? \(/);
+    expect(home).toMatch(/Reflect on this/);
+    expect(home).toMatch(/Demo response · nothing is saved to your notebook\./);
+    expect(home).not.toMatch(/deterministic stand-in|Reflection demo|uppercase/);
+    expect(home).not.toMatch(/You are looking at values as of|Back to today/);
+    const nav = read("src/components/nav.tsx");
+    expect(nav).toMatch(/AsOfStrip/);
+    expect(nav).toMatch(/Back to today/);
+    expect(nav).not.toMatch(/AsOfPill|Values as of/);
+    expect(read("src/app/layout.tsx")).toMatch(/StorageNotice/);
   });
 });
 

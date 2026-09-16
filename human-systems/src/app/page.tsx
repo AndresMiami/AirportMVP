@@ -1,24 +1,27 @@
 "use client";
 /**
- * HOME (Step 6A): a calm notebook over the whole machine.
+ * HOME (Step 6A, converged visually in 6A.1): the notebook is the product;
+ * analysis appears only when there is something worth noticing.
  *
  *   What are you thinking about?   -> a browser-local draft (never the model)
- *   Something keeps showing up     -> the deterministic History engine
- *   Needs your review              -> the proposal ledger
- *   Working explanations           -> the canonical hypotheses
+ *   Something keeps showing up     -> ONE strongest repetition from the
+ *                                     deterministic History engine, worded
+ *                                     for Home; the rest is a count
+ *   Needs your review              -> the proposal ledger, only when open
+ *   Working explanations           -> the canonical hypotheses, only when any
  *
- * Home invents no analysis. "Reflection demo" runs the deterministic task
- * mock through the 5B/5C context and output contracts, read-only, and says
- * so. Home = meaning; a card's detail = evidence; Library = machinery.
+ * Home invents no analysis. "Reflect on this" (Demo) runs the deterministic
+ * task mock through the 5B/5C context and output contracts, read-only, and
+ * says so. Absence renders nothing: no empty-state cards.
  */
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildAiContext, providerPayload } from "@/ai/context";
 import type { AiOutputItem } from "@/ai/response";
 import { MockAiTaskProvider } from "@/ai/task-mock";
 import { useModel } from "@/components/model-provider";
 import { Loading, Note } from "@/components/ui";
-import { openProposalCount, recurrenceCards, workingHypotheses } from "@/features/home/cards";
+import { openProposalCount, recurrenceOverview, workingHypotheses } from "@/features/home/cards";
 import type { MutationProposal } from "@/kernel";
 
 const DRAFT_KEY = "human-systems.home-draft.v1";
@@ -46,13 +49,17 @@ const todayIso = () => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-function HomeCard({ eyebrow, title, children, action, tone = "neutral" }: { eyebrow: string; title: string; children?: React.ReactNode; action: { href: string; label: string }; tone?: "neutral" | "attention" }) {
+const truncate = (s: string, max = 110) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
+
+/** The one card Home allows real weight: a subtle surface, one label in
+ *  sentence case, one sentence, one action. */
+function Insight({ label, title, children, action, tone = "neutral" }: { label: string; title: string; children?: React.ReactNode; action: { href: string; label: string }; tone?: "neutral" | "attention" }) {
   return (
-    <section className={`rounded-2xl bg-surface px-5 py-4 shadow-sm ${tone === "attention" ? "ring-1 ring-warn/40" : ""}`} data-home-card={eyebrow}>
-      <p className="text-xs uppercase tracking-wide text-muted">{eyebrow}</p>
-      <h2 className="mt-1 text-base font-medium leading-snug">{title}</h2>
-      {children ? <div className="mt-1 text-sm text-muted">{children}</div> : null}
-      <Link href={action.href} className="mt-3 inline-block text-sm font-medium text-accent hover:underline">
+    <section className={`rounded-xl border bg-surface px-5 py-4 ${tone === "attention" ? "border-warn/40" : "border-border/70"}`} data-home-card={label}>
+      <p className="text-sm text-muted">{label}</p>
+      <h2 className="mt-1.5 text-[17px] font-medium leading-snug">{title}</h2>
+      {children ? <div className="mt-1.5 text-[15px] leading-relaxed text-muted">{children}</div> : null}
+      <Link href={action.href} className="mt-3 inline-block text-[15px] font-medium text-accent hover:underline">
         {action.label} →
       </Link>
     </section>
@@ -60,11 +67,12 @@ function HomeCard({ eyebrow, title, children, action, tone = "neutral" }: { eyeb
 }
 
 export default function HomePage() {
-  const { status, model, evaluated, proposals, proposalRecovery, asOf, setAsOf, isSample, seedLabel } = useModel();
+  const { status, model, evaluated, proposals, proposalRecovery, asOf, isSample, seedLabel } = useModel();
   const [draft, setDraft] = useState("");
   const [loaded, setLoaded] = useState<string | null>(null);
   const [ledger, setLedger] = useState<MutationProposal[] | null>(null);
   const [reflection, setReflection] = useState<{ ok: true; items: AiOutputItem[] } | { ok: false; error: string } | null>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
   const today = todayIso();
 
   useEffect(() => {
@@ -74,6 +82,14 @@ export default function HomePage() {
     setDraft(readDraft(model.id));
     setLoaded(model.id);
   }, [model, loaded]);
+
+  // the writing surface grows with the note instead of scrolling or resizing
+  useEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 168)}px`;
+  }, [draft, model]);
 
   useEffect(() => {
     if (!proposals || !model || proposalRecovery.status !== "done") return;
@@ -86,13 +102,14 @@ export default function HomePage() {
     };
   }, [proposals, model, proposalRecovery.status]);
 
-  const cards = useMemo(() => (model ? recurrenceCards(model, asOf ? asOf.slice(0, 10) : today) : []), [model, asOf, today]);
+  const patterns = useMemo(() => (model ? recurrenceOverview(model, asOf ? asOf.slice(0, 10) : today) : { strongest: null, more: 0 }), [model, asOf, today]);
 
   if (status === "error") return null; // the storage notice above says what happened
   if (status === "loading" || !model || !evaluated) return <Loading />;
 
   const open = ledger ? openProposalCount(ledger) : null;
   const working = workingHypotheses(model);
+  const hasText = draft.trim().length > 0;
   const update = (text: string) => {
     setDraft(text);
     writeDraft(model.id, text);
@@ -110,44 +127,32 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      {asOf ? (
-        <div className="mb-5 rounded-2xl bg-warn-soft px-5 py-3 text-sm" role="status">
-          You are looking at values as of <span className="font-medium tabular-nums">{asOf.slice(0, 10)}</span>. Anything not recorded by then shows as unknown.{" "}
-          <button type="button" className="underline" onClick={() => setAsOf(null)}>
-            Back to today
-          </button>
-        </div>
-      ) : null}
-      {isSample ? <p className="mb-5 text-xs text-muted">You are looking at the {seedLabel}. Your own system can be created in Library.</p> : null}
-
-      <section className="mb-8">
+      <section className="mb-10">
         <label htmlFor="home-thinking" className="block text-2xl font-semibold tracking-tight md:text-3xl">
           What are you thinking about?
         </label>
-        <p className="mt-2 text-sm text-muted">Write what&apos;s on your mind. You don&apos;t need to organize it first.</p>
-        <div className="relative mt-4">
-          <textarea id="home-thinking" className="w-full resize-y rounded-2xl border-0 bg-surface px-5 py-4 text-base leading-relaxed shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40" rows={6} value={draft} onChange={(e) => update(e.target.value)} placeholder="Something changed at work this month and I keep coming back to it…" />
-          <span className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-background px-2 py-1 text-xs text-muted" title="Voice input is not available yet" aria-hidden="true">
-            🎤
-          </span>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="button" className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50" disabled={draft.trim().length === 0} onClick={() => void reflect()}>
-            Reflection demo
-          </button>
-          <span className="text-xs text-muted">Kept in this browser until you ask the app to work with it. The demo is a deterministic stand-in, not real intelligence.</span>
-        </div>
+        <p className="mt-2 text-[15px] leading-relaxed text-muted">Write what&apos;s on your mind. You don&apos;t need to organize it first.</p>
+        <textarea ref={area} id="home-thinking" className="mt-5 block w-full resize-none overflow-hidden rounded-xl border border-border/70 bg-surface px-5 py-4 text-[17px] leading-relaxed placeholder:text-muted/70 focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/20" rows={6} value={draft} onChange={(e) => update(e.target.value)} placeholder="Something changed at work this month and I keep coming back to it…" />
+        {hasText ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button type="button" className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-[15px] font-medium text-white hover:opacity-90" onClick={() => void reflect()}>
+              Reflect on this
+              <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-medium">Demo</span>
+            </button>
+            <span className="text-sm text-muted">Demo response · nothing is saved to your notebook.</span>
+          </div>
+        ) : null}
         {reflection ? (
           reflection.ok ? (
-            <div className="mt-4 rounded-2xl bg-surface px-5 py-4 shadow-sm" data-testid="reflection">
-              <p className="text-xs uppercase tracking-wide text-muted">Reflection demo · nothing is added to your notebook</p>
-              <ul className="mt-2 space-y-2 text-sm">
+            <div className="mt-4 rounded-xl border border-border/70 bg-surface px-5 py-4" data-testid="reflection">
+              <p className="text-sm text-muted">Demo response</p>
+              <ul className="mt-2 space-y-2 text-[15px] leading-relaxed">
                 {reflection.items.map((it) => (
                   <li key={it.id}>
                     {it.kind === "interpretation" ? (
                       <>
                         <span className="text-muted">A tentative reading:</span> {it.text}
-                        {it.caveat ? <span className="block text-xs text-muted">{it.caveat}</span> : null}
+                        {it.caveat ? <span className="block text-sm text-muted">{it.caveat}</span> : null}
                       </>
                     ) : it.kind === "question" ? (
                       <>
@@ -160,7 +165,7 @@ export default function HomePage() {
                 ))}
                 {reflection.items.length === 0 ? <li className="text-muted">The demo has nothing to say about this yet.</li> : null}
               </ul>
-              <Link href="/ai" className="mt-2 inline-block text-xs text-muted underline">
+              <Link href="/ai" className="mt-2 inline-block text-sm text-muted underline">
                 See exactly what a real assistant would receive
               </Link>
             </div>
@@ -170,43 +175,44 @@ export default function HomePage() {
         ) : null}
       </section>
 
-      <div className="space-y-4">
-        {cards.length > 0 ? (
-          cards.map((c) => (
-            <HomeCard key={c.variableId} eyebrow="Something keeps showing up" title={c.headline} action={{ href: c.exploreHref, label: "Explore" }}>
-              {c.details[0]}
-            </HomeCard>
-          ))
-        ) : (
-          <HomeCard eyebrow="Something keeps showing up" title="Nothing has repeated in the records yet." action={{ href: "/history", label: "See what changed" }}>
-            A record has to be entered again at a later date before anything can keep showing up.
-          </HomeCard>
-        )}
+      <div className="space-y-6">
+        {patterns.strongest ? (
+          <div>
+            <Insight label="Something keeps showing up" title={patterns.strongest.sentence} action={{ href: patterns.strongest.exploreHref, label: "Explore what was happening" }} />
+            {patterns.more > 0 ? (
+              <p className="mt-2 px-5 text-sm text-muted">
+                <Link href="/history" className="hover:underline" data-testid="more-patterns">
+                  {patterns.more === 1 ? "1 more pattern in History" : `${patterns.more} more patterns in History`} →
+                </Link>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {proposalRecovery.status === "error" ? (
           <Note tone="warn">Your proposals could not be read: {proposalRecovery.message}</Note>
         ) : open !== null && open > 0 ? (
-          <HomeCard eyebrow="Needs your review" title={open === 1 ? "1 proposed change is waiting for you." : `${open} proposed changes are waiting for you.`} action={{ href: "/proposals", label: "Review" }} tone="attention">
+          <Insight label="Needs your review" title={open === 1 ? "1 proposed change is waiting for you." : `${open} proposed changes are waiting for you.`} action={{ href: "/proposals", label: "Review" }} tone="attention">
             Nothing changes in your notebook until you decide.
-          </HomeCard>
-        ) : (
-          <HomeCard eyebrow="Needs your review" title="Nothing is waiting for your decision." action={{ href: "/proposals", label: "See past decisions" }} />
-        )}
+          </Insight>
+        ) : null}
 
         {working.length > 0 ? (
-          <HomeCard eyebrow="Working explanations" title={working.length === 1 ? "1 explanation you're currently investigating." : `${working.length} explanations you're currently investigating.`} action={{ href: "/hypotheses", label: "View" }}>
-            {working.slice(0, 2).map((h) => `“${h.statement}”`).join(" · ")}
-            {working.length > 2 ? " · …" : ""}
-          </HomeCard>
-        ) : (
-          <HomeCard eyebrow="Working explanations" title="You're not investigating anything yet." action={{ href: "/history", label: "Start from what keeps showing up" }}>
-            An explanation begins as something to test, never as a conclusion.
-          </HomeCard>
-        )}
+          <section className="px-5" data-home-card="Working explanations">
+            <p className="text-[15px] leading-relaxed">
+              <span className="font-medium">{working.length === 1 ? "You're investigating 1 explanation" : `You're investigating ${working.length} explanations`}</span>
+              <span className="block text-muted">“{truncate(working[0].statement)}”</span>
+            </p>
+            <Link href="/hypotheses" className="mt-1.5 inline-block text-sm font-medium text-accent hover:underline">
+              View all →
+            </Link>
+          </section>
+        ) : null}
       </div>
 
-      <p className="mt-10 text-xs text-muted">
-        Everything underneath is available in{" "}
+      <p className="mt-14 text-sm text-muted">
+        {isSample ? <>You are looking at the {seedLabel}. </> : null}
+        Your own system, and everything underneath, is in{" "}
         <Link href="/library" className="underline">
           Library
         </Link>
