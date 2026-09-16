@@ -54,8 +54,13 @@ export function explorePatternText(facts: Pick<EvidenceFacts, "exactRepetition" 
   return [...leads, ...around, EXPLORE_PATTERN_CAUTION].join(" ");
 }
 
-/** Shown under a locus heading with no chosen or linked candidate. Never a prompt in disguise. */
-export const NO_GROUNDED_CANDIDATE = "No grounded candidate of this kind yet.";
+/** Shown under a locus heading with no candidate. A draft is a candidate,
+ *  not a grounded one, so the line claims nothing about evidence. */
+export const NO_CANDIDATE_YET = "No candidate of this kind yet.";
+
+/** Linked hypotheses are RELATED to the record; nothing yet says they explain the recurrence. */
+export const RELATED_HYPOTHESES_HEADING = "Related hypotheses already in the model";
+export const RELATED_HYPOTHESES_NOTE = "These are linked to this record. That does not mean they explain this recurrence.";
 
 /** The inert "Investigate this explanation" control's explanation. */
 export const INVESTIGATE_INERT_TEXT = "Investigating an explanation will propose a hypothesis for your review; that review step is not built yet, so nothing is created from here.";
@@ -65,7 +70,7 @@ export const EXPLORE_QUESTIONS = [
   "This kept happening.",
   "What was different each time?",
   "What was the same each time?",
-  "What was also true when this did not happen?",
+  "How did the other recorded times compare?",
   "What is still unresolved?",
   "Possible explanations to investigate",
 ] as const;

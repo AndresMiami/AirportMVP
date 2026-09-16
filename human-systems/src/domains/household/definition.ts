@@ -66,6 +66,8 @@ export const HOUSEHOLD_DOMAIN: DomainDefinition = {
   ],
   presentation: HOUSEHOLD_PRESENTATION,
   explanationCatalogue: HOUSEHOLD_EXPLANATION_CATALOGUE,
+  // a household-level recurring pattern is explored against every member's records too
+  exploreContext: { systemPatternIncludesSubjects: true },
   categories: HOUSEHOLD_CATEGORIES,
   evaluationDimensions: HOUSEHOLD_EVALUATION_DIMENSIONS,
   assumptions: HOUSEHOLD_ASSUMPTIONS,

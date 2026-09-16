@@ -253,6 +253,11 @@ export interface DomainDefinition {
   presentation?: DomainPresentation;
   /** Optional prompts for "Explore this pattern" (questions, not candidates). */
   explanationCatalogue?: ExplanationCatalogue;
+  /** Optional Explore context scope. Default (conservative): a pattern's
+   *  context is its own subject plus the system. A domain may opt in to
+   *  reading every assigned subject's records as context for a
+   *  SYSTEM-level pattern (a household reads its members). */
+  exploreContext?: { systemPatternIncludesSubjects: boolean };
 }
 
 export const DEFAULT_LOCUS_LABELS: Record<Locus, string> = {

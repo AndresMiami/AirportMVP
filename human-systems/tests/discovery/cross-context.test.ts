@@ -6,7 +6,7 @@
  *   ABSENCE IS NOT DIFFERENCE   RESOLUTION != OBSERVATION   EXTENT, NOT POINT
  */
 import { describe, expect, it } from "vitest";
-import { containsForbiddenPhrase, crossContext, type CrossContext, type PatternRef } from "@/discovery";
+import { containsForbiddenPhrase, contextSubjectsFor, crossContext, type CrossContext, type PatternRef } from "@/discovery";
 import { createBlankModel } from "@/model/blank";
 import { domainRegistry, type DomainDefinition } from "@/model/domain";
 import * as M from "@/services/mutations";
@@ -250,6 +250,19 @@ describe("crossContext", () => {
     const p2Scope = ok(crossContext(m, PATTERN, { contextSubjectIds: ["p2"] }));
     expect(p2Scope.occurrences[1].eventsNear.map((e) => e.title)).toEqual(["Other subject's event near July"]);
     expect(p2Scope.conditions.map((c) => c.variableId)).toEqual(["other_subject"]);
+  });
+
+  it("a system-level pattern under an opted-in domain reads every member's variables and events; the math is unchanged", () => {
+    const sysPattern: PatternRef = { ...PATTERN, variableId: "sys_y", subjectId: "sys" };
+    const withSysY = { ...m, variables: [...m.variables, variable("sys_y", "sys", m.variables.find((v) => v.id === "income_stability")!.values.map((e, i) => ({ ...e, id: `sy${i}` })))] };
+    const conservative = ok(crossContext(withSysY, sysPattern));
+    expect(conservative.conditions.map((c) => c.variableId)).not.toContain("work_arrangement"); // p1's variable
+    expect(conservative.occurrences[1].eventsNear.map((e) => e.title)).toEqual(["System event near July"]);
+    const optedIn = ok(crossContext(withSysY, sysPattern, { contextSubjectIds: contextSubjectsFor(withSysY, sysPattern, { exploreContext: { systemPatternIncludesSubjects: true } }) }));
+    expect(optedIn.conditions.map((c) => c.variableId)).toEqual(expect.arrayContaining(["work_arrangement", "other_subject", "buffer"]));
+    expect(optedIn.conditions.map((c) => c.variableId)).not.toContain("unassigned");
+    expect(optedIn.occurrences[1].eventsNear.map((e) => e.title).sort()).toEqual(["Near the July occurrence", "Other subject's event near July", "System event near July"]);
+    expect(cond(optedIn, "buffer").statement).toBe(cond(conservative, "buffer").statement); // same classification, wider scope
   });
 
   it("context scope is the pattern's subject plus the system; other subjects and unassigned variables are excluded; events are gathered per occurrence window", () => {

@@ -9,7 +9,8 @@
  * pattern" opens an explanatory card only.
  */
 import Link from "next/link";
-import { useId, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useId, useMemo, useState } from "react";
 import { temporalInterval } from "@/calculations/time";
 import { useModel } from "@/components/model-provider";
 import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
@@ -196,12 +197,26 @@ function Section({ title, hint, entries, description, model, explorable = false 
   );
 }
 
-export default function HistoryPage() {
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+/** A URL date is used only when it is a strict calendar date; anything else falls back to the default. */
+function urlDate(v: string | null): string | null {
+  if (!v || !DATE_ONLY.test(v)) return null;
+  try {
+    normalizeIntervalStart(v);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+function HistoryInner() {
   const { status, model, evaluated, error } = useModel();
   const ids = useId();
-  const [fromInput, setFrom] = useState<string | null>(null);
-  const [toInput, setTo] = useState<string | null>(null);
-  const [subject, setSubject] = useState<string>(ALL);
+  const params = useSearchParams();
+  // initial state from the URL (Explore returns here with the period the pattern was found in); malformed values fall back
+  const [fromInput, setFrom] = useState<string | null>(() => urlDate(params.get("from")));
+  const [toInput, setTo] = useState<string | null>(() => urlDate(params.get("to")));
+  const [subjectInput, setSubject] = useState<string | null>(() => params.get("subject"));
   const [convention, setConvention] = useState(true);
   const [includeDerived, setIncludeDerived] = useState(false);
 
@@ -209,6 +224,8 @@ export default function HistoryPage() {
   const today = todayIso();
   const from = fromInput ?? earliest ?? today;
   const to = toInput ?? today;
+  // a URL subject is honoured only when it names the system or an existing subject
+  const subject = subjectInput !== null && model && (subjectInput === model.id || model.profile.members.some((m) => m.id === subjectInput)) ? subjectInput : ALL;
 
   const result = useMemo<{ ok: true; description: IntervalDescription } | { ok: false; error: string } | null>(() => {
     if (!model) return null;
@@ -255,7 +272,7 @@ export default function HistoryPage() {
             <label htmlFor={`${ids}-subject`} className="block text-muted">
               Whose records
             </label>
-            <select id={`${ids}-subject`} value={subject} onChange={(e) => setSubject(e.target.value)}>
+            <select id={`${ids}-subject`} value={subject} onChange={(e) => setSubject(e.target.value || null)}>
               <option value={ALL}>Everything</option>
               <option value={model.id}>The whole system ({model.profile.name})</option>
               {subjects.map((s) => (
@@ -286,6 +303,14 @@ export default function HistoryPage() {
         <HistoryBody description={result.description} model={model} subjectPlural={subjectLabelPluralOf(domain)} />
       )}
     </div>
+  );
+}
+
+export default function HistoryPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <HistoryInner />
+    </Suspense>
   );
 }
 

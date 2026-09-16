@@ -22,6 +22,7 @@
  * midnight. Nothing here is a cause, a score or a ranking.
  */
 import { temporalInterval } from "@/calculations/time";
+import type { DomainDefinition } from "@/model/domain";
 import { resolveValue } from "@/model/history";
 import type { StoredVariable, SystemModel, TemporalRef, ValidBasis } from "@/types";
 import { describeVariableHistory, type Caveat } from "./describe-history";
@@ -163,6 +164,21 @@ export interface CrossContextOptions {
    *  pattern's subject plus the system. Another subject's event near the
    *  pattern, or an unassigned event, is never context by default. */
   contextSubjectIds?: string[];
+}
+
+/**
+ * The subjects whose records (variables AND events) form a pattern's
+ * context. Conservative default: the pattern's own subject plus the
+ * system. For a SYSTEM-level pattern in a domain that opts in
+ * (`exploreContext.systemPatternIncludesSubjects`), every assigned
+ * subject as well, archived included (history keeps its subject).
+ * Unassigned records are never context.
+ */
+export function contextSubjectsFor(model: Pick<SystemModel, "id" | "profile">, pattern: Pick<PatternRef, "subjectId">, domain?: Pick<DomainDefinition, "exploreContext">): string[] {
+  if (pattern.subjectId === null) return [];
+  const base = pattern.subjectId === model.id ? [model.id] : [pattern.subjectId, model.id];
+  if (pattern.subjectId === model.id && domain?.exploreContext?.systemPatternIncludesSubjects) return [...base, ...model.profile.members.map((m) => m.id)];
+  return base;
 }
 
 /* ------------------------------------------------------------------ */
@@ -327,7 +343,7 @@ export function crossContext(model: SystemModel, pattern: PatternRef, options: C
   }
 
   const windowDays = options.eventWindowDays ?? 30;
-  const contextSubjects = new Set(options.contextSubjectIds ?? [pattern.subjectId, model.id]);
+  const contextSubjects = new Set(options.contextSubjectIds ?? contextSubjectsFor(model, pattern));
   const contextVars = model.variables.filter((v) => v.kind === "input" && v.id !== y.id && v.subjectId !== null && contextSubjects.has(v.subjectId));
   const byId = new Map(history.records.map((r) => [r.entryId, r]));
 

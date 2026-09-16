@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
 import { INPUT_IDS } from "@/domains/household/keys";
-import { EXPLORE_QUESTIONS, INVESTIGATE_INERT_TEXT, NO_GROUNDED_CANDIDATE, containsForbiddenPhrase, decodePatternRef, encodePatternRef, linkedHypotheses, type PatternRef } from "@/discovery";
+import { EXPLORE_QUESTIONS, INVESTIGATE_INERT_TEXT, NO_CANDIDATE_YET, RELATED_HYPOTHESES_NOTE, containsForbiddenPhrase, contextSubjectsFor, decodePatternRef, encodePatternRef, linkedHypotheses, type PatternRef } from "@/discovery";
 import { DEFAULT_LOCUS_LABELS, locusLabel } from "@/model/domain";
 import * as M from "@/services/mutations";
 
@@ -102,9 +102,28 @@ describe("explanation catalogue", () => {
 
 describe("explore language", () => {
   it("the fixed copy examines, never concludes, and the empty-heading line is not a prompt in disguise", () => {
-    expect(EXPLORE_QUESTIONS).toEqual(["This kept happening.", "What was different each time?", "What was the same each time?", "What was also true when this did not happen?", "What is still unresolved?", "Possible explanations to investigate"]);
-    expect(NO_GROUNDED_CANDIDATE).toBe("No grounded candidate of this kind yet.");
+    expect(EXPLORE_QUESTIONS).toEqual(["This kept happening.", "What was different each time?", "What was the same each time?", "How did the other recorded times compare?", "What is still unresolved?", "Possible explanations to investigate"]);
+    expect(NO_CANDIDATE_YET).toBe("No candidate of this kind yet."); // a draft is a candidate, never "grounded"
+    expect(RELATED_HYPOTHESES_NOTE).toBe("These are linked to this record. That does not mean they explain this recurrence.");
     expect(INVESTIGATE_INERT_TEXT).toMatch(/nothing is created from here/);
-    for (const t of [...EXPLORE_QUESTIONS, NO_GROUNDED_CANDIDATE, INVESTIGATE_INERT_TEXT]) expect(containsForbiddenPhrase(t), t).toBeNull();
+    for (const t of [...EXPLORE_QUESTIONS, NO_CANDIDATE_YET, RELATED_HYPOTHESES_NOTE, INVESTIGATE_INERT_TEXT]) expect(containsForbiddenPhrase(t), t).toBeNull();
+  });
+});
+
+describe("explore context scope", () => {
+  const m = createSampleHousehold();
+  const members = m.profile.members.map((x) => x.id);
+  it("default: a subject-level pattern reads its subject plus the system; a system-level pattern reads the system only", () => {
+    expect(contextSubjectsFor(m, { subjectId: members[0] })).toEqual([members[0], m.id]);
+    expect(contextSubjectsFor(m, { subjectId: m.id })).toEqual([m.id]);
+    expect(contextSubjectsFor(m, { subjectId: null })).toEqual([]);
+  });
+  it("the household opts in: a household-level pattern reads every member's records too; a member-level pattern does not widen", () => {
+    expect(contextSubjectsFor(m, { subjectId: m.id }, HOUSEHOLD_DOMAIN)).toEqual([m.id, ...members]);
+    expect(contextSubjectsFor(m, { subjectId: members[0] }, HOUSEHOLD_DOMAIN)).toEqual([members[0], m.id]);
+    expect(HOUSEHOLD_DOMAIN.exploreContext).toEqual({ systemPatternIncludesSubjects: true });
+  });
+  it("a domain without the opt-in keeps the conservative default", () => {
+    expect(contextSubjectsFor(m, { subjectId: m.id }, { exploreContext: undefined })).toEqual([m.id]);
   });
 });

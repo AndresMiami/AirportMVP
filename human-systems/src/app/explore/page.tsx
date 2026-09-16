@@ -19,10 +19,14 @@ import {
   CAUSATION_DISCLAIMER,
   EXPLORE_QUESTIONS,
   INVESTIGATE_INERT_TEXT,
-  NO_GROUNDED_CANDIDATE,
+  NO_CANDIDATE_YET,
+  RELATED_HYPOTHESES_HEADING,
+  RELATED_HYPOTHESES_NOTE,
+  contextSubjectsFor,
   crossContext,
   dayMonthYear,
   decodePatternRef,
+  encodePatternRef,
   formatValue,
   linkedHypotheses,
   monthYear,
@@ -127,7 +131,9 @@ function Occurrences({ r, model }: { r: CrossContext; model: SystemModel }) {
 
 function Explanations({ r, model, domain }: { r: CrossContext; model: SystemModel; domain: DomainDefinition }) {
   const ids = useId();
-  const scope = `${model.id}|${r.pattern.variableId}|${r.pattern.repeatedValue}|${r.pattern.occurrenceTimes.join(",")}`;
+  // drafts are keyed by the FULL pattern reference (interval included): a wider
+  // evidence window has different contrast cases and is a different investigation
+  const scope = `${model.id}|${encodePatternRef(r.pattern)}`;
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [editing, setEditing] = useState<{ locus: Locus; text: string; promptId?: string } | null>(null);
   useEffect(() => {
@@ -153,7 +159,8 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-xs font-semibold text-muted mb-1">Already in your hypotheses</h3>
+        <h3 className="text-xs font-semibold text-muted mb-1">{RELATED_HYPOTHESES_HEADING}</h3>
+        <p className="text-xs text-muted mb-1">{RELATED_HYPOTHESES_NOTE}</p>
         {linked.length === 0 ? (
           <p className="text-sm text-muted">No hypothesis is linked to this record yet (links, never wording, decide this).</p>
         ) : (
@@ -179,7 +186,7 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
           <div key={locus}>
             <h3 className="text-xs font-semibold text-muted mb-1">{locusLabel(domain, locus)}</h3>
             {mine.length === 0 ? (
-              <p className="text-sm text-muted">{NO_GROUNDED_CANDIDATE}</p>
+              <p className="text-sm text-muted">{NO_CANDIDATE_YET}</p>
             ) : (
               <ul className="text-sm space-y-2">
                 {mine.map((d) => (
@@ -254,8 +261,10 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
 }
 
 function ExploreBody({ pattern, model, domain }: { pattern: PatternRef; model: SystemModel; domain: DomainDefinition }) {
-  const result = useMemo(() => crossContext(model, pattern), [model, pattern]);
-  const back = `/history`;
+  // context scope is domain configuration (a household reads its members for a household-level pattern); the math is unchanged
+  const result = useMemo(() => crossContext(model, pattern, { contextSubjectIds: contextSubjectsFor(model, pattern, domain) }), [model, pattern, domain]);
+  // back to History with the same period the pattern was found in (the reference carries it; nothing else is invented)
+  const back = `/history?${new URLSearchParams({ from: pattern.interval.from, to: pattern.interval.to }).toString()}`;
   if (!result.ok) {
     return (
       <div className="space-y-3">
@@ -283,21 +292,28 @@ function ExploreBody({ pattern, model, domain }: { pattern: PatternRef; model: S
         <p className="text-xs text-muted mb-2">Recorded at the same value at every occurrence. A value only carried forward by the resolver never counts. Recorded together is not caused by.</p>
         <ConditionList items={pick(r.groups.commonAtOccurrences)} empty="Nothing readable was recorded the same at every occurrence." />
       </Card>
-      <Card title={`${EXPLORE_QUESTIONS[3]} (${r.groups.backgroundComplete.length})`}>
-        <p className="text-xs text-muted mb-2">Present at every occurrence and at every contrast time. True in both cases is not the difference, so these do not by themselves distinguish the cases.</p>
-        <ConditionList items={pick(r.groups.backgroundComplete)} empty={r.contrasts.length === 0 ? "No contrast case is recorded, so this cannot be answered yet." : "Nothing readable was the same in every contrast case."} />
-        {r.groups.differentiatingComplete.length > 0 ? (
-          <div className="mt-3">
-            <p className="text-xs font-semibold text-muted mb-1">Different every time we have complete contrast evidence ({r.groups.differentiatingComplete.length})</p>
-            <ConditionList items={pick(r.groups.differentiatingComplete)} empty="" />
+      <Card title={`${EXPLORE_QUESTIONS[3]} (${r.groups.backgroundComplete.length + r.groups.differentiatingComplete.length + r.groups.mixedComplete.length})`}>
+        <p className="text-xs text-muted mb-2">
+          Conditions recorded the same at every occurrence, compared with the times the pattern was recorded at another value. Only comparisons with complete contrast coverage appear here; incomplete ones are under unresolved. True in both cases is not the difference.
+        </p>
+        {r.contrasts.length === 0 ? (
+          <p className="text-sm text-muted">No contrast case is recorded, so nothing can be compared yet.</p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-muted mb-1">Also true at every contrast time ({r.groups.backgroundComplete.length})</p>
+              <ConditionList items={pick(r.groups.backgroundComplete)} empty="None." />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted mb-1">Different at every contrast time, complete coverage ({r.groups.differentiatingComplete.length})</p>
+              <ConditionList items={pick(r.groups.differentiatingComplete)} empty="None." />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted mb-1">Mixed across contrast times ({r.groups.mixedComplete.length})</p>
+              <ConditionList items={pick(r.groups.mixedComplete)} empty="None." />
+            </div>
           </div>
-        ) : null}
-        {r.groups.mixedComplete.length > 0 ? (
-          <div className="mt-3">
-            <p className="text-xs font-semibold text-muted mb-1">Partly distinguishes ({r.groups.mixedComplete.length})</p>
-            <ConditionList items={pick(r.groups.mixedComplete)} empty="" />
-          </div>
-        ) : null}
+        )}
       </Card>
       <Card title={`${EXPLORE_QUESTIONS[4]} (${unresolved.length})`}>
         <p className="text-xs text-muted mb-2">Missing, conflicting for the same time, varied within a broad period, only an older value standing, or contrast evidence incomplete. Each is a different thing, and each is said as it is.</p>
@@ -305,7 +321,7 @@ function ExploreBody({ pattern, model, domain }: { pattern: PatternRef; model: S
       </Card>
       <Card title={EXPLORE_QUESTIONS[5]}>
         <p className="text-xs text-muted mb-3">
-          An explanation is a condition to test, never a verdict. The three headings are examined alike; a heading with nothing grounded stays empty rather than being filled in.
+          An explanation is a condition to test, never a verdict. The three headings are examined alike; a heading with no candidate stays empty rather than being filled in. A draft is a candidate, not evidence.
         </p>
         <Explanations r={r} model={model} domain={domain} />
       </Card>
