@@ -55,7 +55,7 @@ describe("discovery language", () => {
       unresolved_undated: variable([entry("a", 5, { kind: "unknown", precision: "unspecified", text: "sometime" })]),
     };
     const expectedWords: Record<string, RegExp> = {
-      repeated: /the same value .* recorded on 2 dates/,
+      repeated: /was recorded on 2 dates/,
       repeated_interrupted: /unresolved/,
       low_variation: /low recorded variation under display convention A23/,
       changed: /the recorded values differ/,
@@ -106,6 +106,7 @@ describe("discovery language", () => {
     expect(claim).toMatch(/^This condition was explicitly stated for a period/);
     expect(several).toMatch(/recorded more than once.*explicitly stated for a period/);
     for (const t of [repeated, low, claim, several]) {
+      expect(t).not.toMatch(/other things changed|other recorded variable|event/); // no context was given, so none is claimed
       expect(containsForbiddenPhrase(t)).toBeNull();
       expect(t).toContain(EXPLORE_PATTERN_CAUTION);
       expect(t).toMatch(/none of this establishes the underlying cause/);

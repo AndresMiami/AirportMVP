@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
-import { DERIVED_RECOMPUTATION_CAVEAT, describeInterval } from "@/discovery";
+import { DERIVED_RECOMPUTATION_CAVEAT, containsForbiddenPhrase, describeInterval, explorePatternText, historySentenceFor } from "@/discovery";
 import { createBlankModel } from "@/model/blank";
 import { domainRegistry, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
@@ -140,7 +140,41 @@ describe("describeInterval on the synthetic system", () => {
     const both = d.variables.find((v) => v.description.variableId === "both_h")!;
     expect(both.description.summaryClass).toBe("changed");
     expect(both.description.facts.exactRepetition).toBe(true);
-    expect(both.sentences.headline).toMatch(/3 recorded values, 3000 u → 5000 u, Jan 2026 → Aug 2026; the recorded values differ, and 5000 u was recorded on 2 dates\./);
+  });
+
+  it("3000 -> 5000 -> 5000: the section decides the lens; each sentence states its own fact and neither claims continuity or cause", () => {
+    const both = d.variables.find((v) => v.description.variableId === "both_h")!;
+    const changed = historySentenceFor(both.description, "changed");
+    const repeated = historySentenceFor(both.description, "repeated");
+    expect(changed.headline).toBe("both_h: 3 recorded values ranged from 3000 u to 5000 u, Jan 2026 → Aug 2026; the recorded values differ.");
+    expect(repeated.headline).toBe("both_h: 5000 u was recorded on 2 dates, Apr 2026 → Aug 2026.");
+    expect(repeated.details.join(" ")).toMatch(/does not show that the value held between the dates/);
+    for (const t of [changed.headline, ...changed.details, repeated.headline, ...repeated.details]) {
+      expect(containsForbiddenPhrase(t), t).toBeNull();
+      expect(t, t).not.toMatch(/throughout|continuous|stayed at|held from|because/i);
+    }
+    // the description object itself is untouched by the lens
+    expect(both.sentences.headline).toBe(changed.headline); // its own summary lens is "changed"
+    // the low-variation lens has its own sentence
+    const low = d.variables.find((v) => v.description.variableId === "changing_b")!;
+    expect(historySentenceFor(low.description, "low_variation").headline).toMatch(/low recorded variation under display convention A23/);
+    expect(historySentenceFor(low.description, "changed").headline).toMatch(/ranged from 50 u to 53 u/);
+  });
+
+  it("Explore text never invents surrounding context: it states other changes and events only from the context record, and only when N > 0", () => {
+    const both = d.variables.find((v) => v.description.variableId === "both_h")!;
+    const ctx = d.context.find((c) => c.variableId === "both_h")!;
+    const withContext = explorePatternText(both.description.facts, { variablesChanged: ctx.variablesChanged.length, eventsInInterval: ctx.eventsInInterval });
+    expect(withContext).toMatch(/^This condition was recorded more than once\. During the same period, 2 other recorded variables changed\. 3 events were also recorded during the period\./);
+    // the same facts with nothing else changed and no events: no such claim at all
+    const alone = explorePatternText(both.description.facts, { variablesChanged: 0, eventsInInterval: 0 });
+    expect(alone).toBe(`This condition was recorded more than once. ${withContext.slice(withContext.indexOf("That makes it"))}`);
+    expect(alone).not.toMatch(/other recorded variable|other things changed|event/);
+    // and with no context at all, nothing about the surroundings is said
+    const none = explorePatternText(both.description.facts);
+    expect(none).not.toMatch(/other recorded variable|other things changed|event/);
+    // a single other change / single event use singular wording
+    expect(explorePatternText(both.description.facts, { variablesChanged: 1, eventsInInterval: 1 })).toMatch(/1 other recorded variable changed\. 1 event was also recorded/);
   });
 
   it("derived variables are absent by default and never candidates", () => {
@@ -189,7 +223,7 @@ describe("describeInterval on the synthetic system", () => {
     expect(plain.buckets.lowVariation).toEqual([]);
     const b = plain.variables.find((v) => v.description.variableId === "changing_b")!;
     expect(b.description.variation).toMatchObject({ min: 50, max: 53, rawRange: 3, normalizedRange: null, convention: null });
-    expect(b.sentences.headline).toMatch(/50 u → 53 u/);
+    expect(b.sentences.headline).toMatch(/ranged from 50 u to 53 u/);
   });
 
   it("derived recomputation on request goes to its own section with the today's-structure caveat", () => {
@@ -298,7 +332,7 @@ describe("describeInterval on the household sample with enriched histories", () 
     expect(d.variables.some((v) => v.description.variableId === DERIVED_IDS.bufferMonths)).toBe(false);
     // the repeated sentence is descriptive
     const s = d.variables.find((v) => v.description.variableId === dani)!.sentences;
-    expect(s.headline).toMatch(/the same value \(.+\) recorded on 3 dates, Jan 2026 → Sep 2026/);
+    expect(s.headline).toMatch(/was recorded on 3 dates, Jan 2026 → Sep 2026/);
     expect(s.details.join(" ")).toMatch(/does not show that the value held between the dates/);
   });
 

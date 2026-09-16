@@ -20,9 +20,11 @@ import {
   describeInterval,
   explorePatternText,
   formatValue,
+  historySentenceFor,
   monthYear,
   normalizeIntervalStart,
   type DescribedVariable,
+  type HistoryLens,
   type IntervalDescription,
 } from "@/discovery";
 import { subjectLabelPluralOf } from "@/model/domain";
@@ -58,13 +60,8 @@ function ExploreCard({ item, description, onClose }: { item: DescribedVariable; 
   const changedNames = (ctx?.variablesChanged ?? []).map((id) => description.variables.find((v) => v.description.variableId === id)?.description.name ?? id);
   return (
     <div className="mt-2 rounded-md border border-accent bg-accent-soft px-3 py-2 text-sm" role="region" aria-label={`Explore ${item.description.name}`}>
-      <p>{explorePatternText(item.description.facts)}</p>
-      {ctx ? (
-        <p className="text-xs text-muted mt-2">
-          In the same period {changedNames.length > 0 ? `${changedNames.length} other variable${changedNames.length > 1 ? "s" : ""} changed (${changedNames.join(", ")})` : "no other variable's recorded values differ"}
-          {ctx.eventsInInterval > 0 ? ` and ${ctx.eventsInInterval} event${ctx.eventsInInterval > 1 ? "s were" : " was"} recorded` : ""}. That is context to examine, not a cause.
-        </p>
-      ) : null}
+      <p>{explorePatternText(item.description.facts, ctx ? { variablesChanged: ctx.variablesChanged.length, eventsInInterval: ctx.eventsInInterval } : undefined)}</p>
+      {ctx && changedNames.length > 0 ? <p className="text-xs text-muted mt-2">The other variables that changed: {changedNames.join(", ")}. That is context to examine, not a cause.</p> : null}
       <div className="mt-2 flex flex-wrap gap-2">
         <Link href="/hypotheses" className={BTN}>
           View hypotheses
@@ -78,16 +75,18 @@ function ExploreCard({ item, description, onClose }: { item: DescribedVariable; 
   );
 }
 
-function RecordRow({ item, description, model, explorable = false }: { item: DescribedVariable; description: IntervalDescription; model: SystemModel; explorable?: boolean }) {
+function RecordRow({ item, lens, description, model, explorable = false }: { item: DescribedVariable; lens: HistoryLens; description: IntervalDescription; model: SystemModel; explorable?: boolean }) {
   const [open, setOpen] = useState(false);
   const [explore, setExplore] = useState(false);
   const d = item.description;
+  // the SECTION decides the lens; the description is the same object everywhere
+  const sentences = historySentenceFor(d, lens);
   const subject = d.subjectId === model.id ? null : subjectLabelFor(model, d.subjectId);
   return (
     <li className="px-4 py-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <p className="text-sm">
-          {item.sentences.headline}
+          {sentences.headline}
           {subject ? <span className="text-xs text-muted"> · {subject}</span> : null}
         </p>
         <span className="flex gap-1.5">
@@ -104,9 +103,9 @@ function RecordRow({ item, description, model, explorable = false }: { item: Des
       {explore ? <ExploreCard item={item} description={description} onClose={() => setExplore(false)} /> : null}
       {open ? (
         <div className="mt-2 space-y-2 text-xs">
-          {item.sentences.details.length > 0 ? (
+          {sentences.details.length > 0 ? (
             <ul className="list-disc pl-5 text-muted space-y-0.5">
-              {item.sentences.details.map((line, i) => (
+              {sentences.details.map((line, i) => (
                 <li key={i}>{line}</li>
               ))}
             </ul>
@@ -161,16 +160,17 @@ function RecordRow({ item, description, model, explorable = false }: { item: Des
   );
 }
 
-function Section({ title, hint, items, description, model, explorable = false }: { title: string; hint: string; items: DescribedVariable[]; description: IntervalDescription; model: SystemModel; explorable?: boolean }) {
+/** One row per (variable, lens): a variable qualifying by two facts shows one sentence per fact. */
+function Section({ title, hint, entries, description, model, explorable = false }: { title: string; hint: string; entries: { item: DescribedVariable; lens: HistoryLens }[]; description: IntervalDescription; model: SystemModel; explorable?: boolean }) {
   return (
-    <Card title={`${title} (${items.length})`}>
+    <Card title={`${title} (${entries.length})`}>
       <p className="text-xs text-muted mb-2">{hint}</p>
-      {items.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="text-sm text-muted">Nothing in this group for the chosen period.</p>
       ) : (
         <ul className="-mx-4 divide-y divide-border border-t border-border">
-          {items.map((item) => (
-            <RecordRow key={item.description.variableId} item={item} description={description} model={model} explorable={explorable} />
+          {entries.map(({ item, lens }) => (
+            <RecordRow key={`${item.description.variableId}:${lens}`} item={item} lens={lens} description={description} model={model} explorable={explorable} />
           ))}
         </ul>
       )}
@@ -274,8 +274,13 @@ export default function HistoryPage() {
 function HistoryBody({ description, model, subjectPlural }: { description: IntervalDescription; model: SystemModel; subjectPlural: string }) {
   const d = description;
   const datedRecords = d.variables.reduce((n, v) => n + v.description.knownRecordCount, 0);
-  // a variable may qualify by more than one fact; list it once
-  const similar = [...new Map([...d.buckets.repeated, ...d.buckets.lowVariation, ...d.buckets.explicitClaims].map((v) => [v.description.variableId, v])).values()];
+  // one entry per fact: a variable that repeated AND stayed within A23 gets one sentence per lens
+  const similar: { item: DescribedVariable; lens: HistoryLens }[] = [
+    ...d.buckets.repeated.map((item) => ({ item, lens: "repeated" as const })),
+    ...d.buckets.lowVariation.map((item) => ({ item, lens: "low_variation" as const })),
+    ...d.buckets.explicitClaims.map((item) => ({ item, lens: "explicit_claim" as const })),
+  ];
+  const withLens = (items: DescribedVariable[], lens: HistoryLens) => items.map((item) => ({ item, lens }));
   return (
     <div className="mt-4 space-y-4">
       <p className="text-sm">
@@ -296,7 +301,7 @@ function HistoryBody({ description, model, subjectPlural }: { description: Inter
         ) : (
           <ul className="-mx-4 divide-y divide-border border-t border-border">
             {d.buckets.changed.map((item) => (
-              <RecordRow key={item.description.variableId} item={item} description={d} model={model} />
+              <RecordRow key={item.description.variableId} item={item} lens="changed" description={d} model={model} />
             ))}
             {d.events.inInterval.map((e) => (
               <li key={e.id} className="px-4 py-2.5 text-sm">
@@ -315,14 +320,14 @@ function HistoryBody({ description, model, subjectPlural }: { description: Inter
       <Section
         title="What repeated or stayed similar in the records"
         hint="The same value recorded on more than one date, values within the low-variation display convention, or a period the person stated explicitly. These are facts about the records and can overlap with &ldquo;what changed&rdquo;. A repeated record does not show that the value held in between."
-        items={similar}
+        entries={similar}
         description={d}
         model={model}
         explorable
       />
-      <Section title="Only an old value still standing" hint="Nothing was recorded in this period; the last recorded value still resolves because nothing replaced it. That is the model's state, not an observation made in the period." items={d.buckets.lastKnownOnly} description={d} model={model} />
-      <Section title="Not enough history" hint="At most one dated value in this period; nothing can be said about repetition." items={d.buckets.insufficient} description={d} model={model} />
-      <Section title="Unknown" hint="Recorded as unknown, recorded twice for the same time with different values, or recorded without an orderable time." items={d.buckets.unresolved} description={d} model={model} />
+      <Section title="Only an old value still standing" hint="Nothing was recorded in this period; the last recorded value still resolves because nothing replaced it. That is the model's state, not an observation made in the period." entries={withLens(d.buckets.lastKnownOnly, "last_known_only")} description={d} model={model} />
+      <Section title="Not enough history" hint="At most one dated value in this period; nothing can be said about repetition." entries={withLens(d.buckets.insufficient, "insufficient")} description={d} model={model} />
+      <Section title="Unknown" hint="Recorded as unknown, recorded twice for the same time with different values, or recorded without an orderable time." entries={withLens(d.buckets.unresolved, "unresolved")} description={d} model={model} />
 
       {d.recomputed.length > 0 ? (
         <Card title={`Calculated values, recomputed (${d.recomputed.length})`}>

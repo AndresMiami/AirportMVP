@@ -29,16 +29,34 @@ export const CAUSATION_DISCLAIMER = "Repeated or stable observations do not esta
 export const EXPLORE_PATTERN_CAUTION =
   "That makes it a pattern worth examining, but none of this establishes the underlying cause. Competing explanations (circumstances, structure, outside shocks, incentives, habits, or a mix) deserve the same look before any one of them becomes a working model.";
 
-/** The read-only "Explore this pattern" card, worded from the evidence
- *  that made the variable a candidate. Several facts may hold at once. */
-export function explorePatternText(facts: Pick<EvidenceFacts, "exactRepetition" | "lowRecordedVariation" | "explicitIntervalClaim">): string {
+/** Surrounding context for an Explore card: what the interval description
+ *  actually found around the candidate. Absent = nothing is claimed. */
+export interface ExploreContext {
+  /** Other recorded variables whose values differ over the same period. */
+  variablesChanged: number;
+  /** Events recorded during the period. */
+  eventsInInterval: number;
+}
+
+/** The read-only "Explore this pattern" card. PATTERN EVIDENCE (from the
+ *  variable's own facts) is worded separately from SURROUNDING CONTEXT
+ *  (from the interval description), and context is stated only when it
+ *  exists: the facts alone cannot know whether anything else changed. */
+export function explorePatternText(facts: Pick<EvidenceFacts, "exactRepetition" | "lowRecordedVariation" | "explicitIntervalClaim">, context?: ExploreContext): string {
   const leads: string[] = [];
-  if (facts.exactRepetition) leads.push("This condition was recorded more than once while other things changed.");
-  if (facts.lowRecordedVariation) leads.push("These recorded values stayed within a narrow range (display convention A23) while other things changed.");
+  if (facts.exactRepetition) leads.push("This condition was recorded more than once.");
+  if (facts.lowRecordedVariation) leads.push("These recorded values stayed within a narrow range (display convention A23).");
   if (facts.explicitIntervalClaim) leads.push("This condition was explicitly stated for a period, as the person's own assertion.");
   if (leads.length === 0) leads.push("This condition is shown here because of what the records contain.");
-  return `${leads.join(" ")} ${EXPLORE_PATTERN_CAUTION}`;
+  const around: string[] = [];
+  if (context && context.variablesChanged > 0) around.push(`During the same period, ${context.variablesChanged} other recorded variable${context.variablesChanged > 1 ? "s" : ""} changed.`);
+  if (context && context.eventsInInterval > 0) around.push(`${context.eventsInInterval} event${context.eventsInInterval > 1 ? "s were" : " was"} also recorded during the period.`);
+  return [...leads, ...around, EXPLORE_PATTERN_CAUTION].join(" ");
 }
+
+/** A presentation lens: the section a sentence is written for. The
+ *  underlying description is unchanged; only the sentence differs. */
+export type HistoryLens = VariableHistoryDescription["summaryClass"];
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -67,8 +85,17 @@ export interface HistorySentences {
   details: string[];
 }
 
-/** Sentences for one variable's history description. Pure and total. */
+/** Sentences for one variable's history description under its own
+ *  summary lens. Pure and total. */
 export function historySentences(d: VariableHistoryDescription): HistorySentences {
+  return historySentenceFor(d, d.summaryClass);
+}
+
+/** Sentences for one variable's history description under the LENS of the
+ *  section showing it. A value that changed and was also recorded again
+ *  gets a "changed" sentence in one section and a "repeated" sentence in
+ *  the other; each states its own fact and neither claims continuity. */
+export function historySentenceFor(d: VariableHistoryDescription, lens: HistoryLens): HistorySentences {
   const n = d.distinctApplicationTimeCount;
   const first = d.applicationTimes.find((t) => t.kind === "known")?.start;
   const last = [...d.applicationTimes].reverse().find((t) => t.kind === "known")?.start;
@@ -76,10 +103,14 @@ export function historySentences(d: VariableHistoryDescription): HistorySentence
   const details: string[] = [];
   let headline: string;
 
-  switch (d.summaryClass) {
+  switch (lens) {
     case "repeated": {
-      const v = d.repeatedValues.map((r) => formatValue(r.value, d.unit)).join(", ");
-      headline = `${d.name}: the same value (${v}) recorded on ${n} dates${span ? `, ${span}` : ""}.`;
+      const parts = d.repeatedValues.map((r) => {
+        const times = r.applicationTimes;
+        const rspan = times.length > 1 && times[0] !== times.at(-1) ? `, ${monthYear(times[0])} → ${monthYear(times.at(-1) as string)}` : "";
+        return `${formatValue(r.value, d.unit)} was recorded on ${times.length} dates${rspan}`;
+      });
+      headline = `${d.name}: ${parts.length > 0 ? parts.join("; ") : "no value was recorded on more than one date"}.`;
       details.push(`${d.knownRecordCount} dated records with a known value; ${d.distinctApplicationTimeCount} distinct application times.`);
       details.push("A value recorded again is a repeated record; it does not show that the value held between the dates.");
       break;
@@ -91,8 +122,7 @@ export function historySentences(d: VariableHistoryDescription): HistorySentence
       break;
     }
     case "changed": {
-      const repeat = d.repeatedValues.length > 0 ? `, and ${d.repeatedValues.map((r) => `${formatValue(r.value, d.unit)} was recorded on ${r.applicationTimes.length} dates`).join("; ")}` : "";
-      headline = `${d.name}: ${n} recorded values, ${formatValue(d.variation.min, d.unit)} → ${formatValue(d.variation.max, d.unit)}${span ? `, ${span}` : ""}; the recorded values differ${repeat}.`;
+      headline = `${d.name}: ${n} recorded values ranged from ${formatValue(d.variation.min, d.unit)} to ${formatValue(d.variation.max, d.unit)}${span ? `, ${span}` : ""}; the recorded values differ.`;
       details.push(`${d.differingRecordedPairs} of ${Math.max(0, n - 1)} consecutive record pairs differ (a count of records compared, not of changes that happened).`);
       if (d.variation.referenceRange === null) details.push("No reference range is declared, so the size of the change is reported raw, never as small or large.");
       break;
