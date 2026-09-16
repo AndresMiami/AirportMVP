@@ -291,7 +291,7 @@ function HistoryInner() {
   if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
   if (status === "loading" || !model || !evaluated || !result) return <Loading />;
   const subjects = subjectsOf(model, { includeArchived: true });
-  const whose = subject === ALL ? "everyone" : subject === model.id ? `the whole system` : (subjectLabelFor(model, subject) ?? subject);
+  const whose = subject === ALL ? "Everyone" : subject === model.id ? "The whole system" : (subjectLabelFor(model, subject) ?? subject);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -303,7 +303,6 @@ function HistoryInner() {
             {monthName(from)} → {monthName(to)}
           </span>
           <span className="text-muted"> · {whose}</span>
-          {result.ok ? <span className="block text-sm text-muted">{periodSummary(result.description)}</span> : null}
         </p>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
           <button type="button" className={TOGGLE} aria-expanded={periodOpen} onClick={() => setPeriodOpen((x) => !x)} data-testid="change-period">
@@ -347,6 +346,11 @@ function HistoryInner() {
         ) : null}
         {advancedOpen ? (
           <div className="mt-3 space-y-2 rounded-xl border border-border/70 bg-surface px-4 py-3 text-sm" data-testid="advanced-controls">
+            {result.ok ? (
+              <p className="text-muted" data-testid="period-counts">
+                In this period: {periodSummary(result.description)}.
+              </p>
+            ) : null}
             <label className="flex items-start gap-2">
               <input type="checkbox" className="mt-1" checked={convention} onChange={(e) => setConvention(e.target.checked)} />
               <span>

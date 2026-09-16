@@ -37,10 +37,13 @@ describe("the three questions", () => {
     expect(q.needsInformation).toHaveLength(d.buckets.lastKnownOnly.length + d.buckets.insufficient.length + d.buckets.unresolved.length);
     for (const r of [...q.changed, ...q.recurring, ...q.needsInformation]) {
       expect(containsForbiddenPhrase(r.text), r.text).toBeNull();
-      expect(r.text).not.toMatch(/application time|dated records|A23|resolution|summaryClass/);
+      expect(r.text).not.toMatch(/application time|dated records|A23|resolution|summaryClass|recorded variable|dated value/);
     }
+    // 6B.1: counts appear only where the finding needs them — an exact repetition's recorded dates, a single recorded value
+    for (const r of [...q.changed, ...q.recurring.filter((x) => x.lens !== "repeated")]) expect(r.text).not.toMatch(/across \d+ recorded values|\d+ recorded/);
     expect(q.changed.every((r) => r.tag === null)).toBe(true);
-    expect(new Set(q.recurring.map((r) => r.tag))).toEqual(new Set(["Same value", ...(d.buckets.lowVariation.length ? ["Stayed close"] : []), ...(d.buckets.explicitClaims.length ? ["As stated"] : [])]));
+    expect(q.recurring.filter((r) => r.lens === "repeated").every((r) => r.tag === null)).toBe(true); // no "Same value" tag
+    expect(new Set(q.recurring.filter((r) => r.lens !== "repeated").map((r) => r.tag))).toEqual(new Set([...(d.buckets.lowVariation.length ? ["Stayed close"] : []), ...(d.buckets.explicitClaims.length ? ["As stated"] : [])]));
     expect(q.needsInformation.every((r) => ["Old value still standing", "Not enough history", "Unknown"].includes(r.tag as string))).toBe(true);
   });
 
@@ -61,7 +64,8 @@ describe("the three questions", () => {
   it("words each lens for people while the engine keeps its own sentence under Details", () => {
     const d = interval();
     const income = d.variables.find((x) => x.description.variableId === "income_stability")!.description;
-    expect(historyRows(income, "changed")[0].text).toBe("income_stability ranged from 5 to 9 across 7 recorded values between February 2025 and June 2026.");
+    expect(historyRows(income, "changed")[0].text).toBe("income_stability ranged from 5 to 9 between February 2025 and June 2026.");
+    expect(historySentenceFor(income, "changed").details[0]).toMatch(/^\d+ of \d+ consecutive record pairs differ/); // the count stays under Details
     expect(historyRows(income, "repeated")[0].text).toBe("income_stability was 5 on 4 recorded dates between February 2025 and June 2026.");
     expect(historySentenceFor(income, "repeated").headline).toMatch(/was recorded on 4 dates/); // unchanged engine wording
     const cover = d.variables.find((x) => x.description.variableId === "health_cover")!.description;
@@ -84,7 +88,7 @@ describe("the three questions", () => {
     expect(steady.facts.lowRecordedVariation).toBe(true);
     const row = historyRows(steady, "low_variation")[0];
     expect(row).toMatchObject({ question: "recurring", tag: "Stayed close", exploreHref: null });
-    expect(row.text).toMatch(/^Steady stayed between 10 and 14 across 3 recorded values/);
+    expect(row.text).toBe("Steady stayed between 10 and 14 between December 2025 and June 2026.");
     expect(historyRows(steady, "repeated")).toEqual([]);
   });
 

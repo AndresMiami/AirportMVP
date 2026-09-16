@@ -7,7 +7,9 @@
  * stated period, a carried-forward value, insufficient history,
  * ambiguity, unknowns) keeps its own row, tag and Explore hand-off; the
  * engine's own sentence, record counts and caveats stay available under
- * Details. The Explore PatternRef is encoded exactly as before. Pure; no
+ * Details. First-layer sentences carry a count only where the finding
+ * needs it (an exact repetition's recorded dates, a single recorded
+ * value); a change or a close range is worded without one (6B.1). The Explore PatternRef is encoded exactly as before. Pure; no
  * React; no household.
  */
 import { dayMonthYear, encodePatternRef, type HistoryLens, type IntervalDescription, type VariableHistoryDescription } from "@/discovery";
@@ -22,7 +24,7 @@ export interface HistoryRow {
   lens: HistoryLens;
   /** Which of the three questions the row answers. */
   question: HistoryQuestion;
-  /** A quiet distinction label ("Same value", "Stayed close", "As stated", "Old value still standing", "Not enough history", "Unknown"); null for plain change. */
+  /** A quiet distinction label ("Stayed close", "As stated", "Old value still standing", "Not enough history", "Unknown"); null for plain change and for exact repetition (6B.1: the sentence and the section already say it). */
   tag: string | null;
   /** The ordinary-language sentence. */
   text: string;
@@ -53,7 +55,7 @@ export function historyRows(d: VariableHistoryDescription, lens: HistoryLens): H
           key: `${d.variableId}:changed`,
           question: "changed",
           tag: null,
-          text: `${d.name} ranged from ${plainQuantity(d.variation.min, d.unit)} to ${plainQuantity(d.variation.max, d.unit)} across ${n} recorded values${span}.`,
+          text: `${d.name} ranged from ${plainQuantity(d.variation.min, d.unit)} to ${plainQuantity(d.variation.max, d.unit)}${span || " during this period"}.`,
           exploreHref: null,
           repeatedValue: null,
         },
@@ -63,7 +65,7 @@ export function historyRows(d: VariableHistoryDescription, lens: HistoryLens): H
         ...base,
         key: `${d.variableId}:repeated:${rv.value}`,
         question: "recurring",
-        tag: "Same value",
+        tag: null, // inside "What keeps showing up?" the sentence already says it; the other kinds keep their distinguishing tags
         text: recurrenceSentence(d.name, rv.value, d.unit, rv.applicationTimes),
         exploreHref: explorePatternHref(d, rv.value, rv.applicationTimes),
         repeatedValue: rv.value,
@@ -75,7 +77,7 @@ export function historyRows(d: VariableHistoryDescription, lens: HistoryLens): H
           key: `${d.variableId}:low_variation`,
           question: "recurring",
           tag: "Stayed close",
-          text: `${d.name} stayed between ${plainQuantity(d.variation.min, d.unit)} and ${plainQuantity(d.variation.max, d.unit)} across ${n} recorded values${span}.`,
+          text: `${d.name} stayed between ${plainQuantity(d.variation.min, d.unit)} and ${plainQuantity(d.variation.max, d.unit)}${span || " during this period"}.`,
           exploreHref: null,
           repeatedValue: null,
         },
@@ -188,7 +190,7 @@ export function needsInformationGroups(rows: HistoryRow[]): RowGroup[] {
     });
 }
 
-/** "3 recorded variables, 12 dated values and 2 events" for the period line. */
+/** "3 recorded variables, 12 dated values and 2 events" — engineering counts, shown under Advanced only (6B.1), never in the first layer. */
 export function periodSummary(d: IntervalDescription): string {
   const dated = d.variables.reduce((n, v) => n + v.description.knownRecordCount, 0);
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

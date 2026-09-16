@@ -83,6 +83,13 @@ describe("History (6B: presentation simplified, distinctions kept)", () => {
     expect(page.indexOf("What keeps showing up?")).toBeLessThan(page.indexOf("What still needs more information?"));
     expect(page).toMatch(/historyQuestions\(d\)/);
     expect(page).toMatch(/needsInformationGroups\(q\.needsInformation\)/);
+    // 6B.1: the engineering counts render only inside the Advanced block, never in the header
+    const header = page.slice(page.indexOf("<header"), page.indexOf("</header>"));
+    const advanced = header.slice(header.indexOf('data-testid="advanced-controls"'));
+    expect(header.split("periodSummary(").length - 1).toBe(1);
+    expect(advanced).toMatch(/periodSummary\(/);
+    expect(header.slice(0, header.indexOf('data-testid="advanced-controls"'))).not.toMatch(/periodSummary/);
+    expect(read("src/features/history/wording.ts")).not.toMatch(/tag: "Same value"/);
     expect(page).toMatch(/describeInterval\(model/); // the same engine call as before
     expect(page).not.toMatch(/@\/services\/mutations|\.save\(|proposals\.create/);
     // the technical layer is behind toggles, never on the first layer

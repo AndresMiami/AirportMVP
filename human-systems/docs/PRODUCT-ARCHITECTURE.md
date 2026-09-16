@@ -841,8 +841,25 @@ capture surface corrects this when it replaces that screen.
    Explore hand-off opening the pattern, Change period and Advanced
    revealing their controls, Details revealing the records table
    (scrolling inside its own box on mobile), no horizontal overflow.
-   Next: Explore, then Review, then Map — after the History screenshots
-   are reviewed.
+   STEP 6B.1 DONE — HISTORY FIRST-LAYER CLEANUP (presentation only;
+   discovery, buckets, PatternRef, URL parsing, Details, Advanced
+   behaviour and grouping untouched). The visible period header is the
+   period, whose records, Change period and Advanced — the engineering
+   counts ("N recorded variables, N dated values and N events") render
+   only inside Advanced. A change reads "Total debt ranged from $4,000 to
+   $9,500 between February 2025 and September 2026." and a close range
+   "Liquid reserves stayed between $2,000 and $2,400 between …" — no
+   "across N recorded values"; the counts stay in Details through the
+   engine's own sentence and the records table. Counts remain in the
+   first layer only where the finding needs them: an exact repetition's
+   "on 7 recorded dates" and "only one recorded value". Exact-repetition
+   rows carry no "Same value" tag (the section and the sentence already
+   say it); Stayed close, As stated, Old value still standing, Not enough
+   history and Unknown keep their tags because they mean different
+   things. Pinned in tests (first layer free of recorded variable / dated
+   value / across N recorded values / Same value; Details still exposes
+   the counts and raw records) and in Chromium. Next: Explore, then
+   Review, then Map — after the History screenshots are reviewed.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

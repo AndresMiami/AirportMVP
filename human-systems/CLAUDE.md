@@ -246,15 +246,18 @@ problem. HISTORY (6B): SIMPLIFY THE PRESENTATION, NOT THE DISTINCTIONS —
 the first layer is three ordinary questions (What changed? / What keeps
 showing up? / What still needs more information?) worded by
 src/features/history/wording.ts over the UNCHANGED discovery engine;
-every engine distinction keeps its own row and tag (Same value / Stayed
-close / As stated / Old value still standing / Not enough history /
-Unknown), exact repetition hands /explore the exact same PatternRef
-(one row per repeated value), the engine's own sentence, raw records
-with source and confidence, resolution states and evidence facts sit
-under Details, and the period, subject, A23 convention, calculated
-values, snapshots and interval caveats sit under Change period /
-Advanced / Notes. Never move a distinction out of the page to simplify
-it; move it behind a toggle. Next: Explore, then Review, then Map — one
+every engine distinction keeps its own row (tags Stayed close / As
+stated / Old value still standing / Not enough history / Unknown; an
+exact repetition needs no tag inside "What keeps showing up?"), exact
+repetition hands /explore the exact same PatternRef (one row per
+repeated value), the engine's own sentence, raw records with source and
+confidence, resolution states, evidence facts and every record count
+sit under Details, and the period, subject, the engineering counts, A23
+convention, calculated values, snapshots and interval caveats sit under
+Change period / Advanced / Notes. First-layer sentences carry a count
+only where the finding needs it ("on 7 recorded dates", "only one
+recorded value"), never "across N recorded values" (6B.1). Never move a
+distinction out of the page to simplify it; move it behind a toggle. Next: Explore, then Review, then Map — one
 coherent product over the existing capability, not more AI work.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
