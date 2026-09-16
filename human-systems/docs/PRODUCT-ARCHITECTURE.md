@@ -858,8 +858,72 @@ capture surface corrects this when it replaces that screen.
    history and Unknown keep their tags because they mean different
    things. Pinned in tests (first layer free of recorded variable / dated
    value / across N recorded values / Same value; Details still exposes
-   the counts and raw records) and in Chromium. Next: Explore, then
-   Review, then Map — after the History screenshots are reviewed.
+   the counts and raw records) and in Chromium. HISTORY FROZEN at
+   e5e0e68 (reviewed: the removal of cards was right; event timing
+   wording — "2025-07-01", "Mar–Aug 2026 (two months within)" — is on
+   the polish backlog, not a checkpoint).
+   STEP 6C DONE — EXPLORE: SIMPLIFY WITHOUT CHANGING THE COMPARISON.
+   Unchanged: crossContext and contextSubjectsFor (the same call, pinned
+   verbatim), PatternRef, occurrence/contrast membership, condition
+   classifications, contrast coverage, event scope, the draft scope key
+   (`${model.id}|${encodePatternRef(pattern)}` under
+   human-systems.explore-drafts.v1), promptId capture, proposal basis and
+   request (buildExploreProposal -> ProposalService.create with
+   proposedBy person -> /proposals?focus=id), staleness, hypothesis
+   linking, AI contracts, schemas. The page now reads in the notebook
+   column: "← Back to History / Explore / This kept happening. Why might
+   that be?" then the pattern in plain words from the result only
+   ("Total debt was $4,000 on 7 recorded dates between …") with "See the
+   recorded times" hiding every occurrence and contrast date, marker,
+   nearby event and the event-window convention until asked. Five
+   questions follow, worded by src/features/explore/wording.ts over the
+   engine's own groups row by row (tests/features/explore-wording.test.ts
+   pins identical ids and order per group, every condition exactly once,
+   partial coverage under unresolved): What was different each time?
+   ("Liquid reserves was $2,000, then $4,500, then …"); What was the same
+   each time? ("X was 3 months each time."); How did the other recorded
+   times compare? — only the complete-coverage groups, each rendered only
+   when it has entries, translated without changing meaning ("Also true
+   when this did not happen" / "Different when this did not happen" /
+   "Mixed in the other recorded times"; a differentiating row reads
+   "different in all of the recorded comparison cases", never caused /
+   explains / strong evidence / likely cause / predictor; no contrast
+   cases -> "There are no other recorded values to compare with yet.");
+   What is still unresolved? (tags "Not readable at every time", "No
+   usable comparison", "Comparison incomplete"; the five unresolved
+   meanings stay distinct; a group above three rows collapses to one
+   sentence with "Show all N"); What might explain this? — one human
+   workspace: "Already investigating" only when a linked or created
+   hypothesis exists ("Created from this pattern" where applicable;
+   status, confidence and the exact link reasons under Details), the
+   person's drafts with their domain locus label (Person / Environment /
+   Interaction), "Investigate this explanation" as the one primary
+   action, a plain proposal status ("Waiting for your review", "Needs a
+   fresh review …", "Could not be applied …", "Replaced …", never hidden)
+   with "Review proposal →", "Write an explanation" opening "Your
+   explanation" + a locus choice + "Keep as draft" / Cancel / "Draft only
+   · kept in this browser", every domain prompt under one collapsed
+   "Questions to help you think" (locus label kept; selecting one still
+   creates a draft with that exact promptId), and the mock AI link
+   demoted to "Help me think about this pattern · Demo". Footer: "These
+   comparisons can help you form explanations. They do not establish a
+   cause." with "About this comparison" holding the carried-forward
+   rule, the complete-coverage rule, the five unresolved meanings, the
+   draft-is-not-evidence line and every engine caveat. Each condition
+   row's Details shows the engine's own statement and its readable /
+   same / different counts. No Card components, no six equal blocks, no
+   empty locus sections, no "No candidate yet". Chromium desktop +
+   mobile: History -> exact recurrence -> Explore, plain first layer,
+   recorded times hidden until requested, complete groups keep their
+   meanings, incomplete coverage stays unresolved, write a draft from a
+   question -> reload -> survives with its promptId, Investigate -> model
+   unchanged -> focused proposal with proposedBy person and the
+   pattern / cross_context / catalogue_prompt / user_statement basis,
+   return -> "Waiting for your review" + "Review proposal", approve ->
+   "Already investigating" + "Created from this pattern" with confidence
+   only under Details, no horizontal overflow, the first mobile viewport
+   showing the pattern and the first question. Next: Review, then Map —
+   after the Explore screenshots are reviewed.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

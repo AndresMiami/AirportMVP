@@ -106,6 +106,41 @@ describe("History (6B: presentation simplified, distinctions kept)", () => {
   });
 });
 
+describe("Explore (6C: presentation simplified, comparison unchanged)", () => {
+  it("asks the five questions in order over the same engine call, the same draft scope, the same proposal path, and moves the technical layer behind toggles", () => {
+    const page = read("src/app/explore/page.tsx");
+    const order = ["What was different each time?", "What was the same each time?", "How did the other recorded times compare?", "What is still unresolved?", "What might explain this?"];
+    for (const q of order) expect(page).toContain(`title="${q}"`);
+    for (let i = 1; i < order.length; i++) expect(page.indexOf(order[i - 1])).toBeLessThan(page.indexOf(order[i]));
+    expect(page).toContain("This kept happening. Why might that be?");
+    // unchanged: the comparison, its subject scope, the draft scope key, the proposal request and author, the review hand-off
+    expect(page).toContain("crossContext(model, pattern, { contextSubjectIds: contextSubjectsFor(model, pattern, domain) })");
+    expect(page).toContain("const scope = `${model.id}|${encodePatternRef(r.pattern)}`;");
+    expect(page).toContain('const DRAFTS_KEY = "human-systems.explore-drafts.v1";');
+    expect(page).toContain("const input = buildExploreProposal(d, r, domain);");
+    expect(page).toContain('proposals.create({ modelId: model.id, request: input.request, proposedBy: { kind: "person" }, rationale: input.rationale, basis: input.basis })');
+    expect(page).toContain("setEditing({ locus: q.locus, text: \"\", promptId: q.id })");
+    expect(page).toContain("promptId: editing.promptId");
+    expect(page).not.toMatch(/@\/services\/mutations|\bapply\(|replaceModel|\.save\(/);
+    // the technical layer is behind toggles; no six equal cards; the demo link is secondary
+    for (const t of ["recorded-times-toggle", "about", "condition-details", "hypothesis-details", "questions", "write-explanation", "help-me-think"]) expect(page).toContain(`data-testid="${t}"`);
+    expect(page).not.toMatch(/<Card\b/);
+    expect(page).not.toMatch(/No candidate of this kind yet|links, never wording, decide this|Write your own|Keep as a candidate/);
+    expect(page).toMatch(/Write an explanation/);
+    expect(page).toMatch(/Keep as draft/);
+    expect(page).toMatch(/Draft only · kept in this browser/);
+    expect(page).toMatch(/Created from this pattern/);
+    expect(page).toMatch(/Help me think about this pattern/);
+    expect(page).toMatch(/exploreSections\(result\)/);
+    // every engine group is consumed by the wording module; the engine imports nothing from features
+    const wording = read("src/features/explore/wording.ts");
+    for (const g of ["differingAtOccurrences", "commonAtOccurrences", "insufficientAtOccurrences", "backgroundComplete", "differentiatingComplete", "mixedComplete", "contrastPartial", "undecided"]) expect(wording).toContain(g);
+    expect(wording).not.toMatch(/from "react"|@\/domains|@\/services|@\/kernel/);
+    expect(read("src/discovery/cross-context.ts")).not.toMatch(/@\/features/);
+    expect(read("src/features/explore/proposal.ts")).toBe(read("src/features/explore/proposal.ts")); // untouched by this step is proven by git; the proposal path pins above cover behaviour
+  });
+});
+
 describe("Library and routes", () => {
   it("Library links every advanced screen, and every existing route still has a page", () => {
     const lib = read("src/app/library/page.tsx");

@@ -257,8 +257,26 @@ convention, calculated values, snapshots and interval caveats sit under
 Change period / Advanced / Notes. First-layer sentences carry a count
 only where the finding needs it ("on 7 recorded dates", "only one
 recorded value"), never "across N recorded values" (6B.1). Never move a
-distinction out of the page to simplify it; move it behind a toggle. Next: Explore, then Review, then Map — one
-coherent product over the existing capability, not more AI work.
+distinction out of the page to simplify it; move it behind a toggle.
+HISTORY IS FROZEN (e5e0e68). EXPLORE (6C): SIMPLIFY WITHOUT CHANGING
+THE COMPARISON — the page words the UNCHANGED crossContext result as
+five questions (What was different each time? / What was the same each
+time? / How did the other recorded times compare? / What is still
+unresolved? / What might explain this?) through
+src/features/explore/wording.ts, which maps the engine's groups row by
+row and never recomputes, ranks or promotes: the three complete-contrast
+meanings keep their membership under human headings (Also true when
+this did not happen / Different when this did not happen / Mixed in the
+other recorded times), partial coverage stays unresolved, unresolved
+keeps its distinct tags, no sentence says caused / explains / strong
+evidence / likely cause / predictor, and the engine's statement, counts,
+recorded times and caveats sit behind toggles. Investigate is still the
+only boundary (buildExploreProposal -> ProposalService.create,
+proposedBy person -> /proposals?focus=id; drafts stay in this browser
+under the full-pattern scope key; a prompt-derived draft keeps its exact
+promptId). Never redesign the comparison to simplify the page. Next:
+Review, then Map — one coherent product over the existing capability,
+not more AI work.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

@@ -1,50 +1,50 @@
 "use client";
 /**
- * EXPLORE THIS PATTERN — read-only. "This kept happening. Why might that
- * be?" answered from the deterministic cross-context engine: what was
- * different each time, what was the same, what was also true when it did
- * NOT happen, what is still unresolved, and possible explanations to
- * investigate. Candidates come only from the person's own drafts (kept in
- * this browser, never in the model) and from hypotheses deterministically
- * linked to the record. Catalogue prompts are questions to consider, never
- * candidates. Nothing here writes to the model: "Investigate this
- * explanation" creates a PROPOSAL through the kernel, the person reviews
- * it in /proposals, and only approval there creates the hypothesis.
+ * EXPLORE (Step 6C: simplified presentation, same comparison) — one human
+ * question: "This kept happening. Why might that be?" The deterministic
+ * cross-context engine provides the comparison; the person supplies the
+ * explanation. The first layer reads as five questions in the same narrow
+ * column as Home and History:
+ *
+ *   What was different each time?             -> differingAtOccurrences
+ *   What was the same each time?              -> commonAtOccurrences
+ *   How did the other recorded times compare? -> backgroundComplete /
+ *                                                differentiatingComplete /
+ *                                                mixedComplete (complete
+ *                                                coverage only)
+ *   What is still unresolved?                 -> insufficientAtOccurrences /
+ *                                                undecided / contrastPartial
+ *   What might explain this?                  -> the person's drafts, the
+ *                                                domain's questions, and the
+ *                                                hypotheses already linked
+ *
+ * Nothing here recomputes, ranks or writes: the wording module only words
+ * the engine's groups; the recorded times, the engine's own statements and
+ * counts, and every caveat sit behind toggles. "Investigate this
+ * explanation" creates a PROPOSAL through the kernel exactly as in Step 4
+ * (buildExploreProposal -> ProposalService.create -> /proposals?focus=id),
+ * the person reviews it in Proposals, and only approval there creates the
+ * hypothesis. Drafts stay in this browser, keyed by the full pattern.
  */
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useState } from "react";
 import { useModel } from "@/components/model-provider";
-import { Card, Loading, Note, PageHeader } from "@/components/ui";
-import {
-  CAUSATION_DISCLAIMER,
-  EXPLORE_QUESTIONS,
-  INVESTIGATE_TEXT,
-  INVESTIGATE_UNAVAILABLE_TEXT,
-  NO_CANDIDATE_YET,
-  RELATED_HYPOTHESES_HEADING,
-  RELATED_HYPOTHESES_NOTE,
-  contextSubjectsFor,
-  crossContext,
-  dayMonthYear,
-  decodePatternRef,
-  encodePatternRef,
-  formatValue,
-  linkedHypotheses,
-  monthYear,
-  type ConditionAssessment,
-  type CrossContext,
-  type PatternRef,
-} from "@/discovery";
+import { Loading, Note } from "@/components/ui";
+import { CAUSATION_DISCLAIMER, INVESTIGATE_TEXT, INVESTIGATE_UNAVAILABLE_TEXT, contextSubjectsFor, crossContext, dayMonthYear, decodePatternRef, encodePatternRef, formatValue, linkedHypotheses, monthYear, type CrossContext, type PatternRef } from "@/discovery";
 import { buildExploreProposal, createdFromPattern, mergeRelated, reconcileDraft, type ExploreDraft } from "@/features/explore/proposal";
+import { EXPLORE_CAVEAT, NO_CONTRASTS_YET, exploreSections, proposalStatusLine, type ExploreRow } from "@/features/explore/wording";
 import type { MutationProposal } from "@/kernel";
 import { locusLabel, type DomainDefinition, type Locus } from "@/model/domain";
 import { subjectLabelFor } from "@/model/subjects";
 import type { SystemModel } from "@/types";
 
-const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed";
 const LOCI: Locus[] = ["external_to_subject", "internal_to_subject", "interaction"];
 const DRAFTS_KEY = "human-systems.explore-drafts.v1";
+const TOGGLE = "text-sm text-muted hover:text-foreground hover:underline";
+const ACTION = "text-[15px] font-medium text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline";
+const PRIMARY = "rounded-full bg-accent px-4 py-2 text-[15px] font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed";
+const GROUP_THRESHOLD = 3;
 
 interface Draft extends ExploreDraft {
   locus: Locus;
@@ -69,52 +69,97 @@ function writeDrafts(scope: string, drafts: Draft[]): void {
   }
 }
 
-function conditionLabel(c: ConditionAssessment): string {
-  if (c.atOccurrences === "differing") return "differed";
-  if (c.atOccurrences === "insufficient") return "unresolved";
-  if (c.contrastCoverage === "none") return "no usable contrast";
-  if (c.contrastCoverage === "partial") return "comparison incomplete";
-  if (c.contrastShows === "same") return "also true when this did not happen";
-  if (c.contrastShows === "different") return "different every time we have complete contrast evidence";
-  return "partly distinguishes";
+/** A condition row: the plain sentence, a quiet tag when the distinction needs one, and the engine's statement and counts under Details. */
+function ConditionRow({ row }: { row: ExploreRow }) {
+  const [open, setOpen] = useState(false);
+  const c = row.counts;
+  return (
+    <li className="py-3" data-explore-row={row.group} data-variable={row.variableId}>
+      {row.tag ? <p className="text-sm text-muted">{row.tag}</p> : null}
+      <p className="text-[15px] leading-relaxed">{row.text}</p>
+      <button type="button" className={`mt-1 ${TOGGLE}`} aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+        {open ? "Hide details" : "Details"}
+      </button>
+      {open ? (
+        <div className="mt-2 space-y-1 text-sm text-muted" data-testid="condition-details">
+          <p>{row.statement}</p>
+          <p>
+            Readable at {c.occurrenceUsable} of {c.occurrenceTotal} occurrences. Other recorded times: {c.contrastSame} the same, {c.contrastDifferent} different, {c.contrastUsable} of {c.contrastTotal} readable.
+            {c.reliesOnRecordedBasis ? " Relies partly on dates known only from when the information was recorded." : ""}
+          </p>
+        </div>
+      ) : null}
+    </li>
+  );
 }
 
-function ConditionList({ items, empty }: { items: ConditionAssessment[]; empty: string }) {
-  if (items.length === 0) return <p className="text-sm text-muted">{empty}</p>;
-  return (
-    <ul className="-mx-4 divide-y divide-border border-t border-border">
-      {items.map((c) => (
-        <li key={c.variableId} className="px-4 py-2 text-sm">
-          {c.statement} <span className="text-xs text-muted">· {conditionLabel(c)}</span>
+/** Rows above the threshold read as one line until asked for (the History treatment). */
+function Rows({ rows, collapsible = false, summary }: { rows: ExploreRow[]; collapsible?: boolean; summary?: (n: number) => string }) {
+  const [open, setOpen] = useState(false);
+  const collapsed = collapsible && rows.length > GROUP_THRESHOLD && !open;
+  if (collapsed && summary) {
+    return (
+      <ul className="mt-1 divide-y divide-border/70">
+        <li className="py-3" data-explore-group-collapsed="true">
+          <p className="text-[15px] leading-relaxed">{summary(rows.length)}</p>
+          <button type="button" className={`mt-1 ${TOGGLE}`} aria-expanded={false} onClick={() => setOpen(true)} data-testid="show-rows">
+            Show all {rows.length}
+          </button>
         </li>
+      </ul>
+    );
+  }
+  return (
+    <ul className="mt-1 divide-y divide-border/70">
+      {rows.map((row) => (
+        <ConditionRow key={`${row.group}:${row.variableId}`} row={row} />
       ))}
+      {collapsible && rows.length > GROUP_THRESHOLD ? (
+        <li className="py-2">
+          <button type="button" className={TOGGLE} aria-expanded={true} onClick={() => setOpen(false)}>
+            Show fewer
+          </button>
+        </li>
+      ) : null}
     </ul>
   );
 }
 
-function Occurrences({ r, model }: { r: CrossContext; model: SystemModel }) {
+function Question({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section data-explore-question={title}>
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+const Empty = ({ children }: { children: React.ReactNode }) => <p className="mt-2 text-[15px] text-muted">{children}</p>;
+
+/** The recorded times: every occurrence and contrast date with its markers, nearby events, and the event-window convention. Hidden until asked. */
+function RecordedTimes({ r, model }: { r: CrossContext; model: SystemModel }) {
   const fmtExtent = (s: CrossContext["occurrences"][number]) => (s.application.text ? s.application.text : s.application.start === s.application.end ? dayMonthYear(s.application.start) : `${dayMonthYear(s.application.start)} to ${dayMonthYear(s.application.end)}`);
   return (
-    <div className="grid gap-3 md:grid-cols-2 text-sm">
+    <div className="mt-3 space-y-3 text-sm" data-testid="recorded-times">
       <div>
-        <p className="text-xs text-muted mb-1">Recorded at {formatValue(r.pattern.repeatedValue, r.unit)}:</p>
-        <ul className="space-y-0.5">
+        <p className="text-muted">Recorded at {formatValue(r.pattern.repeatedValue, r.unit)}:</p>
+        <ul className="mt-1 space-y-0.5">
           {r.occurrences.map((s) => (
             <li key={s.application.start}>
               {fmtExtent(s)}
-              {s.application.kind === "approx" ? <span className="text-xs text-muted"> · approximate</span> : null}
-              {s.application.kind === "range" ? <span className="text-xs text-muted"> · stated period</span> : null}
-              {s.eventsNear.length > 0 ? <span className="text-xs text-muted"> · events nearby: {s.eventsNear.map((e) => e.title).join(", ")}</span> : null}
+              {s.application.kind === "approx" ? <span className="text-muted"> · approximate</span> : null}
+              {s.application.kind === "range" ? <span className="text-muted"> · stated period</span> : null}
+              {s.eventsNear.length > 0 ? <span className="text-muted"> · events nearby: {s.eventsNear.map((e) => e.title).join(", ")}</span> : null}
             </li>
           ))}
         </ul>
       </div>
       <div>
-        <p className="text-xs text-muted mb-1">Recorded at other values:</p>
+        <p className="text-muted">Recorded at other values:</p>
         {r.contrasts.length === 0 ? (
-          <p className="text-muted">None in this period, so nothing can be said about what distinguishes the occurrences.</p>
+          <p className="mt-1 text-muted">None in this period.</p>
         ) : (
-          <ul className="space-y-0.5">
+          <ul className="mt-1 space-y-0.5">
             {r.contrasts.map((s) => (
               <li key={s.application.start}>
                 {fmtExtent(s)} · {formatValue(s.patternValue, r.unit)}
@@ -123,8 +168,8 @@ function Occurrences({ r, model }: { r: CrossContext; model: SystemModel }) {
           </ul>
         )}
       </div>
-      <p className="text-xs text-muted md:col-span-2">
-        {subjectLabelFor(model, r.pattern.subjectId)} · {monthYear(r.pattern.interval.from)} → {monthYear(r.pattern.interval.to)} · events counted within {r.window.days} days of an occurrence (a display convention)
+      <p className="text-muted">
+        {subjectLabelFor(model, r.pattern.subjectId)} · {monthYear(r.pattern.interval.from)} → {monthYear(r.pattern.interval.to)} · events counted within {r.window.days} days of an occurrence (a display convention). A repeated record does not show that the value held between the dates.
       </p>
     </div>
   );
@@ -142,6 +187,7 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
   const [ledger, setLedger] = useState<MutationProposal[] | null>(null);
   const [busyDraft, setBusyDraft] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [openHyp, setOpenHyp] = useState<string | null>(null);
   const investigateReady = proposals !== null && proposalRecovery.status === "done";
 
   useEffect(() => {
@@ -230,120 +276,143 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-xs font-semibold text-muted mb-1">{RELATED_HYPOTHESES_HEADING}</h3>
-        <p className="text-xs text-muted mb-1">{RELATED_HYPOTHESES_NOTE}</p>
-        {related.length === 0 ? (
-          <p className="text-sm text-muted">No hypothesis is linked to this record yet (links, never wording, decide this).</p>
-        ) : (
-          <ul className="text-sm space-y-1">
+    <div className="mt-2 space-y-6">
+      {related.length > 0 ? (
+        <div data-testid="already-investigating">
+          <p className="text-sm text-muted">Already investigating</p>
+          <ul className="mt-1 divide-y divide-border/70">
             {related.map(({ hypothesis, linkedVia, createdFromThisPattern }) => (
-              <li key={hypothesis.id}>
-                <Link href="/hypotheses" className="underline">
-                  {hypothesis.statement}
-                </Link>{" "}
-                <span className="text-xs text-muted">
-                  · {hypothesis.status} · {hypothesis.confidence === null ? "confidence not assessed" : `confidence ${Math.round(hypothesis.confidence * 100)}%`}
-                  {linkedVia.length > 0 ? ` · ${linkedVia.map((v) => linkWords[v]).join("; ")}` : ""}
-                </span>
-                {createdFromThisPattern ? <span className="ml-1 rounded border border-border bg-background px-1.5 py-0.5 text-xs">Created from this Explore pattern</span> : null}
+              <li key={hypothesis.id} className="py-3" data-hypothesis-id={hypothesis.id}>
+                <p className="text-[15px] leading-relaxed">
+                  <Link href="/hypotheses" className="hover:underline">
+                    “{hypothesis.statement}”
+                  </Link>
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted">
+                  {createdFromThisPattern ? <span data-testid="created-from-pattern">Created from this pattern</span> : null}
+                  <button type="button" className={TOGGLE} aria-expanded={openHyp === hypothesis.id} onClick={() => setOpenHyp((x) => (x === hypothesis.id ? null : hypothesis.id))}>
+                    {openHyp === hypothesis.id ? "Hide details" : "Details"}
+                  </button>
+                </div>
+                {openHyp === hypothesis.id ? (
+                  <p className="mt-1 text-sm text-muted" data-testid="hypothesis-details">
+                    Status: {hypothesis.status}. Confidence: {hypothesis.confidence === null ? "not assessed" : `${Math.round(hypothesis.confidence * 100)}%`}.{linkedVia.length > 0 ? ` Linked because ${linkedVia.map((v) => linkWords[v]).join("; ")}.` : ""} Linked by explicit records, never by wording; a link does not mean this hypothesis explains the pattern.
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
-        )}
-      </div>
+        </div>
+      ) : null}
 
-      {LOCI.map((locus) => {
-        const mine = drafts.filter((d) => d.locus === locus);
-        const questions = prompts.filter((p) => p.locus === locus);
-        return (
-          <div key={locus}>
-            <h3 className="text-xs font-semibold text-muted mb-1">{locusLabel(domain, locus)}</h3>
-            {mine.length === 0 ? (
-              <p className="text-sm text-muted">{NO_CANDIDATE_YET}</p>
-            ) : (
-              <ul className="text-sm space-y-2">
-                {mine.map((d) => {
-                  const st = statusOf(d);
-                  return (
-                    <li key={d.id} className="rounded border border-border px-3 py-2" data-draft-id={d.id} data-proposal-id={d.proposalId ?? ""}>
-                      <p>{d.text}</p>
-                      {d.promptId ? <p className="text-xs text-muted">from the question: {prompts.find((p) => p.id === d.promptId)?.question}</p> : null}
-                      {d.proposalId ? <p className="text-xs text-muted">A proposal exists for this explanation{st ? ` (${st})` : ""}; review it there. Nothing is created until you approve it.</p> : null}
-                      <div className="mt-1.5 flex flex-wrap gap-2">
-                        <button type="button" className={BTN} disabled={!investigateReady || busyDraft !== null} title={investigateReady ? undefined : INVESTIGATE_UNAVAILABLE_TEXT} aria-describedby={`${ids}-investigate`} onClick={() => void investigate(d)}>
-                          {d.proposalId ? "Review proposal" : busyDraft === d.id ? "Proposing…" : "Investigate this explanation"}
-                        </button>
-                        <button type="button" className={BTN} onClick={() => save(drafts.filter((x) => x.id !== d.id))} disabled={busyDraft !== null}>
-                          Remove draft
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {questions.length > 0 ? (
-              <details className="mt-2 text-sm">
-                <summary className="cursor-pointer text-xs text-muted">Questions to consider ({questions.length})</summary>
-                <ul className="mt-1 space-y-1">
-                  {questions.map((q) => (
-                    <li key={q.id} className="flex flex-wrap items-baseline gap-x-2">
-                      <span>{q.question}</span>
-                      {q.hint ? <span className="text-xs text-muted">({q.hint})</span> : null}
-                      <button type="button" className={BTN} onClick={() => setEditing({ locus, text: "", promptId: q.id })}>
-                        Write an explanation from this
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-            {editing?.locus === locus ? (
-              <div className="mt-2 rounded border border-accent bg-accent-soft p-3 text-sm">
-                {editing.promptId ? <p className="text-xs text-muted mb-1">{prompts.find((p) => p.id === editing.promptId)?.question}</p> : null}
-                <label htmlFor={`${ids}-draft-${locus}`} className="block text-xs text-muted">
-                  Your explanation, as a condition to test (not a verdict about anyone)
-                </label>
-                <textarea id={`${ids}-draft-${locus}`} className="w-full mt-1" rows={2} value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} />
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    className={BTN}
-                    disabled={editing.text.trim().length === 0}
-                    onClick={() => {
-                      save([...drafts, { id: `d_${Date.now().toString(36)}`, locus, text: editing.text.trim(), promptId: editing.promptId }]);
-                      setEditing(null);
-                    }}
-                  >
-                    Keep as a candidate (this browser only)
-                  </button>
-                  <button type="button" className={BTN} onClick={() => setEditing(null)}>
-                    Cancel
+      {drafts.length > 0 ? (
+        <ul className="divide-y divide-border/70" data-testid="drafts">
+          {drafts.map((d) => {
+            const st = statusOf(d);
+            return (
+              <li key={d.id} className="py-3" data-draft-id={d.id} data-proposal-id={d.proposalId ?? ""}>
+                <p className="text-sm text-muted">{locusLabel(domain, d.locus)}</p>
+                <p className="text-[15px] leading-relaxed">“{d.text}”</p>
+                {d.promptId ? <p className="text-sm text-muted">From the question: {prompts.find((p) => p.id === d.promptId)?.question}</p> : null}
+                {d.proposalId ? <p className="mt-1 text-sm text-muted">{proposalStatusLine(st)}</p> : null}
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  {d.proposalId ? (
+                    <button type="button" className={ACTION} disabled={!investigateReady || busyDraft !== null} title={investigateReady ? undefined : INVESTIGATE_UNAVAILABLE_TEXT} onClick={() => void investigate(d)}>
+                      Review proposal →
+                    </button>
+                  ) : (
+                    <button type="button" className={PRIMARY} disabled={!investigateReady || busyDraft !== null} title={investigateReady ? undefined : INVESTIGATE_UNAVAILABLE_TEXT} aria-describedby={`${ids}-investigate`} onClick={() => void investigate(d)}>
+                      {busyDraft === d.id ? "Proposing…" : "Investigate this explanation"}
+                    </button>
+                  )}
+                  <button type="button" className={TOGGLE} onClick={() => save(drafts.filter((x) => x.id !== d.id))} disabled={busyDraft !== null}>
+                    Remove draft
                   </button>
                 </div>
-              </div>
-            ) : (
-              <button type="button" className={`${BTN} mt-2`} onClick={() => setEditing({ locus, text: "" })}>
-                Write your own
-              </button>
-            )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      {editing ? (
+        <div className="rounded-xl border border-border/70 bg-surface px-5 py-4" data-testid="draft-editor">
+          {editing.promptId ? <p className="mb-2 text-sm text-muted">{prompts.find((p) => p.id === editing.promptId)?.question}</p> : null}
+          <label htmlFor={`${ids}-draft`} className="block text-[15px] font-medium">
+            Your explanation
+          </label>
+          <textarea id={`${ids}-draft`} className="mt-2 block w-full resize-none rounded-xl border border-border/70 bg-surface px-4 py-3 text-[15px] leading-relaxed focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/20" rows={3} value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} placeholder="A condition you want to test, not a verdict about anyone." />
+          <label htmlFor={`${ids}-locus`} className="mt-3 block text-sm text-muted">
+            This is mostly about
+          </label>
+          <select id={`${ids}-locus`} className="mt-1" value={editing.locus} onChange={(e) => setEditing({ ...editing, locus: e.target.value as Locus })}>
+            {LOCI.map((l) => (
+              <option key={l} value={l}>
+                {locusLabel(domain, l)}
+              </option>
+            ))}
+          </select>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <button
+              type="button"
+              className={PRIMARY}
+              disabled={editing.text.trim().length === 0}
+              onClick={() => {
+                save([...drafts, { id: `d_${Date.now().toString(36)}`, locus: editing.locus, text: editing.text.trim(), promptId: editing.promptId }]);
+                setEditing(null);
+              }}
+            >
+              Keep as draft
+            </button>
+            <button type="button" className={TOGGLE} onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+            <span className="text-sm text-muted">Draft only · kept in this browser</span>
           </div>
-        );
-      })}
+        </div>
+      ) : (
+        <div>
+          {drafts.length === 0 && related.length === 0 ? <p className="text-[15px] leading-relaxed text-muted">Write an explanation you want to investigate.</p> : null}
+          <button type="button" className={`${drafts.length === 0 && related.length === 0 ? "mt-2 " : ""}${PRIMARY}`} onClick={() => setEditing({ locus: LOCI[0], text: "" })} data-testid="write-explanation">
+            Write an explanation
+          </button>
+        </div>
+      )}
+
+      {prompts.length > 0 ? (
+        <details className="text-sm" data-testid="questions">
+          <summary className="cursor-pointer text-muted hover:text-foreground">Questions to help you think</summary>
+          <ul className="mt-2 divide-y divide-border/70">
+            {prompts.map((q) => (
+              <li key={q.id} className="py-2.5" data-prompt-id={q.id}>
+                <p className="text-sm text-muted">{locusLabel(domain, q.locus)}</p>
+                <p className="text-[15px] leading-relaxed">
+                  {q.question}
+                  {q.hint ? <span className="text-sm text-muted"> ({q.hint})</span> : null}
+                </p>
+                <button type="button" className={`mt-1 ${TOGGLE}`} onClick={() => setEditing({ locus: q.locus, text: "", promptId: q.id })}>
+                  Write an explanation from this
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
       {problem ? (
-        <p className="text-xs text-warn" role="alert">
+        <p className="text-sm text-warn" role="alert">
           {problem}
         </p>
       ) : null}
-      <p className="text-xs">
-        <Link href={`/ai?task=suggest_explanations_for_pattern&${encodePatternRef(r.pattern)}`} className="underline">
-          Ask about this pattern (mock AI; anything it suggests still goes through review)
+
+      <p className="text-sm">
+        <Link href={`/ai?task=suggest_explanations_for_pattern&${encodePatternRef(r.pattern)}`} className="inline-flex items-center gap-2 text-muted hover:underline" data-testid="help-me-think">
+          Help me think about this pattern
+          <span className="rounded-full border border-border px-1.5 py-0.5 text-xs">Demo</span>
         </Link>
       </p>
-      <p id={`${ids}-investigate`} className="text-xs text-muted">
-        {investigateReady ? INVESTIGATE_TEXT : proposalRecovery.status === "error" ? `${INVESTIGATE_UNAVAILABLE_TEXT} ${proposalRecovery.message}` : INVESTIGATE_UNAVAILABLE_TEXT} Drafts stay in this browser and are not part of the model.
+      <p id={`${ids}-investigate`} className="text-sm text-muted">
+        {investigateReady ? INVESTIGATE_TEXT : proposalRecovery.status === "error" ? `${INVESTIGATE_UNAVAILABLE_TEXT} ${proposalRecovery.message}` : INVESTIGATE_UNAVAILABLE_TEXT}
       </p>
     </div>
   );
@@ -352,77 +421,86 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
 function ExploreBody({ pattern, model, domain }: { pattern: PatternRef; model: SystemModel; domain: DomainDefinition }) {
   // context scope is domain configuration (a household reads its members for a household-level pattern); the math is unchanged
   const result = useMemo(() => crossContext(model, pattern, { contextSubjectIds: contextSubjectsFor(model, pattern, domain) }), [model, pattern, domain]);
+  const [timesOpen, setTimesOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   // back to History with the same period the pattern was found in (the reference carries it; nothing else is invented)
   const back = `/history?${new URLSearchParams({ from: pattern.interval.from, to: pattern.interval.to }).toString()}`;
-  if (!result.ok) {
+  const sections = useMemo(() => (result.ok ? exploreSections(result) : null), [result]);
+  if (!result.ok || !sections) {
     return (
       <div className="space-y-3">
-        <Note tone="warn">{result.message}</Note>
-        <Link href={back} className="underline text-sm">
+        <Note tone="warn">{result.ok ? "" : result.message}</Note>
+        <Link href={back} className="text-sm underline">
           Back to History
         </Link>
       </div>
     );
   }
   const r = result;
-  const byId = new Map(r.conditions.map((c) => [c.variableId, c]));
-  const pick = (ids: string[]) => ids.map((id) => byId.get(id)!).filter(Boolean);
-  const unresolved = pick([...r.groups.insufficientAtOccurrences, ...r.groups.undecided, ...r.groups.contrastPartial]);
   return (
-    <div className="space-y-4">
-      <Card title={EXPLORE_QUESTIONS[0]}>
-        <p className="text-sm mb-3">{r.statements[0]}</p>
-        <Occurrences r={r} model={model} />
-      </Card>
-      <Card title={`${EXPLORE_QUESTIONS[1]} (${r.groups.differingAtOccurrences.length})`}>
-        <ConditionList items={pick(r.groups.differingAtOccurrences)} empty="Nothing recorded changed between the occurrences." />
-      </Card>
-      <Card title={`${EXPLORE_QUESTIONS[2]} (${r.groups.commonAtOccurrences.length})`}>
-        <p className="text-xs text-muted mb-2">Recorded at the same value at every occurrence. A value only carried forward by the resolver never counts. Recorded together is not caused by.</p>
-        <ConditionList items={pick(r.groups.commonAtOccurrences)} empty="Nothing readable was recorded the same at every occurrence." />
-      </Card>
-      <Card title={`${EXPLORE_QUESTIONS[3]} (${r.groups.backgroundComplete.length + r.groups.differentiatingComplete.length + r.groups.mixedComplete.length})`}>
-        <p className="text-xs text-muted mb-2">
-          Conditions recorded the same at every occurrence, compared with the times the pattern was recorded at another value. Only comparisons with complete contrast coverage appear here; incomplete ones are under unresolved. True in both cases is not the difference.
+    <div>
+      <header className="mb-8">
+        <Link href={back} className="text-sm text-muted hover:underline" data-testid="back-to-history">
+          ← Back to History
+        </Link>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">Explore</h1>
+        <p className="mt-2 text-[15px] leading-relaxed text-muted">This kept happening. Why might that be?</p>
+        <p className="mt-4 text-[17px] font-medium leading-snug" data-testid="pattern">
+          {sections.pattern}
         </p>
-        {r.contrasts.length === 0 ? (
-          <p className="text-sm text-muted">No contrast case is recorded, so nothing can be compared yet.</p>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs font-semibold text-muted mb-1">Also true at every contrast time ({r.groups.backgroundComplete.length})</p>
-              <ConditionList items={pick(r.groups.backgroundComplete)} empty="None." />
+        <button type="button" className={`mt-2 ${TOGGLE}`} aria-expanded={timesOpen} onClick={() => setTimesOpen((x) => !x)} data-testid="recorded-times-toggle">
+          {timesOpen ? "Hide the recorded times" : "See the recorded times"}
+        </button>
+        {timesOpen ? <RecordedTimes r={r} model={model} /> : null}
+      </header>
+
+      <div className="space-y-10">
+        <Question title="What was different each time?">{sections.different.length === 0 ? <Empty>Nothing recorded changed between these times.</Empty> : <Rows rows={sections.different} collapsible summary={(n) => `${n} conditions were recorded at different values across these times.`} />}</Question>
+
+        <Question title="What was the same each time?">{sections.same.length === 0 ? <Empty>Nothing readable was recorded the same at every one of these times.</Empty> : <Rows rows={sections.same} collapsible summary={(n) => `${n} conditions were recorded at the same value every time.`} />}</Question>
+
+        <Question title="How did the other recorded times compare?">
+          {r.contrasts.length === 0 ? (
+            <Empty>{NO_CONTRASTS_YET}</Empty>
+          ) : sections.compared.length === 0 ? (
+            <Empty>No condition recorded the same each time can be compared completely with the other recorded times yet.</Empty>
+          ) : (
+            <div className="mt-2 space-y-5">
+              {sections.compared.map((g) => (
+                <div key={g.group} data-contrast-group={g.group}>
+                  <p className="text-sm font-medium text-muted">{g.heading}</p>
+                  <Rows rows={g.rows} collapsible summary={(n) => `${n} conditions. ${g.heading}.`} />
+                </div>
+              ))}
             </div>
-            <div>
-              <p className="text-xs font-semibold text-muted mb-1">Different at every contrast time, complete coverage ({r.groups.differentiatingComplete.length})</p>
-              <ConditionList items={pick(r.groups.differentiatingComplete)} empty="None." />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted mb-1">Mixed across contrast times ({r.groups.mixedComplete.length})</p>
-              <ConditionList items={pick(r.groups.mixedComplete)} empty="None." />
-            </div>
-          </div>
-        )}
-      </Card>
-      <Card title={`${EXPLORE_QUESTIONS[4]} (${unresolved.length})`}>
-        <p className="text-xs text-muted mb-2">Missing, conflicting for the same time, varied within a broad period, only an older value standing, or contrast evidence incomplete. Each is a different thing, and each is said as it is.</p>
-        <ConditionList items={unresolved} empty="Nothing is unresolved for this pattern." />
-      </Card>
-      <Card title={EXPLORE_QUESTIONS[5]}>
-        <p className="text-xs text-muted mb-3">
-          An explanation is a condition to test, never a verdict. The three headings are examined alike; a heading with no candidate stays empty rather than being filled in. A draft is a candidate, not evidence.
-        </p>
-        <Explanations r={r} model={model} domain={domain} />
-      </Card>
-      <div className="space-y-1">
-        <Note>{CAUSATION_DISCLAIMER}</Note>
-        {r.caveats.map((c) => (
-          <Note key={c.code}>{c.text}</Note>
-        ))}
+          )}
+        </Question>
+
+        <Question title="What is still unresolved?">{sections.unresolved.length === 0 ? <Empty>Nothing is unresolved for this pattern.</Empty> : <Rows rows={sections.unresolved} collapsible summary={(n) => `${n} conditions cannot be compared yet: missing, conflicting, or read only in part.`} />}</Question>
+
+        <Question title="What might explain this?">
+          <Explanations r={r} model={model} domain={domain} />
+        </Question>
       </div>
-      <Link href={back} className="underline text-sm">
-        Back to History
-      </Link>
+
+      <footer className="mt-12 space-y-2 text-sm text-muted">
+        <p>{EXPLORE_CAVEAT}</p>
+        <button type="button" className={TOGGLE} aria-expanded={aboutOpen} onClick={() => setAboutOpen((x) => !x)} data-testid="about">
+          {aboutOpen ? "Hide" : "About this comparison"}
+        </button>
+        {aboutOpen ? (
+          <ul className="list-disc space-y-1 pl-5" data-testid="about-details">
+            <li>{CAUSATION_DISCLAIMER}</li>
+            <li>“The same each time” means recorded at the same value at every one of these times. A value only carried forward by the resolver never counts, and recorded together is not caused by.</li>
+            <li>“How did the other recorded times compare?” lists only conditions with complete contrast coverage; an incomplete comparison stays under “still unresolved” and is never promoted. True in both cases is not the difference.</li>
+            <li>Unresolved covers five different things, each said as it is: missing, conflicting for the same time, varied within a broad period, only an older value standing, and contrast evidence incomplete.</li>
+            <li>An explanation is a condition to test, never a verdict. A draft is a candidate, not evidence.</li>
+            {r.caveats.map((c) => (
+              <li key={c.code}>{c.text}</li>
+            ))}
+          </ul>
+        ) : null}
+      </footer>
     </div>
   );
 }
@@ -434,13 +512,13 @@ function ExploreInner() {
   if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
   if (status === "loading" || !model || !evaluated) return <Loading />;
   return (
-    <div>
-      <PageHeader title="Explore this pattern" lede="This kept happening. Why might that be? What follows is what the records let us investigate: what differed, what was the same, what was also true when it did not happen, and what is still unresolved. Nothing here is a cause or a conclusion." />
+    <div className="mx-auto max-w-2xl">
       {pattern === null ? (
-        <div className="space-y-3">
-          <Note>Open a repeated record from History to explore it: every pattern here starts from something recorded more than once.</Note>
-          <Link href="/history" className="underline text-sm">
-            Go to History
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Explore</h1>
+          <p className="mt-2 text-[15px] leading-relaxed text-muted">Open something that keeps showing up in History to explore it: every pattern here starts from a value recorded more than once.</p>
+          <Link href="/history" className="mt-4 inline-block text-[15px] font-medium text-accent hover:underline">
+            Go to History →
           </Link>
         </div>
       ) : (
