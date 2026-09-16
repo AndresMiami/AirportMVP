@@ -115,6 +115,24 @@ files allowed to import household code are the pack itself,
 `app/income/page.tsx` and the provider's single bootstrap import
 (tests/architecture pins the list; tests/model/neutral-domain proves a
 neutral domain runs with household modules mocked to throw).
+STRUCTURAL DISCOVERY (src/discovery, the /history screen): RESOLUTION !=
+OBSERVATION != RECURRENCE and RECORDED AGAIN != CONTINUOUSLY PRESENT !=
+STRUCTURAL != CAUSAL. The discovery layer describes RECORDS with
+non-exclusive evidence facts (exact repetition needs two distinct
+application times and strict equality, no threshold; low recorded
+variation only under the explicitly applied A23 display convention with a
+reference range; an explicit interval claim only from a stored `range`
+assertion; a value that still resolves because nothing replaced it is
+carry-forward, never an observation; explicit unknowns, ambiguity and
+unorderable timing are evidence with unresolved meaning, never zero
+evidence). It never ranks "most structural", never computes a score,
+never names a cause; sentences come from fixed templates and tests pin
+the forbidden phrases (causes, structurally persistent, invariant, hidden
+cause, generator, will continue, improved, weakened). Derived variables
+are excluded from repetition candidates and recomputed only on request
+under today's structure, caveated. Snapshots are secondary evidence
+("recorded in k of n saved snapshots"). "Explore this pattern" is
+read-only until the proposal / approval kernel exists.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /

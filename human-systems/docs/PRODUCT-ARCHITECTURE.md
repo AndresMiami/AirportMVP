@@ -449,11 +449,24 @@ capture surface corrects this when it replaces that screen.
 ## 15. Staged roadmap (ROADMAP, not implementation; order approved 2026-09-15)
 
 1. Domain-agnostic cleanup (section 13, all five steps; one migration).
-2. Structural discovery core + History / What persisted UI:
-   `describeVariableHistory` / `describeInterval` (non-exclusive evidence
-   facts over value histories; snapshots as secondary evidence), manual snapshots,
-   questions gated by explicit approval, built in the section 17 visual
-   language; Attractor page renamed.
+2. Structural discovery core + History / What persisted UI — DONE
+   (descriptive core): `src/discovery` with `describeVariableHistory`
+   (non-exclusive evidence facts over one input variable's value history:
+   exact repetition, low recorded variation under the explicitly applied
+   A23 convention, explicit interval claims, last-known carry-forward,
+   explicit unknowns and interruptions, ambiguity, unorderable and
+   approximate timing, recorded-basis dates; a derived summary class that
+   never replaces the facts), `describeInterval` (buckets, events as
+   context, snapshots as secondary evidence, derived recomputation only on
+   request and caveated), `describeSnapshotSeries`, fixed sentence
+   templates and the forbidden-phrase discipline, and the read-only
+   `/history` screen ("What changed", "What repeated or stayed similar in
+   the records", "Only an old value still standing", "Not enough history",
+   "Unknown", Details disclosure, the fixed causation disclaimer, and an
+   explanatory "Explore this pattern" card that writes nothing). Remaining
+   from this item: questions gated by explicit approval, the Attractor
+   page rename, and the proposal step behind "Explore this pattern" (the
+   proposal / approval kernel, item 4).
 3. 3c evidence convergence on the clean vocabulary.
 4. Proposal / approval kernel (`MutationProposal`, dry-run diff, review
    cards with the two confirmation levels, provenance and `proposedBy`

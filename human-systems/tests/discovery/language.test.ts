@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { INPUT_IDS } from "@/domains/household/keys";
-import { CAUSATION_DISCLAIMER, FORBIDDEN_PHRASES, containsForbiddenPhrase, describeInterval, describeSnapshotSeries, describeVariableHistory, historySentences, type IntervalDescription } from "@/discovery";
+import { CAUSATION_DISCLAIMER, EXPLORE_PATTERN_TEXT, FORBIDDEN_PHRASES, containsForbiddenPhrase, describeInterval, describeSnapshotSeries, describeVariableHistory, historySentences, type IntervalDescription } from "@/discovery";
 import * as M from "@/services/mutations";
 import { VariableSchema, type TemporalRef, type ValueEntry } from "@/types";
 
@@ -94,6 +94,13 @@ describe("discovery language", () => {
     for (const t of texts) expect(containsForbiddenPhrase(t), t).toBeNull();
     expect(d.disclaimer).toBe(CAUSATION_DISCLAIMER);
     expect(CAUSATION_DISCLAIMER).toBe("Repeated or stable observations do not establish cause.");
+  });
+
+  it("the read-only Explore card copy examines, never concludes, and names competing explanations", () => {
+    expect(containsForbiddenPhrase(EXPLORE_PATTERN_TEXT)).toBeNull();
+    expect(EXPLORE_PATTERN_TEXT).toMatch(/does not establish/);
+    expect(EXPLORE_PATTERN_TEXT).toMatch(/Competing explanations/);
+    expect(EXPLORE_PATTERN_TEXT).not.toMatch(/personality|archetype|you are/i);
   });
 
   it("snapshot statements say 'recorded in k of n saved snapshots' and never 'persist'", () => {

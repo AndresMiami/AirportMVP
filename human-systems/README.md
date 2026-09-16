@@ -89,6 +89,9 @@ src/
                   household/ (keys, variables with subject scope, formulas,
                   projections, signature v1, constraint templates, event
                   types). Engine directories never import this (tested).
+  discovery/      structural discovery (descriptive, deterministic):
+                  describeVariableHistory, describeInterval,
+                  describeSnapshotSeries, sentence templates
   signatures/     structural-signature engine: compute (per subject),
                   dynamics, compare, gap, questions, interpretation
   scenarios/      applyScenario() and compareScenario() (tendencies by horizon)

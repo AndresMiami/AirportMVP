@@ -25,6 +25,10 @@ export const FORBIDDEN_PHRASES = [
 /** The fixed disclaimer shown with every discovery result. */
 export const CAUSATION_DISCLAIMER = "Repeated or stable observations do not establish cause.";
 
+/** The read-only "Explore this pattern" card (no write path exists yet). */
+export const EXPLORE_PATTERN_TEXT =
+  "This condition was recorded repeatedly while several other things changed. That makes it a pattern worth examining, but repetition alone does not establish that it generated those outcomes. Competing explanations (circumstances, structure, outside shocks, incentives, habits, or a mix) deserve the same look before any one of them becomes a working model.";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** "Mar 2026" from an ISO instant or date (UTC). */

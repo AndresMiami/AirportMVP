@@ -8,6 +8,7 @@ import { useModel } from "@/components/model-provider";
  *  `route` and a `label` (inserted after the profile). */
 const LINKS: { href: string; label: string; group?: string }[] = [
   { href: "/", label: "Dashboard" },
+  { href: "/history", label: "History" },
   { href: "/profile", label: "System profile" },
   { href: "/variables", label: "Structural variables" },
   { href: "/feedback-map", label: "Feedback map" },
@@ -54,7 +55,7 @@ export function Nav() {
   const collectionLinks = (evaluated?.domain.collections ?? [])
     .filter((c): c is typeof c & { route: string } => typeof c.route === "string" && c.route.length > 0)
     .map((c) => ({ href: c.route, label: c.label }));
-  const links = [...LINKS.slice(0, 2), ...collectionLinks, ...LINKS.slice(2)];
+  const links = [...LINKS.slice(0, 3), ...collectionLinks, ...LINKS.slice(3)];
   return (
     <nav className="border-b md:border-b-0 md:border-r border-border bg-surface md:w-60 md:min-h-screen shrink-0">
       <div className="px-4 py-4 border-b border-border">

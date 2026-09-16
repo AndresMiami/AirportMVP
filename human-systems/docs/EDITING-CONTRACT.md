@@ -229,6 +229,20 @@ Stored as `{value, unit}` with unit days | weeks | months | years. Use
 `horizonOfMonths` / `formatMonths` for cumulative values. Never show a lag
 in a unit the person did not choose without saying so.
 
+## History screen (structural discovery, read-only)
+
+`/history` calls `describeInterval` from `src/discovery` on the stored
+model and renders its buckets and sentences. It never writes: no
+mutation, no hypothesis, no snapshot. "Explore this pattern" opens an
+explanatory card; proposing a hypothesis from it is a later stage behind
+the proposal / approval kernel. The screen's words are the discovery
+layer's templates (`historySentences`, `CAUSATION_DISCLAIMER`,
+`EXPLORE_PATTERN_TEXT`), pinned by tests/discovery/language.test.ts: a
+value recorded again is a repeated record, never evidence that it held in
+between; a value that still resolves is the model's state, never an
+observation in the period; low variation is the A23 display convention
+and only with a reference range; nothing names a cause.
+
 ## Domain-driven screens (Checkpoint 3)
 
 Generic screens read the ACTIVE DOMAIN (`evaluated.domain`) for every word
