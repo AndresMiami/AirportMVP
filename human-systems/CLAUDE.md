@@ -242,8 +242,20 @@ label and questions under "Question to consider" (Home is not the
 diagnostics screen; the AI contract is unchanged); the footer is
 "Fictional sample · Your systems and advanced details are in Library."
 Do not polish Home further unless a usability test shows a concrete
-problem. Next: History, then Explore, Review, Map — one coherent
-product over the existing capability, not more AI work.
+problem. HISTORY (6B): SIMPLIFY THE PRESENTATION, NOT THE DISTINCTIONS —
+the first layer is three ordinary questions (What changed? / What keeps
+showing up? / What still needs more information?) worded by
+src/features/history/wording.ts over the UNCHANGED discovery engine;
+every engine distinction keeps its own row and tag (Same value / Stayed
+close / As stated / Old value still standing / Not enough history /
+Unknown), exact repetition hands /explore the exact same PatternRef
+(one row per repeated value), the engine's own sentence, raw records
+with source and confidence, resolution states and evidence facts sit
+under Details, and the period, subject, A23 convention, calculated
+values, snapshots and interval caveats sit under Change period /
+Advanced / Notes. Never move a distinction out of the page to simplify
+it; move it behind a toggle. Next: Explore, then Review, then Map — one
+coherent product over the existing capability, not more AI work.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

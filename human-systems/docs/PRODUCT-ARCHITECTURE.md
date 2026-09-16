@@ -808,6 +808,41 @@ capture surface corrects this when it replaces that screen.
    product's visual language is set — Home is for thinking, History for
    remembering what changed, Explore for asking why, Library for the
    machinery — and the next step is History, then Explore, Review, Map.
+   STEP 6B DONE — HISTORY: SIMPLIFY THE PRESENTATION, NOT THE
+   DISTINCTIONS. The discovery engine (src/discovery) is untouched: the
+   same describeInterval call, the same buckets, the same occurrence
+   times, and "Explore what was happening" hands /explore the EXACT
+   PatternRef the original screen encoded (variable, subject, requested
+   interval, repeated value, occurrence times — pinned byte for byte in
+   tests/features/history-wording.test.ts). The first layer now reads as
+   three ordinary questions in the narrow notebook column: "What
+   changed?" (values that ranged, plus events), "What keeps showing up?"
+   (exact repetition one row PER REPEATED VALUE with its own Explore
+   hand-off, tag "Same value"; low recorded variation "Stayed close"; an
+   explicitly stated period "As stated" — the non-exact kinds keep the
+   read-only "Look closer" card), and "What still needs more
+   information?" (tags "Old value still standing", "Not enough history",
+   "Unknown", plus events without a date; grouped by distinction, a group
+   above three rows collapses to one sentence with "Show all N" — nothing
+   dropped). Wording lives in src/features/history/wording.ts over the
+   shared src/features/plain-language.ts ("Total debt ranged from $4,000
+   to $9,500 across 8 recorded values between February 2025 and
+   September 2026."; "Total debt was $4,000 on 7 recorded dates …");
+   forbidden phrases are checked on every generated sentence. Behind
+   toggles: Change period (From / To / Whose records), Advanced (the A23
+   low-variation display convention, calculated values recomputed under
+   today's structure, saved snapshots), Details on every row (the
+   engine's own sentence and evidence lines, the raw records with source
+   and confidence, resolution at both ends, evidence facts) and "Notes on
+   this period" (the interval caveats); the causation disclaimer stays
+   on the page. Nothing writes to the model. Chromium desktop + mobile:
+   three headings in order, the first layer free of A23 / application
+   times / dated records / evidence facts / confidence wording, the
+   Explore hand-off opening the pattern, Change period and Advanced
+   revealing their controls, Details revealing the records table
+   (scrolling inside its own box on mobile), no horizontal overflow.
+   Next: Explore, then Review, then Map — after the History screenshots
+   are reviewed.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

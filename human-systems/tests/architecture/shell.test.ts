@@ -75,6 +75,30 @@ describe("Home", () => {
   });
 });
 
+describe("History (6B: presentation simplified, distinctions kept)", () => {
+  it("asks the three questions first, keeps every engine distinction, hands Explore the same PatternRef, and moves the technical layer behind Change period / Advanced / Details", () => {
+    const page = read("src/app/history/page.tsx");
+    for (const q of ["What changed?", "What keeps showing up?", "What still needs more information?"]) expect(page).toContain(`title="${q}"`);
+    expect(page.indexOf("What changed?")).toBeLessThan(page.indexOf("What keeps showing up?"));
+    expect(page.indexOf("What keeps showing up?")).toBeLessThan(page.indexOf("What still needs more information?"));
+    expect(page).toMatch(/historyQuestions\(d\)/);
+    expect(page).toMatch(/needsInformationGroups\(q\.needsInformation\)/);
+    expect(page).toMatch(/describeInterval\(model/); // the same engine call as before
+    expect(page).not.toMatch(/@\/services\/mutations|\.save\(|proposals\.create/);
+    // the technical layer is behind toggles, never on the first layer
+    for (const t of ["change-period", "advanced", "history-details", "caveats"]) expect(page).toContain(`data-testid="${t}"`);
+    expect(page).toMatch(/A23/); // the convention is still selectable, under Advanced
+    expect(page).toMatch(/includeDerived/);
+    expect(page).toMatch(/SourceBadge|ConfidenceBadge/); // raw records with provenance stay under Details
+    expect(page).toMatch(/CAUSATION_DISCLAIMER/);
+    const wording = read("src/features/history/wording.ts");
+    expect(wording).toMatch(/encodePatternRef\(\{ variableId: d\.variableId, subjectId: d\.subjectId, interval: \{ from: d\.interval\.requested\.from, to: d\.interval\.requested\.to \}, repeatedValue, occurrenceTimes/);
+    expect(wording).not.toMatch(/from "react"|@\/domains|@\/services/);
+    // discovery math untouched by this step: the engine modules import nothing from features
+    for (const f of ["describe-history.ts", "describe-interval.ts", "cross-context.ts", "language.ts", "pattern-ref.ts"]) expect(read(`src/discovery/${f}`)).not.toMatch(/@\/features/);
+  });
+});
+
 describe("Library and routes", () => {
   it("Library links every advanced screen, and every existing route still has a page", () => {
     const lib = read("src/app/library/page.tsx");
