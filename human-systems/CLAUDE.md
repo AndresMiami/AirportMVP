@@ -204,6 +204,20 @@ through the proposal kernel. AI -> Variable and AI -> Observation
 stay blocked by canonical-mutation seams (manufactured 0.5 judgments and
 sourceType unknown / confidence 0 in addVariable; required numeric
 confidence in addObservation), recorded in docs/PRODUCT-ARCHITECTURE.md.
+PRODUCT SHELL (Step 6A): primary navigation is exactly Home / History /
+Map / Library (src/components/nav.tsx); nothing was deleted — the old
+dashboard is `/overview`, `/map` wraps feedback-map, `/library` indexes
+every advanced screen (Records / Model / Investigation / Advanced
+analysis) and tests/architecture/shell.test.ts pins that every route is
+reachable from it. Home (src/app/page.tsx) is a capture box with a
+browser-local draft (not a Source record yet), a read-only "Reflection
+demo" over the mock provider, and three card kinds computed by
+src/features/home/cards.ts from existing systems only (History-engine
+repetition -> Explore, ledger open count -> /proposals, non-rejected
+hypotheses). Home speaks ordinary language: never "structural gap",
+"attractor", "model health", "variables", "recurrence set" or
+"cross-context" there. History, Explore and Review await visual review
+before further simplification.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

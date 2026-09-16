@@ -238,7 +238,7 @@ function ContextPanel({ pattern, initialTask }: { pattern: PatternRef | null; in
 
       {ctx && payload ? (
         <Card title="Mock interpretation — nothing will be added to your model" className="mt-4">
-          <p className="text-xs text-muted mb-2">A deterministic mock answers the exact payload above under the new contract; its output is validated against that payload before it is shown. There is nothing here to approve: no model write, no proposal.</p>
+          <p className="text-xs text-muted mb-2">A deterministic mock answers the exact payload above under the new contract; its output is validated against that payload before it is shown. Nothing here writes the model. A candidate explanation can be sent to review with “Review as hypothesis”; that creates a proposal you decide on in Proposals, never a hypothesis directly.</p>
           <button type="button" className="rounded border border-border bg-background px-3 py-1.5 text-sm hover:border-accent" onClick={() => void runMock()}>
             Run the task mock (no network)
           </button>

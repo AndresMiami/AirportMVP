@@ -709,6 +709,42 @@ capture surface corrects this when it replaces that screen.
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.
+   STEP 6A DONE — SIMPLIFIED PRODUCT SHELL + HOME (the shell and Home
+   only; History, Explore and Review keep their current screens pending
+   visual review). Primary navigation is exactly Home / History / Map /
+   Library (src/components/nav.tsx; the side navigation is gone, the
+   main column is wider, the as-of pill persists in the top bar). No
+   route was deleted: the old dashboard moved from `/` to `/overview`
+   unchanged, `/map` wraps the existing feedback-map page, `/library`
+   is the advanced index grouped Records / Model / Investigation /
+   Advanced analysis and hosts the system switcher, and every existing
+   route is linked from it (pinned by tests/architecture/shell.test.ts,
+   which also pins the four labels, the Home wording, and that Home
+   imports no mutation, apply, save or proposal-creating path). HOME
+   (src/app/page.tsx) opens with "What are you thinking about?", a large
+   capture box ("Write what's on your mind. You don't need to organize
+   it first."), a reserved microphone glyph that records nothing, and a
+   draft kept ONLY in this browser (`human-systems.home-draft.v1`, keyed
+   by system; it is not a Source record — Source capture is still the
+   roadmap item above). The one primary action, "Reflection demo", runs
+   the deterministic MockAiTaskProvider read-only over the
+   interpret_free_text context and is labelled "nothing is added to your
+   notebook" / "a deterministic stand-in, not real intelligence". Cards
+   come only from systems that already exist (src/features/home/cards.ts,
+   pure, generic): "Something keeps showing up" = describeVariableHistory
+   over each assigned input's recorded span up to today, exact
+   repetition only, worded by historySentenceFor, strongest first, three
+   at most, each with the exact Explore pattern hand-off; "Needs your
+   review" = the ledger's open count (proposed / reviewed / stale /
+   failed / applying) linking to /proposals; "Working explanations" =
+   non-rejected hypotheses. Empty states are calm sentences. Home uses
+   no engine vocabulary (no structural gap, attractor, model health,
+   variables, recurrence set, cross-context). Storage errors, the as-of
+   notice with "Back to today", and the unreadable-store warning render
+   unchanged. The stale "no model write, no proposal" sentence on /ai
+   now says a candidate explanation can be sent to review as a proposal.
+   Discovery math, proposal semantics and canonical schemas are
+   untouched; 5E/5F remain paused.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real
@@ -724,7 +760,7 @@ that already has to move; the proposal kernel precedes the shell because
 every capture write and every persistence question is a review card;
 Groups sit with the kernel because the Map is a primary screen.
 
-## 16. Product surface (APPROVED DIRECTION, not implemented)
+## 16. Product surface (APPROVED DIRECTION; the shell and Home shipped in Step 6A, the rest not implemented)
 
     THE ENGINE MAY BE COMPLEX.
     THE USER EXPERIENCE SHOULD NOT FEEL COMPLEX.

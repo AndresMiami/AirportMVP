@@ -1,261 +1,217 @@
 "use client";
+/**
+ * HOME (Step 6A): a calm notebook over the whole machine.
+ *
+ *   What are you thinking about?   -> a browser-local draft (never the model)
+ *   Something keeps showing up     -> the deterministic History engine
+ *   Needs your review              -> the proposal ledger
+ *   Working explanations           -> the canonical hypotheses
+ *
+ * Home invents no analysis. "Reflection demo" runs the deterministic task
+ * mock through the 5B/5C context and output contracts, read-only, and says
+ * so. Home = meaning; a card's detail = evidence; Library = machinery.
+ */
 import Link from "next/link";
-import { useId } from "react";
-import { GettingStarted } from "@/components/getting-started";
+import { useEffect, useMemo, useState } from "react";
+import { buildAiContext, providerPayload } from "@/ai/context";
+import type { AiOutputItem } from "@/ai/response";
+import { MockAiTaskProvider } from "@/ai/task-mock";
 import { useModel } from "@/components/model-provider";
-import { fmtPct, fmtValue } from "@/components/format";
-import { SystemSwitcher } from "@/components/system-switcher";
-import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
-import { resolveVariable, subjectRef, systemRef } from "@/model/domain";
-import { subjectsOf } from "@/model/subjects";
-import type { Variable } from "@/types";
+import { Loading, Note } from "@/components/ui";
+import { openProposalCount, recurrenceCards, workingHypotheses } from "@/features/home/cards";
+import type { MutationProposal } from "@/kernel";
 
-const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50";
+const DRAFT_KEY = "human-systems.home-draft.v1";
 
-/** Today's calendar date in the browser's zone, as the date input expects it. */
-function todayIso(): string {
+function readDraft(modelId: string): string {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(DRAFT_KEY) ?? "{}") as Record<string, string>;
+    return typeof all[modelId] === "string" ? all[modelId] : "";
+  } catch {
+    return "";
+  }
+}
+function writeDraft(modelId: string, text: string): void {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(DRAFT_KEY) ?? "{}") as Record<string, string>;
+    all[modelId] = text;
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(all));
+  } catch {
+    /* storage unavailable: the draft lives for this page only */
+  }
+}
+const todayIso = () => {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+};
 
-/** "View as of": a date input plus a way back to today. The date input
- *  cannot pick a future day; the engine treats a date as the end of that
- *  day. Display and input only: it changes how values are READ, never what
- *  is stored. */
-function ViewAsOfControl({ asOf, setAsOf }: { asOf: string | null; setAsOf: (d: string | null) => void }) {
-  const id = useId();
-  const today = todayIso();
+function HomeCard({ eyebrow, title, children, action, tone = "neutral" }: { eyebrow: string; title: string; children?: React.ReactNode; action: { href: string; label: string }; tone?: "neutral" | "attention" }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <label htmlFor={id} className="text-muted">
-        View as of
-      </label>
-      <input
-        id={id}
-        type="date"
-        max={today}
-        value={asOf ? asOf.slice(0, 10) : ""}
-        onChange={(e) => {
-          const v = e.target.value;
-          setAsOf(v && v <= today ? v : null);
-        }}
-      />
-      <button type="button" className={BTN} disabled={!asOf} onClick={() => setAsOf(null)}>
-        Back to today
-      </button>
-      {asOf ? null : <span className="text-muted">Showing today&apos;s values.</span>}
-    </div>
+    <section className={`rounded-2xl bg-surface px-5 py-4 shadow-sm ${tone === "attention" ? "ring-1 ring-warn/40" : ""}`} data-home-card={eyebrow}>
+      <p className="text-xs uppercase tracking-wide text-muted">{eyebrow}</p>
+      <h2 className="mt-1 text-base font-medium leading-snug">{title}</h2>
+      {children ? <div className="mt-1 text-sm text-muted">{children}</div> : null}
+      <Link href={action.href} className="mt-3 inline-block text-sm font-medium text-accent hover:underline">
+        {action.label} →
+      </Link>
+    </section>
   );
 }
 
-export default function DashboardPage() {
-  const { status, evaluated, isSample, seedLabel, migratedFrom, models, resetToSample, asOf, setAsOf } = useModel();
-  if (status === "error") return null; // the storage notice above the page says what happened
-  if (status === "loading" || !evaluated) return <Loading />;
+export default function HomePage() {
+  const { status, model, evaluated, proposals, proposalRecovery, asOf, setAsOf, isSample, seedLabel } = useModel();
+  const [draft, setDraft] = useState("");
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [ledger, setLedger] = useState<MutationProposal[] | null>(null);
+  const [reflection, setReflection] = useState<{ ok: true; items: AiOutputItem[] } | { ok: false; error: string } | null>(null);
+  const today = todayIso();
 
-  const { model, loops, gap, issues, unassignedVariables } = evaluated;
-  const infoNotes = issues.filter((i) => i.level === "info");
-  const problems = issues.filter((i) => i.level !== "info");
-  const activeMembers = subjectsOf(model);
-  /** Headline variables the ACTIVE DOMAIN names (presentation configuration),
-   *  present in this system; system keys resolve once, member keys once per
-   *  active subject. A domain without headline keys shows none. */
-  const headline: { variable: Variable; label: string }[] = [];
-  for (const { key, scope } of evaluated.domain.presentation?.headlineKeys ?? []) {
-    if (scope === "system") {
-      const v = resolveVariable(evaluated.variables, model.id, systemRef(key));
-      if (v) headline.push({ variable: v, label: v.name });
-    } else {
-      for (const m of activeMembers) {
-        const v = resolveVariable(evaluated.variables, model.id, subjectRef(key, m.id));
-        if (v) headline.push({ variable: v, label: `${v.name} — ${m.label}` });
-      }
+  useEffect(() => {
+    if (!model || loaded === model.id) return;
+    // the draft is a per-viewer convenience in this browser, never model state
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(readDraft(model.id));
+    setLoaded(model.id);
+  }, [model, loaded]);
+
+  useEffect(() => {
+    if (!proposals || !model || proposalRecovery.status !== "done") return;
+    let cancelled = false;
+    void proposals.list(model.id).then((all) => {
+      if (!cancelled) setLedger(all);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [proposals, model, proposalRecovery.status]);
+
+  const cards = useMemo(() => (model ? recurrenceCards(model, asOf ? asOf.slice(0, 10) : today) : []), [model, asOf, today]);
+
+  if (status === "error") return null; // the storage notice above says what happened
+  if (status === "loading" || !model || !evaluated) return <Loading />;
+
+  const open = ledger ? openProposalCount(ledger) : null;
+  const working = workingHypotheses(model);
+  const update = (text: string) => {
+    setDraft(text);
+    writeDraft(model.id, text);
+    setReflection(null);
+  };
+  const reflect = async () => {
+    try {
+      const ctx = buildAiContext(model, "interpret_free_text", { subjectId: model.id, userText: draft, asOf: asOf ? asOf.slice(0, 10) : today });
+      const r = await new MockAiTaskProvider().run(providerPayload(ctx), ctx.contextHash);
+      setReflection(r.ok ? { ok: true, items: r.response.items } : { ok: false, error: r.error });
+    } catch (e) {
+      setReflection({ ok: false, error: e instanceof Error ? e.message : String(e) });
     }
-  }
-  const reinforcing = loops.filter((l) => l.polarity === "reinforcing");
-  const balancing = loops.filter((l) => l.polarity === "balancing");
-  const topLoop = [...loops].sort((a, b) => (b.pressure ?? -1) - (a.pressure ?? -1))[0];
-  const inputVariableCount = model.variables.filter((v) => v.kind === "input").length;
-  const isEmpty = Object.values(model.collections).every((c) => c.items.length === 0) && inputVariableCount === 0;
-  const otherSystems = Math.max(0, models.length - 1);
+  };
 
   return (
-    <div>
-      <div className="mb-4">
-        <SystemSwitcher compact />
-      </div>
-
-      <div className="mb-4">
-        <ViewAsOfControl asOf={asOf} setAsOf={setAsOf} />
-      </div>
-
+    <div className="mx-auto max-w-2xl">
       {asOf ? (
-        <div className="mb-4">
-          <Card tone="warn" title="Showing a past date">
-            <p className="text-sm">
-              Showing values and targets as of <span className="font-medium tabular-nums">{asOf.slice(0, 10)}</span>. Relationships, constraints,
-              hypotheses and calculations use today&apos;s structure. A saved snapshot is the record of the whole system at a past date.
-            </p>
-            <p className="text-xs text-muted mt-1">Anything not recorded by that date shows as unknown, never as a later value.</p>
-            <button type="button" className={`${BTN} mt-2`} onClick={() => setAsOf(null)}>
-              Back to today
-            </button>
-          </Card>
+        <div className="mb-5 rounded-2xl bg-warn-soft px-5 py-3 text-sm" role="status">
+          You are looking at values as of <span className="font-medium tabular-nums">{asOf.slice(0, 10)}</span>. Anything not recorded by then shows as unknown.{" "}
+          <button type="button" className="underline" onClick={() => setAsOf(null)}>
+            Back to today
+          </button>
         </div>
       ) : null}
+      {isSample ? <p className="mb-5 text-xs text-muted">You are looking at the {seedLabel}. Your own system can be created in Library.</p> : null}
 
-      {infoNotes.length > 0 ? (
-        <div className="mb-4 space-y-2">
-          {infoNotes.map((i, k) => (
-            <Note key={k}>{i.message}</Note>
-          ))}
+      <section className="mb-8">
+        <label htmlFor="home-thinking" className="block text-2xl font-semibold tracking-tight md:text-3xl">
+          What are you thinking about?
+        </label>
+        <p className="mt-2 text-sm text-muted">Write what&apos;s on your mind. You don&apos;t need to organize it first.</p>
+        <div className="relative mt-4">
+          <textarea id="home-thinking" className="w-full resize-y rounded-2xl border-0 bg-surface px-5 py-4 text-base leading-relaxed shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/40" rows={6} value={draft} onChange={(e) => update(e.target.value)} placeholder="Something changed at work this month and I keep coming back to it…" />
+          <span className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-background px-2 py-1 text-xs text-muted" title="Voice input is not available yet" aria-hidden="true">
+            🎤
+          </span>
         </div>
-      ) : null}
-
-      <PageHeader
-        title={model.profile.name}
-        lede={`Current system versus desired system. Values on the left are what the model ${asOf ? `held as of ${asOf.slice(0, 10)}` : "holds today"}; values on the right are the ${asOf ? "targets recorded by then" : "stated targets"}. Every number carries a source type and a confidence on the Structural variables page.`}
-      />
-
-      {migratedFrom !== null ? (
-        <div className="mb-4">
-          <Note>
-            {model.profile.name} was stored under schema version {migratedFrom} and was upgraded on load. Its values are unchanged; the stored copy now uses the current schema.
-          </Note>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button type="button" className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50" disabled={draft.trim().length === 0} onClick={() => void reflect()}>
+            Reflection demo
+          </button>
+          <span className="text-xs text-muted">Kept in this browser until you ask the app to work with it. The demo is a deterministic stand-in, not real intelligence.</span>
         </div>
-      ) : null}
-
-      {isSample ? (
-        <div className="mb-4">
-          <Note>
-            This is the {seedLabel ?? "fictional sample"}. Edit values on its pages; changes stay in this browser only.{" "}
-            <button type="button" className="underline" onClick={() => void resetToSample()}>
-              Reset to sample
-            </button>
-          </Note>
-        </div>
-      ) : (
-        <div className="mb-4">
-          <Note>
-            {model.profile.name} · {model.profile.systemType} ·{" "}
-            {otherSystems === 0 ? "no other systems stored in this browser" : `${otherSystems} other system${otherSystems > 1 ? "s" : ""} stored in this browser`}
-          </Note>
-        </div>
-      )}
-
-      {unassignedVariables.length > 0 ? (
-        <div className="mb-4">
-          <Note tone="warn">
-            {unassignedVariables.length} variable{unassignedVariables.length > 1 ? "s have" : " has"} no subject assigned and feed{unassignedVariables.length > 1 ? "" : "s"} no calculation.{" "}
-            <Link href="/variables" className="underline">
-              Assign subjects
-            </Link>
-          </Note>
-        </div>
-      ) : null}
-
-      {isEmpty ? (
-        <div className="mb-4">
-          <GettingStarted model={model} evaluated={evaluated} defaultOpen />
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card tone="current" title={<span className="text-accent">CURRENT SYSTEM</span>}>
-          {isEmpty ? (
-            <p className="text-sm text-muted">No values yet. The calculated variables fill in once the domain&apos;s records and input variables exist.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {headline.map(({ variable: v, label }) => (
-                <Stat
-                  key={v.id}
-                  tone="current"
-                  label={label}
-                  value={fmtValue(v.currentValue, v.unit)}
-                  sub={`${v.sourceType.replace("_", " ")} · ${Math.round(v.confidence * 100)}% conf.`}
-                />
-              ))}
-            </div>
-          )}
-          <p className="text-xs text-muted mt-3">{model.currentAttractor.summary || "No current attractor described yet (System profile)."}</p>
-        </Card>
-        <Card tone="desired" title={<span className="text-desired">DESIRED SYSTEM</span>}>
-          {isEmpty ? (
-            <p className="text-sm text-muted">No targets yet. A desired value can be set on any variable once one exists.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {headline.map(({ variable: v, label }) => {
-                const g = gap.gaps.find((x) => x.variableId === v.id);
-                return (
-                  <Stat
-                    key={v.id}
-                    tone="desired"
-                    label={label}
-                    value={fmtValue(v.desiredValue, v.unit)}
-                    sub={g ? `gap ${fmtPct(g.normalizedGap)} of range` : "no target set"}
-                  />
-                );
-              })}
-            </div>
-          )}
-          <p className="text-xs text-muted mt-3">{model.desiredAttractor.summary || "No desired attractor described yet (System profile)."}</p>
-        </Card>
-      </div>
-
-      {isEmpty ? null : (
-        <div className="grid gap-4 md:grid-cols-3 mt-4">
-          <Card title="Structural gap">
-            <div className="text-2xl font-semibold tabular-nums">
-              {gap.openCount} <span className="text-sm font-normal text-muted">open</span> · {gap.closedCount}{" "}
-              <span className="text-sm font-normal text-muted">at target</span>
-            </div>
-            <div className="text-xs text-muted">
-              across {gap.gaps.length} variable{gap.gaps.length === 1 ? "" : "s"} with targets; one gap per variable, never summed
-            </div>
-            <Link href="/gap" className="text-xs underline mt-2 inline-block">
-              Per-variable gap
-            </Link>
-          </Card>
-          <Card title="Feedback loops">
-            <div className="text-2xl font-semibold tabular-nums">
-              {reinforcing.length} <span className="text-sm font-normal text-muted">reinforcing</span> · {balancing.length}{" "}
-              <span className="text-sm font-normal text-muted">balancing</span>
-            </div>
-            {topLoop ? (
-              <div className="text-xs text-muted mt-1">
-                Highest pressure: {topLoop.annotation?.name ?? topLoop.id} ({topLoop.polarity}, index{" "}
-                {topLoop.pressure?.toFixed(2)})
-              </div>
-            ) : null}
-            <Link href="/feedback-map" className="text-xs underline mt-2 inline-block">
-              Feedback map
-            </Link>
-          </Card>
-          <Card title="Model health">
-            {problems.length === 0 ? (
-              <div className="text-sm">No structural issues detected.</div>
-            ) : (
-              <ul className="text-xs space-y-1">
-                {problems.map((i, k) => (
-                  <li key={k} className={i.level === "error" ? "text-neg" : "text-warn"}>
-                    {i.message}
+        {reflection ? (
+          reflection.ok ? (
+            <div className="mt-4 rounded-2xl bg-surface px-5 py-4 shadow-sm" data-testid="reflection">
+              <p className="text-xs uppercase tracking-wide text-muted">Reflection demo · nothing is added to your notebook</p>
+              <ul className="mt-2 space-y-2 text-sm">
+                {reflection.items.map((it) => (
+                  <li key={it.id}>
+                    {it.kind === "interpretation" ? (
+                      <>
+                        <span className="text-muted">A tentative reading:</span> {it.text}
+                        {it.caveat ? <span className="block text-xs text-muted">{it.caveat}</span> : null}
+                      </>
+                    ) : it.kind === "question" ? (
+                      <>
+                        <span className="text-muted">A question:</span> {it.text}
+                      </>
+                    ) : (
+                      it.kind
+                    )}
                   </li>
                 ))}
+                {reflection.items.length === 0 ? <li className="text-muted">The demo has nothing to say about this yet.</li> : null}
               </ul>
-            )}
-            <Link href="/evidence" className="text-xs underline mt-2 inline-block">
-              Evidence and assumptions
-            </Link>
-          </Card>
-        </div>
-      )}
+              <Link href="/ai" className="mt-2 inline-block text-xs text-muted underline">
+                See exactly what a real assistant would receive
+              </Link>
+            </div>
+          ) : (
+            <Note tone="warn">{reflection.error}</Note>
+          )
+        ) : null}
+      </section>
 
-      {isEmpty ? null : (
-        <div className="mt-4">
-          <GettingStarted model={model} evaluated={evaluated} defaultOpen={false} />
-        </div>
-      )}
+      <div className="space-y-4">
+        {cards.length > 0 ? (
+          cards.map((c) => (
+            <HomeCard key={c.variableId} eyebrow="Something keeps showing up" title={c.headline} action={{ href: c.exploreHref, label: "Explore" }}>
+              {c.details[0]}
+            </HomeCard>
+          ))
+        ) : (
+          <HomeCard eyebrow="Something keeps showing up" title="Nothing has repeated in the records yet." action={{ href: "/history", label: "See what changed" }}>
+            A record has to be entered again at a later date before anything can keep showing up.
+          </HomeCard>
+        )}
+
+        {proposalRecovery.status === "error" ? (
+          <Note tone="warn">Your proposals could not be read: {proposalRecovery.message}</Note>
+        ) : open !== null && open > 0 ? (
+          <HomeCard eyebrow="Needs your review" title={open === 1 ? "1 proposed change is waiting for you." : `${open} proposed changes are waiting for you.`} action={{ href: "/proposals", label: "Review" }} tone="attention">
+            Nothing changes in your notebook until you decide.
+          </HomeCard>
+        ) : (
+          <HomeCard eyebrow="Needs your review" title="Nothing is waiting for your decision." action={{ href: "/proposals", label: "See past decisions" }} />
+        )}
+
+        {working.length > 0 ? (
+          <HomeCard eyebrow="Working explanations" title={working.length === 1 ? "1 explanation you're currently investigating." : `${working.length} explanations you're currently investigating.`} action={{ href: "/hypotheses", label: "View" }}>
+            {working.slice(0, 2).map((h) => `“${h.statement}”`).join(" · ")}
+            {working.length > 2 ? " · …" : ""}
+          </HomeCard>
+        ) : (
+          <HomeCard eyebrow="Working explanations" title="You're not investigating anything yet." action={{ href: "/history", label: "Start from what keeps showing up" }}>
+            An explanation begins as something to test, never as a conclusion.
+          </HomeCard>
+        )}
+      </div>
+
+      <p className="mt-10 text-xs text-muted">
+        Everything underneath is available in{" "}
+        <Link href="/library" className="underline">
+          Library
+        </Link>
+        .
+      </p>
     </div>
   );
 }
