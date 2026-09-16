@@ -15,6 +15,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { buildSystemPrompt } from "@/ai/prompt";
+import { describeVariableHistory } from "@/discovery";
 import { createBlankModel } from "@/model/blank";
 import { categoryVocabulary, domainRegistry, evaluationDimensionKeys, resolveVariable, subjectLabelPluralOf, subjectRef, systemRef, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
@@ -235,6 +236,18 @@ describe("neutral-domain proof: the engine does not require a household", () => 
     expect(Object.keys(m.collections)).toEqual([]);
     const links = (NEUTRAL.collections ?? []).filter((c) => c.route).map((c) => c.route);
     expect(links).toEqual([]); // no Income link for a neutral domain
+  });
+
+  it("the discovery layer describes a neutral variable's history with no household dependency", async () => {
+    const { model } = await neutralSystem();
+    const later = M.recordValue(model, "input_a", { value: 50, sourceType: "measured", confidence: 0.9, valid: { kind: "date", start: "2026-11-01", precision: "day", text: "2026-11-01" } });
+    const stored = later.variables.find((v) => v.id === "input_a")!;
+    const d = describeVariableHistory(stored, { from: "2026-01-01", to: "2026-12-31" });
+    expect(d.facts.exactRepetition).toBe(true);
+    expect(d.repeatedValues[0].value).toBe(50);
+    expect(d.facts.recurrenceReliesOnRecordedBasis).toBe(true); // the first entry was recorded, not asserted
+    expect(d.summaryClass).toBe("repeated");
+    expect(() => describeVariableHistory(later.variables.find((v) => v.key === "ratio")!, { from: "2026-01-01", to: "2026-12-31" })).toThrow(/input variables only/);
   });
 
   it("the runtime guard is armed: importing any household module in this file fails, importing an engine module does not", async () => {
