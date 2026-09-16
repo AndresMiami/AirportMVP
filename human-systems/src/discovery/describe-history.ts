@@ -131,7 +131,7 @@ export interface EvidenceFacts {
   /** A boundary is resolved from an entry whose own extent does not cover it. */
   lastKnownCarryForward: boolean;
   explicitUnknownPresent: boolean;
-  /** An explicit unknown lies between two known application times. */
+  /** An explicit unknown lies between two occurrences of a repeated value. */
   unknownInterruption: boolean;
   ambiguityPresent: boolean;
   unorderableEvidencePresent: boolean;
@@ -175,8 +175,9 @@ export interface VariableHistoryDescription {
   /** Usable application times with a known value. */
   distinctApplicationTimeCount: number;
   distinctKnownValues: number[];
-  /** Values recorded at two or more distinct application times. */
-  repeatedValues: { value: number; applicationTimes: string[] }[];
+  /** Values recorded at two or more distinct application times, with the
+   *  explicit-unknown times that fall between their first and last occurrence. */
+  repeatedValues: { value: number; applicationTimes: string[]; unknownTimesBetween: string[] }[];
   /** Overlapping records recording an explicit unknown. */
   explicitUnknownCount: number;
   unknownInterruptions: number;
@@ -331,14 +332,21 @@ export function describeVariableHistory(variable: StoredVariable, request: Inter
   const distinctKnownValues = [...new Set(knownValues)].sort((a, b) => a - b);
   const repeatedValues = distinctKnownValues
     .map((value) => ({ value, applicationTimes: knownTimes.filter((t) => t.value === value).map((t) => t.start) }))
-    .filter((r) => r.applicationTimes.length >= 2);
+    .filter((r) => r.applicationTimes.length >= 2)
+    .map((r) => ({ ...r, unknownTimesBetween: times.filter((t) => t.kind === "unknown" && t.start > r.applicationTimes[0] && t.start < (r.applicationTimes.at(-1) as string)).map((t) => t.start) }));
   const repeatedTimes = new Set(repeatedValues.flatMap((r) => r.applicationTimes));
 
-  // Unknown interruptions: explicit-unknown times strictly between two known times.
-  let unknownInterruptions = 0;
-  const firstKnownIdx = times.findIndex((t) => t.kind === "known");
-  const lastKnownIdx = times.map((t) => t.kind).lastIndexOf("known");
-  if (firstKnownIdx >= 0) for (let i = firstKnownIdx + 1; i < lastKnownIdx; i++) if (times[i].kind === "unknown") unknownInterruptions += 1;
+  // Unknown interruptions: explicit-unknown times that lie strictly between
+  // two occurrences of a value that REPEATED. An unknown between two
+  // different values interrupts nothing that recurred. One unknown time is
+  // counted once even when several values repeat around it.
+  const interrupting = new Set<string>();
+  for (const rv of repeatedValues) {
+    const first = rv.applicationTimes[0];
+    const last = rv.applicationTimes.at(-1) as string;
+    for (const t of times) if (t.kind === "unknown" && t.start > first && t.start < last) interrupting.add(t.start);
+  }
+  const unknownInterruptions = interrupting.size;
 
   let differingRecordedPairs = 0;
   for (let i = 1; i < knownTimes.length; i++) if (knownTimes[i].value !== knownTimes[i - 1].value) differingRecordedPairs += 1;

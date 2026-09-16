@@ -10,23 +10,37 @@
 import { DiscoveryError } from "./errors";
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+/** A real ISO 8601 timestamp: date, "T", time to at least minutes, optional
+ *  seconds and fraction, and an explicit zone (Z or ±hh:mm). Nothing looser
+ *  (no "March 1", no "2026-3-1", no zone-less datetime) is accepted. */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
 
-function requireIso(iso: string, what: string): void {
-  if (typeof iso !== "string" || iso.length === 0 || Number.isNaN(Date.parse(iso))) {
-    throw new DiscoveryError(`Interval ${what} must be an ISO date or instant, got ${JSON.stringify(iso)}`);
+/** Strict ISO parsing. A date-only string stays a calendar day (the caller
+ *  chooses which end of it); a timestamp is re-serialized in UTC so that
+ *  the same instant written with different zone offsets compares equal.
+ *  Instants are compared as strings everywhere in the engine, so every
+ *  normalized instant has the exact same shape. */
+function strictIso(iso: string, what: string): { dateOnly: string } | { instant: string } {
+  if (typeof iso === "string" && DATE_ONLY.test(iso)) {
+    const ms = Date.parse(`${iso}T00:00:00.000Z`);
+    if (!Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === iso) return { dateOnly: iso };
+  } else if (typeof iso === "string" && ISO_DATETIME.test(iso)) {
+    const ms = Date.parse(iso);
+    if (!Number.isNaN(ms)) return { instant: new Date(ms).toISOString() };
   }
+  throw new DiscoveryError(`Interval ${what} must be an ISO date (YYYY-MM-DD) or an ISO timestamp with a zone, got ${JSON.stringify(iso)}`);
 }
 
-/** Date-only -> the first instant of that day; datetime -> unchanged. */
+/** Date-only -> the first instant of that day; timestamp -> the same instant in UTC. */
 export function normalizeIntervalStart(iso: string): string {
-  requireIso(iso, "start");
-  return DATE_ONLY.test(iso) ? `${iso}T00:00:00.000Z` : iso;
+  const p = strictIso(iso, "start");
+  return "dateOnly" in p ? `${p.dateOnly}T00:00:00.000Z` : p.instant;
 }
 
-/** Date-only -> the last instant of that day; datetime -> unchanged. */
+/** Date-only -> the last instant of that day; timestamp -> the same instant in UTC. */
 export function normalizeIntervalEnd(iso: string): string {
-  requireIso(iso, "end");
-  return DATE_ONLY.test(iso) ? `${iso}T23:59:59.999Z` : iso;
+  const p = strictIso(iso, "end");
+  return "dateOnly" in p ? `${p.dateOnly}T23:59:59.999Z` : p.instant;
 }
 
 export interface IntervalRequest {

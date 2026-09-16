@@ -70,7 +70,7 @@ describe("describeVariableHistory", () => {
     const d = describeVariableHistory(variable([entry({ id: "e1", value: 5, valid: date("2026-01-10") }), entry({ id: "e2", value: 5, valid: date("2026-06-10") })]), YEAR);
     expect(d.facts.exactRepetition).toBe(true);
     expect(d.facts.allKnownValuesEqual).toBe(true);
-    expect(d.repeatedValues).toEqual([{ value: 5, applicationTimes: ["2026-01-10T00:00:00.000Z", "2026-06-10T00:00:00.000Z"] }]);
+    expect(d.repeatedValues).toEqual([{ value: 5, applicationTimes: ["2026-01-10T00:00:00.000Z", "2026-06-10T00:00:00.000Z"], unknownTimesBetween: [] }]);
     expect(d.distinctApplicationTimeCount).toBe(2);
     expect(d.knownRecordCount).toBe(2);
     expect(d.differingRecordedPairs).toBe(0);
@@ -93,6 +93,7 @@ describe("describeVariableHistory", () => {
     expect(d.facts.explicitUnknownPresent).toBe(true);
     expect(d.facts.unknownInterruption).toBe(true);
     expect(d.unknownInterruptions).toBe(1);
+    expect(d.repeatedValues[0].unknownTimesBetween).toEqual(["2026-03-10T00:00:00.000Z"]);
     expect(d.explicitUnknownCount).toBe(1);
     expect(d.applicationTimes.map((t) => t.kind)).toEqual(["known", "unknown", "known"]);
     expect(d.facts.ambiguityPresent).toBe(false);
@@ -114,9 +115,26 @@ describe("describeVariableHistory", () => {
     expect(d.differingRecordedPairs).toBe(1);
     expect(d.distinctKnownValues).toEqual([5, 10]);
     expect(d.facts.exactRepetition).toBe(false);
-    expect(d.facts.unknownInterruption).toBe(true);
+    // the unknown sits between two DIFFERENT values: nothing repeated was interrupted
+    expect(d.facts.unknownInterruption).toBe(false);
+    expect(d.unknownInterruptions).toBe(0);
+    expect(d.facts.explicitUnknownPresent).toBe(true);
     expect("valueChanges" in d).toBe(false);
     expect(d.summaryClass).toBe("changed");
+    // an unknown between two occurrences of a repeated value, with a different value in between too, counts once
+    const mixed = describeVariableHistory(
+      variable([entry({ id: "e1", value: 5, valid: date("2026-01-10") }), entry({ id: "e2", value: null, valid: date("2026-03-10") }), entry({ id: "e3", value: 10, valid: date("2026-06-10") }), entry({ id: "e4", value: 5, valid: date("2026-09-10") })]),
+      YEAR,
+    );
+    expect(mixed.facts.exactRepetition).toBe(true);
+    expect(mixed.facts.allKnownValuesEqual).toBe(false);
+    expect(mixed.unknownInterruptions).toBe(1);
+    expect(mixed.repeatedValues).toEqual([{ value: 5, applicationTimes: ["2026-01-10T00:00:00.000Z", "2026-09-10T00:00:00.000Z"], unknownTimesBetween: ["2026-03-10T00:00:00.000Z"] }]);
+    // an unknown AFTER the last occurrence interrupts nothing
+    const after = describeVariableHistory(variable([entry({ id: "e1", value: 5, valid: date("2026-01-10") }), entry({ id: "e2", value: 5, valid: date("2026-06-10") }), entry({ id: "e3", value: null, valid: date("2026-09-10") })]), YEAR);
+    expect(after.facts.exactRepetition).toBe(true);
+    expect(after.facts.unknownInterruption).toBe(false);
+    expect(after.facts.explicitUnknownPresent).toBe(true);
   });
 
   it("C. low recorded variation: a reference range AND the explicitly applied A23 convention", () => {

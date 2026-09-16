@@ -18,9 +18,29 @@ describe("interval boundary helpers", () => {
     expect(normalizeIntervalStart("2026-03-01")).not.toBe(normalizeInstant("2026-03-01"));
   });
 
-  it("datetime inputs remain exact at both ends", () => {
+  it("timestamp inputs keep their instant at both ends, re-serialized in UTC", () => {
     expect(normalizeIntervalStart("2026-03-01T12:34:56.000Z")).toBe("2026-03-01T12:34:56.000Z");
     expect(normalizeIntervalEnd("2026-03-01T12:34:56.000Z")).toBe("2026-03-01T12:34:56.000Z");
+    expect(normalizeIntervalStart("2026-03-01T12:34:56Z")).toBe("2026-03-01T12:34:56.000Z");
+    expect(normalizeIntervalStart("2026-03-01T12:34Z")).toBe("2026-03-01T12:34:00.000Z");
+  });
+
+  it("the same instant written with different zone offsets normalizes to one UTC string, so string comparison is correct", () => {
+    expect(normalizeIntervalStart("2026-03-01T12:00:00+02:00")).toBe("2026-03-01T10:00:00.000Z");
+    expect(normalizeIntervalEnd("2026-03-01T05:00:00-05:00")).toBe("2026-03-01T10:00:00.000Z");
+    expect(normalizeIntervalStart("2026-03-01T12:00:00+02:00")).toBe(normalizeIntervalStart("2026-03-01T10:00:00.000Z"));
+    // an offset that crosses midnight lands on the right UTC day
+    expect(normalizeIntervalStart("2026-03-01T01:00:00+03:00")).toBe("2026-02-28T22:00:00.000Z");
+    const iv = requestedInterval({ from: "2026-03-01T12:00:00+02:00", to: "2026-03-01T12:00:00+01:00" });
+    expect(iv.from < iv.to).toBe(true);
+    expect(iv.requested).toEqual({ from: "2026-03-01T12:00:00+02:00", to: "2026-03-01T12:00:00+01:00" });
+  });
+
+  it("only strict ISO forms are accepted: lenient Date.parse inputs, zone-less datetimes and invalid calendar dates are refused", () => {
+    for (const bad of ["March 1, 2026", "2026-3-1", "2026/03/01", "2026-03-01T12:00:00", "2026-03-01 12:00:00Z", "2026-02-30", "2026-13-01", "20260301"]) {
+      expect(() => normalizeIntervalStart(bad), bad).toThrow(DiscoveryError);
+      expect(() => normalizeIntervalEnd(bad), bad).toThrow(DiscoveryError);
+    }
   });
 
   it("requestedInterval echoes the request and normalizes both ends; a same-day request spans the whole day", () => {
