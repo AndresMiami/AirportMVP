@@ -84,7 +84,12 @@ export interface Slice {
 }
 
 export type OccurrenceReading = "common" | "differing" | "insufficient";
+/** What the USABLE contrasts show about a common condition. */
 export type ContrastReading = "background" | "differentiating" | "mixed" | "undecided" | "not_applicable";
+/** What the usable contrasts show, independent of how many were usable. */
+export type ContrastShows = "same" | "different" | "mixed" | "none";
+/** How much of the contrast evidence was usable: every contrast time, some, or none. */
+export type ContrastCoverage = "complete" | "partial" | "none";
 
 export interface ConditionAssessment {
   variableId: string;
@@ -100,8 +105,14 @@ export interface ConditionAssessment {
   contrastUsable: number;
   contrastSame: number;
   contrastDifferent: number;
+  /** Direction from the usable contrasts, and coverage, kept INDEPENDENT:
+   *  "different" with "partial" coverage is not a fully distinguished case. */
+  contrastShows: ContrastShows;
+  contrastCoverage: ContrastCoverage;
+  /** The usable-contrast reading (not_applicable unless common at occurrences). */
   againstContrasts: ContrastReading;
-  /** The common reading rests partly on recorded-basis dates. */
+  /** The common reading rests partly on recorded-basis dates (from the
+   *  readings' own validBasis, whatever their temporal shape). */
   reliesOnRecordedBasis: boolean;
   statement: string;
 }
@@ -139,7 +150,9 @@ export type CrossContextRefusal = {
 export interface CrossContextOptions {
   /** Days on each side of an occurrence extent inside which events count as "near" (default 30). */
   eventWindowDays?: number;
-  /** Subjects whose input variables form the context; default: the pattern's subject plus the system. */
+  /** Subjects whose input variables AND events form the context; default: the
+   *  pattern's subject plus the system. Another subject's event near the
+   *  pattern, or an unassigned event, is never context by default. */
   contextSubjectIds?: string[];
 }
 
@@ -203,18 +216,22 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
   const conUsable = con.filter(usable);
   const same = commonValue === null ? 0 : conUsable.filter((c) => c.value === commonValue).length;
   const different = commonValue === null ? 0 : conUsable.filter((c) => c.value !== commonValue).length;
+  const contrastShows: ContrastShows = atOccurrences !== "common" || conUsable.length === 0 ? "none" : different === 0 ? "same" : same === 0 ? "different" : "mixed";
+  const contrastCoverage: ContrastCoverage = con.length === 0 || conUsable.length === 0 ? "none" : conUsable.length === con.length ? "complete" : "partial";
   let againstContrasts: ContrastReading = "not_applicable";
   if (atOccurrences === "common") {
-    if (conUsable.length === 0) againstContrasts = "undecided";
-    else if (different === 0) againstContrasts = "background";
-    else if (same === 0) againstContrasts = "differentiating";
-    else againstContrasts = "mixed";
+    againstContrasts = contrastShows === "none" ? "undecided" : contrastShows === "same" ? "background" : contrastShows === "different" ? "differentiating" : "mixed";
   }
-  const reliesOnRecordedBasis = atOccurrences === "common" && occUsable.some((c) => c.basis === "recorded_basis_coverage");
+  // Epistemic basis is independent of temporal shape: a stored RANGE whose
+  // date is known only from its recording still rests on recorded basis.
+  const reliesOnRecordedBasis = atOccurrences === "common" && occUsable.some((c) => c.validBasis === "recorded");
   const fmt = (v: number | null) => formatValue(v, z.unit);
   const nO = occ.length;
   const nC = con.length;
-  const unresolvedCases = occ.filter((c) => !usable(c)).length + con.filter((c) => !usable(c)).length;
+  const nUnusableC = nC - conUsable.length;
+  const unresolvedCases = occ.filter((c) => !usable(c)).length + nUnusableC;
+  const readable = `${conUsable.length} readable contrast time${conUsable.length === 1 ? "" : "s"}`;
+  const others = `${nUnusableC} other contrast time${nUnusableC === 1 ? " is" : "s are"} unresolved`;
   let statement: string;
   if (atOccurrences === "insufficient") {
     statement = `${z.name} is unresolved in ${unresolvedCases} of ${nO + nC} relevant cases (${occUsable.length} of ${nO} occurrences readable); not enough evidence to compare.`;
@@ -223,18 +240,25 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
   } else {
     const base = `${z.name} was recorded at ${fmt(commonValue)} at all ${nO} occurrences`;
     const recordedNote = reliesOnRecordedBasis ? " (relying partly on dates known only from when the information was recorded)" : "";
-    switch (againstContrasts) {
-      case "background":
-        statement = `${base} and at all ${conUsable.length} usable contrast times${recordedNote}; present whether the pattern occurred or not, so it does not by itself distinguish the cases.`;
+    const complete = contrastCoverage === "complete";
+    switch (contrastShows) {
+      case "same":
+        statement = complete
+          ? `${base} and at all ${nC} contrast time${nC === 1 ? "" : "s"}${recordedNote}; present whether the pattern occurred or not, so it does not by itself distinguish the cases.`
+          : `${base} and the same at the ${readable}${recordedNote}; ${others}, so whether it distinguishes the cases remains open.`;
         break;
-      case "differentiating":
-        statement = `${base} and different at all ${conUsable.length} usable contrast times${recordedNote}; this distinguishes the recorded cases. Recorded together is not caused by.`;
+      case "different":
+        statement = complete
+          ? `${base} and different at all ${nC} contrast time${nC === 1 ? "" : "s"}${recordedNote}; this distinguishes the recorded cases. Recorded together is not caused by.`
+          : `${base} and different at the ${readable}${recordedNote}; ${others}, so the comparison is incomplete.`;
         break;
       case "mixed":
-        statement = `${base}${recordedNote}; the same at ${same} and different at ${different} of ${conUsable.length} usable contrast times, so the recorded cases are only partly distinguished.`;
+        statement = complete
+          ? `${base}${recordedNote}; the same at ${same} and different at ${different} of ${nC} contrast times, so the recorded cases are only partly distinguished.`
+          : `${base}${recordedNote}; the same at ${same} and different at ${different} of the ${readable}; ${others}.`;
         break;
       default:
-        statement = `${base}${recordedNote}; no usable contrast reading exists (${nC} contrast time${nC === 1 ? "" : "s"}, ${nC - conUsable.length} unreadable), so whether it distinguishes the cases is undecided.`;
+        statement = `${base}${recordedNote}; no usable contrast reading exists (${nC} contrast time${nC === 1 ? "" : "s"}, ${nUnusableC} unresolved), so whether it distinguishes the cases is undecided.`;
     }
   }
   return {
@@ -251,6 +275,8 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
     contrastUsable: conUsable.length,
     contrastSame: same,
     contrastDifferent: different,
+    contrastShows,
+    contrastCoverage,
     againstContrasts,
     reliesOnRecordedBasis,
     statement,
@@ -300,7 +326,11 @@ export function crossContext(model: SystemModel, pattern: PatternRef, options: C
       patternValue: t.value as number,
       patternEntryIds: t.entryIds,
       context: contextVars.map((z) => readContext(z, application)),
-      eventsNear: model.events.map((e) => eventContext(e, near)).filter((r) => r.inInterval).map((r) => r.ctx),
+      eventsNear: model.events
+        .filter((e) => e.subjectId !== null && contextSubjects.has(e.subjectId))
+        .map((e) => eventContext(e, near))
+        .filter((r) => r.inInterval)
+        .map((r) => r.ctx),
     };
   };
   const occurrences = times.filter((t) => t.value === pattern.repeatedValue).map((t) => slice(t, "occurrence"));
