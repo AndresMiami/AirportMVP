@@ -82,7 +82,9 @@ export class LocalStorageModelRepository implements ModelRepository {
   private read(): StoreShape {
     const raw = this.storage.getItem(this.key);
     let store: StoreShape;
-    if (raw === null || raw === "") {
+    // ABSENT key = empty store. Anything present, the empty string included,
+    // is data: it must parse as the envelope or it is refused.
+    if (raw === null) {
       store = { activeId: null, models: {}, backups: {} };
     } else {
       let parsed: unknown;
@@ -105,7 +107,7 @@ export class LocalStorageModelRepository implements ModelRepository {
    *  destination -> primary write -> ONLY THEN remove the legacy key. */
   private importLegacy(store: StoreShape): StoreShape {
     const legacy = this.storage.getItem(this.legacyKey);
-    if (legacy === null || legacy === "") return store;
+    if (legacy === null) return store; // absent = no legacy record; "" is present malformed data
     let obj: unknown;
     try {
       obj = JSON.parse(legacy);
@@ -197,9 +199,15 @@ export class LocalStorageModelRepository implements ModelRepository {
     const validated = SystemModelSchema.parse(model);
     // localStorage is synchronous: read, compare and write in one turn.
     const store = this.read();
+    // Same preservation rule as save(): an unreadable raw record under this
+    // id is never overwritten, whatever revision the caller expects.
+    if (this.isUnreadableRecord(store, validated.id)) {
+      throw new StorageError("would_overwrite_unreadable", `A stored system with id "${validated.id}" exists but cannot be read by this build; a guarded save would overwrite it. Nothing was written.`);
+    }
     const raw = store.models[validated.id];
     const stored = raw === undefined ? null : SystemModelSchema.safeParse(raw);
-    const current = stored === null ? null : stored.success ? revisionOf(stored.data) : `unreadable:${validated.id}`;
+    // a record that fails the current schema but migrates is readable-but-old: its revision is not the caller's, so the compare refuses
+    const current = stored === null ? null : stored.success ? revisionOf(stored.data) : `unmigrated:${validated.id}`;
     if (current !== expectedRevision) return { ok: false, currentRevision: current };
     store.models[validated.id] = validated;
     this.write(store);

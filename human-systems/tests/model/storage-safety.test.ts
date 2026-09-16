@@ -53,6 +53,34 @@ describe("truly empty storage", () => {
     expect(model.id).toBe(SAMPLE_SYSTEM_ID);
     expect(JSON.parse(s.getItem(STORAGE_KEY) as string).activeId).toBe(SAMPLE_SYSTEM_ID);
   });
+  it("an EMPTY STRING under the primary key is present malformed data, not an empty store: refused, preserved, no seed, no write", async () => {
+    const s = new FakeStorage();
+    s.setItem(STORAGE_KEY, "");
+    s.writes = 0;
+    s.removes = 0;
+    const repo = new LocalStorageModelRepository(s);
+    await expect(repo.list()).rejects.toThrow(StorageError);
+    await expect(repo.list()).rejects.toMatchObject({ kind: "unreadable_store" });
+    await expect(repo.save(createSampleHousehold())).rejects.toThrow(StorageError);
+    await expect(service(s).loadActiveOrSeed()).rejects.toThrow(/not valid JSON\. Nothing was changed/);
+    expect(s.getItem(STORAGE_KEY)).toBe("");
+    expect(s.writes).toBe(0);
+    expect(s.removes).toBe(0);
+  });
+  it("an EMPTY STRING under the legacy key is present malformed legacy data: refused, key and value kept", async () => {
+    const s = new FakeStorage();
+    s.setItem(LEGACY_V1_KEY, "");
+    s.writes = 0;
+    s.removes = 0;
+    const repo = new LocalStorageModelRepository(s);
+    await expect(repo.list()).rejects.toMatchObject({ kind: "unreadable_legacy" });
+    await expect(service(s).loadActiveOrSeed()).rejects.toThrow(StorageError);
+    expect(s.data.has(LEGACY_V1_KEY)).toBe(true);
+    expect(s.getItem(LEGACY_V1_KEY)).toBe("");
+    expect(s.getItem(STORAGE_KEY)).toBeNull();
+    expect(s.writes).toBe(0);
+    expect(s.removes).toBe(0);
+  });
   it("an empty models container is an empty store too", async () => {
     const s = new FakeStorage();
     s.setItem(STORAGE_KEY, storeWith({}));
@@ -110,6 +138,23 @@ describe("unreadable model records count as stored: no seed, no overwrite", () =
     await repo.save({ ...good, profile: { ...good.profile, description: "edited" } });
     expect((await repo.load(good.id))?.profile.description).toBe("edited");
     expect((JSON.parse(s.getItem(STORAGE_KEY) as string) as { models: Record<string, unknown> }).models.sys_old).toEqual(bad);
+  });
+
+  it("the GUARDED save refuses an unreadable record explicitly, even when the caller passes the old synthetic revision or the record's own text", async () => {
+    const s = new FakeStorage();
+    const good = createSampleHousehold();
+    const bad = unreadableRecord("sys_old");
+    s.setItem(STORAGE_KEY, storeWith({ sys_old: bad, [good.id]: good }, good.id));
+    const repo = new LocalStorageModelRepository(s);
+    const candidate = { ...good, id: "sys_old" } as SystemModel;
+    for (const expected of [`unreadable:sys_old`, `unmigrated:sys_old`, JSON.stringify(bad), null, "anything"]) {
+      await expect(repo.saveIfRevision(candidate, expected, () => expected)).rejects.toThrow(StorageError);
+      await expect(repo.saveIfRevision(candidate, expected, () => expected)).rejects.toMatchObject({ kind: "would_overwrite_unreadable" });
+    }
+    expect((JSON.parse(s.getItem(STORAGE_KEY) as string) as { models: Record<string, unknown> }).models.sys_old).toEqual(bad);
+    // the readable sibling still takes a guarded save
+    const rev = (m: SystemModel | null) => (m ? JSON.stringify(m.profile) : null);
+    expect(await repo.saveIfRevision({ ...good, profile: { ...good.profile, description: "guarded" } }, rev(good), rev)).toEqual({ ok: true });
   });
 
   it("resetting to the sample cannot overwrite an unreadable record carrying the seed id", async () => {

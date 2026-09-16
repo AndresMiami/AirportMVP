@@ -572,7 +572,13 @@ capture surface corrects this when it replaces that screen.
    write lands first and the key is removed only afterwards, a failed
    import leaving the legacy bytes intact; every page shows the storage
    notice instead of an endless load. Explicit recovery / export /
-   deletion of unreadable data is a later tool. Remaining: Explore
+   deletion of unreadable data is a later tool. 3.1.1 hardenings: an empty
+   string under either key is present malformed data (refused, kept),
+   never an absent key; the guarded `saveIfRevision` refuses an unreadable
+   raw record explicitly before any revision compare (a caller passing
+   any expected revision, the old synthetic one included, cannot
+   overwrite it); page-level Loading is suppressed under a storage
+   error. Remaining: Explore
    -> proposal (Step 4), AI proposals (Step 5).
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place

@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { LocalStorageProposalRepository, MemoryProposalRepository, PROPOSALS_KEY, ProposalError, ProposalService, revisionOf, type MutationBatch, type MutationProposal } from "@/kernel";
-import { LocalStorageModelRepository, type KeyValueStorage } from "@/repositories/local-storage-repository";
+import { LocalStorageModelRepository, StorageError, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { MemoryModelRepository } from "@/repositories/memory-repository";
 import { ModelService, RevisionConflictError } from "@/services/model-service";
 import * as M from "@/services/mutations";
@@ -501,7 +501,7 @@ describe("ModelService.saveIfRevision and the repositories' guarded primitive", 
     expect(await repo.saveIfRevision(fresh, null, revisionOf)).toEqual({ ok: false, currentRevision: revisionOf(fresh) });
   });
 
-  it("LocalStorageModelRepository: read-compare-write in one turn; an unreadable stored model never matches", async () => {
+  it("LocalStorageModelRepository: read-compare-write in one turn; an unreadable stored model is refused outright", async () => {
     const storage = new FakeStorage();
     const repo = new LocalStorageModelRepository(storage);
     const models = new ModelService(repo, { now: () => KERNEL_NOW, newId: () => "sys_kernel" });
@@ -513,8 +513,9 @@ describe("ModelService.saveIfRevision and the repositories' guarded primitive", 
     const raw = JSON.parse(storage.getItem("human-systems.store.v2") as string) as { models: Record<string, unknown> };
     raw.models[model.id] = { garbage: true };
     storage.setItem("human-systems.store.v2", JSON.stringify(raw));
-    const r = await repo.saveIfRevision(model, base, revisionOf);
-    expect(r).toEqual({ ok: false, currentRevision: `unreadable:${model.id}` });
+    // an unreadable raw record is never overwritten by a guarded save either: explicit refusal, nothing written
+    await expect(repo.saveIfRevision(model, base, revisionOf)).rejects.toThrow(StorageError);
+    expect((JSON.parse(storage.getItem("human-systems.store.v2") as string) as { models: Record<string, unknown> }).models[model.id]).toEqual({ garbage: true });
   });
 
   it("LocalStorageProposalRepository round-trips and refuses to write over an unreadable ledger", async () => {

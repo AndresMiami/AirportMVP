@@ -1,6 +1,8 @@
+"use client";
 import { categoryMeta, SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
 import type { SourceType, VariableCategory } from "@/types";
 import { fmtConfidence } from "./format";
+import { useModel } from "./model-provider";
 
 export function PageHeader({ title, lede }: { title: string; lede?: string }) {
   return (
@@ -104,6 +106,10 @@ export function Note({ children, tone = "neutral" }: { children: React.ReactNode
   );
 }
 
+/** Page-level placeholder while the model loads. Under a terminal storage
+ *  error the storage notice already says what happened, so nothing is shown. */
 export function Loading() {
+  const { status } = useModel();
+  if (status === "error") return null;
   return <p className="text-sm text-muted">Loading the model from this browser…</p>;
 }
