@@ -10,6 +10,8 @@
  *   - a stale or conflicting approval writes NOTHING to the model;
  *   - recovery reconciles from the stored revision, never from a guess.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { LocalStorageProposalRepository, MemoryProposalRepository, PROPOSALS_KEY, ProposalError, ProposalService, revisionOf, type MutationBatch, type MutationProposal } from "@/kernel";
 import { LocalStorageModelRepository, type KeyValueStorage } from "@/repositories/local-storage-repository";
@@ -322,6 +324,92 @@ describe("approve: guarded two-phase commit", () => {
     expect(stored.hypotheses.find((x) => x.id === "hyp_2")?.supportingObservationIds).toEqual(["obs_1"]);
     expect(stored.variables.find((v) => v.id === "input_b")?.values.at(-1)).toMatchObject({ value: 31, recordedAt: expect.any(String) });
     expect((await h.svc.get(p.id)).commit?.affectedIds).toEqual(["variables:input_b", "observations:obs_1", "hypotheses:hyp_2"]);
+  });
+});
+
+describe("failed proposals leave only through an EXPLICIT retry", () => {
+  async function failedAfterPersistence(h: Harness) {
+    const p = await h.svc.create({ modelId: h.model.id, request: HYP, proposedBy: { kind: "person" }, basis: [{ kind: "observation", id: "obs_a" }] });
+    await h.svc.review(p.id);
+    vi.spyOn(h.repo, "saveIfRevision").mockRejectedValueOnce(new Error("QuotaExceededError"));
+    const r = await h.svc.approve(p.id);
+    expect(r.ok).toBe(false);
+    expect((await h.svc.get(p.id)).status).toBe("failed");
+    return p;
+  }
+
+  it("the kernel never retries on its own: revalidate leaves failed alone, review and approve refuse it", async () => {
+    const h = await harness();
+    const p = await failedAfterPersistence(h);
+    const guarded = vi.spyOn(h.repo, "saveIfRevision");
+    guarded.mockClear();
+    expect((await h.svc.revalidate(p.id)).status).toBe("failed");
+    await expect(h.svc.review(p.id)).rejects.toThrow(/failed and cannot be reviewed/);
+    const a = await h.svc.approve(p.id);
+    expect(a.ok).toBe(false);
+    expect(a.ok === false && a.reason).toBe("not_reviewable");
+    expect(guarded).not.toHaveBeenCalled();
+    expect((await h.svc.get(p.id)).status).toBe("failed");
+    expect((await h.svc.get(p.id)).commit).not.toBeNull(); // the failed attempt's expectations are kept until a retry
+  });
+
+  it("retry with the review material unchanged -> reviewed again (commit record dropped), then approve succeeds", async () => {
+    const h = await harness();
+    const base = await storedRevision(h);
+    const p = await failedAfterPersistence(h);
+    const r = await h.svc.retry(p.id);
+    expect(r.status).toBe("reviewed");
+    expect(r.commit).toBeNull();
+    expect(r.reviewFingerprint).toBe(p.reviewFingerprint);
+    expect(r.lastValidatedRevision).toBe(base);
+    expect(r.review.at(-1)).toMatchObject({ status: "reviewed", by: "person" });
+    expect(r.review.at(-1)?.note).toMatch(/retry/);
+    expect(await storedRevision(h)).toBe(base); // the retry itself writes nothing
+    const a = await h.svc.approve(p.id);
+    expect(a.ok).toBe(true);
+    expect(await storedRevision(h)).toBe(p.preview.resultRevision);
+  });
+
+  it("retry after the review material changed -> stale with the previous preview and basis kept; approve stays unavailable", async () => {
+    const h = await harness();
+    const p = await failedAfterPersistence(h);
+    await h.models.save(M.updateObservation((await h.models.load(h.model.id)) as SystemModel, "obs_a", { statement: "corrected since" }));
+    const r = await h.svc.retry(p.id);
+    expect(r.status).toBe("stale");
+    expect(r.commit).toBeNull();
+    expect(r.previousPreview).toEqual(p.preview);
+    expect(r.previousResolvedBasis).toEqual(p.resolvedBasis);
+    expect(r.resolvedBasis[0].content).toMatchObject({ statement: "corrected since" });
+    expect((await h.svc.approve(p.id)).ok).toBe(false);
+    await expect(h.svc.retry(p.id)).rejects.toThrow(/only a failed proposal can be retried/);
+    expect((await h.svc.review(p.id)).status).toBe("reviewed");
+    expect((await h.svc.approve(p.id)).ok).toBe(true);
+  });
+
+  it("a failed proposal can still be rejected or replaced by an edit; a commit that never landed retries the same way", async () => {
+    const h = await harness();
+    const a = await failedAfterPersistence(h);
+    expect((await h.svc.reject(a.id, "give up")).status).toBe("rejected");
+    const b = await failedAfterPersistence(h);
+    const { superseded, proposal } = await h.svc.edit(b.id, OBS);
+    expect(superseded.status).toBe("superseded");
+    expect(proposal.status).toBe("proposed");
+    // commit-never-landed (from recovery) -> retry -> reviewed
+    const c = await h.svc.create({ modelId: h.model.id, request: [{ kind: "addDisconfirmingCondition", args: { hypothesisId: "hyp_1", condition: "A rises while B stays" } }], proposedBy: { kind: "person" } });
+    await h.ledger.put({ ...c, status: "applying", commit: { expectedBaseRevision: await storedRevision(h), expectedResultRevision: c.preview.resultRevision, actualResultRevision: null, approvedAt: null, affectedIds: [] } });
+    expect((await h.svc.recover(h.model.id))[0]?.outcome).toBe("commit_never_landed");
+    expect((await h.svc.retry(c.id)).status).toBe("reviewed");
+    expect((await h.svc.approve(c.id)).ok).toBe(true);
+  });
+
+  it("the status vocabulary has no unused approved state: the successful sequence is proposed -> reviewed -> applying -> applied", async () => {
+    const h = await harness();
+    const p = await h.svc.create({ modelId: h.model.id, request: OBS, proposedBy: { kind: "person" } });
+    await h.svc.review(p.id);
+    await h.svc.approve(p.id);
+    expect((await h.svc.get(p.id)).review.map((r) => r.status)).toEqual(["proposed", "reviewed", "applying", "applied"]);
+    const src = readFileSync(path.join(process.cwd(), "src/kernel/types.ts"), "utf8");
+    expect(src).not.toMatch(/"approved"/);
   });
 });
 

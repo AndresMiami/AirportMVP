@@ -155,7 +155,18 @@ two-phase through the proposal ledger and `ModelService.saveIfRevision`
 (canonical state changes ONLY after the guarded save succeeds; stale,
 conflict and persistence failure write nothing; `applying` proposals are
 reconciled on startup from the stored revision, never guessed). The
-consequence table is pinned code, never the proposer's choice.
+consequence table is pinned code, never the proposer's choice. REVIEW
+UI (Step 2, /proposals): the card answers seven fixed questions in
+ordinary language derived from the record, always says under the basis
+that the records explain the proposal and do not make it true, keeps the
+mechanical diff under Details, approves ordinary proposals in one explicit
+step and consequential ones only after a second confirmation naming the
+consequence, shows a stale proposal as before / changed since / now with
+approval withheld until an explicit fresh review, and offers a failed
+proposal ONLY an explicit "Check again and retry" (never automatic). The
+provider adopts the persisted model returned by the guarded approval;
+it never saves it again, and a failed approval leaves React state alone.
+Startup recovery runs before any card can act.
 
 The generic backend objects are: Person / System, Observation, Evidence,
 Variable + dated values, Constraint, Relationship, Hypothesis, Event /

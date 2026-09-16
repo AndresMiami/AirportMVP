@@ -40,7 +40,10 @@ export type ConsequenceClass = "ordinary" | "consequential";
 
 export type MutationBatch = MutationStep[];
 
-export type ProposalStatus = "proposed" | "reviewed" | "approved" | "applying" | "applied" | "failed" | "rejected" | "stale" | "superseded";
+/** proposed -> reviewed -> applying -> applied is the successful sequence.
+ *  failed leaves only through an EXPLICIT retry (never automatic), which
+ *  lands on reviewed (review material unchanged) or stale (it changed). */
+export type ProposalStatus = "proposed" | "reviewed" | "applying" | "applied" | "failed" | "rejected" | "stale" | "superseded";
 
 export interface ReviewRecord {
   at: string;
@@ -130,4 +133,6 @@ export interface MutationProposal {
   supersededBy: string | null;
   /** A stale proposal keeps the preview the person last saw beside the new one. */
   previousPreview: DryRunResult | null;
+  /** ... and the cited records as they read then, so the card can say what changed. */
+  previousResolvedBasis: ResolvedBasis[] | null;
 }

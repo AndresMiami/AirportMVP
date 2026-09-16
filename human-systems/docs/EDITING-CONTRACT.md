@@ -260,7 +260,8 @@ criteria, relationships, observations; never wording). The domain's
 (`internal_to_subject`, `external_to_subject`, `interaction`, labelled in
 the domain's words); a question becomes a candidate only when the person
 writes one from it. A heading with nothing grounded shows "No grounded
-candidate of this kind yet." "Investigate this explanation" is inert until
+candidate of this kind yet." "Investigate this explanation" is inert (Step 4 wires it to the
+proposal kernel, whose review inbox `/proposals` now exists) until
 the proposal / approval kernel exists. No mutation, no confidence, no
 ranking, no score.
 

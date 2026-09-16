@@ -12,3 +12,4 @@ export * from "./dry-run";
 export * from "./fingerprint";
 export * from "./proposal-repository";
 export * from "./service";
+export * from "./wording";

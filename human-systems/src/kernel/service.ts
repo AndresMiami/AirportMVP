@@ -37,7 +37,10 @@ export type ApproveResult =
 
 export type RecoveryOutcome = { proposalId: string; outcome: "reconciled_applied" | "commit_never_landed" | "conflict" };
 
+/** States the kernel revalidates on its own. `failed` is deliberately absent: it leaves only through an explicit retry. */
 const REVIEWABLE: ReadonlySet<ProposalStatus> = new Set(["proposed", "reviewed", "stale"]);
+/** States a person may still reject or replace by an edit. */
+const OPEN: ReadonlySet<ProposalStatus> = new Set(["proposed", "reviewed", "stale", "failed"]);
 
 export class ProposalService {
   constructor(
@@ -84,6 +87,7 @@ export class ProposalService {
       commit: null,
       supersededBy: null,
       previousPreview: null,
+      previousResolvedBasis: null,
     };
     await this.proposals.put(proposal);
     return proposal;
@@ -107,7 +111,7 @@ export class ProposalService {
     if (fp === p.reviewFingerprint) {
       next = this.record({ ...p, lastValidatedRevision: current, preview, resolvedBasis }, p.status, "kernel", "revalidated: the model changed elsewhere; what you reviewed is unaffected");
     } else {
-      next = this.record({ ...p, previousPreview: p.preview, preview, resolvedBasis, reviewFingerprint: fp, consequenceClass: preview.consequenceClass, lastValidatedRevision: current }, "stale", "kernel", preview.ok ? "the model changed in a way that alters what you reviewed; a fresh review is needed" : `the proposal can no longer be applied: ${preview.errors.map((e) => e.message).join("; ")}`);
+      next = this.record({ ...p, previousPreview: p.preview, previousResolvedBasis: p.resolvedBasis, preview, resolvedBasis, reviewFingerprint: fp, consequenceClass: preview.consequenceClass, lastValidatedRevision: current }, "stale", "kernel", preview.ok ? "the model changed in a way that alters what you reviewed; a fresh review is needed" : `the proposal can no longer be applied: ${preview.errors.map((e) => e.message).join("; ")}`);
     }
     await this.proposals.put(next);
     return next;
@@ -122,9 +126,34 @@ export class ProposalService {
     return next;
   }
 
+  /**
+   * EXPLICIT retry of a failed proposal (a persistence failure, a conflict,
+   * or a commit that never landed). Never called by the kernel on its own.
+   * The proposal is re-run against the stored model: review material
+   * unchanged -> reviewed again (the person's review still stands);
+   * changed -> stale, a fresh review is required. The commit record of the
+   * failed attempt is dropped either way.
+   */
+  async retry(id: string, note = ""): Promise<MutationProposal> {
+    const p = await this.get(id);
+    if (p.status !== "failed") throw new ProposalError(`Proposal ${id} is ${p.status}; only a failed proposal can be retried`);
+    const model = await this.storedModel(p.modelId);
+    const current = revisionOf(model) as string;
+    const preview = dryRun(p.materialized, model);
+    const resolvedBasis = resolveBasis(model, p.basis);
+    const fp = reviewFingerprint(p.materialized, preview, resolvedBasis);
+    const base = { ...p, commit: null, lastValidatedRevision: current, preview, resolvedBasis };
+    const next =
+      fp === p.reviewFingerprint
+        ? this.record(base, "reviewed", "person", note || "retry: what you reviewed is unaffected; it can be approved again")
+        : this.record({ ...base, previousPreview: p.preview, previousResolvedBasis: p.resolvedBasis, reviewFingerprint: fp, consequenceClass: preview.consequenceClass }, "stale", "kernel", preview.ok ? "retry: the model changed in a way that alters what you reviewed; a fresh review is needed" : `retry: the proposal can no longer be applied: ${preview.errors.map((e) => e.message).join("; ")}`);
+    await this.proposals.put(next);
+    return next;
+  }
+
   async reject(id: string, note = ""): Promise<MutationProposal> {
     const p = await this.get(id);
-    if (!REVIEWABLE.has(p.status)) throw new ProposalError(`Proposal ${id} is ${p.status} and cannot be rejected`);
+    if (!OPEN.has(p.status)) throw new ProposalError(`Proposal ${id} is ${p.status} and cannot be rejected`);
     const next = this.record(p, "rejected", "person", note);
     await this.proposals.put(next);
     return next;
@@ -133,7 +162,7 @@ export class ProposalService {
   /** An edit is a NEW proposal; the old one is superseded. Writes nothing to the model. */
   async edit(id: string, request: MutationBatch, note = ""): Promise<{ superseded: MutationProposal; proposal: MutationProposal }> {
     const p = await this.get(id);
-    if (!REVIEWABLE.has(p.status)) throw new ProposalError(`Proposal ${id} is ${p.status} and cannot be edited`);
+    if (!OPEN.has(p.status)) throw new ProposalError(`Proposal ${id} is ${p.status} and cannot be edited`);
     const proposal = await this.create({ modelId: p.modelId, request, proposedBy: { kind: "person" }, rationale: p.rationale, basis: p.basis });
     const superseded = this.record({ ...p, supersededBy: proposal.id }, "superseded", "person", note);
     await this.proposals.put(superseded);

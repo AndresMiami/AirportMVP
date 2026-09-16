@@ -205,6 +205,18 @@ export const ORDINARY_KINDS = new Set([
   "addKillCriterion", "attachObservationToHypothesis", "addEvent", "updateEvent", "setActionExtension", "addSignatureSnapshot", "updateSignatureMeta",
 ]);
 
+/** Ordinary-language reasons a materialized step is consequential, for the
+ *  second confirmation to NAME. Same rules as consequenceOf, by content. */
+export function consequenceReasons(kind: string, args: unknown): string[] {
+  const a = isRecord(args) ? args : {};
+  const out: string[] = [];
+  if (kind === "addConstraint" && a.type === "hard" && !a.check) out.push(`“${String(a.name ?? "this constraint")}” becomes a HARD constraint the engine cannot check: every action it names will be reported as violating it until a person says otherwise.`);
+  if (kind === "updateHypothesis" && typeof a.patch === "object" && a.patch !== null && "statement" in (a.patch as object)) out.push("The hypothesis statement itself changes; every observation attached to it was attached to the old wording.");
+  if (CONSEQUENTIAL_KINDS.has(kind)) out.push(`“${kind}” removes, corrects, reassigns or re-judges recorded material; the record after this change no longer says what it said before.`);
+  if (!CONSEQUENTIAL_KINDS.has(kind) && !ORDINARY_KINDS.has(kind)) out.push(`“${kind}” is not a known mutation; it is treated as consequential.`);
+  return out;
+}
+
 export function consequenceOf(kind: string, args: unknown, model: SystemModel): ConsequenceClass {
   if (CONSEQUENTIAL_KINDS.has(kind)) return "consequential";
   const a = isRecord(args) ? args : {};

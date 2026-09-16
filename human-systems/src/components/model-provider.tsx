@@ -7,6 +7,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { HOUSEHOLD_APP, householdServiceOptions } from "@/bootstrap/household-app";
+import { LocalStorageProposalRepository, ProposalService, type ApproveResult, type RecoveryOutcome } from "@/kernel";
 import { domainRegistry, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem, type EvaluatedSystem } from "@/model/evaluate";
 import { LocalStorageModelRepository, type ModelSummary } from "@/repositories";
@@ -14,6 +15,13 @@ import { ModelService, MutationError, type ImportResult } from "@/services";
 import type { SystemModel, SystemType, Variable } from "@/types";
 
 export type ModelMutation = (model: SystemModel) => SystemModel;
+
+/** Startup reconciliation of proposals stranded in "applying" for the
+ *  active model. Cards that can act are shown only once this is done. */
+export type ProposalRecoveryState =
+  | { status: "pending"; outcomes: []; message: null }
+  | { status: "done"; outcomes: RecoveryOutcome[]; message: null }
+  | { status: "error"; outcomes: []; message: string };
 
 interface ModelContextValue {
   status: "loading" | "ready" | "error";
@@ -56,6 +64,13 @@ interface ModelContextValue {
   /** Validate, store and activate an exported file. Nothing is stored when
    *  the result is not ok; an existing id is refused unless `replace`. */
   importModel: (text: string, replace: boolean) => Promise<ImportResult>;
+  /** The proposal kernel over the SAME service and store; null until storage is ready. */
+  proposals: ProposalService | null;
+  proposalRecovery: ProposalRecoveryState;
+  /** The ONLY approval path: ProposalService.approve -> guarded persistence
+   *  -> the persisted model is ADOPTED as React state. Nothing is saved
+   *  again, and on any failure React state does not change. */
+  approveProposal: (id: string, note?: string) => Promise<ApproveResult>;
 }
 
 const ModelContext = createContext<ModelContextValue | null>(null);
@@ -63,6 +78,9 @@ const ModelContext = createContext<ModelContextValue | null>(null);
 export function ModelProvider({ children }: { children: React.ReactNode }) {
   const serviceRef = useRef<ModelService | null>(null);
   const repoRef = useRef<LocalStorageModelRepository | null>(null);
+  const proposalsRef = useRef<ProposalService | null>(null);
+  const [proposals, setProposals] = useState<ProposalService | null>(null);
+  const [proposalRecovery, setProposalRecovery] = useState<ProposalRecoveryState>({ status: "pending", outcomes: [], message: null });
   const [status, setStatus] = useState<ModelContextValue["status"]>("loading");
   const [error, setError] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -84,6 +102,20 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     setModels(await serviceRef.current.listModels());
   }, []);
 
+  /** Reconcile "applying" proposals for a model BEFORE its cards can act. An
+   *  unreadable ledger is reported, never emptied. */
+  const recoverProposals = useCallback(async (modelId: string) => {
+    const svc = proposalsRef.current;
+    if (!svc) return;
+    setProposalRecovery({ status: "pending", outcomes: [], message: null });
+    try {
+      const outcomes = await svc.recover(modelId);
+      setProposalRecovery({ status: "done", outcomes, message: null });
+    } catch (e) {
+      setProposalRecovery({ status: "error", outcomes: [], message: e instanceof Error ? e.message : String(e) });
+    }
+  }, []);
+
   useEffect(() => {
     // localStorage is only available in the browser, so the service is
     // created inside the effect and the first render shows "loading".
@@ -91,6 +123,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     const service = new ModelService(repo, appOptions);
     repoRef.current = repo;
     serviceRef.current = service;
+    const kernel = new ProposalService(new LocalStorageProposalRepository(window.localStorage), service);
+    proposalsRef.current = kernel;
     service
       .loadActiveOrSeed()
       .then(async ({ model, seeded }) => {
@@ -98,13 +132,15 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
         setSeeded(seeded);
         setMigratedFrom(repo.reports.get(model.id)?.migratedFrom ?? null);
         setModels(await service.listModels());
+        await recoverProposals(model.id);
+        setProposals(kernel);
         setStatus("ready");
       })
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
         setStatus("error");
       });
-  }, [appOptions]);
+  }, [appOptions, recoverProposals]);
 
   const persist = useCallback(
     (next: SystemModel) => {
@@ -152,8 +188,9 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       setLastError(null);
       setAsOfState(null);
       await refreshList();
+      await recoverProposals(next.id);
     },
-    [refreshList],
+    [refreshList, recoverProposals],
   );
 
   const createBlank = useCallback<ModelContextValue["createBlank"]>(
@@ -208,6 +245,21 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     [activate],
   );
 
+  const approveProposal = useCallback<ModelContextValue["approveProposal"]>(async (id, note = "") => {
+    const kernel = proposalsRef.current;
+    if (!kernel) throw new Error("Storage is not ready yet.");
+    const result = await kernel.approve(id, note);
+    if (result.ok) {
+      // ADOPT the persisted model. Deliberately not persist(): the guarded
+      // save already wrote it, and a second save would be a second
+      // persistence path around the kernel.
+      setModel(result.model);
+      setLastError(null);
+      await refreshList();
+    }
+    return result;
+  }, [refreshList]);
+
   const setAsOf = useCallback<ModelContextValue["setAsOf"]>((date) => {
     setAsOfState(date && date.trim() !== "" ? date.trim() : null);
   }, []);
@@ -241,6 +293,9 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       resetToSample,
       exportModel,
       importModel,
+      proposals,
+      proposalRecovery,
+      approveProposal,
     }),
     [
       status,
@@ -264,6 +319,9 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       importModel,
       seed,
       availableDomains,
+      proposals,
+      proposalRecovery,
+      approveProposal,
     ],
   );
 

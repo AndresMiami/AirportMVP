@@ -505,10 +505,43 @@ capture surface corrects this when it replaces that screen.
    guarded save -> ledger applied; stale / conflict / persistence
    failure write nothing) and startup recovery of `applying` proposals
    (current == expected result -> reconciled applied; current == base ->
-   commit never landed; otherwise recovery conflict). Remaining: the
-   review inbox / card and provider update (Step 2), the nullable
-   hypothesis confidence migration (Step 3), Explore -> proposal (Step
-   4), AI proposals (Step 5).
+   commit never landed; otherwise recovery conflict).
+   KERNEL STEP 2 DONE (the human review experience): `/proposals` is the
+   review inbox for the active system (Needs your review: proposed /
+   stale / failed; Reviewed — ready for your decision; History). The
+   review card (`src/components/proposal-card.tsx`, wording from the
+   pure `src/kernel/wording.ts`) answers what is being proposed, why,
+   what will change, what else will change, what will not change
+   ("Nothing else changes." only when the diff proves it), what records
+   it is based on (always followed by "These records explain why this
+   proposal was made. They do not make the proposal true."), and what
+   uncertainty remains; the mechanical diff sits under Details. Ordinary
+   proposals approve in one explicit step after "I have reviewed this";
+   consequential ones need a second confirmation that NAMES the
+   consequence (no default approval, timers, prechecked boxes or
+   approve-all). A stale card shows what you reviewed before, what
+   changed since then (cited records' old and new wording included) and
+   what the proposal would do now; approval is unavailable until "I have
+   reviewed the new version". Two state corrections: the unused
+   `approved` status is removed (proposed -> reviewed -> applying ->
+   applied), and `failed` leaves ONLY through the explicit
+   `ProposalService.retry` ("Check again and retry": reviewed again when
+   the review material is unchanged, stale when it changed; the kernel
+   never retries on its own). The provider exposes the kernel over the
+   same service and store, runs startup recovery before any card can act
+   (outcomes surfaced in a "Recovered on startup" card; an unreadable
+   ledger is reported and never emptied), and `approveProposal` ADOPTS the
+   model returned by the guarded save as React state without saving it
+   again — on any failure React state does not change. A person proposes
+   through the same kernel with the "Propose a change" form (registered
+   kind + JSON arguments, rationale, cited observations, own words); Edit
+   reuses it and supersedes. Verified in Chromium: ordinary approve (one
+   store write, two ledger writes), consequential double confirmation,
+   reject, edit, stale -> re-review -> approve, failed persistence ->
+   displayed model unchanged -> explicit retry, startup recovery
+   (never-landed and conflict), unreadable ledger. Remaining: the
+   nullable hypothesis confidence migration (Step 3), Explore ->
+   proposal (Step 4), AI proposals (Step 5).
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.
