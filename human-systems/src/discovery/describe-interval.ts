@@ -94,7 +94,8 @@ export interface IntervalDescription {
   disclaimer: string;
 }
 
-function eventContext(e: Event, iv: RequestedInterval): { ctx: EventContext; inInterval: boolean } {
+/** An event as context for an interval: placed by its OWN occurred extent. */
+export function eventContext(e: Event, iv: Pick<RequestedInterval, "from" | "to">): { ctx: EventContext; inInterval: boolean } {
   const extent = temporalInterval(e.occurred);
   const inst = extent ? extentInstants(extent) : null;
   const ctx: EventContext = {

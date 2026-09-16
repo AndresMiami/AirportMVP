@@ -9,3 +9,4 @@ export * from "./describe-history";
 export * from "./describe-snapshots";
 export * from "./language";
 export * from "./describe-interval";
+export * from "./cross-context";

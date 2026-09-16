@@ -15,7 +15,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { buildSystemPrompt } from "@/ai/prompt";
-import { describeVariableHistory } from "@/discovery";
+import { crossContext, describeVariableHistory } from "@/discovery";
 import { createBlankModel } from "@/model/blank";
 import { categoryVocabulary, domainRegistry, evaluationDimensionKeys, resolveVariable, subjectLabelPluralOf, subjectRef, systemRef, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
@@ -248,6 +248,22 @@ describe("neutral-domain proof: the engine does not require a household", () => 
     expect(d.facts.recurrenceReliesOnRecordedBasis).toBe(true); // the first entry was recorded, not asserted
     expect(d.summaryClass).toBe("repeated");
     expect(() => describeVariableHistory(later.variables.find((v) => v.key === "ratio")!, { from: "2026-01-01", to: "2026-12-31" })).toThrow(/input variables only/);
+  });
+
+  it("the cross-context engine runs on a neutral system with no household dependency", async () => {
+    const { model } = await neutralSystem();
+    let later = M.recordValue(model, "input_a", { value: 60, sourceType: "measured", confidence: 0.9, valid: { kind: "date", start: "2026-10-01", precision: "day", text: "2026-10-01" } });
+    later = M.recordValue(later, "input_a", { value: 50, sourceType: "measured", confidence: 0.9, valid: { kind: "date", start: "2026-11-01", precision: "day", text: "2026-11-01" } });
+    later = M.recordValue(later, "input_b", { value: 25, sourceType: "measured", confidence: 0.9, valid: { kind: "date", start: "2026-11-01", precision: "day", text: "2026-11-01" } });
+    const pattern = { variableId: "input_a", subjectId: model.id, interval: { from: "2026-01-01", to: "2026-12-31" }, repeatedValue: 50, occurrenceTimes: ["2026-09-01T00:00:00.000Z", "2026-11-01T00:00:00.000Z"] };
+    const r = crossContext(later, pattern);
+    if (!r.ok) throw new Error(r.message);
+    expect(r.occurrences).toHaveLength(2);
+    expect(r.contrasts).toHaveLength(1);
+    const b = r.conditions.find((c) => c.variableId === "input_b")!;
+    expect(b.atOccurrences).toBe("common"); // 25 recorded at both occurrences (Sep recorded-basis, Nov asserted)
+    expect(b.againstContrasts).toBe("undecided"); // the October contrast only carries September's value forward
+    expect(r.contrasts[0].context.find((c) => c.variableId === "input_b")!.basis).toBe("carried_forward_only");
   });
 
   it("the runtime guard is armed: importing any household module in this file fails, importing an engine module does not", async () => {
