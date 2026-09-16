@@ -12,16 +12,18 @@
  *
  * Home invents no analysis. "Reflect on this" (Demo) runs the deterministic
  * task mock through the 5B/5C context and output contracts, read-only, and
- * says so. Absence renders nothing: no empty-state cards.
+ * says so; the result is bound to the contextHash it answered and hides the
+ * moment the model, the date or the text changes that context (6A.1.1).
+ * Absence renders nothing: no empty-state cards.
  */
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildAiContext, providerPayload } from "@/ai/context";
-import type { AiOutputItem } from "@/ai/response";
+import { providerPayload } from "@/ai/context";
 import { MockAiTaskProvider } from "@/ai/task-mock";
 import { useModel } from "@/components/model-provider";
 import { Loading, Note } from "@/components/ui";
 import { openProposalCount, recurrenceOverview, workingHypotheses } from "@/features/home/cards";
+import { homeContext, visibleReflection, type HomeReflection } from "@/features/home/reflection";
 import type { MutationProposal } from "@/kernel";
 
 const DRAFT_KEY = "human-systems.home-draft.v1";
@@ -67,11 +69,11 @@ function Insight({ label, title, children, action, tone = "neutral" }: { label: 
 }
 
 export default function HomePage() {
-  const { status, model, evaluated, proposals, proposalRecovery, asOf, isSample, seedLabel } = useModel();
+  const { status, model, evaluated, proposals, proposalRecovery, asOf, isSample } = useModel();
   const [draft, setDraft] = useState("");
   const [loaded, setLoaded] = useState<string | null>(null);
   const [ledger, setLedger] = useState<MutationProposal[] | null>(null);
-  const [reflection, setReflection] = useState<{ ok: true; items: AiOutputItem[] } | { ok: false; error: string } | null>(null);
+  const [reflection, setReflection] = useState<HomeReflection | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const today = todayIso();
 
@@ -103,6 +105,8 @@ export default function HomePage() {
   }, [proposals, model, proposalRecovery.status]);
 
   const patterns = useMemo(() => (model ? recurrenceOverview(model, asOf ? asOf.slice(0, 10) : today) : { strongest: null, more: 0 }), [model, asOf, today]);
+  // the context the demo would answer RIGHT NOW; a stored reflection is shown only while it matches
+  const current = useMemo(() => (model ? homeContext(model, draft, asOf, today) : null), [model, draft, asOf, today]);
 
   if (status === "error") return null; // the storage notice above says what happened
   if (status === "loading" || !model || !evaluated) return <Loading />;
@@ -110,19 +114,16 @@ export default function HomePage() {
   const open = ledger ? openProposalCount(ledger) : null;
   const working = workingHypotheses(model);
   const hasText = draft.trim().length > 0;
+  const shown = visibleReflection(reflection, current);
   const update = (text: string) => {
     setDraft(text);
     writeDraft(model.id, text);
-    setReflection(null);
   };
   const reflect = async () => {
-    try {
-      const ctx = buildAiContext(model, "interpret_free_text", { subjectId: model.id, userText: draft, asOf: asOf ? asOf.slice(0, 10) : today });
-      const r = await new MockAiTaskProvider().run(providerPayload(ctx), ctx.contextHash);
-      setReflection(r.ok ? { ok: true, items: r.response.items } : { ok: false, error: r.error });
-    } catch (e) {
-      setReflection({ ok: false, error: e instanceof Error ? e.message : String(e) });
-    }
+    if (!current || "error" in current) return;
+    const ctx = current.ctx;
+    const r = await new MockAiTaskProvider().run(providerPayload(ctx), ctx.contextHash);
+    setReflection({ forHash: ctx.contextHash, result: r.ok ? { ok: true, items: r.response.items } : { ok: false, error: r.error } });
   };
 
   return (
@@ -142,35 +143,33 @@ export default function HomePage() {
             <span className="text-sm text-muted">Demo response · nothing is saved to your notebook.</span>
           </div>
         ) : null}
-        {reflection ? (
-          reflection.ok ? (
+        {current && "error" in current ? <Note tone="warn">{current.error}</Note> : null}
+        {shown ? (
+          shown.ok ? (
             <div className="mt-4 rounded-xl border border-border/70 bg-surface px-5 py-4" data-testid="reflection">
               <p className="text-sm text-muted">Demo response</p>
-              <ul className="mt-2 space-y-2 text-[15px] leading-relaxed">
-                {reflection.items.map((it) => (
-                  <li key={it.id}>
-                    {it.kind === "interpretation" ? (
-                      <>
-                        <span className="text-muted">A tentative reading:</span> {it.text}
-                        {it.caveat ? <span className="block text-sm text-muted">{it.caveat}</span> : null}
-                      </>
-                    ) : it.kind === "question" ? (
-                      <>
-                        <span className="text-muted">A question:</span> {it.text}
-                      </>
-                    ) : (
-                      it.kind
-                    )}
-                  </li>
-                ))}
-                {reflection.items.length === 0 ? <li className="text-muted">The demo has nothing to say about this yet.</li> : null}
-              </ul>
-              <Link href="/ai" className="mt-2 inline-block text-sm text-muted underline">
+              <div className="mt-2 space-y-3 text-[15px] leading-relaxed">
+                {shown.items.map((it) =>
+                  it.kind === "interpretation" ? (
+                    <p key={it.id}>
+                      {it.text}
+                      {it.caveat ? <span className="mt-1 block text-sm text-muted">{it.caveat}</span> : null}
+                    </p>
+                  ) : it.kind === "question" ? (
+                    <p key={it.id}>
+                      <span className="block text-sm text-muted">Question to consider</span>
+                      {it.text}
+                    </p>
+                  ) : null,
+                )}
+                {shown.items.length === 0 ? <p className="text-muted">The demo has nothing to say about this yet.</p> : null}
+              </div>
+              <Link href="/ai" className="mt-3 inline-block text-sm text-muted underline">
                 See exactly what a real assistant would receive
               </Link>
             </div>
           ) : (
-            <Note tone="warn">{reflection.error}</Note>
+            <Note tone="warn">{shown.error}</Note>
           )
         ) : null}
       </section>
@@ -211,8 +210,8 @@ export default function HomePage() {
       </div>
 
       <p className="mt-14 text-sm text-muted">
-        {isSample ? <>You are looking at the {seedLabel}. </> : null}
-        Your own system, and everything underneath, is in{" "}
+        {isSample ? <>Fictional sample · </> : null}
+        Your systems and advanced details are in{" "}
         <Link href="/library" className="underline">
           Library
         </Link>

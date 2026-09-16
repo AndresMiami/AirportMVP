@@ -778,9 +778,36 @@ capture surface corrects this when it replaces that screen.
    no horizontal overflow, one as-of notice, no microphone, no empty
    cards, one recurrence card with "$4,000", the more-patterns link to
    History, the actionable proposal card, and every primary destination
-   plus Library reachable. Next: look at Home again and decide whether
-   one would actually sit down and type into it — before any other
-   screen is redesigned.
+   plus Library reachable. Reviewed: yes, one would sit down and type
+   into it.
+   STEP 6A.1.1 DONE — FINAL HOME FREEZE (layout approved from the
+   reviewed screenshots and preserved exactly: column width, whitespace,
+   navigation, auto-growing writing surface, one recurrence card, flat
+   working-explanations line, conditional review card, typography). Four
+   corrections only. (1) The global strip says "Values as of June 1,
+   2025 · Back to today", not "Viewing …": asOf resolves values
+   historically; relationships, hypotheses and constraints remain
+   today's structure, so a whole-model snapshot must never be implied.
+   Still exactly one as-of treatment. (2) The Home reflection is bound
+   to its context exactly as the /ai screen binds the mock:
+   src/features/home/reflection.ts builds the current
+   interpret_free_text context from the model, the draft and the as-of
+   selection (`homeContext`) and `visibleReflection` renders a stored
+   {forHash, result} only while forHash equals the current contextHash;
+   a changed date, a changed relevant value or changed text hides the
+   old response and nothing reruns the mock (tests/features/
+   home-reflection.test.ts pins all four cases with the real builder and
+   provider; Chromium pins reflect → Back to today → hidden). (3) The
+   demo response is humanized: the interpretation is the paragraph
+   itself (no "A tentative reading:" prefix), its caveat sits under it,
+   questions carry the quiet heading "Question to consider"; no
+   epistemic or debug vocabulary appears on Home and the output schema
+   is untouched. (4) The footer reads "Fictional sample · Your systems
+   and advanced details are in Library." HOME IS FROZEN: no further
+   polishing unless a usability test reveals a concrete problem. The
+   product's visual language is set — Home is for thinking, History for
+   remembering what changed, Explore for asking why, Library for the
+   machinery — and the next step is History, then Explore, Review, Map.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

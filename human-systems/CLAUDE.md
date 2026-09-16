@@ -229,9 +229,21 @@ with a Demo badge) appears only after typing, the writing surface
 auto-grows with no resize handle and no microphone until voice exists;
 the ONE as-of treatment is the slim `AsOfStrip` under the primary
 navigation on every page ("Viewing June 1, 2025 · Back to today"),
-never a second banner; storage errors keep their own notice. History,
-Explore, Map and Review await their own visual review before further
-simplification.
+never a second banner; storage errors keep their own notice. HOME IS
+FROZEN (6A.1.1): the strip says "Values as of …" because asOf resolves
+VALUES historically while relationships, hypotheses and constraints
+stay today's structure — never "Viewing"; the demo reflection is stored
+with the contextHash it answered (src/features/home/reflection.ts:
+`homeContext` builds the interpret_free_text context from model + draft
++ as-of, `visibleReflection` shows a result only while the hash still
+matches, nothing reruns the mock); the demo response renders the
+interpretation as its own paragraph with no "A tentative reading:"
+label and questions under "Question to consider" (Home is not the
+diagnostics screen; the AI contract is unchanged); the footer is
+"Fictional sample · Your systems and advanced details are in Library."
+Do not polish Home further unless a usability test shows a concrete
+problem. Next: History, then Explore, Review, Map — one coherent
+product over the existing capability, not more AI work.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

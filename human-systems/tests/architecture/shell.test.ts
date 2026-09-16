@@ -51,8 +51,27 @@ describe("Home", () => {
     const nav = read("src/components/nav.tsx");
     expect(nav).toMatch(/AsOfStrip/);
     expect(nav).toMatch(/Back to today/);
-    expect(nav).not.toMatch(/AsOfPill|Values as of/);
+    expect(nav).not.toMatch(/AsOfPill/);
     expect(read("src/app/layout.tsx")).toMatch(/StorageNotice/);
+  });
+
+  it("6A.1.1 freeze: one as-of treatment worded 'Values as of', the reflection bound to its contextHash, no epistemic labels on the demo response, a short sample footer", () => {
+    const nav = read("src/components/nav.tsx");
+    expect(nav.match(/data-testid="as-of-strip"/g)).toHaveLength(1);
+    expect(nav).toMatch(/Values as of <span/);
+    expect(nav).not.toMatch(/Viewing </);
+    const home = read("src/app/page.tsx");
+    expect(home).not.toMatch(/Values as of|Back to today|Viewing/);
+    expect(home).toMatch(/homeContext\(model, draft, asOf, today\)/);
+    expect(home).toMatch(/visibleReflection\(reflection, current\)/);
+    expect(home).toMatch(/forHash: ctx\.contextHash/);
+    expect(home).not.toMatch(/buildAiContext/); // the binding helper owns the context
+    expect(home).not.toMatch(/A tentative reading|directly_stated|interpretive|tentative|unresolved|epistemic/);
+    expect(home).toMatch(/Question to consider/);
+    expect(home).toMatch(/Fictional sample · /);
+    expect(home).not.toMatch(/You are looking at the/);
+    const helper = read("src/features/home/reflection.ts");
+    expect(helper).not.toMatch(/MockAiTaskProvider|from "react"|@\/domains|@\/services/);
   });
 });
 

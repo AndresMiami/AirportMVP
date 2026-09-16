@@ -17,7 +17,8 @@ const LINKS: { href: string; label: string; matches: (path: string) => boolean }
 
 /** The ONE as-of treatment (Step 6A.1): a slim strip under the primary
  *  navigation on every page while the values shown are from a past
- *  date. No page shows a second as-of notice; storage errors keep their
+ *  date. "Values as of": asOf resolves VALUES historically; structure
+ *  (relationships, hypotheses, constraints) stays today's (6A.1.1). No page shows a second as-of notice; storage errors keep their
  *  own prominent notice. */
 export function AsOfStrip() {
   const { asOf, setAsOf } = useModel();
@@ -26,7 +27,7 @@ export function AsOfStrip() {
     <div className="border-b border-warn/30 bg-warn-soft text-warn" role="status" data-testid="as-of-strip">
       <div className="mx-auto flex max-w-3xl items-center justify-center gap-2 px-4 py-1.5 text-sm">
         <span>
-          Viewing <span className="font-medium">{longDate(asOf)}</span>
+          Values as of <span className="font-medium">{longDate(asOf)}</span>
         </span>
         <span aria-hidden="true">·</span>
         <button type="button" className="underline underline-offset-2 hover:opacity-80" onClick={() => setAsOf(null)}>
