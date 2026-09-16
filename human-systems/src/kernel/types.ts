@@ -42,7 +42,12 @@ export type ProposalBasisRef =
   | { kind: "user_statement"; text: string }
   /** A catalogue question that PROMPTED a draft (never evidence): resolved
    *  against the named domain version; `question` is the reviewed snapshot. */
-  | { kind: "catalogue_prompt"; domainId: string; domainVersion: number; promptId: string; question: string };
+  | { kind: "catalogue_prompt"; domainId: string; domainVersion: number; promptId: string; question: string }
+  /** ORIGIN of wording that came from a completed AI call: immutable
+   *  snapshot (a finished response never mutates), NEVER evidence. The
+   *  cited records carried beside it are the basis. Provider payload,
+   *  manifest and withheld material are never stored here. */
+  | { kind: "ai_output"; adapterId: string; task: string; contextHash: string; sourceRevisionHash: string; outputItemId: string; outputKind: string; text: string; state?: string };
 
 export type ConsequenceClass = "ordinary" | "consequential";
 

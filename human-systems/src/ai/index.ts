@@ -6,3 +6,4 @@ export * from "./context";
 export * from "./response";
 export * from "./task-provider";
 export * from "./task-mock";
+export * from "./proposal-bridge";

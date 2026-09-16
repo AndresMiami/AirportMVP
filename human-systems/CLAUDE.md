@@ -190,9 +190,17 @@ extractions quote a cited source verbatim and are directly_stated (says
 it, not true); interpretations and candidate explanations are
 interpretive / tentative / unresolved and may not claim cause, proof or
 odds; every ref must exist in the exact payload; one bad item rejects the
-whole response; the schema has no numeric epistemic field. The legacy /ai
-screen is read-only; nothing AI-derived reaches the model except through
-the proposal kernel. AI -> Variable and AI -> Observation
+whole response; the schema has no numeric epistemic field. AI -> PROPOSAL (5D): a validated
+candidate explanation becomes, only when the person clicks "Review as
+hypothesis", exactly one addHypothesis proposal (the AI's words, the
+pattern's subject, confidence null, nothing else invented) with
+proposedBy = person and an immutable `ai_output` ORIGIN basis beside the
+re-resolvable evidence basis (pattern, Explore comparison, cited
+records) — origin is never evidence, staleness follows the evidence, and
+the same adapter + contextHash + output id never opens a second
+proposal. Every other AI output kind is display-only. The legacy /ai
+analysis is read-only; nothing AI-derived reaches the model except
+through the proposal kernel. AI -> Variable and AI -> Observation
 stay blocked by canonical-mutation seams (manufactured 0.5 judgments and
 sourceType unknown / confidence 0 in addVariable; required numeric
 confidence in addObservation), recorded in docs/PRODUCT-ARCHITECTURE.md.

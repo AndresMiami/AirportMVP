@@ -24,7 +24,7 @@ export function mockItemsFor(payload: AiProviderPayload): AiOutputItem[] {
     case "propose_observation_from_user_statement": {
       if (!userText) return [];
       const quote = firstSentence(str(userText.payload.text));
-      return [{ kind: "extraction", id: "out_1", text: `The text states: ${quote}`, quote, sourceRef: userText.id, ...(system ? { subjectRef: system.id } : {}), state: "directly_stated" }];
+      return [{ kind: "extraction", id: "out_1", text: `The text states: ${quote}`, quote, sourceRef: userText.id, state: "directly_stated" }];
     }
     case "interpret_free_text": {
       if (!userText) return [];

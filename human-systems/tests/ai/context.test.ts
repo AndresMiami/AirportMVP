@@ -296,12 +296,14 @@ describe("privacy manifest", () => {
 });
 
 describe("source pins", () => {
-  it("the legacy /ai page has no mutation, apply, replaceModel or proposal-creation path, and is labelled read-only", () => {
+  it("the /ai page has no mutation, apply or replaceModel path; its only write is a person-submitted proposal through the kernel (5D); the legacy analysis is labelled read-only", () => {
     const src = readFileSync(path.join(process.cwd(), "src/app/ai/page.tsx"), "utf8");
     expect(src).not.toMatch(/@\/services\/mutations/);
     expect(src).not.toMatch(/\bapply\b\s*[(,}]/);
     expect(src).not.toMatch(/replaceModel|updateVariable|addApproved|ai_inferred/);
-    expect(src).not.toMatch(/proposals\.create|ProposalService/);
+    expect(src.match(/proposals\.create\(/g)).toHaveLength(1);
+    expect(src).toMatch(/proposals\.create\(\{ modelId: model\.id, request: candidate\.request, proposedBy: \{ kind: "person" \}/);
+    expect(src).not.toMatch(/ProposalService|approve\(|\.review\(/);
     expect(src).toMatch(/LEGACY, READ-ONLY/);
     expect(src).toMatch(/What would be sent to AI/);
   });

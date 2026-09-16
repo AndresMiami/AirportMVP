@@ -671,11 +671,41 @@ capture surface corrects this when it replaces that screen.
    the provider payload literally, the manifest separately as "What was
    intentionally left out", and the mock's validated output under "Mock
    interpretation — nothing will be added to your model"; the legacy
-   analysis is collapsed. Remaining: 5D proposal bridge (whitelist:
-   addHypothesis, addDisconfirmingCondition, addKillCriterion
-   statement-only; person-completed fields; AI output item id as the
-   origin reference beside ProposalAuthor), 5E Explore AI drafts through
-   the Step 4 path, 5F first external provider behind the payload panel.
+   analysis is collapsed. STEP 5D DONE — VALIDATED AI OUTPUT ->
+   HUMAN-INITIATED PROPOSAL. Extraction lost `subjectRef` (the subject is
+   derived from the cited source; the AI never assigns it). The kernel
+   gains an immutable `ai_output` ORIGIN basis (adapter, task,
+   contextHash, sourceRevisionHash, output item id and kind, text, state)
+   that resolves to its own snapshot and is worded on the card as "AI
+   wording that prompted this proposal … The AI output is not evidence.
+   The cited records below are the basis for reviewing the proposal.";
+   provider payload, manifest and withheld material never enter the
+   ledger. The pure bridge `toProposalSet(context, response, adapterId)`
+   (src/ai/proposal-bridge.ts; imports no repository or service) maps a
+   validated CandidateExplanation — and nothing else in 5D — to exactly
+   one registered `addHypothesis` (the AI's words, the PATTERN's subject,
+   confidence null; no status, prediction, evidence attachment, condition,
+   kill criterion, relationship or notes; weakenedBy / alternatives stay
+   prose), with the evidence basis pattern + Explore comparison + every
+   cited item converted to its exact kernel basis kind (observation,
+   event, hypothesis, relationship, variable, catalogue_prompt, user
+   statement); a cited kind with no re-resolvable basis (system, value,
+   derived, constraint) fails the WHOLE set visibly, never snapshotted.
+   CONTENT ORIGIN != PROPOSAL AUTHOR: the person clicks "Review as
+   hypothesis", so `proposedBy` is the person and the ai_output basis
+   records the origin; Step 4 staleness holds unchanged (a changed
+   comparison or recurrence goes stale with identical AI wording, an
+   unrelated change revalidates harmlessly). Duplicate protection:
+   adapterId + contextHash + outputItemId identifies a suggestion; an
+   open proposal is navigated to, an applied one reads "Already added as
+   a working hypothesis", a rejected one is shown and never recreated
+   from the identical output. /ai reads a pattern from its URL (Explore
+   links "Ask about this pattern"), and the other 5C output kinds remain
+   display-only (Observation and Variable stay blocked by the recorded
+   canonical seams; free-text interpretations may cite value/derived
+   kinds the kernel cannot re-resolve). PAUSED by decision: 5E (Explore
+   AI drafts) and 5F (first external provider) wait; the next work is the
+   simplified product experience over this machinery.
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.

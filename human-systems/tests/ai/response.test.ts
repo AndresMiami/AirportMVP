@@ -38,13 +38,13 @@ describe("validation against the exact payload", () => {
     const p = providerPayload(c);
     const ut = p.items.find((i) => i.kind === "user_text")!.id;
     const sys = p.items.find((i) => i.kind === "system")!.id;
-    const good = { kind: "extraction", id: "o1", text: "Hours dropped.", quote: "My hours dropped from 40 to 15 in March.", sourceRef: ut, subjectRef: sys, state: "directly_stated" };
+    const good = { kind: "extraction", id: "o1", text: "Hours dropped.", quote: "My hours dropped from 40 to 15 in March.", sourceRef: ut, state: "directly_stated" };
     expect(ok(p, c.contextHash, [good]).ok).toBe(true);
     expect(err(ok(p, c.contextHash, [{ ...good, quote: "hours fell from 40 to 15" }]))).toMatch(/not a verbatim substring/);
     expect(err(ok(p, c.contextHash, [{ ...good, sourceRef: "user_text:nope" }]))).toMatch(/not in the supplied context/);
     expect(err(ok(p, c.contextHash, [{ ...good, sourceRef: sys }]))).toMatch(/not a textual source/);
-    // a ref that exists in the MODEL but was excluded from this payload (p2's variable) is not citable
-    expect(err(ok(p, c.contextHash, [{ ...good, subjectRef: "variable:other_subject" }]))).toMatch(/not in the supplied context/);
+    // the AI never assigns a subject: a subjectRef is an unknown key and rejects the response
+    expect(err(ok(p, c.contextHash, [{ ...good, subjectRef: sys }]))).toMatch(/did not match the contract/);
   });
 
   it("rejects the whole response on: contextHash mismatch, wrong task, unknown key, disallowed kind for the task, duplicate ids, interpretation claiming directly_stated, a numeric epistemic field", () => {
@@ -109,7 +109,7 @@ describe("the deterministic task mock", () => {
       expect(a.response.contextHash).toBe(c.contextHash);
       const ids = new Set(p.items.map((i) => i.id));
       for (const it of a.response.items) {
-        const cited = it.kind === "extraction" ? [it.sourceRef, ...(it.subjectRef ? [it.subjectRef] : [])] : it.kind === "interpretation" ? it.restsOn : it.kind === "candidate_explanation" ? [it.forPattern, ...it.restsOn] : it.kind === "question" ? it.targets : it.sections.flatMap((s) => s.cites);
+        const cited = it.kind === "extraction" ? [it.sourceRef] : it.kind === "interpretation" ? it.restsOn : it.kind === "candidate_explanation" ? [it.forPattern, ...it.restsOn] : it.kind === "question" ? it.targets : it.sections.flatMap((s) => s.cites);
         for (const r of cited) expect(ids.has(r), `${task} cites ${r}`).toBe(true);
       }
     }

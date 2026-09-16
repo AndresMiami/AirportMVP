@@ -13,6 +13,7 @@ export const BASIS_DISCLAIMER = "These records explain why this proposal was mad
 export const NOTHING_ELSE_CHANGES = "Nothing else changes.";
 export const NO_RATIONALE = "No reason was given.";
 export const ENGINE_CANNOT_JUDGE = "The engine cannot tell whether this change is right; it only shows exactly what it does.";
+export const AI_OUTPUT_NOT_EVIDENCE = "The AI output is not evidence. The cited records below are the basis for reviewing the proposal.";
 
 export interface BasisLine {
   ref: ProposalBasisRef;
@@ -69,6 +70,8 @@ function basisText(b: ResolvedBasis): BasisLine {
       return { ref: b.ref, text: `You wrote: “${b.ref.text}”`, resolved: true };
     case "catalogue_prompt":
       return c ? { ref: b.ref, text: `Question that prompted the draft: “${String(c.question)}”`, resolved: true } : { ref: b.ref, text: `Question that prompted the draft is no longer in the catalogue (${b.ref.promptId}); it read: “${b.ref.question}”`, resolved: false };
+    case "ai_output":
+      return { ref: b.ref, text: `AI wording that prompted this proposal: “${b.ref.text}” (${b.ref.state ?? "unstated"}; adapter ${b.ref.adapterId}). ${AI_OUTPUT_NOT_EVIDENCE}`, resolved: true };
   }
 }
 

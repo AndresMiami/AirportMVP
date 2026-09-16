@@ -337,6 +337,11 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
           {problem}
         </p>
       ) : null}
+      <p className="text-xs">
+        <Link href={`/ai?task=suggest_explanations_for_pattern&${encodePatternRef(r.pattern)}`} className="underline">
+          Ask about this pattern (mock AI; anything it suggests still goes through review)
+        </Link>
+      </p>
       <p id={`${ids}-investigate`} className="text-xs text-muted">
         {investigateReady ? INVESTIGATE_TEXT : proposalRecovery.status === "error" ? `${INVESTIGATE_UNAVAILABLE_TEXT} ${proposalRecovery.message}` : INVESTIGATE_UNAVAILABLE_TEXT} Drafts stay in this browser and are not part of the model.
       </p>

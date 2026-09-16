@@ -43,7 +43,8 @@ export function resolveBasis(model: SystemModel, basis: readonly ProposalBasisRe
         return { ref, content: prompt ? { question: prompt.question, locus: prompt.locus, hint: prompt.hint ?? null } : null };
       }
       case "user_statement":
-        return { ref, content: ref };
+      case "ai_output":
+        return { ref, content: ref }; // immutable snapshots: their own content
     }
   });
 }

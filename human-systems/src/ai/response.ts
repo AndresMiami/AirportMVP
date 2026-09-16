@@ -30,8 +30,8 @@ export const ExtractionSchema = z
     text: nonEmpty,
     /** Exact substring of the cited textual source. */
     quote: nonEmpty,
+    /** The subject of an extraction is DERIVED from the cited source item; the AI never assigns it. */
     sourceRef: nonEmpty,
-    subjectRef: nonEmpty.optional(),
     state: z.literal("directly_stated"),
   })
   .strict();
@@ -151,7 +151,7 @@ export function validateAiResponse(raw: unknown, payload: AiProviderPayload, con
     if (!allowed.includes(it.kind)) return { ok: false, error: `${it.id}: output kind "${it.kind}" is not allowed for task ${payload.task}` };
     switch (it.kind) {
       case "extraction": {
-        const bad = exists(it.sourceRef, "sourceRef", it.id) ?? (it.subjectRef ? exists(it.subjectRef, "subjectRef", it.id) : null);
+        const bad = exists(it.sourceRef, "sourceRef", it.id);
         if (bad) return { ok: false, error: bad };
         const src = byId.get(it.sourceRef)!;
         const field = TEXT_FIELD[src.kind];
