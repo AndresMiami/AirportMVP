@@ -50,8 +50,8 @@ function ViewAsOfControl({ asOf, setAsOf }: { asOf: string | null; setAsOf: (d: 
 }
 
 export default function DashboardPage() {
-  const { status, evaluated, isSample, seedLabel, migratedFrom, models, resetToSample, error, asOf, setAsOf } = useModel();
-  if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
+  const { status, evaluated, isSample, seedLabel, migratedFrom, models, resetToSample, asOf, setAsOf } = useModel();
+  if (status === "error") return null; // the storage notice above the page says what happened
   if (status === "loading" || !evaluated) return <Loading />;
 
   const { model, loops, gap, issues, unassignedVariables } = evaluated;

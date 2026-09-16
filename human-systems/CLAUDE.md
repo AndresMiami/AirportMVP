@@ -108,7 +108,18 @@ hypothesis, null is never read as low, no calculation reads the field,
 and v5 -> v6 keeps every stored number exactly while refusing malformed
 v5 confidence (missing / null / string / out of range) as corrupt data,
 never laundering it into "not assessed". Other entities' confidence
-contracts are unchanged. DOMAIN-AGNOSTIC (Checkpoint 3): the generic
+contracts are unchanged. STORAGE SAFETY (Checkpoint 3.1): UNREADABLE !=
+EMPTY — if the system does not understand your data, its first duty is to
+preserve it. An absent primary key is an empty store; a present key that
+is not a readable store envelope is a typed StorageError on every read
+and write, bytes untouched, never normalized; a raw model record that
+fails migration still COUNTS as stored (`hasStoredModels`, `unreadable`),
+so startup never seeds over it and `save` refuses to overwrite it; the
+legacy single-model key is imported only when it parses, has an id and
+collides with nothing, and is removed only AFTER the primary write
+landed. The app shows a storage notice instead of substituting the
+sample. Recovery / export / deletion of unreadable data is an explicit
+tool for later. DOMAIN-AGNOSTIC (Checkpoint 3): the generic
 service knows no domain and no sample (`createBlank` requires a domainId;
 the seed is injected from `src/bootstrap/household-app.ts`, the ONLY
 place the household product is chosen); generic screens read every

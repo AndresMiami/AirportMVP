@@ -557,7 +557,22 @@ capture surface corrects this when it replaces that screen.
    addHypothesis requires only the statement and previews "Confidence:
    not assessed."; a reviewed proposal created under v5 revalidates
    harmlessly after the model migrates. No calculation reads the field
-   (pinned by source scan and by evaluation equality). Remaining: Explore
+   (pinned by source scan and by evaluation equality). STORAGE SAFETY CHECKPOINT 3.1 DONE
+   (unreadable != empty): the repository refuses a present-but-unreadable
+   store envelope (bad JSON, not an object, malformed models / backups /
+   activeId) with a typed `StorageError` on every read and write and
+   never normalizes it; a raw model record that fails migration still
+   counts as stored (`hasStoredModels`, `unreadable`), so
+   `loadActiveOrSeed` seeds only when NO raw record exists — an
+   unreadable record under the seed's own id or any other id is reported
+   and preserved byte for byte, never replaced by the sample, and `save`
+   (reset-to-sample included) refuses to overwrite it while a valid
+   sibling still loads; the legacy single-model key is imported only when
+   it parses, has a usable id and collides with nothing, the primary
+   write lands first and the key is removed only afterwards, a failed
+   import leaving the legacy bytes intact; every page shows the storage
+   notice instead of an endless load. Explicit recovery / export /
+   deletion of unreadable data is a later tool. Remaining: Explore
    -> proposal (Step 4), AI proposals (Step 5).
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place

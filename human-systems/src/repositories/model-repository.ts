@@ -23,6 +23,13 @@ export interface ModelRepository {
    *  turn, so within one running app instance no other guarded write can
    *  interleave. Cross-tab protection is future work. */
   saveIfRevision(model: SystemModel, expectedRevision: string | null, revisionOf: (m: SystemModel | null) => string | null): Promise<GuardedSaveResult>;
+  /** Whether ANY raw model record exists, readable by this build or not.
+   *  Deciding "the store is empty" must never depend on a successful
+   *  migration: unreadable != empty. */
+  hasStoredModels(): Promise<boolean>;
+  /** Raw model records this build could not read (migration or validation
+   *  refused), with the reason. They stay stored, byte for byte. */
+  unreadable(): Promise<{ id: string; error: string }[]>;
   delete(id: string): Promise<void>;
   getActiveId(): Promise<string | null>;
   setActiveId(id: string | null): Promise<void>;

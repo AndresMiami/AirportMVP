@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ModelProvider } from "@/components/model-provider";
 import { Nav } from "@/components/nav";
+import { StorageNotice } from "@/components/storage-notice";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -20,7 +21,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ModelProvider>
           <div className="flex min-h-screen flex-col md:flex-row">
             <Nav />
-            <main className="flex-1 px-4 py-6 md:px-8 md:py-8 max-w-6xl">{children}</main>
+            <main className="flex-1 px-4 py-6 md:px-8 md:py-8 max-w-6xl">
+              <StorageNotice />
+              {children}
+            </main>
           </div>
         </ModelProvider>
       </body>

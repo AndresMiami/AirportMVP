@@ -23,6 +23,12 @@ export class MemoryModelRepository implements ModelRepository {
     this.models.set(validated.id, structuredClone(validated));
     return { ok: true };
   }
+  async hasStoredModels(): Promise<boolean> {
+    return this.models.size > 0;
+  }
+  async unreadable(): Promise<{ id: string; error: string }[]> {
+    return [];
+  }
   async delete(id: string): Promise<void> {
     this.models.delete(id);
     if (this.activeId === id) this.activeId = null;

@@ -3,7 +3,7 @@ import { evaluateSystem } from "@/model/evaluate";
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
-import { LocalStorageModelRepository, LEGACY_V1_KEY, STORAGE_KEY, type KeyValueStorage } from "@/repositories/local-storage-repository";
+import { LocalStorageModelRepository, LEGACY_V1_KEY, STORAGE_KEY, StorageError, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { MemoryModelRepository } from "@/repositories/memory-repository";
 import { ModelService } from "@/services/model-service";
 import { HOUSEHOLD_APP, householdServiceOptions } from "@/bootstrap/household-app";
@@ -22,7 +22,7 @@ class FakeStorage implements KeyValueStorage {
 }
 
 describe("LocalStorageModelRepository", () => {
-  it("round-trips several models, tracks the active id, and treats corrupt data as absent", async () => {
+  it("round-trips several models, tracks the active id, and REFUSES corrupt data instead of treating it as absent", async () => {
     const s = new FakeStorage();
     const repo = new LocalStorageModelRepository(s);
     expect(await repo.list()).toEqual([]);
@@ -39,10 +39,12 @@ describe("LocalStorageModelRepository", () => {
     expect(await repo.load("second")).toBeNull();
 
     s.setItem(STORAGE_KEY, "{ not json");
-    expect(await repo.list()).toEqual([]);
+    await expect(repo.list()).rejects.toThrow(StorageError);
+    expect(s.getItem(STORAGE_KEY)).toBe("{ not json");
     s.setItem(STORAGE_KEY, JSON.stringify({ activeId: "x", models: { x: { schemaVersion: 2 } } }));
     expect(await repo.load("x")).toBeNull();
     expect(repo.reports.get("x")?.ok).toBe(false);
+    expect(await repo.hasStoredModels()).toBe(true);
     await repo.clear();
     expect(s.data.size).toBe(0);
   });

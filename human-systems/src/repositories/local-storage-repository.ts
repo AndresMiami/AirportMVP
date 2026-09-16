@@ -3,6 +3,23 @@
  * passed through model/migrations on load, so a record saved by an older
  * build is upgraded (or rejected with a reason) before it reaches the UI.
  * The v1 single-model key is imported once and then removed.
+ *
+ * STORAGE SAFETY (Checkpoint 3.1): unreadable != empty. Data this build
+ * cannot understand is never treated as absent and never overwritten or
+ * deleted by anything automatic:
+ *   - an ABSENT primary key is an empty store; a PRESENT key that is not
+ *     a readable store envelope (bad JSON, not an object, malformed
+ *     models/backups/activeId) is a typed StorageError — every read AND
+ *     every write refuses while it stands, bytes untouched;
+ *   - a raw model record that fails migration still COUNTS as stored
+ *     (hasStoredModels) and is reported (unreadable), never replaced:
+ *     save() refuses to overwrite it;
+ *   - the legacy single-model key is imported only when it parses, has a
+ *     usable id and collides with nothing; it is removed only AFTER the
+ *     primary write succeeded. A failed import leaves its bytes intact and
+ *     surfaces a StorageError.
+ * Recovery, export or deletion of unreadable data is an explicit tool for
+ * later; this layer only preserves and refuses.
  */
 import { migrateModel, migrationOptionsFor } from "@/model/migrations";
 import { SystemModelSchema, type SystemModel } from "@/types";
@@ -28,6 +45,21 @@ interface StoreShape {
   backups: Record<string, Record<string, unknown>>;
 }
 
+export type StorageErrorKind = "unreadable_store" | "unreadable_legacy" | "legacy_conflict" | "would_overwrite_unreadable";
+
+/** Stored data this build cannot safely interpret. Nothing was written. */
+export class StorageError extends Error {
+  constructor(
+    readonly kind: StorageErrorKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = "StorageError";
+  }
+}
+
+const isPlainObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+
 export interface LoadReport {
   id: string;
   ok: boolean;
@@ -45,37 +77,47 @@ export class LocalStorageModelRepository implements ModelRepository {
     private readonly legacyKey: string = LEGACY_V1_KEY,
   ) {}
 
+  /** The store envelope, strictly. Absent key = empty store. A present key
+   *  that is not the envelope this build writes is refused, bytes kept. */
   private read(): StoreShape {
-    let store: StoreShape = { activeId: null, models: {}, backups: {} };
     const raw = this.storage.getItem(this.key);
-    if (raw) {
+    let store: StoreShape;
+    if (raw === null || raw === "") {
+      store = { activeId: null, models: {}, backups: {} };
+    } else {
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(raw) as Partial<StoreShape>;
-        store = {
-          activeId: typeof parsed.activeId === "string" ? parsed.activeId : null,
-          models: parsed.models && typeof parsed.models === "object" ? parsed.models : {},
-          backups: parsed.backups && typeof parsed.backups === "object" ? parsed.backups : {},
-        };
+        parsed = JSON.parse(raw);
       } catch {
-        store = { activeId: null, models: {}, backups: {} };
+        throw new StorageError("unreadable_store", `The stored data under "${this.key}" is not valid JSON. Nothing was changed; the data is kept exactly as it is.`);
       }
+      if (!isPlainObject(parsed)) throw new StorageError("unreadable_store", `The stored data under "${this.key}" is not a store (expected an object). Nothing was changed.`);
+      if (!isPlainObject(parsed.models)) throw new StorageError("unreadable_store", `The stored data under "${this.key}" has no readable "models" container. Nothing was changed.`);
+      if (parsed.backups !== undefined && !isPlainObject(parsed.backups)) throw new StorageError("unreadable_store", `The stored data under "${this.key}" has a malformed "backups" container. Nothing was changed.`);
+      if (parsed.activeId !== undefined && parsed.activeId !== null && typeof parsed.activeId !== "string") throw new StorageError("unreadable_store", `The stored data under "${this.key}" has a malformed "activeId". Nothing was changed.`);
+      for (const [id, b] of Object.entries(parsed.backups ?? {})) if (!isPlainObject(b)) throw new StorageError("unreadable_store", `The stored data under "${this.key}" has malformed backups for "${id}". Nothing was changed.`);
+      store = { activeId: typeof parsed.activeId === "string" ? parsed.activeId : null, models: parsed.models, backups: (parsed.backups as StoreShape["backups"] | undefined) ?? {} };
     }
-    // One-time import of the pre-store single-model key.
+    return this.importLegacy(store);
+  }
+
+  /** One-time import of the pre-store single-model key: parse -> safe
+   *  destination -> primary write -> ONLY THEN remove the legacy key. */
+  private importLegacy(store: StoreShape): StoreShape {
     const legacy = this.storage.getItem(this.legacyKey);
-    if (legacy) {
-      try {
-        const obj = JSON.parse(legacy) as { id?: unknown };
-        if (obj && typeof obj.id === "string" && !(obj.id in store.models)) {
-          store.models[obj.id] = obj;
-          if (!store.activeId) store.activeId = obj.id;
-          this.write(store);
-        }
-      } catch {
-        // unreadable legacy record: drop it
-      }
-      this.storage.removeItem(this.legacyKey);
+    if (legacy === null || legacy === "") return store;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(legacy);
+    } catch {
+      throw new StorageError("unreadable_legacy", `The older single-model record under "${this.legacyKey}" is not valid JSON. It was kept exactly as it is; nothing was imported or deleted.`);
     }
-    return store;
+    if (!isPlainObject(obj) || typeof obj.id !== "string" || obj.id === "") throw new StorageError("unreadable_legacy", `The older single-model record under "${this.legacyKey}" has no usable id. It was kept exactly as it is; nothing was imported or deleted.`);
+    if (obj.id in store.models) throw new StorageError("legacy_conflict", `The older single-model record under "${this.legacyKey}" has the same id ("${obj.id}") as a stored system. Both were kept; neither was overwritten.`);
+    const next: StoreShape = { ...store, models: { ...store.models, [obj.id]: obj }, activeId: store.activeId ?? obj.id };
+    this.write(next); // throws -> the legacy key stays
+    this.storage.removeItem(this.legacyKey);
+    return next;
   }
 
   private write(store: StoreShape): void {
@@ -119,11 +161,36 @@ export class LocalStorageModelRepository implements ModelRepository {
     return model;
   }
 
+  /** True when a raw record exists under `id` that this build cannot read. */
+  private isUnreadableRecord(store: StoreShape, id: string): boolean {
+    const raw = store.models[id];
+    if (raw === undefined) return false;
+    if (SystemModelSchema.safeParse(raw).success) return false;
+    return !migrateModel(raw, migrationOptionsFor(raw)).ok;
+  }
+
   async save(model: SystemModel): Promise<void> {
     const validated = SystemModelSchema.parse(model);
     const store = this.read();
+    if (this.isUnreadableRecord(store, validated.id)) {
+      throw new StorageError("would_overwrite_unreadable", `A stored system with id "${validated.id}" exists but cannot be read by this build; saving would overwrite it. Nothing was written.`);
+    }
     store.models[validated.id] = validated;
     this.write(store);
+  }
+
+  async hasStoredModels(): Promise<boolean> {
+    return Object.keys(this.read().models).length > 0;
+  }
+
+  async unreadable(): Promise<{ id: string; error: string }[]> {
+    const store = this.read();
+    const out: { id: string; error: string }[] = [];
+    for (const [id, raw] of Object.entries(store.models)) {
+      const result = migrateModel(raw, migrationOptionsFor(raw));
+      if (!result.ok) out.push({ id, error: result.error });
+    }
+    return out;
   }
 
   async saveIfRevision(model: SystemModel, expectedRevision: string | null, revisionOf: (m: SystemModel | null) => string | null): Promise<GuardedSaveResult> {

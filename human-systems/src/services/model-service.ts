@@ -102,6 +102,13 @@ export class ModelService {
         return { model: m, seeded: false };
       }
     }
+    // Seeding is allowed ONLY when nothing at all is stored. Stored records
+    // this build cannot read are not "nothing": refuse, name them, write nothing.
+    if (await this.repo.hasStoredModels()) {
+      const bad = await this.repo.unreadable();
+      const detail = bad.map((b) => `${b.id}: ${b.error}`).join("; ");
+      throw new Error(`Stored data could not be read by this build, so no sample was created and nothing was changed. ${bad.length} stored system${bad.length === 1 ? "" : "s"} could not be read${detail ? ` (${detail})` : ""}. The data is kept exactly as it is.`);
+    }
     if (!this.seed) throw new Error("Nothing is stored and no seed is configured for this application.");
     const model = this.seed.create();
     await this.repo.save(model);
