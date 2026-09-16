@@ -113,20 +113,26 @@ describe("fictional user: from incomplete observations to a compared history", (
     // capital and resilience stayed within the A23 display threshold — a
     // display grouping over two saved points, not a persistence claim.
     const cmp = compareSignatures(m.signatures[0], m.signatures[1]);
-    const changedIds = cmp.changed.map((c) => c.dimensionId);
+    const changedIds = cmp.movedAtOrAboveThreshold.map((c) => c.dimensionId);
     expect(changedIds).toContain("financial_buffer");
     expect(changedIds).toContain("income_floor");
-    expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.classification).toBe("increased");
-    expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.before).toBeCloseTo(1500 / 3000 / 6, 9);
-    expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.after).toBeCloseTo(9000 / 3000 / 6, 9);
-    const withinIds = cmp.withinThreshold.map((c) => c.dimensionId);
-    expect(withinIds).toContain("career_capital");
-    expect(withinIds).toContain("income_resilience"); // shares moved a little, under the display threshold
+    expect(cmp.movedAtOrAboveThreshold.find((c) => c.dimensionId === "financial_buffer")!.classification).toBe("increased");
+    expect(cmp.movedAtOrAboveThreshold.find((c) => c.dimensionId === "financial_buffer")!.before).toBeCloseTo(1500 / 3000 / 6, 9);
+    expect(cmp.movedAtOrAboveThreshold.find((c) => c.dimensionId === "financial_buffer")!.after).toBeCloseTo(9000 / 3000 / 6, 9);
+    // changed = the values differ at any magnitude; it contains the small move too
+    expect(cmp.changed.map((c) => c.dimensionId)).toEqual(expect.arrayContaining([...changedIds, "income_resilience"]));
+    // exact equality lives outside the convention; within-threshold is non-zero movement only
+    expect(cmp.unchanged.map((c) => c.dimensionId)).toContain("career_capital");
+    expect(cmp.withinThreshold.map((c) => c.dimensionId)).not.toContain("career_capital");
+    expect(cmp.changed.map((c) => c.dimensionId)).not.toContain("career_capital");
+    expect(cmp.withinThreshold.map((c) => c.dimensionId)).toContain("income_resilience"); // shares moved a little, under the display threshold
     expect(cmp.dimensions.find((c) => c.dimensionId === "income_resilience")!.classification).toBe("within_threshold");
     expect(cmp.unknownInvolved.map((c) => c.dimensionId)).toContain("physical_feasibility");
-    expect(cmp.variablesChanged.map((v) => v.variableId)).toEqual(expect.arrayContaining([INPUT_IDS.liquidReserves]));
-    // total_income has no reference range: it differs, and no scaled judgment is made
+    expect(cmp.variablesMovedAtOrAboveThreshold.map((v) => v.variableId)).toEqual(expect.arrayContaining([INPUT_IDS.liquidReserves]));
+    // total_income has no reference range: it differs (so it is in changed), and no scaled judgment is made
     expect(cmp.variablesDifferNoScale.map((v) => v.variableId)).toContain("total_income");
+    expect(cmp.variablesChanged.map((v) => v.variableId)).toEqual(expect.arrayContaining([INPUT_IDS.liquidReserves, "total_income"]));
+    expect(cmp.variablesChanged.map((v) => v.variableId)).not.toContain(INPUT_IDS.careerCapital);
     expect(cmp.variables.find((v) => v.variableId === "total_income")!.movement).toBeNull();
     // career capital is exactly equal in both snapshots: unchanged, no threshold involved
     expect(cmp.variablesUnchanged.map((v) => v.variableId)).toContain(INPUT_IDS.careerCapital);
@@ -161,7 +167,7 @@ describe("fictional user: from incomplete observations to a compared history", (
     expect(reloaded.id).toBe("sys_ren");
     expect(reloaded.signatures).toEqual(m.signatures);
     expect(reloaded.signatures[0].label).toBe("Ren household 2026-01");
-    expect(compareSignatures(reloaded.signatures[0], reloaded.signatures[1]).changed.map((c) => c.dimensionId)).toEqual(changedIds);
+    expect(compareSignatures(reloaded.signatures[0], reloaded.signatures[1]).movedAtOrAboveThreshold.map((c) => c.dimensionId)).toEqual(changedIds);
     // The dimension helper still agrees with the stored history for an unchanged dimension.
     expect(dim(reloaded, "career_capital").normalizedValue).toBe(reloaded.signatures[1].dimensions.find((d) => d.dimensionId === "career_capital")!.normalizedValue);
   });

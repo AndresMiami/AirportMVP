@@ -1,13 +1,14 @@
 /**
  * Comparing two saved snapshots (assumption A23, a DISPLAY convention).
- *  - "what changed": dimensions whose normalized value moved by at least
- *    the threshold between the two snapshots, described as increased or
- *    decreased — a direction, never an improvement or a weakening (that
- *    would need a declared normative direction);
- *  - "within threshold": dimensions known in both whose normalized value
- *    moved less than the threshold. This is a low-variation display
- *    convention over two recorded points; it is NOT persistence,
- *    structure, invariance or continuity;
+ *  - THE FACT comes first: same | different. "unchanged" = both known and
+ *    exactly equal (no threshold); "changed" = both known and different,
+ *    at ANY magnitude. changed != crossed the display threshold;
+ *  - THE DISPLAY CONVENTION (A23) then sorts the different ones: "within
+ *    threshold" = non-zero movement below 0.10 on the normalized scale;
+ *    "increased" / "decreased" = movement at or above it — a direction,
+ *    never an improvement or a weakening (that would need a declared
+ *    normative direction). Neither grouping is persistence, structure,
+ *    invariance or continuity;
  *  - variables: exact equality is reported as unchanged (no threshold);
  *    with a reference-range scale on both sides the threshold applies;
  *    without one only the raw difference is reported, never a scaled
@@ -78,21 +79,32 @@ export interface RelationshipPresence {
 export interface SignatureComparison {
   before: { id: string; label?: string; createdAt: string };
   after: { id: string; label?: string; createdAt: string };
-  /** The A23 display threshold that produced `changed` / `withinThreshold`. */
+  /** The A23 display threshold behind the *AtOrAboveThreshold / *WithinThreshold groupings. */
   changeThreshold: number;
   dimensions: DimensionChange[];
+  /* THE FACT: same | different. `changed` means the recorded values
+   * differ (both known), whatever the size of the move. */
+  /** Known in both and exactly equal (no threshold involved). */
+  unchanged: DimensionChange[];
+  /** Known in both and different, at any magnitude (within_threshold, increased, decreased). */
   changed: DimensionChange[];
-  /** Known in both and moved less than the threshold: a display grouping, not persistence. */
+  /* THE DISPLAY CONVENTION (A23) over the different ones. */
+  /** Non-zero movement below the display threshold. */
   withinThreshold: DimensionChange[];
+  /** increased / decreased: movement at or above the display threshold, largest first. */
+  movedAtOrAboveThreshold: DimensionChange[];
   unknownInvolved: DimensionChange[];
   confidenceIncreased: DimensionChange[];
   confidenceDecreased: DimensionChange[];
   variables: VariableChange[];
-  variablesChanged: VariableChange[];
-  /** Exactly equal in both snapshots (no threshold). */
+  /** Exactly equal raw values in both snapshots (no threshold). */
   variablesUnchanged: VariableChange[];
-  /** Scaled movement below the threshold (A23 display convention). */
+  /** Different raw values at any magnitude: within_threshold, increased, decreased and differs_no_scale. */
+  variablesChanged: VariableChange[];
+  /** Non-zero scaled movement below the display threshold (A23). */
   variablesWithinThreshold: VariableChange[];
+  /** increased / decreased: scaled movement at or above the display threshold. */
+  variablesMovedAtOrAboveThreshold: VariableChange[];
   /** Different raw values with no scale to judge the size of the move. */
   variablesDifferNoScale: VariableChange[];
   relationships: { kept: RelationshipPresence[]; added: RelationshipPresence[]; removed: RelationshipPresence[] };
@@ -180,15 +192,18 @@ export function compareSignatures(
     after: { id: after.id, label: after.label, createdAt: after.createdAt },
     changeThreshold: threshold,
     dimensions,
-    changed: dimensions.filter((d) => d.classification === "increased" || d.classification === "decreased").sort(byAbsDelta),
-    withinThreshold: dimensions.filter((d) => d.classification === "within_threshold" || d.classification === "unchanged"),
+    unchanged: dimensions.filter((d) => d.classification === "unchanged"),
+    changed: dimensions.filter((d) => d.classification === "within_threshold" || d.classification === "increased" || d.classification === "decreased").sort(byAbsDelta),
+    withinThreshold: dimensions.filter((d) => d.classification === "within_threshold"),
+    movedAtOrAboveThreshold: dimensions.filter((d) => d.classification === "increased" || d.classification === "decreased").sort(byAbsDelta),
     unknownInvolved: dimensions.filter((d) => d.classification.includes("unknown") || d.classification.includes("became")),
     confidenceIncreased: dimensions.filter((d) => d.confidenceDelta >= CONFIDENCE_CHANGE_THRESHOLD),
     confidenceDecreased: dimensions.filter((d) => d.confidenceDelta <= -CONFIDENCE_CHANGE_THRESHOLD),
     variables,
-    variablesChanged: variables.filter((v) => v.classification === "increased" || v.classification === "decreased"),
     variablesUnchanged: variables.filter((v) => v.classification === "unchanged"),
+    variablesChanged: variables.filter((v) => ["within_threshold", "increased", "decreased", "differs_no_scale"].includes(v.classification)),
     variablesWithinThreshold: variables.filter((v) => v.classification === "within_threshold"),
+    variablesMovedAtOrAboveThreshold: variables.filter((v) => v.classification === "increased" || v.classification === "decreased"),
     variablesDifferNoScale: variables.filter((v) => v.classification === "differs_no_scale"),
     relationships: { kept, added, removed },
     completenessDelta: after.completeness - before.completeness,
