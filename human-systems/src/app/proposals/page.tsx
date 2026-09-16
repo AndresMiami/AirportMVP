@@ -1,33 +1,30 @@
 "use client";
 /**
- * PROPOSALS — the review inbox for the active system. Every proposal here
- * was materialized and previewed by the kernel; nothing on this page
- * writes to the model except an explicit approval, which goes through
- * ProposalService.approve -> guarded persistence -> the provider adopting
- * the persisted model. Cards that can act appear only after startup
- * recovery has reconciled any proposal stranded in "applying".
+ * REVIEW (Step 6D: simplified presentation, same approval semantics) —
+ * "Nothing changes until you decide." Every proposal here was materialized
+ * and previewed by the kernel; nothing on this page writes to the model
+ * except an explicit approval, which goes through ProposalService.approve
+ * -> guarded persistence -> the provider adopting the persisted model.
+ * Cards that can act appear only after startup recovery has reconciled
+ * any proposal stranded in "applying". The route stays /proposals.
+ *
+ * Order: a focused proposal (?focus=id, the one Explore just created)
+ * first; other actionable proposals under "Other things waiting for you";
+ * applied / rejected / superseded under a collapsed "Past decisions"; the
+ * manual composer under a collapsed "Advanced" near the bottom.
  */
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useModel } from "@/components/model-provider";
 import { ProposalCard, type ProposalActions } from "@/components/proposal-card";
 import { ProposalCompose, type ComposeSubmit } from "@/components/proposal-compose";
-import { Card, Loading, Note, PageHeader } from "@/components/ui";
-import type { MutationProposal, RecoveryOutcome } from "@/kernel";
+import { Loading, Note } from "@/components/ui";
+import { recoveryLine } from "@/features/review/wording";
+import type { MutationProposal } from "@/kernel";
 
-const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed";
+const TOGGLE = "text-sm text-muted hover:text-foreground hover:underline disabled:opacity-50 disabled:cursor-not-allowed";
 const REVALIDATED = new Set<MutationProposal["status"]>(["proposed", "reviewed", "stale"]);
-
-function recoveryWords(o: RecoveryOutcome): string {
-  switch (o.outcome) {
-    case "reconciled_applied":
-      return `Proposal ${o.proposalId}: the stored system already carries this change; it is recorded as applied.`;
-    case "commit_never_landed":
-      return `Proposal ${o.proposalId}: the change was approved but never reached the stored system; it is marked as not applied and can be retried after a check.`;
-    case "conflict":
-      return `Proposal ${o.proposalId}: the stored system is neither the state before nor the state after this change; it is marked as not applied and needs a fresh look before any retry.`;
-  }
-}
+const ACTIONABLE = new Set<MutationProposal["status"]>(["proposed", "reviewed", "stale", "failed", "applying"]);
 
 function ProposalsInner() {
   const { status, model, proposals, proposalRecovery, approveProposal } = useModel();
@@ -35,7 +32,8 @@ function ProposalsInner() {
   const [items, setItems] = useState<MutationProposal[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [composing, setComposing] = useState<false | { editing: MutationProposal | null }>(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showPast, setShowPast] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Revalidate every reviewable proposal against the STORED model whenever
@@ -102,60 +100,92 @@ function ProposalsInner() {
 
   if (status === "loading" || !model) return <Loading />;
 
-  const open = (items ?? []).filter((p) => ["proposed", "stale", "failed", "applying"].includes(p.status));
-  const ready = (items ?? []).filter((p) => p.status === "reviewed");
-  const history = (items ?? []).filter((p) => ["applied", "rejected", "superseded"].includes(p.status));
+  const actionable = (items ?? []).filter((p) => ACTIONABLE.has(p.status));
+  const focused = focus ? (actionable.find((p) => p.id === focus) ?? null) : null;
+  const others = actionable.filter((p) => p.id !== focused?.id);
+  const past = (items ?? []).filter((p) => ["applied", "rejected", "superseded"].includes(p.status));
+  const ready = proposalRecovery.status === "done" && items !== null;
 
   return (
-    <div>
-      <PageHeader title="Proposals" lede="Changes waiting for your decision. The engine shows exactly what each one does; you decide whether it is right. Nothing here changes the system until you approve it." />
+    <div className="mx-auto max-w-2xl">
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
+        <p className="mt-2 text-[15px] leading-relaxed text-muted">Check what would change before anything is added to your notebook. Nothing changes until you decide.</p>
+      </header>
 
       {proposalRecovery.status === "pending" ? <Note>Checking for changes that were approved but not completed…</Note> : null}
-      {proposalRecovery.status === "error" ? <Note tone="warn">The proposal ledger could not be read: {proposalRecovery.message}. Nothing is shown or written until it is inspected.</Note> : null}
+      {proposalRecovery.status === "error" ? <Note tone="warn">Your past decisions could not be read: {proposalRecovery.message}. Nothing is shown or written until it is inspected.</Note> : null}
       {proposalRecovery.status === "done" && proposalRecovery.outcomes.length > 0 ? (
-        <Card title="Recovered on startup" tone="warn" className="mb-4">
-          <ul className="text-sm space-y-1" data-testid="recovery-outcomes">
+        <section className="mb-8 rounded-xl border border-warn/50 bg-warn-soft px-5 py-4" data-testid="recovery">
+          <p className="text-sm font-medium">Checked on startup</p>
+          <ul className="mt-1 space-y-1 text-[15px] leading-relaxed" data-testid="recovery-outcomes">
             {proposalRecovery.outcomes.map((o) => (
-              <li key={o.proposalId}>{recoveryWords(o)}</li>
+              <li key={o.proposalId}>{recoveryLine(o)}</li>
             ))}
           </ul>
-        </Card>
+        </section>
       ) : null}
       {loadError ? <Note tone="warn">{loadError}</Note> : null}
 
-      <div className="mb-4">
-        {composing ? (
-          <Card title={composing.editing ? "Edit proposal" : "Propose a change"}>
+      {composing ? (
+        <section className="mb-8 rounded-xl border border-border/70 bg-surface px-5 py-4" data-testid="composer">
+          <p className="text-sm text-muted">{composing.editing ? "Edit proposal" : "Propose a change"}</p>
+          <div className="mt-2">
             <ProposalCompose model={model} editing={composing.editing} onSubmit={submitCompose} onCancel={() => setComposing(false)} />
-          </Card>
-        ) : (
-          <button type="button" className={BTN} onClick={() => setComposing({ editing: null })} disabled={proposalRecovery.status !== "done"}>
-            Propose a change
-          </button>
-        )}
-      </div>
+          </div>
+        </section>
+      ) : null}
 
-      {proposalRecovery.status === "done" && items !== null ? (
-        <div className="space-y-6">
-          <section aria-labelledby="needs-review">
-            <h2 id="needs-review" className="text-sm font-semibold mb-2">
-              Needs your review ({open.length})
-            </h2>
-            {open.length === 0 ? <p className="text-sm text-muted">Nothing is waiting for review.</p> : <div className="space-y-3">{open.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} focused={p.id === focus} />)}</div>}
+      {ready ? (
+        <div className="space-y-10">
+          {focused ? (
+            <section data-testid="focused">
+              <ProposalCard p={focused} actions={actions} busy={busy} focused />
+            </section>
+          ) : null}
+
+          {others.length > 0 ? (
+            <section data-testid="others">
+              {focused ? <h2 className="text-lg font-semibold tracking-tight">Other things waiting for you</h2> : null}
+              <div className={focused ? "mt-2 space-y-4" : "space-y-4"}>
+                {others.map((p) => (
+                  <ProposalCard key={p.id} p={p} actions={actions} busy={busy} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {actionable.length === 0 ? <p className="text-[15px] text-muted">Nothing is waiting for your decision.</p> : null}
+
+          <section data-testid="past">
+            <button type="button" className={TOGGLE} onClick={() => setShowPast((s) => !s)} aria-expanded={showPast} data-testid="past-toggle">
+              {showPast ? "Hide past decisions" : `Past decisions (${past.length})`}
+            </button>
+            {showPast ? (
+              past.length === 0 ? (
+                <p className="mt-2 text-[15px] text-muted">No decision yet.</p>
+              ) : (
+                <div className="mt-2 divide-y divide-border/70">
+                  {past.map((p) => (
+                    <ProposalCard key={p.id} p={p} actions={actions} busy={busy} />
+                  ))}
+                </div>
+              )
+            ) : null}
           </section>
-          <section aria-labelledby="ready">
-            <h2 id="ready" className="text-sm font-semibold mb-2">
-              Reviewed — ready for your decision ({ready.length})
-            </h2>
-            {ready.length === 0 ? <p className="text-sm text-muted">No reviewed proposal is waiting for a decision.</p> : <div className="space-y-3">{ready.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} focused={p.id === focus} />)}</div>}
-          </section>
-          <section aria-labelledby="history">
-            <h2 id="history" className="text-sm font-semibold mb-2">
-              <button type="button" className="underline decoration-dotted" onClick={() => setShowHistory((s) => !s)} aria-expanded={showHistory}>
-                History ({history.length})
-              </button>
-            </h2>
-            {showHistory ? (history.length === 0 ? <p className="text-sm text-muted">No decided proposal yet.</p> : <div className="space-y-3">{history.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} />)}</div>) : null}
+
+          <section data-testid="advanced">
+            <button type="button" className={TOGGLE} onClick={() => setShowAdvanced((s) => !s)} aria-expanded={showAdvanced} data-testid="advanced-toggle">
+              {showAdvanced ? "Hide advanced" : "Advanced"}
+            </button>
+            {showAdvanced ? (
+              <div className="mt-2 text-[15px] leading-relaxed text-muted">
+                <p>Propose a change by hand: any registered mutation, as a request the kernel previews before you decide.</p>
+                <button type="button" className={`mt-2 ${TOGGLE}`} onClick={() => setComposing({ editing: null })} disabled={proposalRecovery.status !== "done" || composing !== false}>
+                  Propose a change
+                </button>
+              </div>
+            ) : null}
           </section>
         </div>
       ) : null}

@@ -141,6 +141,49 @@ describe("Explore (6C: presentation simplified, comparison unchanged)", () => {
   });
 });
 
+describe("Review (6D: presentation simplified, approval semantics unchanged)", () => {
+  it("page: Review first, the focused proposal first, no empty inbox sections, past decisions and the composer collapsed; recovery gating and kernel revalidation intact", () => {
+    const page = read("src/app/proposals/page.tsx");
+    expect(page).toMatch(/<h1[^>]*>Review<\/h1>/);
+    expect(page).toContain("Check what would change before anything is added to your notebook.");
+    expect(page).toContain("Other things waiting for you");
+    expect(page).toMatch(/Past decisions \(\$\{past\.length\}\)/);
+    expect(page).toContain('data-testid="advanced"');
+    expect(page).toMatch(/ProposalCompose/); // the composer is preserved, not deleted
+    expect(page).toContain('proposedBy: { kind: "person" }');
+    expect(page).toMatch(/const focused = focus \? \(actionable\.find\(\(p\) => p\.id === focus\) \?\? null\) : null;/);
+    expect(page).not.toMatch(/Needs your review \(|Reviewed — ready|Nothing is waiting for review/);
+    expect(page).toMatch(/proposalRecovery\.status !== "done"\) return;/);
+    expect(page).toMatch(/proposals\.revalidate\(p\.id\)/);
+    expect(page).not.toMatch(/@\/services\/mutations|\bapply\(|replaceModel|\.save\(|saveIfRevision/);
+    expect(page).toMatch(/approveProposal\(id, note\)/); // the provider's guarded approval path, nothing else
+  });
+  it("card: four questions first, one primary action per state, two-stage decision, consequential second confirmation, failed retry only, stale re-review, Reject kept, note on request, everything else under Details", () => {
+    const card = read("src/components/proposal-card.tsx");
+    for (const t of ["would-change", "why", "based-on", "details-toggle", "mechanical-diff", "consequence-notice", "changed-since", "reviewed-before"]) expect(card).toContain(`data-testid="${t}"`);
+    expect(card).toContain("BASIS_DISCLAIMER");
+    expect(card).toContain("decisionHeading(p, shown)");
+    expect(card).toMatch(/p\.status === "proposed" \?[\s\S]*actions\.review\(p\.id, note\)[\s\S]*I&apos;ve reviewed this/);
+    expect(card).toMatch(/p\.status === "stale" \?[\s\S]*actions\.review\(p\.id, note\)[\s\S]*I&apos;ve reviewed the updated version/);
+    expect(card).toMatch(/p\.status === "failed" \?[\s\S]*actions\.retry\(p\.id\)[\s\S]*Check again and retry/);
+    expect(card).toMatch(/p\.status === "reviewed" \?[\s\S]*consequential \? \(\) => setConfirming\(true\) : approve/);
+    expect(card).toContain('const canApprove = p.status === "reviewed" && p.preview.ok;');
+    expect(card).toContain("Yes, apply this consequential change");
+    expect(card).toContain("Ready for your decision");
+    expect(card).toContain("Nothing was written.");
+    expect(card).toContain("What you reviewed before");
+    expect(card).toMatch(/>\s*Reject\s*</);
+    expect(card).not.toMatch(/Not now/); // rejection is a persisted decision, never a dismissal
+    expect(card).toContain("Add a note");
+    expect(card).not.toMatch(/setTimeout\(|setInterval\(|defaultChecked|approveAll\(|checked=\{true\}/);
+    expect(card).not.toMatch(/@\/services|\.save\(|saveIfRevision|replaceModel|\bapply\(/);
+    // first-layer labels never expose kernel names
+    const wording = read("src/features/review/wording.ts");
+    expect(wording).not.toMatch(/label: "(ai_output|cross_context|pattern_ref|PatternRef|fingerprint|catalogue_prompt|user_statement)"/);
+    expect(wording).not.toMatch(/@\/services|@\/model|from "react"/);
+  });
+});
+
 describe("Library and routes", () => {
   it("Library links every advanced screen, and every existing route still has a page", () => {
     const lib = read("src/app/library/page.tsx");

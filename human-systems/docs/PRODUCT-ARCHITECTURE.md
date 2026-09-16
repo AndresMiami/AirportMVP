@@ -922,8 +922,69 @@ capture surface corrects this when it replaces that screen.
    return -> "Waiting for your review" + "Review proposal", approve ->
    "Already investigating" + "Created from this pattern" with confidence
    only under Details, no horizontal overflow, the first mobile viewport
-   showing the pattern and the first question. Next: Review, then Map —
-   after the Explore screenshots are reviewed.
+   showing the pattern and the first question. EXPLORE FROZEN at f1b6e31
+   (polish backlog, not a checkpoint: a colon form "Liquid reserves:
+   $2,000 → $4,500 → …" for the differed-each-time row; the expanded
+   recorded-times detail is intentionally technical).
+   STEP 6D DONE — REVIEW: SIMPLIFY WITHOUT CHANGING APPROVAL SEMANTICS.
+   The proposal kernel is frozen and untouched (create, materialization,
+   dry-run, fingerprints, revalidation, staleness, review status,
+   approval, guarded persistence, retry, rejection, superseding,
+   recovery, consequential classification); the page still acts only
+   after startup recovery, still revalidates every reviewable proposal
+   through the kernel, and still approves only through the provider's
+   guarded approveProposal. The human concept is now "Review — Nothing
+   changes until you decide." at the same /proposals route: a focused
+   proposal (?focus=id from Explore) first in one subtle bordered
+   surface, other actionable proposals under "Other things waiting for
+   you", no empty inbox sections, applied / rejected / superseded under
+   a collapsed "Past decisions (N)", and the manual composer preserved
+   unchanged under a collapsed "Advanced" near the bottom. The card
+   (src/components/proposal-card.tsx over src/features/review/wording.ts)
+   answers four questions first over the kernel's own describeProposal()
+   wording: what am I deciding ("Keep this as a working hypothesis?" +
+   the quoted statement when the single registered step is
+   addHypothesis; otherwise "Apply this change?" + the kernel's first
+   summary), "What this would change" (willChange), "Why you're seeing
+   this" (why), "Based on" (the kernel's basis lines with human labels —
+   You wrote / Pattern / Comparison / Question / Suggested wording /
+   Record / Event / Hypothesis / Variable / Relationship / Value history
+   — never ai_output, cross_context, PatternRef, fingerprint or
+   basis-kind names; AI wording carries the not-evidence note; the basis
+   disclaimer stays visible), and "Still uncertain" only when a
+   proposal-specific line exists (the kernel's fixed cannot-judge
+   sentence moves under Details). One primary action per state and the
+   decision stays two-stage: proposed -> "I've reviewed this"
+   (ProposalService.review, never approval); reviewed -> "Ready for your
+   decision" + "Approve and apply" (guarded path); stale -> "Something
+   changed since you reviewed this" with changedSince prominent, the
+   current form, "What you reviewed before" under Details, and "I've
+   reviewed the updated version" before approval is possible; failed ->
+   "Nothing was written." + "Check again and retry" (explicit, never
+   automatic). A consequential proposal names its consequence up front
+   and still requires "Yes, apply this consequential change" (cancel is
+   "Cancel"; Reject is never renamed — it is a persisted decision). Reject
+   and Edit stay secondary; the note is revealed by "Add a note". Under
+   Details, nothing removed: author, timestamps, ordinary/consequential
+   label, id, status word, what else will change, what will not, every
+   uncertainty line, named consequences, what was reviewed before, the
+   mechanical diff. Recovery outcomes are translated but all three stay
+   named (already saved / never reached your notebook / neither before
+   nor after — fresh look) and an unreadable ledger is still reported.
+   Pinned in tests/features/review-wording.test.ts and
+   tests/architecture/shell.test.ts (state -> action mapping, canApprove,
+   the second confirmation, no timers / prechecked / approve-all, no
+   model save or mutation import, no "Not now"); Chromium desktop +
+   mobile walked Explore -> Investigate -> focused Review with the
+   decision in the first viewport and the model unchanged -> reviewed ->
+   Approve and apply -> canonical hypothesis (confidence null, subject
+   the pattern's) -> Past decisions; stale (changed-since first, approval
+   unavailable, re-review, approval available); reject (model unchanged,
+   note kept, Past decisions); consequential (named before review, no
+   one-step approve, explicit second confirmation); failed ("Nothing was
+   written.", retry only, then applied); edit -> supersede; startup
+   recovery line; unreadable ledger; no horizontal overflow on mobile.
+   Next: Map — after the Review screenshots are reviewed.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

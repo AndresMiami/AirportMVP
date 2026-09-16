@@ -274,9 +274,28 @@ recorded times and caveats sit behind toggles. Investigate is still the
 only boundary (buildExploreProposal -> ProposalService.create,
 proposedBy person -> /proposals?focus=id; drafts stay in this browser
 under the full-pattern scope key; a prompt-derived draft keeps its exact
-promptId). Never redesign the comparison to simplify the page. Next:
-Review, then Map — one coherent product over the existing capability,
-not more AI work.
+promptId). Never redesign the comparison to simplify the page. EXPLORE
+IS FROZEN (f1b6e31). REVIEW (6D): SIMPLIFY WITHOUT CHANGING APPROVAL
+SEMANTICS — /proposals reads "Review · Nothing changes until you
+decide."; the focused proposal comes first, no empty inbox sections,
+past decisions and the manual composer are collapsed; the card
+(src/components/proposal-card.tsx over src/features/review/wording.ts)
+answers what am I deciding / what would change / why / based on over
+the kernel's OWN describeProposal() wording with human basis labels
+(never ai_output / cross_context / PatternRef / fingerprint names; AI
+wording is origin, not evidence; the basis disclaimer stays visible)
+and keeps everything else under Details (author, ids, what else
+changes, what will not, every uncertainty line, what was reviewed
+before, the mechanical diff). The decision stays two-stage and one
+primary action per state: proposed -> "I've reviewed this" (review,
+never approval); reviewed -> "Ready for your decision" + "Approve and
+apply" (the guarded path only); stale -> changed-since first, re-review
+before approval; failed -> "Nothing was written." + explicit retry;
+consequential -> named up front + "Yes, apply this consequential
+change"; Reject is never renamed; no timers, no prechecked confirmation,
+no approve-all. Never simplify the card by merging review and approval
+or by hiding a recovery outcome. Next: Map — one coherent product over
+the existing capability, not more AI work.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;
