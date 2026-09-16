@@ -180,8 +180,9 @@ export const LoopSnapshotItemSchema = z.object({
 });
 export type LoopSnapshotItem = z.infer<typeof LoopSnapshotItemSchema>;
 
-/** Every variable's value at snapshot time, so history can be inspected
- *  below the dimension level (persistence indicators, "what changed"). */
+/** Every variable's value at snapshot time, so a saved snapshot can be
+ *  compared below the dimension level ("what changed"; snapshot-series
+ *  facts in the discovery layer). */
 export const VariableSnapshotItemSchema = z.object({
   id: z.string(),
   name: z.string(),

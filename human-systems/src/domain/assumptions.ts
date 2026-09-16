@@ -142,11 +142,11 @@ export const ASSUMPTIONS: ModelAssumption[] = [
   },
   {
     id: "A23",
-    title: "Change and persistence thresholds",
+    title: "Low-variation display convention (0.10)",
     statement:
-      "Between two snapshots a dimension or variable 'changed' when its normalised value moved by at least 0.10 and is 'persistent' when both values are known and moved less. Across several snapshots an item is persistent when its range over the known snapshots is below 0.10. Confidence 'improved' at +0.10. Repeated appearance of a pattern is reported as repetition, never as cause.",
+      "When explicitly applied, a movement below 0.10 on a defensible normalized scale (a signature dimension, or a variable with a reference range on both sides) may be DISPLAYED as 'within threshold' / 'low recorded variation', and a movement at or above 0.10 as 'increased' or 'decreased' (a direction, never an improvement or a weakening). Confidence 'increased' / 'decreased' at ±0.10. The threshold is a UI/model convention. It does NOT define structural persistence, causation, invariance or continuity. Exact repetition of a value requires no threshold. Without a reference range there is no normalized low-variation classification; the raw range is always exposed. A relationship recorded in several saved snapshots is reported as 'recorded in k of n saved snapshots', never as having persisted between them.",
     status: "convention",
-    usedBy: ["compareSignatures", "persistenceIndicators", "recurringRelationships"],
+    usedBy: ["compareSignatures", "compareVariables", "relationshipRecurrence"],
   },
   {
     id: "A24",

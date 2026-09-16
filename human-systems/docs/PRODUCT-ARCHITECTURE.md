@@ -450,7 +450,8 @@ capture surface corrects this when it replaces that screen.
 
 1. Domain-agnostic cleanup (section 13, all five steps; one migration).
 2. Structural discovery core + History / What persisted UI:
-   `describePersistence`, interval description, manual snapshots,
+   `describeVariableHistory` / `describeInterval` (non-exclusive evidence
+   facts over value histories; snapshots as secondary evidence), manual snapshots,
    questions gated by explicit approval, built in the section 17 visual
    language; Attractor page renamed.
 3. 3c evidence convergence on the clean vocabulary.
@@ -501,7 +502,7 @@ Ordinary statements are the interface, and the shell translates them:
 | "What stayed the same?" | the persistence description over the value histories and snapshots |
 
 Nobody is asked to know what a hypothesis, a TemporalRef, a source type,
-a persistence indicator or a snapshot is.
+an evidence form or a snapshot is.
 
 ### 16.1 The normal interaction
 
@@ -586,23 +587,30 @@ values and assumption ids appear only under Show analysis / Details.
 
 Then plain-language interval comparison: what changed, what stayed
 relatively stable, what is unknown, what lacks enough history. The
-sentences come from fixed descriptive templates ("Housing cost stayed
-approximately the same", "Income instability was present throughout the
-recorded period"); "substantially" and "approximately" are labelled
-display conventions under Details. WHAT PERSISTED? is one of the central
-product experiences and a Home button:
+sentences come from fixed descriptive templates ("Housing cost: the same
+value recorded on 4 dates", "Income instability: recorded in every dated
+entry of the period; the months between entries are unresolved");
+"substantially" and "low variation" are labelled display conventions
+under Details. RESOLUTION != OBSERVATION != PERSISTENCE: a value that
+still resolves because nothing replaced it is carried-forward state, never
+evidence that the condition held in between, and REPETITION != STRUCTURE:
+repetition is measured, structure is hypothesized from it plus other
+evidence. WHAT PERSISTED? is one of the central product experiences and a
+Home button:
 
     What persisted?            Jan 2025 — Sep 2026
     Income sources changed        4 times
     Work arrangements changed     3 times
     Monthly income varied         substantially
 
-    These conditions remained present:
-    • Dependence on variable income   observed across 19 months
-    • Low financial buffer            present across 4 recorded periods
-    • Need for immediate income       supported by 6 observations
+    Repeated or similar in the records:
+    • Dependence on variable income   same condition recorded on 5 dates
+                                      Jan 2025 → Aug 2026
+    • Low financial buffer            4 recorded values, $1,800 → $2,100
+                                      low variation under convention A23
+    • Need for immediate income       stated in 6 observations
 
-    These are observations of persistence, not claims of cause.
+    Repeated or stable observations do not establish cause.
     [Explore the pattern]
 
 Explore the pattern asks "Is one of these worth investigating as a common

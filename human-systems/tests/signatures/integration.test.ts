@@ -17,9 +17,8 @@ import * as M from "@/services/mutations";
 import {
   compareSignatures,
   computeSignature,
-  persistenceIndicators,
   questionPriorities,
-  recurringRelationships,
+  relationshipRecurrence,
 } from "@/signatures";
 import type { SystemModel } from "@/types";
 
@@ -110,29 +109,29 @@ describe("fictional user: from incomplete observations to a compared history", (
     m = await svc.save(m);
     expect(m.signatures.map((s) => s.id)).toEqual(["sig_1", "sig_2"]);
 
-    // 10-11. Compare: buffer and floor changed; career capital and resilience persisted.
+    // 10-11. Compare: buffer and floor changed (direction only); career
+    // capital and resilience stayed within the A23 display threshold — a
+    // display grouping over two saved points, not a persistence claim.
     const cmp = compareSignatures(m.signatures[0], m.signatures[1]);
     const changedIds = cmp.changed.map((c) => c.dimensionId);
     expect(changedIds).toContain("financial_buffer");
     expect(changedIds).toContain("income_floor");
-    expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.classification).toBe("improved");
+    expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.classification).toBe("increased");
     expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.before).toBeCloseTo(1500 / 3000 / 6, 9);
     expect(cmp.changed.find((c) => c.dimensionId === "financial_buffer")!.after).toBeCloseTo(9000 / 3000 / 6, 9);
-    const persistentIds = cmp.persistent.map((c) => c.dimensionId);
-    expect(persistentIds).toContain("career_capital");
-    expect(persistentIds).toContain("income_resilience"); // shares moved a little, well under the threshold
+    const withinIds = cmp.withinThreshold.map((c) => c.dimensionId);
+    expect(withinIds).toContain("career_capital");
+    expect(withinIds).toContain("income_resilience"); // shares moved a little, under the display threshold
+    expect(cmp.dimensions.find((c) => c.dimensionId === "income_resilience")!.classification).toBe("within_threshold");
     expect(cmp.unknownInvolved.map((c) => c.dimensionId)).toContain("physical_feasibility");
-    expect(cmp.variablesChanged.map((v) => v.variableId)).toEqual(expect.arrayContaining([INPUT_IDS.liquidReserves, "total_income"]));
-    expect(cmp.variablesPersistent.map((v) => v.variableId)).toContain(INPUT_IDS.careerCapital);
-    const persistence = persistenceIndicators(m.signatures);
-    const career = persistence.find((p) => p.level === "dimension" && p.id === "career_capital")!;
-    expect(career.persistent).toBe(true);
-    expect(career.snapshotsKnown).toBe(2);
-    expect(career.othersChanged).toBeGreaterThanOrEqual(2);
-    expect(career.statement).toMatch(/appears structurally persistent across 2 snapshots/);
-    expect(career.statement).toMatch(/not a demonstration of cause/);
-    expect(persistence.find((p) => p.level === "dimension" && p.id === "financial_buffer")!.persistent).toBe(false);
-    expect(persistence.find((p) => p.level === "dimension" && p.id === "social_support")!.snapshotsKnown).toBe(0);
+    expect(cmp.variablesChanged.map((v) => v.variableId)).toEqual(expect.arrayContaining([INPUT_IDS.liquidReserves]));
+    // total_income has no reference range: it differs, and no scaled judgment is made
+    expect(cmp.variablesDifferNoScale.map((v) => v.variableId)).toContain("total_income");
+    expect(cmp.variables.find((v) => v.variableId === "total_income")!.movement).toBeNull();
+    // career capital is exactly equal in both snapshots: unchanged, no threshold involved
+    expect(cmp.variablesUnchanged.map((v) => v.variableId)).toContain(INPUT_IDS.careerCapital);
+    // no classification uses evaluative words
+    for (const c of [...cmp.dimensions, ...cmp.variables]) expect(["improved", "weakened", "persistent"]).not.toContain(c.classification);
 
     // 12. Same state values, different relationship graph -> same V, different dynamics.
     m = M.addVariable(m, { id: "financial_pressure", subjectId: "sys_ren", name: "Financial pressure", category: "event", changeSpeed: "fast", unit: "self-rating 0-10", sourceType: "self_reported", confidence: 0.6, currentValue: 6, referenceRange: { min: 0, max: 10 } });
@@ -146,11 +145,15 @@ describe("fictional user: from incomplete observations to a compared history", (
     expect(sigA.relationshipSnapshot[0].direction).toBe("positive");
     expect(sigB.relationshipSnapshot[0].direction).toBe("negative");
     expect(sigA.dynamics.strongestIncomingInfluences[0].direction).not.toBe(sigB.dynamics.strongestIncomingInfluences[0].direction);
-    // Reappearance is counted, never asserted as cause.
+    // Recurrence is counted over SAVED snapshots, never asserted as cause or as continuity.
     const twoA = [sigA, computeSignature(evaluateSystem(personA), { id: "a2", now: T2, mode: "current", subjectId: "ren" })];
-    const recurring = recurringRelationships(twoA);
-    expect(recurring[0].appearances).toBe(2);
+    const recurring = relationshipRecurrence(twoA);
+    expect(recurring[0].recordedIn).toBe(2);
+    expect(recurring[0].snapshotsTotal).toBe(2);
+    expect(recurring[0].statement).toMatch(/recorded in 2 of 2 saved snapshots/);
     expect(recurring[0].statement).toMatch(/not a demonstrated cause/);
+    expect(recurring[0].statement).not.toMatch(/persist/);
+    expect("meanStrength" in recurring[0]).toBe(false);
 
     // Reload: history intact, the stored snapshots still evaluate the same.
     const svc2 = new ModelService(new LocalStorageModelRepository(storage), { now: () => T2 });
