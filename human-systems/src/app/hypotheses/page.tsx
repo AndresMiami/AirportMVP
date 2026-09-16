@@ -99,8 +99,21 @@ interface FormValues {
   kind: HypothesisKind;
   loopId?: string;
   relationshipIds: string[];
-  confidence: number;
+  /** null = not assessed. The form never manufactures a number. */
+  confidence: number | null;
   notes: string;
+}
+
+/** Hypothesis-specific: null is "not assessed", never a low number. */
+function HypothesisConfidenceBadge({ confidence }: { confidence: number | null }) {
+  if (confidence === null) {
+    return (
+      <span title="No confidence judgment has been recorded for this hypothesis" className="inline-block rounded px-1.5 py-0.5 text-xs bg-background border border-border border-dashed text-muted">
+        Not assessed
+      </span>
+    );
+  }
+  return <ConfidenceBadge confidence={confidence} />;
 }
 
 const nameOf = (variableById: ReadonlyMap<string, Variable>, id: string) => variableById.get(id)?.name ?? id;
@@ -176,7 +189,7 @@ function HypothesisForm({
     kind: initial?.kind ?? "general",
     loopId: initial?.loopId,
     relationshipIds: initial?.relationshipIds ?? [],
-    confidence: initial?.confidence ?? 0.5,
+    confidence: initial?.confidence ?? null,
     notes: initial?.notes ?? "",
   }));
   const [localError, setLocalError] = useState<string | null>(null);
@@ -282,19 +295,32 @@ function HypothesisForm({
         </Field>
       ) : null}
 
-      <Field label="Confidence" htmlFor={`${ids}-confidence`} hint="How sure the person is of this reading.">
-        <div className="flex items-center gap-3">
-          <input
-            id={`${ids}-confidence`}
-            type="range"
+      <Field label="Confidence" hint="How sure the person is of this reading, in percent. Leave it empty if you have not assessed it: unknown is not 50%.">
+        <div className="flex flex-wrap items-center gap-3">
+          <NumberField
+            value={draft.confidence === null ? null : Math.round(draft.confidence * 100)}
+            nullable
             min={0}
-            max={1}
-            step={0.05}
-            value={draft.confidence}
-            onChange={(e) => update({ confidence: Number(e.target.value) })}
+            max={100}
+            step={5}
+            className="w-24"
+            ariaLabel="Confidence in percent (empty = not assessed)"
+            onCommit={(v) => update({ confidence: v === null ? null : Math.min(1, Math.max(0, v / 100)) })}
           />
-          <span className="tabular-nums">{fmtConfidence(draft.confidence)}</span>
-          <span className="text-xs text-muted">{confidenceLabel(draft.confidence)}</span>
+          {draft.confidence === null ? (
+            <span className="text-xs text-muted" data-testid="confidence-state">
+              Not assessed
+            </span>
+          ) : (
+            <>
+              <span className="text-xs text-muted" data-testid="confidence-state">
+                {fmtConfidence(draft.confidence)} · {confidenceLabel(draft.confidence)}
+              </span>
+              <button type="button" className="rounded border border-border bg-background px-2 py-0.5 text-xs hover:border-accent" onClick={() => update({ confidence: null })}>
+                Clear (not assessed)
+              </button>
+            </>
+          )}
         </div>
       </Field>
 
@@ -778,7 +804,7 @@ function HypothesisCard({
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <KindBadge kind={h.kind} />
             <HypothesisStatusBadge status={h.status} />
-            <ConfidenceBadge confidence={h.confidence} />
+            <HypothesisConfidenceBadge confidence={h.confidence} />
             <span className="text-xs text-muted font-mono">{h.id}</span>
           </div>
         </div>

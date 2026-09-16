@@ -85,7 +85,7 @@ describe("v2 -> v3 idempotence", () => {
   it("migrates once, then passes through unchanged with migratedFrom null", () => {
     const first = migrated();
     expect(first.migratedFrom).toBe(2);
-    expect(first.model.schemaVersion).toBe(5);
+    expect(first.model.schemaVersion).toBe(6);
     const again = migrateModel(first.model, { systemScopeKeys: SYSTEM_SCOPE_KEYS });
     if (!again.ok) throw new Error(again.error);
     expect(again.migratedFrom).toBeNull();
@@ -172,12 +172,12 @@ describe("repository: backup and failure discipline", () => {
     s.setItem(STORAGE_KEY, JSON.stringify({ activeId: id, models: { [id]: v2 } }));
     const repo = new LocalStorageModelRepository(s);
     const loaded = await repo.load(id);
-    expect(loaded?.schemaVersion).toBe(5);
+    expect(loaded?.schemaVersion).toBe(6);
     expect(repo.reports.get(id)).toEqual({ id, ok: true, migratedFrom: 2 });
     const backups = await repo.backupsFor(id);
     expect(backups["2"]).toEqual(v2);
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw>; backups: Record<string, Record<string, Raw>> };
-    expect(stored.models[id].schemaVersion).toBe(5);
+    expect(stored.models[id].schemaVersion).toBe(6);
     expect(stored.backups[id]["2"]).toEqual(v2);
     // second load: no migration, backup untouched
     await repo.load(id);

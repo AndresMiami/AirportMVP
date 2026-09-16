@@ -6,7 +6,8 @@ buffers, dependencies, constraints, and leverage. It is **not** a financial
 calculator and **not** a life coach. Every number carries a source type and
 a confidence; every formula is a labelled model assumption.
 
-Status: schema v5, domain-agnostic cleanup COMPLETE (Checkpoints 1-3):
+Status: schema v6 (v6 = hypothesis confidence may be "not assessed"; v5 =
+collections), domain-agnostic cleanup COMPLETE (Checkpoints 1-3):
 the household income sources are a DECLARED domain collection, not a
 universal field; records from other domains are preserved, never
 interpreted; the generic service, screens, navigation, creation flow and

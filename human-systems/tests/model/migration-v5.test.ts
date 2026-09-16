@@ -100,8 +100,8 @@ function stripVolatile(m: Raw): Raw {
 }
 
 describe("schema v5 migration: incomeSources -> collections", () => {
-  it("MODEL_SCHEMA_VERSION is 5 and the v5 schema has no universal incomeSources field", () => {
-    expect(MODEL_SCHEMA_VERSION).toBe(5);
+  it("MODEL_SCHEMA_VERSION is 6 (v5 introduced collections) and the schema has no universal incomeSources field", () => {
+    expect(MODEL_SCHEMA_VERSION).toBe(6);
     expect(SystemModelSchema.safeParse(householdV4()).success).toBe(false);
     const v5 = createSampleHousehold();
     expect("incomeSources" in v5).toBe(false);
@@ -113,7 +113,7 @@ describe("schema v5 migration: incomeSources -> collections", () => {
     const items = v4.incomeSources as Raw[];
     expect(items.length).toBeGreaterThan(0);
     const m = migrate(v4);
-    expect(m.schemaVersion).toBe(5);
+    expect(m.schemaVersion).toBe(6);
     expect("incomeSources" in m).toBe(false);
     expect(m.collections.incomeSources).toEqual({ items, origin: "domain" });
     expect(incomeSourcesOf(m).map((i) => i.id)).toEqual(items.map((i) => i.id));
@@ -271,7 +271,7 @@ describe("schema v5 migration: incomeSources -> collections", () => {
     expect(repo.reports.get(v4.id as string)).toEqual({ id: v4.id, ok: true, migratedFrom: 4 });
     expect((await repo.backupsFor(v4.id as string))["4"]).toEqual(v4);
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> };
-    expect(stored.models[v4.id as string].schemaVersion).toBe(5);
+    expect(stored.models[v4.id as string].schemaVersion).toBe(6);
     expect("incomeSources" in stored.models[v4.id as string]).toBe(false);
     const again = await repo.load(v4.id as string);
     expect(again).toEqual(loaded);

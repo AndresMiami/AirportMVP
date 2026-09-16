@@ -390,7 +390,7 @@ describe("migration v3 -> v4", () => {
     const r = migrateModel(v3, migrationOptionsFor(v3, { migratedAt: MIGRATED_AT }));
     if (!r.ok) throw new Error(r.error);
     expect(r.migratedFrom).toBe(3);
-    expect(r.model.schemaVersion).toBe(5);
+    expect(r.model.schemaVersion).toBe(6);
     const again = migrateModel(r.model, migrationOptionsFor(r.model, { migratedAt: "2027-01-01T00:00:00.000Z" }));
     if (!again.ok) throw new Error(again.error);
     expect(again.migratedFrom).toBeNull();
@@ -467,11 +467,11 @@ describe("migration v3 -> v4", () => {
     s.setItem(STORAGE_KEY, JSON.stringify({ activeId: id, models: { [id]: v3 } }));
     const repo = new LocalStorageModelRepository(s);
     const loaded = await repo.load(id);
-    expect(loaded?.schemaVersion).toBe(5);
+    expect(loaded?.schemaVersion).toBe(6);
     expect(repo.reports.get(id)).toEqual({ id, ok: true, migratedFrom: 3 });
     expect((await repo.backupsFor(id))["3"]).toEqual(v3);
     const stored4 = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> };
-    expect(stored4.models[id].schemaVersion).toBe(5);
+    expect(stored4.models[id].schemaVersion).toBe(6);
 
     const bad = buildV3();
     (bad.variables as Raw[])[0].changeSpeed = "not_a_speed";
@@ -494,7 +494,7 @@ describe("19. export / import", () => {
     const text = await svcA.exportModel(m.id);
     const file = JSON.parse(text) as { format: string; schemaVersion: number; model: SystemModel };
     expect(file.format).toBe("human-systems-model");
-    expect(file.schemaVersion).toBe(5);
+    expect(file.schemaVersion).toBe(6);
     expect(file.model.variables.find((v) => v.id === INPUT_IDS.liquidReserves)!.values).toHaveLength(2);
 
     const repoB = new MemoryModelRepository();
@@ -524,7 +524,7 @@ describe("19. export / import", () => {
     expect(older.ok).toBe(true);
     if (!older.ok) return;
     expect(older.migratedFrom).toBe(3);
-    expect(older.model.schemaVersion).toBe(5);
+    expect(older.model.schemaVersion).toBe(6);
     expect(stored(older.model, INPUT_IDS.liquidReserves).values[0].validBasis).toBe("recorded");
 
     // duplicate id: refused, then replaced on request

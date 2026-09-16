@@ -21,7 +21,7 @@ function templateFor(kind: string, model: SystemModel): Record<string, unknown> 
     case "addObservation":
       return { statement: "", sourceType: "self_reported", confidence: 0.6, dateOrPeriod: "" };
     case "addHypothesis":
-      return { statement: "", confidence: 0.3, disconfirmingConditions: [] };
+      return { statement: "", disconfirmingConditions: [] }; // confidence omitted = not assessed
     case "addEvent":
       return { kind: "shock", type: "other", title: "", occurred: { kind: "instant", start: new Date().toISOString().slice(0, 10), precision: "date", text: "" }, recordedAt: new Date().toISOString(), sourceType: "self_reported", confidence: 0.6 };
     case "addVariable":

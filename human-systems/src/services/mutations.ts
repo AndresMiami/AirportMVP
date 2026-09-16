@@ -945,11 +945,14 @@ export function unlinkObservation(model: SystemModel, observationId: string, tar
 /* Hypotheses                                                          */
 /* ------------------------------------------------------------------ */
 
-export type HypothesisInput = Pick<Hypothesis, "statement" | "confidence"> &
+/** `confidence` is optional and may be null: omitted or null = NOT ASSESSED.
+ *  addHypothesis never synthesizes a number. */
+export type HypothesisInput = Pick<Hypothesis, "statement"> &
   Partial<
     Pick<
       Hypothesis,
       | "id"
+      | "confidence"
       | "kind"
       | "loopId"
       | "subjectId"
@@ -993,6 +996,7 @@ export function addHypothesis(model: SystemModel, input: HypothesisInput): Syste
     status: "proposed",
     notes: "",
     ...input,
+    confidence: input.confidence ?? null,
     id,
   }, "hypothesis");
   validateHypothesisRefs(model, hypothesis);
@@ -1117,7 +1121,7 @@ export function detachObservationFromHypothesis(model: SystemModel, hypothesisId
  *  Status starts as "proposed": a loop is never more than a hypothesis. */
 export function ensureLoopHypothesis(
   model: SystemModel,
-  input: { loopId: string; statement: string; relationshipIds?: string[]; confidence?: number },
+  input: { loopId: string; statement: string; relationshipIds?: string[]; confidence?: number | null },
 ): SystemModel {
   if (model.hypotheses.some((h) => h.kind === "loop" && h.loopId === input.loopId)) return model;
   return addHypothesis(model, {
@@ -1125,7 +1129,8 @@ export function ensureLoopHypothesis(
     loopId: input.loopId,
     statement: input.statement,
     relationshipIds: input.relationshipIds ?? [],
-    confidence: input.confidence ?? 0.5,
+    // not assessed unless the caller states a judgment; never a manufactured 0.5
+    confidence: input.confidence ?? null,
     status: "proposed",
   });
 }

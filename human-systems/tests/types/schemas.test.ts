@@ -150,7 +150,7 @@ describe("LagSchema", () => {
 
 describe("SystemModelSchema", () => {
   it("pins the schema version and rejects v1 objects", () => {
-    expect(MODEL_SCHEMA_VERSION).toBe(5);
+    expect(MODEL_SCHEMA_VERSION).toBe(6);
     const sample = createSampleHousehold();
     expect(SystemModelSchema.safeParse(sample).success).toBe(true);
     expect(SystemModelSchema.safeParse({ ...sample, schemaVersion: 1 }).success).toBe(false);

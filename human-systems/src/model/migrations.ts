@@ -279,6 +279,34 @@ export function migrateV4toV5(v4: Raw, options: { declaredCollections?: Readonly
   return { ...rest, schemaVersion: 5, collections, events };
 }
 
+/**
+ * v5 -> v6: hypothesis confidence may be "not assessed" (null). This is a
+ * RELAXATION, so the step first enforces the v5 contract on every
+ * hypothesis it meets: `confidence` present, a finite number, 0 <= c <= 1.
+ * Valid v5 knowledge is preserved EXACTLY (0.5 stays 0.5: it may have been
+ * chosen); malformed v5 data (missing, null, string, out of range) is
+ * refused, never laundered into a valid v6 "not assessed". Nothing else is
+ * read or changed. `hypotheses` defaulted to [] in v5, so absence is [].
+ */
+export function migrateV5toV6(v5: Raw): Raw {
+  const refuse = (message: string): never => {
+    throw new MigrationStepError(5, message);
+  };
+  const raw = v5.hypotheses === undefined ? [] : v5.hypotheses;
+  if (!Array.isArray(raw)) refuse(`"hypotheses" must be an array, got ${describeShape(raw)}`);
+  const hypotheses = (raw as unknown[]).map((h, i) => {
+    if (!isRecord(h)) refuse(`hypotheses[${i}] must be an object, got ${describeShape(h)}`);
+    const rec = h as Raw;
+    if (!("confidence" in rec)) refuse(`hypotheses[${i}].confidence is missing (schema v5 required a number)`);
+    const c: unknown = rec.confidence;
+    if (typeof c !== "number" || !Number.isFinite(c)) refuse(`hypotheses[${i}].confidence must be a finite number, got ${describeShape(c)}`);
+    const n = c as number;
+    if (n < 0 || n > 1) refuse(`hypotheses[${i}].confidence must be between 0 and 1, got ${n}`);
+    return rec;
+  });
+  return { ...v5, schemaVersion: 6, hypotheses };
+}
+
 function describeShape(x: unknown): string {
   if (x === null) return "null";
   if (Array.isArray(x)) return "an array";
@@ -323,6 +351,7 @@ const STEPS: Record<number, (raw: Raw, options: MigrationOptions) => Raw> = {
   2: (raw, options) => migrateV2toV3(raw, options),
   3: (raw, options) => migrateV3toV4(raw, options),
   4: (raw, options) => migrateV4toV5(raw, options),
+  5: (raw) => migrateV5toV6(raw),
 };
 
 export function migrateModel(input: unknown, options: MigrationOptions = {}): MigrationResult {

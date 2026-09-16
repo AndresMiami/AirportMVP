@@ -504,7 +504,10 @@ export const HypothesisSchema = z.object({
   relationshipIds: z.array(z.string()).default([]),
   supportingObservationIds: z.array(z.string()).default([]),
   contradictingObservationIds: z.array(z.string()).default([]),
-  confidence: unitInterval,
+  /** The person's recorded confidence judgment (0..1), or null = NOT
+   *  ASSESSED. null is not zero and is never read as low confidence; no
+   *  calculation reads this field (schema v6). */
+  confidence: unitInterval.nullable().default(null),
   status: HypothesisStatusSchema.default("proposed"),
   notes: z.string().default(""),
 });
@@ -596,7 +599,7 @@ export const SystemProfileSchema = z.object({
 export type SystemProfile = z.infer<typeof SystemProfileSchema>;
 
 /** Bump when the stored shape changes; add a step in model/migrations. */
-export const MODEL_SCHEMA_VERSION = 5;
+export const MODEL_SCHEMA_VERSION = 6;
 
 export const SystemModelSchema = z.object({
   schemaVersion: z.literal(MODEL_SCHEMA_VERSION),

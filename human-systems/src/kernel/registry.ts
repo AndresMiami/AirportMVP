@@ -79,12 +79,13 @@ export const REGISTRY: { [K in MutationKind]: RegistryEntry<K> } = {
     describe: (a, _c, _b, after) => [{ verb: "create", noun: "observation", summary: `Record observation ${q(a.statement)}.`, subject: subjectOf(after, a.subjectId), details: [`Source: ${a.sourceType.replace("_", " ")} · confidence ${Math.round(a.confidence * 100)}%.`, a.dateOrPeriod ? `When: ${a.dateOrPeriod}.` : "No date given."] }],
   },
   addHypothesis: {
-    shape: (a) => requireKeys(a, ["statement", "confidence"]),
+    // confidence is optional / number / null: omitted = not assessed; the mutation validates the number
+    shape: (a) => requireKeys(a, ["statement"]),
     materialize: (a, m) => ({ ...a, id: a.id ?? M.nextId(m, "hyp") }),
     apply: (m, a) => M.addHypothesis(m, a),
     names: (a) => [{ collection: "hypotheses", id: a.id as string }],
     expectedOutputs: () => ({}),
-    describe: (a, _c, _b, after) => [{ verb: "create", noun: "hypothesis", summary: `Create hypothesis ${q(a.statement)}.`, subject: subjectOf(after, a.subjectId), details: [`Status: ${a.status ?? "proposed"}.`, ...(a.disconfirmingConditions?.length ? [`Would be reconsidered if: ${a.disconfirmingConditions.join("; ")}.`] : ["No disconfirming condition stated yet."]), ...(a.predictions?.length ? [`${a.predictions.length} prediction${a.predictions.length > 1 ? "s" : ""}.`] : [])] }],
+    describe: (a, _c, _b, after) => [{ verb: "create", noun: "hypothesis", summary: `Create hypothesis ${q(a.statement)}.`, subject: subjectOf(after, a.subjectId), details: [`Status: ${a.status ?? "proposed"}.`, a.confidence === undefined || a.confidence === null ? "Confidence: not assessed." : `Confidence: ${Math.round(a.confidence * 100)}%.`, ...(a.disconfirmingConditions?.length ? [`Would be reconsidered if: ${a.disconfirmingConditions.join("; ")}.`] : ["No disconfirming condition stated yet."]), ...(a.predictions?.length ? [`${a.predictions.length} prediction${a.predictions.length > 1 ? "s" : ""}.`] : [])] }],
   },
   addEvent: {
     shape: (a) => requireKeys(a, ["kind", "type", "title", "occurred", "recordedAt", "sourceType", "confidence"]),

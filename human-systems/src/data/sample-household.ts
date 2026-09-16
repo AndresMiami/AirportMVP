@@ -25,6 +25,7 @@ import {
   type StoredVariable,
   type TargetEntry,
   type ValueEntry,
+  MODEL_SCHEMA_VERSION,
 } from "@/types";
 
 const D = DERIVED_IDS;
@@ -1061,7 +1062,7 @@ export function createSampleHousehold(): SystemModel {
   ];
 
   const model: SystemModel = {
-    schemaVersion: 5,
+    schemaVersion: MODEL_SCHEMA_VERSION,
     domainDefinitionId: HOUSEHOLD_DOMAIN_ID,
     domainDefinitionVersion: HOUSEHOLD_DOMAIN_VERSION,
     id: SAMPLE_SYSTEM_ID,

@@ -102,7 +102,13 @@ evaluated, never edited by typed tools, never a reason to call the model
 invalid. Migration dispatches on `schemaVersion` only, never on field
 presence; a v4 record that is present but malformed in a field the step
 reads is REFUSED (typed MigrationStepError -> ordinary failure, nothing
-stored), never sanitized. DOMAIN-AGNOSTIC (Checkpoint 3): the generic
+stored), never sanitized. Schema v6: `Hypothesis.confidence` may be null =
+NOT ASSESSED (unknown confidence != 50%); nothing manufactures 0.5 for a
+hypothesis, null is never read as low, no calculation reads the field,
+and v5 -> v6 keeps every stored number exactly while refusing malformed
+v5 confidence (missing / null / string / out of range) as corrupt data,
+never laundering it into "not assessed". Other entities' confidence
+contracts are unchanged. DOMAIN-AGNOSTIC (Checkpoint 3): the generic
 service knows no domain and no sample (`createBlank` requires a domainId;
 the seed is injected from `src/bootstrap/household-app.ts`, the ONLY
 place the household product is chosen); generic screens read every

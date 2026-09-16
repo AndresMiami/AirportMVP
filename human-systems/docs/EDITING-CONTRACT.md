@@ -1,4 +1,4 @@
-# Editing contract (schema v5)
+# Editing contract (schema v6)
 
 How UI screens change the model. Read this before writing an editor, and
 read docs/FOUNDATIONS.md before this: every screen is bound by its
@@ -135,6 +135,16 @@ Profile/members: `updateProfile`, `addMember`, `updateMember`,
 `archiveMember` / `restoreMember` (the normal lifecycle), `removeMember`
 (refused while `memberReferences(model, id).total > 0`),
 `setCurrentAttractor`, `setDesiredAttractor`.
+Hypothesis confidence (schema v6): `Hypothesis.confidence` is a number in
+0..1 the person recorded, or `null` = NOT ASSESSED. `addHypothesis` and
+`ensureLoopHypothesis` store null unless a judgment is explicitly supplied
+(no code path manufactures 0.5), the form starts at "Not assessed" with an
+empty percent field and a clear control, null renders as "Not assessed"
+(never as a low number), and no calculation reads the field. The v5 -> v6
+migration preserves every stored number exactly (0.5 stays 0.5) and
+refuses malformed v5 data (missing, null, string, out of range) instead of
+reading it as "not assessed".
+
 Collections (schema v5): `addCollectionItem(model, name, item)`,
 `updateCollectionItem(model, name, id, patch)`, `removeCollectionItem(model,
 name, id)` (also drops the item's event refs), `collectionItems(model, name)`.

@@ -96,7 +96,7 @@ describe("migrateModel v1 -> v2 -> v3", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.migratedFrom).toBe(1);
-    expect(result.model.schemaVersion).toBe(5);
+    expect(result.model.schemaVersion).toBe(6);
     expect(SystemModelSchema.safeParse(result.model).success).toBe(true);
     expect(result.model.id).toBe("sample_household_okafor_reyes");
   });
@@ -180,7 +180,7 @@ describe("migrateModel on current and invalid input", () => {
     if (!r.ok) return;
     expect(r.migratedFrom).toBeNull();
     expect(r.model).toEqual(input);
-    expect(MODEL_SCHEMA_VERSION).toBe(5);
+    expect(MODEL_SCHEMA_VERSION).toBe(6);
   });
 
   it("a future version fails with a message naming both versions", () => {
@@ -188,7 +188,7 @@ describe("migrateModel on current and invalid input", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toContain("version 99");
-    expect(r.error).toContain("up to 5");
+    expect(r.error).toContain("up to 6");
   });
 
   it("non-objects and objects without schemaVersion fail", () => {
@@ -230,13 +230,13 @@ describe("LocalStorageModelRepository migrates on load and persists the upgraded
     const expected = migrateModel(v1, migrationOptionsFor(v1));
     if (!expected.ok) throw new Error(expected.error);
     expect(loaded).toEqual(expected.model);
-    expect(loaded!.schemaVersion).toBe(5);
+    expect(loaded!.schemaVersion).toBe(6);
     expect(loaded!.relationships.find((r) => r.id === "r06")!.lag).toEqual({ value: 12, unit: "months" });
     expect(repo.reports.get(id)).toEqual({ id, ok: true, migratedFrom: 1 });
 
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { activeId: string; models: Record<string, Raw> };
     expect(stored.activeId).toBe(id);
-    expect(stored.models[id].schemaVersion).toBe(5);
+    expect(stored.models[id].schemaVersion).toBe(6);
     expect((stored.models[id].relationships as Raw[])[0]).toHaveProperty("lag");
     expect((stored.models[id].relationships as Raw[])[0]).not.toHaveProperty("lagMonths");
     expect(stored.models[id].observations).toEqual([]);
@@ -265,7 +265,7 @@ describe("LocalStorageModelRepository migrates on load and persists the upgraded
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> };
     expect(stored.models[good.id as string].schemaVersion).toBe(1);
     const loaded = (await repo.load(good.id as string)) as SystemModel;
-    expect(loaded.schemaVersion).toBe(5);
-    expect((JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> }).models[good.id as string].schemaVersion).toBe(5);
+    expect(loaded.schemaVersion).toBe(6);
+    expect((JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> }).models[good.id as string].schemaVersion).toBe(6);
   });
 });

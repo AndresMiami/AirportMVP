@@ -539,9 +539,26 @@ capture surface corrects this when it replaces that screen.
    store write, two ledger writes), consequential double confirmation,
    reject, edit, stale -> re-review -> approve, failed persistence ->
    displayed model unchanged -> explicit retry, startup recovery
-   (never-landed and conflict), unreadable ledger. Remaining: the
-   nullable hypothesis confidence migration (Step 3), Explore ->
-   proposal (Step 4), AI proposals (Step 5).
+   (never-landed and conflict), unreadable ledger.
+   KERNEL STEP 3 DONE — hypothesis confidence may be NOT ASSESSED (schema
+   v6, migration `migrateV5toV6`): `Hypothesis.confidence` is
+   `unitInterval.nullable().default(null)`; null is not zero and is never
+   read as low; the migration preserves every valid v5 number exactly
+   (0.5 stays 0.5 — a deliberate 0.5 cannot be told from the old default)
+   and enforces the v5 contract first, refusing missing / null / string /
+   out-of-range confidence as corrupt v5 data through the ordinary
+   refusal discipline (nothing stored, no backup, original byte-identical,
+   importer writes nothing); `HypothesisInput.confidence` is optional or
+   null and `addHypothesis` / `ensureLoopHypothesis` store null unless a
+   judgment is explicitly supplied; the hypotheses form starts at "Not
+   assessed" (empty percent field, no slider, explicit clear), existing
+   numbers open exactly as stored, and null renders as "Not assessed"
+   through a hypothesis-specific badge; the proposal kernel's
+   addHypothesis requires only the statement and previews "Confidence:
+   not assessed."; a reviewed proposal created under v5 revalidates
+   harmlessly after the model migrates. No calculation reads the field
+   (pinned by source scan and by evaluation equality). Remaining: Explore
+   -> proposal (Step 4), AI proposals (Step 5).
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.
