@@ -602,7 +602,48 @@ capture surface corrects this when it replaces that screen.
    created from a pattern are surfaced from the ledger's provenance
    ("Created from this Explore pattern"), merged with model-linked ones,
    never by wording. Source pins: Explore imports no mutation function
-   and no service save/apply path. Remaining: AI proposals (Step 5).
+   and no service save/apply path. STEP 5A (design, on file in the
+   session record) redefined the AI boundary: AI interprets, never
+   calculates; explicit epistemic states instead of invented numbers;
+   deterministic, inspectable, task-scoped context; AI output becomes a
+   proposal only through the kernel. STEP 5B DONE — AI CONTEXT BUILDER +
+   LEGACY WRITE SHUTDOWN: `src/ai/context.ts` builds
+   `buildAiContext(model, task, selection)` for six tasks
+   (extract_statements, interpret_free_text,
+   suggest_explanations_for_pattern, suggest_questions_to_reduce_uncertainty,
+   summarize_model, propose_observation_from_user_statement), each with an
+   explicit allowlist of item kinds and a subject-scope rule (subject +
+   system; the pattern's `contextSubjectsFor` scope; or the selected
+   subjects); typed `ContextRef`s with a canonical string id for display;
+   every value carries its basis (recorded_here / carried_forward /
+   calculated / explicit_unknown / ambiguous / unknown) and stored
+   judgments are labelled as judgments; the Explore task reuses PatternRef,
+   contextSubjectsFor and crossContext verbatim; the manifest lists what
+   was included, which subjects were excluded and why, the standing
+   exclusions (notes, evidence text, superseded entries, the ledger,
+   browser drafts) and domain-configured sensitive items withheld unless
+   explicitly included; `contextHash` covers task, system id, a digest of
+   the kernel revision, items and manifest, never `builtAt`, and "values
+   as of" is explicit content (a task that carries values refuses to
+   default it from the clock). Epistemic vocabulary fixed for the later
+   output contract: directly_stated / interpretive / tentative /
+   unresolved, never mapped to numbers. `AiCallIdentity` (task,
+   contextHash, revisionHash) is the handle a future AI-output basis will
+   use so content origin stays separate from ProposalAuthor. The legacy
+   /ai screen is READ-ONLY (no mutation import, no apply, no ai_inferred
+   stamping, the old candidate schema not routed into proposals) and shows
+   the "What would be sent to AI" panel. RECORDED BLOCKERS (canonical
+   seams, not AI-screen bugs): (1) `addVariable` manufactures
+   controllability / durability / estimatedCostToChange 0.5 and an initial
+   value with sourceType unknown and confidence 0 when omitted — AI ->
+   Variable stays prohibited until that mutation contract is cleaned; (2)
+   `addObservation` requires a numeric confidence — AI -> Observation
+   stays blocked until its confidence semantics are deliberately resolved,
+   never by making a person invent a number. Remaining: 5C output schema
+   and task mock, 5D proposal bridge (whitelist: addHypothesis,
+   addDisconfirmingCondition, addKillCriterion statement-only), 5E
+   Explore AI drafts through the Step 4 path, 5F first external provider
+   behind the manifest panel.
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.

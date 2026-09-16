@@ -169,6 +169,22 @@ through the same deterministic engine at every revalidation, so the
 review expires when anything Explore showed changes even if the
 hypothesis text is identical; approval means "keep this as a working
 hypothesis to test", never "this explanation is true".
+AI BOUNDARY (Step 5B, src/ai/context.ts): AI interprets, never
+calculates; it receives the least DETERMINISTIC, INSPECTABLE, task-scoped
+context (`buildAiContext(model, task, selection)`: six tasks, explicit
+item-kind allowlists, subject scope = subject + system / the pattern's
+contextSubjectsFor scope / selected subjects), every value with its basis
+(recorded_here / carried_forward / calculated / explicit_unknown /
+ambiguous / unknown) and stored judgments labelled as judgments, the
+Explore comparison as an INPUT (never recomputed), a manifest of what was
+included, excluded and why, and a contextHash over content only (never the
+clock; "values as of" is explicit content). Epistemic states for AI output
+are directly_stated / interpretive / tentative / unresolved, never numbers.
+The legacy /ai screen is read-only; nothing AI-derived reaches the model
+except through the proposal kernel. AI -> Variable and AI -> Observation
+stay blocked by canonical-mutation seams (manufactured 0.5 judgments and
+sourceType unknown / confidence 0 in addVariable; required numeric
+confidence in addObservation), recorded in docs/PRODUCT-ARCHITECTURE.md.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

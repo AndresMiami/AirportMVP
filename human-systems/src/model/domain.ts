@@ -258,6 +258,11 @@ export interface DomainDefinition {
    *  reading every assigned subject's records as context for a
    *  SYSTEM-level pattern (a household reads its members). */
   exploreContext?: { systemPatternIncludesSubjects: boolean };
+  /** Optional AI-context privacy configuration (Step 5B). Items of these
+   *  kinds, or variables with these keys, are SENSITIVE: excluded from any
+   *  AI context unless the call explicitly includes them. Configuration
+   *  only; the engine never reads it. */
+  aiContext?: { sensitive?: { itemKinds?: readonly string[]; variableKeys?: readonly string[] } };
 }
 
 export const DEFAULT_LOCUS_LABELS: Record<Locus, string> = {
