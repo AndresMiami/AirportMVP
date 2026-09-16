@@ -94,6 +94,10 @@ function synthetic(): SystemModel {
   m = M.addVariable(m, { ...input("repeated_c", "repeated_c", "synth", 5, "2026-01-07") });
   m = M.recordValue(m, "repeated_c", { value: 5, sourceType: "self_reported", confidence: 0.7, valid: date("2026-06-07") });
   m = M.recordValue(m, "repeated_c", { value: 5, sourceType: "observed", confidence: 0.8, valid: date("2026-11-07") });
+  // one that both changed and repeated: 3000 -> 5000 -> 5000
+  m = M.addVariable(m, { ...input("both_h", "both_h", "synth", 3000, "2026-01-08") });
+  m = M.recordValue(m, "both_h", { value: 5000, sourceType: "measured", confidence: 0.9, valid: date("2026-04-08") });
+  m = M.recordValue(m, "both_h", { value: 5000, sourceType: "measured", confidence: 0.9, valid: date("2026-08-08") });
   // one single old value carried forward
   m = M.addVariable(m, { ...input("stale_d", "stale_d", "synth", 7, "2025-03-01") });
   // one explicit unknown
@@ -122,17 +126,21 @@ describe("describeInterval on the synthetic system", () => {
   const m = synthetic();
   const d = describeInterval(m, { ...YEAR, lowVariation: A23, now: NOW });
 
-  it("puts every variable in exactly one bucket, and the buckets are the right ones", () => {
-    expect(ids(d.buckets.changed)).toEqual(["changing_a"]);
+  it("factual groups are non-exclusive: 3000 -> 5000 -> 5000 is both changed and repeated; the small A23 move is both changed and low variation", () => {
+    expect(ids(d.buckets.changed)).toEqual(["both_h", "changing_a", "changing_b"]);
+    expect(ids(d.buckets.repeated)).toEqual(["both_h", "repeated_c"]);
     expect(ids(d.buckets.lowVariation)).toEqual(["changing_b"]);
-    expect(ids(d.buckets.repeated)).toEqual(["repeated_c"]);
+    expect(ids(d.buckets.explicitClaims)).toEqual([]);
     expect(ids(d.buckets.lastKnownOnly)).toEqual(["stale_d"]);
     expect(ids(d.buckets.unresolved).sort()).toEqual(["ambiguous_f", "undated_g", "unknown_e"]);
     expect(ids(d.buckets.insufficient)).toEqual(["part_load@p1"]);
-    expect(ids(d.buckets.explicitClaims)).toEqual([]);
-    const all = Object.values(d.buckets).flatMap(ids).sort();
-    expect(all).toEqual(d.variables.map((v) => v.description.variableId).sort());
-    expect(new Set(all).size).toBe(all.length);
+    // every variable appears somewhere; a value that changed and repeated says both in one sentence
+    const all = new Set(Object.values(d.buckets).flatMap(ids));
+    for (const v of d.variables) expect(all.has(v.description.variableId), v.description.variableId).toBe(true);
+    const both = d.variables.find((v) => v.description.variableId === "both_h")!;
+    expect(both.description.summaryClass).toBe("changed");
+    expect(both.description.facts.exactRepetition).toBe(true);
+    expect(both.sentences.headline).toMatch(/3 recorded values, 3000 u → 5000 u, Jan 2026 → Aug 2026; the recorded values differ, and 5000 u was recorded on 2 dates\./);
   });
 
   it("derived variables are absent by default and never candidates", () => {
@@ -143,9 +151,14 @@ describe("describeInterval on the synthetic system", () => {
 
   it("context names what else changed and how many events fell inside, as evidence not a score", () => {
     const c = d.context.find((x) => x.variableId === "repeated_c")!;
-    expect(c.variablesChanged).toEqual(["changing_a"]);
+    // the FACTUAL changed set: includes the low-variation move and the changed-and-repeated variable
+    expect([...c.variablesChanged].sort()).toEqual(["both_h", "changing_a", "changing_b"]);
     expect(c.eventsInInterval).toBe(3);
-    expect(d.context.map((x) => x.variableId).sort()).toEqual(["changing_b", "repeated_c"]);
+    expect(d.context.map((x) => x.variableId).sort()).toEqual(["both_h", "changing_b", "repeated_c"]);
+    // a candidate that also changed never lists itself
+    expect(d.context.find((x) => x.variableId === "both_h")!.variablesChanged).toEqual(["changing_a", "changing_b"]);
+    // one context per candidate even when several facts qualify it
+    expect(new Set(d.context.map((x) => x.variableId)).size).toBe(d.context.length);
     expect("score" in c).toBe(false);
     expect(d.caveats.find((x) => x.code === "context_not_cause")!.text).toMatch(/not a cause or a score/);
   });
@@ -172,7 +185,7 @@ describe("describeInterval on the synthetic system", () => {
 
   it("without the A23 convention the small move is simply 'changed' with its raw range; the output exists either way", () => {
     const plain = describeInterval(m, YEAR);
-    expect(ids(plain.buckets.changed).sort()).toEqual(["changing_a", "changing_b"]);
+    expect(ids(plain.buckets.changed)).toEqual(["both_h", "changing_a", "changing_b"]);
     expect(plain.buckets.lowVariation).toEqual([]);
     const b = plain.variables.find((v) => v.description.variableId === "changing_b")!;
     expect(b.description.variation).toMatchObject({ min: 50, max: 53, rawRange: 3, normalizedRange: null, convention: null });
@@ -198,7 +211,8 @@ describe("describeInterval on the synthetic system", () => {
     const h1 = describeInterval(m, { from: "2026-01-01", to: "2026-06-30" });
     // repeated_c has two dated records in H1 (Jan, Jun): still repeated; changing_a has Jan and May: changed
     expect(ids(h1.buckets.repeated)).toEqual(["repeated_c"]);
-    expect(ids(h1.buckets.changed).sort()).toEqual(["changing_a"]);
+    // both_h has Jan 3000 and Apr 5000 in H1: changed, and 5000 only once so not repeated there
+    expect(ids(h1.buckets.changed)).toEqual(["both_h", "changing_a"]);
     // changing_b has only January inside H1 -> insufficient there
     expect(ids(h1.buckets.insufficient)).toEqual(expect.arrayContaining(["changing_b"]));
     expect(h1.disclaimer).toBe("Repeated or stable observations do not establish cause.");

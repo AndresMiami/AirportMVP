@@ -72,6 +72,8 @@ export interface IntervalDescription {
   interval: RequestedInterval;
   subjectId: string | null;
   variables: DescribedVariable[];
+  /** changed / repeated / lowVariation / explicitClaims are FACTUAL and may
+   *  overlap; lastKnownOnly / insufficient / unresolved are status groups. */
   buckets: {
     changed: DescribedVariable[];
     repeated: DescribedVariable[];
@@ -81,7 +83,7 @@ export interface IntervalDescription {
     insufficient: DescribedVariable[];
     unresolved: DescribedVariable[];
   };
-  /** For every repeated / low-variation / explicit-claim candidate. */
+  /** One per candidate (repeated, low variation or explicit claim), de-duplicated. */
   context: CandidateContext[];
   events: { inInterval: EventContext[]; unorderable: EventContext[]; outsideInterval: number };
   /** Empty unless includeDerived. */
@@ -118,12 +120,19 @@ export function describeInterval(model: SystemModel, options: DescribeIntervalOp
     const description = describeVariableHistory(v, { from: options.from, to: options.to }, options.lowVariation ? { lowVariation: options.lowVariation } : {});
     return { description, sentences: historySentences(description) };
   });
+  // FACTUAL groups are NON-EXCLUSIVE: 3000 -> 5000 -> 5000 both changed and
+  // repeated, and both facts are shown. The status groups (last-known
+  // only, insufficient, unresolved) come from the derived summary class.
   const by = (cls: VariableHistoryDescription["summaryClass"]) => variables.filter((v) => v.description.summaryClass === cls);
   const buckets = {
-    changed: by("changed"),
-    repeated: by("repeated"),
-    lowVariation: by("low_variation"),
-    explicitClaims: by("explicit_claim"),
+    /** Recorded known values differ (two or more distinct known values in the period). */
+    changed: variables.filter((v) => v.description.distinctKnownValues.length >= 2),
+    /** Exact repetition exists (some value at two or more distinct application times). */
+    repeated: variables.filter((v) => v.description.facts.exactRepetition),
+    /** The A23 low-variation condition is met (convention supplied, reference range, non-equal values). */
+    lowVariation: variables.filter((v) => v.description.facts.lowRecordedVariation),
+    /** An explicit interval claim overlaps the period. */
+    explicitClaims: variables.filter((v) => v.description.facts.explicitIntervalClaim),
     lastKnownOnly: by("last_known_only"),
     insufficient: by("insufficient"),
     unresolved: by("unresolved"),
@@ -139,9 +148,10 @@ export function describeInterval(model: SystemModel, options: DescribeIntervalOp
   events.inInterval.sort((a, b) => (a.occurredStart as string).localeCompare(b.occurredStart as string));
 
   const changedIds = buckets.changed.map((v) => v.description.variableId);
-  const context: CandidateContext[] = [...buckets.repeated, ...buckets.lowVariation, ...buckets.explicitClaims].map((c) => ({
-    variableId: c.description.variableId,
-    variablesChanged: changedIds.filter((id) => id !== c.description.variableId),
+  const candidateIds = [...new Set([...buckets.repeated, ...buckets.lowVariation, ...buckets.explicitClaims].map((c) => c.description.variableId))];
+  const context: CandidateContext[] = candidateIds.map((variableId) => ({
+    variableId,
+    variablesChanged: changedIds.filter((id) => id !== variableId),
     eventsInInterval: events.inInterval.length,
   }));
 

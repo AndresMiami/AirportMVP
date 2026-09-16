@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { INPUT_IDS } from "@/domains/household/keys";
-import { CAUSATION_DISCLAIMER, EXPLORE_PATTERN_TEXT, FORBIDDEN_PHRASES, containsForbiddenPhrase, describeInterval, describeSnapshotSeries, describeVariableHistory, historySentences, type IntervalDescription } from "@/discovery";
+import { CAUSATION_DISCLAIMER, EXPLORE_PATTERN_CAUTION, FORBIDDEN_PHRASES, containsForbiddenPhrase, explorePatternText, describeInterval, describeSnapshotSeries, describeVariableHistory, historySentences, type IntervalDescription } from "@/discovery";
 import * as M from "@/services/mutations";
 import { VariableSchema, type TemporalRef, type ValueEntry } from "@/types";
 
@@ -96,11 +96,22 @@ describe("discovery language", () => {
     expect(CAUSATION_DISCLAIMER).toBe("Repeated or stable observations do not establish cause.");
   });
 
-  it("the read-only Explore card copy examines, never concludes, and names competing explanations", () => {
-    expect(containsForbiddenPhrase(EXPLORE_PATTERN_TEXT)).toBeNull();
-    expect(EXPLORE_PATTERN_TEXT).toMatch(/does not establish/);
-    expect(EXPLORE_PATTERN_TEXT).toMatch(/Competing explanations/);
-    expect(EXPLORE_PATTERN_TEXT).not.toMatch(/personality|archetype|you are/i);
+  it("the read-only Explore card copy is evidence-specific, examines, never concludes, and names competing explanations", () => {
+    const repeated = explorePatternText({ exactRepetition: true, lowRecordedVariation: false, explicitIntervalClaim: false });
+    const low = explorePatternText({ exactRepetition: false, lowRecordedVariation: true, explicitIntervalClaim: false });
+    const claim = explorePatternText({ exactRepetition: false, lowRecordedVariation: false, explicitIntervalClaim: true });
+    const several = explorePatternText({ exactRepetition: true, lowRecordedVariation: false, explicitIntervalClaim: true });
+    expect(repeated).toMatch(/^This condition was recorded more than once/);
+    expect(low).toMatch(/^These recorded values stayed within a narrow range/);
+    expect(claim).toMatch(/^This condition was explicitly stated for a period/);
+    expect(several).toMatch(/recorded more than once.*explicitly stated for a period/);
+    for (const t of [repeated, low, claim, several]) {
+      expect(containsForbiddenPhrase(t)).toBeNull();
+      expect(t).toContain(EXPLORE_PATTERN_CAUTION);
+      expect(t).toMatch(/none of this establishes the underlying cause/);
+      expect(t).toMatch(/Competing explanations/);
+      expect(t).not.toMatch(/personality|archetype|you are/i);
+    }
   });
 
   it("snapshot statements say 'recorded in k of n saved snapshots' and never 'persist'", () => {

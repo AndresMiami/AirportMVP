@@ -16,9 +16,9 @@ import { Card, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@
 import {
   CAUSATION_DISCLAIMER,
   DiscoveryError,
-  EXPLORE_PATTERN_TEXT,
   dayMonthYear,
   describeInterval,
+  explorePatternText,
   formatValue,
   monthYear,
   normalizeIntervalStart,
@@ -58,7 +58,7 @@ function ExploreCard({ item, description, onClose }: { item: DescribedVariable; 
   const changedNames = (ctx?.variablesChanged ?? []).map((id) => description.variables.find((v) => v.description.variableId === id)?.description.name ?? id);
   return (
     <div className="mt-2 rounded-md border border-accent bg-accent-soft px-3 py-2 text-sm" role="region" aria-label={`Explore ${item.description.name}`}>
-      <p>{EXPLORE_PATTERN_TEXT}</p>
+      <p>{explorePatternText(item.description.facts)}</p>
       {ctx ? (
         <p className="text-xs text-muted mt-2">
           In the same period {changedNames.length > 0 ? `${changedNames.length} other variable${changedNames.length > 1 ? "s" : ""} changed (${changedNames.join(", ")})` : "no other variable's recorded values differ"}
@@ -274,7 +274,8 @@ export default function HistoryPage() {
 function HistoryBody({ description, model, subjectPlural }: { description: IntervalDescription; model: SystemModel; subjectPlural: string }) {
   const d = description;
   const datedRecords = d.variables.reduce((n, v) => n + v.description.knownRecordCount, 0);
-  const similar = [...d.buckets.repeated, ...d.buckets.lowVariation, ...d.buckets.explicitClaims];
+  // a variable may qualify by more than one fact; list it once
+  const similar = [...new Map([...d.buckets.repeated, ...d.buckets.lowVariation, ...d.buckets.explicitClaims].map((v) => [v.description.variableId, v])).values()];
   return (
     <div className="mt-4 space-y-4">
       <p className="text-sm">
@@ -289,7 +290,7 @@ function HistoryBody({ description, model, subjectPlural }: { description: Inter
       </p>
 
       <Card title={`What changed (${d.buckets.changed.length + d.events.inInterval.length})`}>
-        <p className="text-xs text-muted mb-2">Variables whose recorded values differ within the period, and the events recorded in it. How much they differ is shown raw unless a reference range exists.</p>
+        <p className="text-xs text-muted mb-2">Variables whose recorded values differ within the period, and the events recorded in it. How much they differ is shown raw unless a reference range exists. A variable can appear here and under &ldquo;repeated&rdquo; at once: values can change and one of them can still be recorded again.</p>
         {d.buckets.changed.length === 0 && d.events.inInterval.length === 0 ? (
           <p className="text-sm text-muted">No recorded value differs and no event is recorded in this period.</p>
         ) : (
@@ -313,7 +314,7 @@ function HistoryBody({ description, model, subjectPlural }: { description: Inter
 
       <Section
         title="What repeated or stayed similar in the records"
-        hint="The same value recorded on more than one date, values within the low-variation display convention, or a period the person stated explicitly. A repeated record does not show that the value held in between."
+        hint="The same value recorded on more than one date, values within the low-variation display convention, or a period the person stated explicitly. These are facts about the records and can overlap with &ldquo;what changed&rdquo;. A repeated record does not show that the value held in between."
         items={similar}
         description={d}
         model={model}

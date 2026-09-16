@@ -124,9 +124,9 @@ async function neutralSystem(): Promise<{ svc: ModelService; repo: MemoryModelRe
   const svc = new ModelService(repo, { now: () => NOW, newId: () => "sys_neutral" });
   let m = await svc.createBlank({ name: "Neutral system", systemType: "unit", domainId: NEUTRAL.id, domainVersion: NEUTRAL.version });
   m = M.addMember(m, { id: "p1", label: "Part one", role: "" });
-  m = M.addVariable(m, { id: "input_a", name: "Input A", key: "input_a", subjectId: m.id, category: "structure", changeSpeed: "slow", unit: "u", currentValue: 50, sourceType: "measured", confidence: 0.9 });
-  m = M.addVariable(m, { id: "input_b", name: "Input B", key: "input_b", subjectId: m.id, category: "buffer", changeSpeed: "fast", unit: "u", currentValue: 25, sourceType: "estimated", confidence: 0.5 });
-  m = M.addVariable(m, { id: "part_load_p1", name: "Part load", key: "part_load", subjectId: "p1", category: "event", changeSpeed: "fast", unit: "u", currentValue: 4, sourceType: "self_reported", confidence: 0.7 });
+  m = M.addVariable(m, { id: "input_a", name: "Input A", key: "input_a", subjectId: m.id, category: "structure", changeSpeed: "slow", unit: "u", currentValue: 50, sourceType: "measured", confidence: 0.9, recordedAt: "2026-09-01T00:00:00.000Z" });
+  m = M.addVariable(m, { id: "input_b", name: "Input B", key: "input_b", subjectId: m.id, category: "buffer", changeSpeed: "fast", unit: "u", currentValue: 25, sourceType: "estimated", confidence: 0.5, recordedAt: "2026-09-01T00:00:00.000Z" });
+  m = M.addVariable(m, { id: "part_load_p1", name: "Part load", key: "part_load", subjectId: "p1", category: "event", changeSpeed: "fast", unit: "u", currentValue: 4, sourceType: "self_reported", confidence: 0.7, recordedAt: "2026-09-01T00:00:00.000Z" });
   m = M.addRelationship(m, { sourceVariableId: "input_a", targetVariableId: "input_b", direction: "positive", ...edge });
   m = M.addRelationship(m, { sourceVariableId: "input_b", targetVariableId: "input_a", direction: "negative", ...edge });
   m = await svc.save(m);

@@ -6,7 +6,7 @@
  * weakened. Every sentence describes records; none describes the person
  * or a cause.
  */
-import type { VariableHistoryDescription } from "./describe-history";
+import type { EvidenceFacts, VariableHistoryDescription } from "./describe-history";
 
 /** Phrases the default descriptive output must never contain. */
 export const FORBIDDEN_PHRASES = [
@@ -25,9 +25,20 @@ export const FORBIDDEN_PHRASES = [
 /** The fixed disclaimer shown with every discovery result. */
 export const CAUSATION_DISCLAIMER = "Repeated or stable observations do not establish cause.";
 
-/** The read-only "Explore this pattern" card (no write path exists yet). */
-export const EXPLORE_PATTERN_TEXT =
-  "This condition was recorded repeatedly while several other things changed. That makes it a pattern worth examining, but repetition alone does not establish that it generated those outcomes. Competing explanations (circumstances, structure, outside shocks, incentives, habits, or a mix) deserve the same look before any one of them becomes a working model.";
+/** The caution every "Explore this pattern" card ends with (no write path exists yet). */
+export const EXPLORE_PATTERN_CAUTION =
+  "That makes it a pattern worth examining, but none of this establishes the underlying cause. Competing explanations (circumstances, structure, outside shocks, incentives, habits, or a mix) deserve the same look before any one of them becomes a working model.";
+
+/** The read-only "Explore this pattern" card, worded from the evidence
+ *  that made the variable a candidate. Several facts may hold at once. */
+export function explorePatternText(facts: Pick<EvidenceFacts, "exactRepetition" | "lowRecordedVariation" | "explicitIntervalClaim">): string {
+  const leads: string[] = [];
+  if (facts.exactRepetition) leads.push("This condition was recorded more than once while other things changed.");
+  if (facts.lowRecordedVariation) leads.push("These recorded values stayed within a narrow range (display convention A23) while other things changed.");
+  if (facts.explicitIntervalClaim) leads.push("This condition was explicitly stated for a period, as the person's own assertion.");
+  if (leads.length === 0) leads.push("This condition is shown here because of what the records contain.");
+  return `${leads.join(" ")} ${EXPLORE_PATTERN_CAUTION}`;
+}
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -80,7 +91,8 @@ export function historySentences(d: VariableHistoryDescription): HistorySentence
       break;
     }
     case "changed": {
-      headline = `${d.name}: ${n} recorded values, ${formatValue(d.variation.min, d.unit)} → ${formatValue(d.variation.max, d.unit)}${span ? `, ${span}` : ""}; the recorded values differ.`;
+      const repeat = d.repeatedValues.length > 0 ? `, and ${d.repeatedValues.map((r) => `${formatValue(r.value, d.unit)} was recorded on ${r.applicationTimes.length} dates`).join("; ")}` : "";
+      headline = `${d.name}: ${n} recorded values, ${formatValue(d.variation.min, d.unit)} → ${formatValue(d.variation.max, d.unit)}${span ? `, ${span}` : ""}; the recorded values differ${repeat}.`;
       details.push(`${d.differingRecordedPairs} of ${Math.max(0, n - 1)} consecutive record pairs differ (a count of records compared, not of changes that happened).`);
       if (d.variation.referenceRange === null) details.push("No reference range is declared, so the size of the change is reported raw, never as small or large.");
       break;
