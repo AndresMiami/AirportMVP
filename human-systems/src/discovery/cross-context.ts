@@ -62,7 +62,12 @@ export type ContextBasis =
   | "explicit_range_coverage"
   /** Nothing overlaps; the resolver carries an earlier value forward. Not evidence about this occurrence. */
   | "carried_forward_only"
+  /** Distinct dated values inside one broad (approximate or stated) occurrence
+   *  extent: the condition varied during the extent, so no single value can
+   *  be assigned to the occurrence. Not a conflict. */
+  | "varied_within_extent"
   | "unknown"
+  /** Conflicting records competing for the SAME application time. */
   | "ambiguous";
 
 export interface ContextReading {
@@ -84,8 +89,6 @@ export interface Slice {
 }
 
 export type OccurrenceReading = "common" | "differing" | "insufficient";
-/** What the USABLE contrasts show about a common condition. */
-export type ContrastReading = "background" | "differentiating" | "mixed" | "undecided" | "not_applicable";
 /** What the usable contrasts show, independent of how many were usable. */
 export type ContrastShows = "same" | "different" | "mixed" | "none";
 /** How much of the contrast evidence was usable: every contrast time, some, or none. */
@@ -109,8 +112,6 @@ export interface ConditionAssessment {
    *  "different" with "partial" coverage is not a fully distinguished case. */
   contrastShows: ContrastShows;
   contrastCoverage: ContrastCoverage;
-  /** The usable-contrast reading (not_applicable unless common at occurrences). */
-  againstContrasts: ContrastReading;
   /** The common reading rests partly on recorded-basis dates (from the
    *  readings' own validBasis, whatever their temporal shape). */
   reliesOnRecordedBasis: boolean;
@@ -128,14 +129,22 @@ export interface CrossContext {
   contrasts: Slice[];
   contrastNote: "none_recorded" | "available";
   conditions: ConditionAssessment[];
+  /** FACTUAL groups only. Contrast groups carry their coverage in their
+   *  name so partial evidence is never filed as a complete distinction. */
   groups: {
-    differing: string[];
-    common: string[];
-    background: string[];
-    differentiating: string[];
-    mixed: string[];
+    differingAtOccurrences: string[];
+    commonAtOccurrences: string[];
+    insufficientAtOccurrences: string[];
+    /** common + same in ALL contrast times */
+    backgroundComplete: string[];
+    /** common + different in ALL contrast times */
+    differentiatingComplete: string[];
+    /** common + mixed over ALL contrast times */
+    mixedComplete: string[];
+    /** common + some contrast times unreadable, whatever the readable ones show */
+    contrastPartial: string[];
+    /** common + no usable contrast reading */
     undecided: string[];
-    insufficient: string[];
   };
   statements: string[];
   caveats: Caveat[];
@@ -181,9 +190,18 @@ function readContext(z: StoredVariable, extent: ApplicationExtent): ContextReadi
     .map((e) => ({ e, x: extentOf(e.valid) }))
     .filter((r): r is { e: (typeof active)[number]; x: ApplicationExtent } => r.x !== null && r.x.start <= extent.end && r.x.end >= extent.start);
   if (overlapping.length > 0) {
-    const payloads = new Set(overlapping.map((r) => JSON.stringify(r.e.value)));
     const entryIds = overlapping.map((r) => r.e.id);
-    if (payloads.size > 1) return { variableId: z.id, value: null, basis: "ambiguous", entryIds, validBasis: null };
+    // Conflicting records for the SAME application time are ambiguous (the
+    // resolver's rule). Distinct dated values at DIFFERENT times inside a
+    // broad occurrence extent are not a conflict: the condition varied.
+    const byStart = new Map<string, Set<string>>();
+    for (const r of overlapping) {
+      if (!byStart.has(r.x.start)) byStart.set(r.x.start, new Set());
+      byStart.get(r.x.start)!.add(JSON.stringify(r.e.value));
+    }
+    if ([...byStart.values()].some((p) => p.size > 1)) return { variableId: z.id, value: null, basis: "ambiguous", entryIds, validBasis: null };
+    const payloads = new Set(overlapping.map((r) => JSON.stringify(r.e.value)));
+    if (payloads.size > 1) return { variableId: z.id, value: null, basis: "varied_within_extent", entryIds, validBasis: null };
     const value = overlapping[0].e.value;
     if (value === null) return { variableId: z.id, value: null, basis: "unknown", entryIds, validBasis: overlapping[0].e.validBasis };
     const anyRange = overlapping.some((r) => r.e.valid.kind === "range");
@@ -218,10 +236,6 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
   const different = commonValue === null ? 0 : conUsable.filter((c) => c.value !== commonValue).length;
   const contrastShows: ContrastShows = atOccurrences !== "common" || conUsable.length === 0 ? "none" : different === 0 ? "same" : same === 0 ? "different" : "mixed";
   const contrastCoverage: ContrastCoverage = con.length === 0 || conUsable.length === 0 ? "none" : conUsable.length === con.length ? "complete" : "partial";
-  let againstContrasts: ContrastReading = "not_applicable";
-  if (atOccurrences === "common") {
-    againstContrasts = contrastShows === "none" ? "undecided" : contrastShows === "same" ? "background" : contrastShows === "different" ? "differentiating" : "mixed";
-  }
   // Epistemic basis is independent of temporal shape: a stored RANGE whose
   // date is known only from its recording still rests on recorded basis.
   const reliesOnRecordedBasis = atOccurrences === "common" && occUsable.some((c) => c.validBasis === "recorded");
@@ -230,11 +244,14 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
   const nC = con.length;
   const nUnusableC = nC - conUsable.length;
   const unresolvedCases = occ.filter((c) => !usable(c)).length + nUnusableC;
+  const unresolvedKinds = [...occ, ...con].filter((c) => !usable(c)).reduce<Record<string, number>>((acc, c) => ({ ...acc, [c.basis]: (acc[c.basis] ?? 0) + 1 }), {});
+  const KIND_WORDS: Record<string, string> = { carried_forward_only: "only an older value standing", unknown: "recorded as unknown or not recorded", ambiguous: "conflicting records for the same time", varied_within_extent: "varied within the occurrence period" };
+  const breakdown = Object.entries(unresolvedKinds).map(([k, n]) => `${n} ${KIND_WORDS[k] ?? k}`).join(", ");
   const readable = `${conUsable.length} readable contrast time${conUsable.length === 1 ? "" : "s"}`;
   const others = `${nUnusableC} other contrast time${nUnusableC === 1 ? " is" : "s are"} unresolved`;
   let statement: string;
   if (atOccurrences === "insufficient") {
-    statement = `${z.name} is unresolved in ${unresolvedCases} of ${nO + nC} relevant cases (${occUsable.length} of ${nO} occurrences readable); not enough evidence to compare.`;
+    statement = `${z.name} is unresolved in ${unresolvedCases} of ${nO + nC} relevant cases (${occUsable.length} of ${nO} occurrences readable; ${breakdown}); not enough evidence to compare.`;
   } else if (atOccurrences === "differing") {
     statement = `${z.name} differed across the ${nO} occurrences (${[...new Set(values)].map(fmt).join(", ")}).`;
   } else {
@@ -277,7 +294,6 @@ function assess(z: StoredVariable, occurrences: Slice[], contrasts: Slice[]): Co
     contrastDifferent: different,
     contrastShows,
     contrastCoverage,
-    againstContrasts,
     reliesOnRecordedBasis,
     statement,
   };
@@ -337,13 +353,17 @@ export function crossContext(model: SystemModel, pattern: PatternRef, options: C
   const contrasts = times.filter((t) => t.value !== pattern.repeatedValue).map((t) => slice(t, "contrast"));
 
   const conditions = contextVars.map((z) => assess(z, occurrences, contrasts));
-  const groups: CrossContext["groups"] = { differing: [], common: [], background: [], differentiating: [], mixed: [], undecided: [], insufficient: [] };
+  const groups: CrossContext["groups"] = { differingAtOccurrences: [], commonAtOccurrences: [], insufficientAtOccurrences: [], backgroundComplete: [], differentiatingComplete: [], mixedComplete: [], contrastPartial: [], undecided: [] };
   for (const c of conditions) {
-    if (c.atOccurrences === "differing") groups.differing.push(c.variableId);
-    else if (c.atOccurrences === "insufficient") groups.insufficient.push(c.variableId);
+    if (c.atOccurrences === "differing") groups.differingAtOccurrences.push(c.variableId);
+    else if (c.atOccurrences === "insufficient") groups.insufficientAtOccurrences.push(c.variableId);
     else {
-      groups.common.push(c.variableId);
-      groups[c.againstContrasts as "background" | "differentiating" | "mixed" | "undecided"].push(c.variableId);
+      groups.commonAtOccurrences.push(c.variableId);
+      if (c.contrastCoverage === "none") groups.undecided.push(c.variableId);
+      else if (c.contrastCoverage === "partial") groups.contrastPartial.push(c.variableId);
+      else if (c.contrastShows === "same") groups.backgroundComplete.push(c.variableId);
+      else if (c.contrastShows === "different") groups.differentiatingComplete.push(c.variableId);
+      else groups.mixedComplete.push(c.variableId);
     }
   }
 
@@ -359,6 +379,9 @@ export function crossContext(model: SystemModel, pattern: PatternRef, options: C
   if (contrasts.length === 0) caveats.push({ code: "no_contrasts", text: "No contrast case is recorded in this period, so nothing can be said about what distinguishes the occurrences." });
   if (conditions.some((c) => c.reliesOnRecordedBasis)) caveats.push({ code: "recorded_basis", text: "A common condition relies partly on dates known only from when the information was recorded, not necessarily when the condition began or was observed." });
   if (occurrences.some((s) => s.application.kind === "approx" || s.application.kind === "range")) caveats.push({ code: "extent_not_point", text: "Some occurrences are approximate or stated periods; context is read over their whole extent, never at a single instant." });
+  const allReadings = [...occurrences, ...contrasts].flatMap((s) => s.context);
+  if (allReadings.some((c) => c.basis === "varied_within_extent")) caveats.push({ code: "varied_within_extent", text: "Within an approximate or stated occurrence period, a condition was recorded at more than one value. No single value can be assigned to that occurrence; that is variation during the period, not conflicting records for the same time." });
+  if (allReadings.some((c) => c.basis === "ambiguous")) caveats.push({ code: "ambiguous_context", text: "Two records claim different values for the same time; that time cannot be read until one is corrected or retracted." });
   for (const s of statements) {
     const bad = containsForbiddenPhrase(s);
     if (bad) throw new Error(`cross-context statement contains forbidden phrase "${bad}": ${s}`);

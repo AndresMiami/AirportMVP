@@ -262,7 +262,8 @@ describe("neutral-domain proof: the engine does not require a household", () => 
     expect(r.contrasts).toHaveLength(1);
     const b = r.conditions.find((c) => c.variableId === "input_b")!;
     expect(b.atOccurrences).toBe("common"); // 25 recorded at both occurrences (Sep recorded-basis, Nov asserted)
-    expect(b.againstContrasts).toBe("undecided"); // the October contrast only carries September's value forward
+    expect(b).toMatchObject({ contrastShows: "none", contrastCoverage: "none" }); // the October contrast only carries September's value forward
+    expect(r.groups.undecided).toContain("input_b");
     expect(r.contrasts[0].context.find((c) => c.variableId === "input_b")!.basis).toBe("carried_forward_only");
   });
 

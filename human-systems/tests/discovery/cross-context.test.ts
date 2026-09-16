@@ -136,25 +136,25 @@ describe("crossContext", () => {
     expect(cond(r, "work_arrangement").atOccurrences).toBe("differing");
     expect(cond(r, "work_arrangement").statement).toBe("work_arrangement differed across the 4 occurrences (1 u, 2 u, 3 u, 4 u).");
     const a = cond(r, "autonomy_pref");
-    expect(a).toMatchObject({ atOccurrences: "common", commonValue: 0.8, contrastUsable: 3, contrastSame: 3, contrastDifferent: 0, againstContrasts: "background" });
+    expect(a).toMatchObject({ atOccurrences: "common", commonValue: 0.8, contrastUsable: 3, contrastSame: 3, contrastDifferent: 0 });
     expect(a).toMatchObject({ contrastShows: "same", contrastCoverage: "complete" });
     expect(a.statement).toBe("autonomy_pref was recorded at 0.8 u at all 4 occurrences and at all 3 contrast times; present whether the pattern occurred or not, so it does not by itself distinguish the cases.");
     const b = cond(r, "buffer");
-    expect(b).toMatchObject({ atOccurrences: "common", commonValue: 1.5, contrastSame: 0, contrastDifferent: 3, againstContrasts: "differentiating" });
+    expect(b).toMatchObject({ atOccurrences: "common", commonValue: 1.5, contrastSame: 0, contrastDifferent: 3 });
     expect(b).toMatchObject({ contrastShows: "different", contrastCoverage: "complete" });
     expect(b.statement).toBe("buffer was recorded at 1.5 months at all 4 occurrences and different at all 3 contrast times; this distinguishes the recorded cases. Recorded together is not caused by.");
     const h = cond(r, "health_cover");
-    expect(h).toMatchObject({ atOccurrences: "insufficient", againstContrasts: "not_applicable", occurrenceUsable: 2, occurrenceTotal: 4 });
-    expect(h.statement).toBe("health_cover is unresolved in 4 of 7 relevant cases (2 of 4 occurrences readable); not enough evidence to compare.");
-    expect(r.groups).toMatchObject({ differing: ["work_arrangement"], background: expect.arrayContaining(["autonomy_pref"]), differentiating: ["buffer"], insufficient: expect.arrayContaining(["health_cover"]) });
+    expect(h).toMatchObject({ atOccurrences: "insufficient", occurrenceUsable: 2, occurrenceTotal: 4 });
+    expect(h.statement).toBe("health_cover is unresolved in 4 of 7 relevant cases (2 of 4 occurrences readable; 3 recorded as unknown or not recorded, 1 only an older value standing); not enough evidence to compare.");
+    expect(r.groups).toMatchObject({ differingAtOccurrences: ["work_arrangement"], backgroundComplete: expect.arrayContaining(["autonomy_pref"]), differentiatingComplete: ["buffer"], insufficientAtOccurrences: expect.arrayContaining(["health_cover"]) });
   });
 
   it("mixed: the same at some usable contrasts and different at others is neither background nor differentiating", () => {
     const z = cond(r, "mixed_z");
-    expect(z).toMatchObject({ atOccurrences: "common", contrastSame: 2, contrastDifferent: 1, againstContrasts: "mixed" });
+    expect(z).toMatchObject({ atOccurrences: "common", contrastSame: 2, contrastDifferent: 1 });
     expect(z).toMatchObject({ contrastShows: "mixed", contrastCoverage: "complete" });
     expect(z.statement).toMatch(/the same at 2 and different at 1 of 3 contrast times, so the recorded cases are only partly distinguished/);
-    expect(r.groups.mixed).toEqual(["mixed_z"]);
+    expect(r.groups.mixedComplete).toEqual(["mixed_z"]);
   });
 
   it("RESOLUTION != OBSERVATION: a carried-forward value never counts as recorded at an occurrence", () => {
@@ -162,13 +162,14 @@ describe("crossContext", () => {
     expect(c.occurrenceBases).toEqual(["carried_forward_only", "carried_forward_only", "carried_forward_only", "carried_forward_only"]);
     expect(c.occurrenceValues).toEqual([9, 9, 9, 9]); // the value is visible, its basis disqualifies it
     expect(c.atOccurrences).toBe("insufficient");
-    expect(r.groups.common).not.toContain("carried_only");
+    expect(r.groups.commonAtOccurrences).not.toContain("carried_only");
+    expect(r.groups.insufficientAtOccurrences).toContain("carried_only");
     expect(r.caveats.map((x) => x.code)).toContain("resolution_not_observation");
   });
 
   it("ABSENCE IS NOT DIFFERENCE: unknown or carried contrast readings never make a condition differentiating", () => {
     const a = cond(r, "absent_contrast");
-    expect(a).toMatchObject({ atOccurrences: "common", commonValue: 6, contrastTotal: 3, contrastUsable: 0, contrastDifferent: 0, againstContrasts: "undecided", contrastShows: "none", contrastCoverage: "none" });
+    expect(a).toMatchObject({ atOccurrences: "common", commonValue: 6, contrastTotal: 3, contrastUsable: 0, contrastDifferent: 0, contrastShows: "none", contrastCoverage: "none" });
     expect(a.statement).toMatch(/no usable contrast reading exists \(3 contrast times, 3 unresolved\), so whether it distinguishes the cases is undecided/);
     // the contrast readings: an explicit unknown, then the resolver carrying 6 forward
     const bases = r.contrasts.map((s) => s.context.find((c) => c.variableId === "absent_contrast")!.basis);
@@ -178,13 +179,13 @@ describe("crossContext", () => {
 
   it("recorded-basis coverage participates but is flagged and caveated; a stored range covers every slice explicitly", () => {
     const rb = cond(r, "recorded_basis");
-    expect(rb).toMatchObject({ atOccurrences: "common", againstContrasts: "background", reliesOnRecordedBasis: true });
+    expect(rb).toMatchObject({ atOccurrences: "common", reliesOnRecordedBasis: true });
     expect(rb.occurrenceBases.every((b) => b === "recorded_basis_coverage")).toBe(true);
     expect(rb.statement).toMatch(/relying partly on dates known only from when the information was recorded/);
     expect(r.caveats.map((x) => x.code)).toContain("recorded_basis");
     const rc = cond(r, "range_cov");
     expect(rc.occurrenceBases.every((b) => b === "explicit_range_coverage")).toBe(true);
-    expect(rc).toMatchObject({ atOccurrences: "common", commonValue: 3, againstContrasts: "background", reliesOnRecordedBasis: false });
+    expect(rc).toMatchObject({ atOccurrences: "common", commonValue: 3, reliesOnRecordedBasis: false });
   });
 
   it("contrast DIRECTION and COVERAGE are independent: 3/3, 2/3, 1/3 and 0/3 usable contrasts are worded differently and never collapse", () => {
@@ -193,23 +194,33 @@ describe("crossContext", () => {
       const entries = [...O.map((d) => entry(1, date(d))), entry(1, date("2026-06-09")), ...C.map((d) => (usableAt.includes(d) ? entry(2, date(d)) : entry(null, date(d))))];
       return { ...m, variables: [...m.variables, variable("cov_z", "sys", entries)] };
     };
-    const full = cond(ok(crossContext(withZ(C), PATTERN)), "cov_z");
-    expect(full).toMatchObject({ contrastShows: "different", contrastCoverage: "complete", contrastUsable: 3, againstContrasts: "differentiating" });
+    const fullR = ok(crossContext(withZ(C), PATTERN));
+    const full = cond(fullR, "cov_z");
+    expect(full).toMatchObject({ contrastShows: "different", contrastCoverage: "complete", contrastUsable: 3 });
+    expect(fullR.groups.differentiatingComplete).toContain("cov_z");
     expect(full.statement).toMatch(/different at all 3 contrast times; this distinguishes the recorded cases/);
-    const two = cond(ok(crossContext(withZ(C.slice(0, 2)), PATTERN)), "cov_z");
+    const twoR = ok(crossContext(withZ(C.slice(0, 2)), PATTERN));
+    const two = cond(twoR, "cov_z");
     expect(two).toMatchObject({ contrastShows: "different", contrastCoverage: "partial", contrastUsable: 2, contrastTotal: 3 });
+    // partial coverage is NEVER filed as a complete distinction
+    expect(twoR.groups.differentiatingComplete).not.toContain("cov_z");
+    expect(twoR.groups.contrastPartial).toContain("cov_z");
+    expect(twoR.groups.commonAtOccurrences).toContain("cov_z");
     expect(two.statement).toMatch(/different at the 2 readable contrast times; 1 other contrast time is unresolved, so the comparison is incomplete\./);
     expect(two.statement).not.toMatch(/distinguishes the recorded cases/);
     const one = cond(ok(crossContext(withZ(C.slice(0, 1)), PATTERN)), "cov_z");
     expect(one).toMatchObject({ contrastShows: "different", contrastCoverage: "partial", contrastUsable: 1 });
     expect(one.statement).toMatch(/different at the 1 readable contrast time; 2 other contrast times are unresolved, so the comparison is incomplete\./);
     const none = cond(ok(crossContext(withZ([]), PATTERN)), "cov_z");
-    expect(none).toMatchObject({ contrastShows: "none", contrastCoverage: "none", againstContrasts: "undecided" });
+    expect(none).toMatchObject({ contrastShows: "none", contrastCoverage: "none" });
     expect(none.statement).toMatch(/undecided/);
     // same + partial, and mixed + partial, are worded cautiously too
     const samePartial = { ...m, variables: [...m.variables, variable("same_p", "sys", [...O.map((d) => entry(1, date(d))), entry(1, date("2026-06-09")), entry(1, date(C[0])), entry(1, date(C[1])), entry(null, date(C[2]))])] };
-    const sp = cond(ok(crossContext(samePartial, PATTERN)), "same_p");
+    const spR = ok(crossContext(samePartial, PATTERN));
+    const sp = cond(spR, "same_p");
     expect(sp).toMatchObject({ contrastShows: "same", contrastCoverage: "partial" });
+    expect(spR.groups.backgroundComplete).not.toContain("same_p");
+    expect(spR.groups.contrastPartial).toContain("same_p");
     expect(sp.statement).toMatch(/the same at the 2 readable contrast times; 1 other contrast time is unresolved, so whether it distinguishes the cases remains open\./);
     const mixedPartial = { ...m, variables: [...m.variables, variable("mixed_p", "sys", [...O.map((d) => entry(1, date(d))), entry(1, date("2026-06-09")), entry(1, date(C[0])), entry(2, date(C[1])), entry(null, date(C[2]))])] };
     const mp = cond(ok(crossContext(mixedPartial, PATTERN)), "mixed_p");
@@ -223,7 +234,7 @@ describe("crossContext", () => {
     const rr = { ...m, variables: [...m.variables, variable("rec_range", "p1", [entry(7, range("2025-01-01", "2026-12-31", "the whole period"), { validBasis: "recorded" })])] };
     const c = cond(ok(crossContext(rr, PATTERN)), "rec_range");
     expect(c.occurrenceBases.every((b) => b === "explicit_range_coverage")).toBe(true);
-    expect(c).toMatchObject({ atOccurrences: "common", commonValue: 7, occurrenceUsable: 4, reliesOnRecordedBasis: true, againstContrasts: "background" });
+    expect(c).toMatchObject({ atOccurrences: "common", commonValue: 7, occurrenceUsable: 4, reliesOnRecordedBasis: true });
     expect(c.statement).toMatch(/relying partly on dates known only from when the information was recorded/);
     expect(ok(crossContext(rr, PATTERN)).caveats.map((x) => x.code)).toContain("recorded_basis");
     const reading = ok(crossContext(rr, PATTERN)).occurrences[0].context.find((x) => x.variableId === "rec_range")!;
@@ -259,8 +270,9 @@ describe("crossContext", () => {
     const rr = ok(crossContext(noC, PATTERN));
     expect(rr.contrasts).toEqual([]);
     expect(rr.contrastNote).toBe("none_recorded");
-    expect(rr.groups.differentiating).toEqual([]);
-    expect(rr.groups.background).toEqual([]);
+    expect(rr.groups.differentiatingComplete).toEqual([]);
+    expect(rr.groups.backgroundComplete).toEqual([]);
+    expect(rr.groups.contrastPartial).toEqual([]);
     expect(rr.groups.undecided).toEqual(expect.arrayContaining(["autonomy_pref", "buffer", "mixed_z", "recorded_basis", "absent_contrast", "range_cov"]));
     expect(rr.caveats.map((x) => x.code)).toContain("no_contrasts");
     expect(rr.statements[0]).toMatch(/no other known value was recorded in this period/);
@@ -278,12 +290,51 @@ describe("crossContext", () => {
     expect(crossContext(withDerived, { ...PATTERN, variableId: "calc" })).toMatchObject({ ok: false, reason: "derived_variable" });
   });
 
+  it("A. conflicting records for the SAME time are ambiguous; B. distinct dated values inside an approximate-month occurrence varied within the extent", () => {
+    const withBoth = {
+      ...m,
+      variables: [
+        ...m.variables,
+        // A: two records on the February occurrence date with different values
+        variable("amb_z", "sys", [entry(1, date(O[0])), entry(2, date(O[0])), entry(1, date(O[1])), entry(1, date(O[2])), entry(1, date("2026-06-09"))]),
+        // B: one value on 5 June and another on 20 June inside "around June 2026"
+        variable("varied_z", "sys", [...O.map((d) => entry(1, date(d))), entry(1, date("2026-06-05")), entry(3, date("2026-06-20"))]),
+      ],
+    };
+    const rr = ok(crossContext(withBoth, PATTERN));
+    const amb = rr.occurrences[0].context.find((c) => c.variableId === "amb_z")!;
+    expect(amb).toMatchObject({ basis: "ambiguous", value: null });
+    expect(amb.entryIds).toHaveLength(2);
+    const varied = rr.occurrences[3].context.find((c) => c.variableId === "varied_z")!;
+    expect(varied).toMatchObject({ basis: "varied_within_extent", value: null, validBasis: null });
+    expect(varied.entryIds).toHaveLength(2);
+    // neither counts as common nor as differing value evidence; both are unresolved for that occurrence
+    for (const id of ["amb_z", "varied_z"]) {
+      const c = cond(rr, id);
+      expect(c.atOccurrences).toBe("insufficient");
+      expect(c.occurrenceUsable).toBe(3);
+      expect(rr.groups.commonAtOccurrences).not.toContain(id);
+      expect(rr.groups.differingAtOccurrences).not.toContain(id);
+      expect(rr.groups.insufficientAtOccurrences).toContain(id);
+    }
+    expect(cond(rr, "varied_z").statement).toMatch(/1 varied within the occurrence period/);
+    // the February conflict also carries into the April contrast through the resolver: two ambiguous readings
+    expect(cond(rr, "amb_z").statement).toMatch(/2 conflicting records for the same time/);
+    // the two situations are explained differently
+    const codes = rr.caveats.map((c) => c.code);
+    expect(codes).toContain("varied_within_extent");
+    expect(codes).toContain("ambiguous_context");
+    expect(rr.caveats.find((c) => c.code === "varied_within_extent")!.text).toMatch(/variation during the period, not conflicting records for the same time/);
+    // a single-day occurrence with two different records is a conflict, never variation
+    expect(rr.occurrences[0].context.find((c) => c.variableId === "amb_z")!.basis).not.toBe("varied_within_extent");
+  });
+
   it("every statement and caveat is descriptive: no forbidden phrase, no cause, no score, no ranking", () => {
     for (const t of [...r.statements, ...r.caveats.map((c) => c.text)]) {
       expect(containsForbiddenPhrase(t), t).toBeNull();
       expect(t, t).not.toMatch(/\bscore\b|\brank|\bexplains\b|\bbecause of\b/i);
     }
     expect("score" in r).toBe(false);
-    expect(Object.keys(r.groups).sort()).toEqual(["background", "common", "differentiating", "differing", "insufficient", "mixed", "undecided"]);
+    expect(Object.keys(r.groups).sort()).toEqual(["backgroundComplete", "commonAtOccurrences", "contrastPartial", "differentiatingComplete", "differingAtOccurrences", "insufficientAtOccurrences", "mixedComplete", "undecided"]);
   });
 });
