@@ -7,7 +7,8 @@
  * the persisted model. Cards that can act appear only after startup
  * recovery has reconciled any proposal stranded in "applying".
  */
-import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useModel } from "@/components/model-provider";
 import { ProposalCard, type ProposalActions } from "@/components/proposal-card";
 import { ProposalCompose, type ComposeSubmit } from "@/components/proposal-compose";
@@ -28,8 +29,9 @@ function recoveryWords(o: RecoveryOutcome): string {
   }
 }
 
-export default function ProposalsPage() {
+function ProposalsInner() {
   const { status, model, proposals, proposalRecovery, approveProposal } = useModel();
+  const focus = useSearchParams().get("focus");
   const [items, setItems] = useState<MutationProposal[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [composing, setComposing] = useState<false | { editing: MutationProposal | null }>(false);
@@ -57,6 +59,12 @@ export default function ProposalsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
+
+  // navigation only: bring the focused proposal into view once it is rendered
+  useEffect(() => {
+    if (!focus || !items) return;
+    document.querySelector(`[data-proposal-id="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: "start" });
+  }, [focus, items]);
 
   const act = async (f: () => Promise<unknown>) => {
     setBusy(true);
@@ -133,13 +141,13 @@ export default function ProposalsPage() {
             <h2 id="needs-review" className="text-sm font-semibold mb-2">
               Needs your review ({open.length})
             </h2>
-            {open.length === 0 ? <p className="text-sm text-muted">Nothing is waiting for review.</p> : <div className="space-y-3">{open.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} />)}</div>}
+            {open.length === 0 ? <p className="text-sm text-muted">Nothing is waiting for review.</p> : <div className="space-y-3">{open.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} focused={p.id === focus} />)}</div>}
           </section>
           <section aria-labelledby="ready">
             <h2 id="ready" className="text-sm font-semibold mb-2">
               Reviewed — ready for your decision ({ready.length})
             </h2>
-            {ready.length === 0 ? <p className="text-sm text-muted">No reviewed proposal is waiting for a decision.</p> : <div className="space-y-3">{ready.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} />)}</div>}
+            {ready.length === 0 ? <p className="text-sm text-muted">No reviewed proposal is waiting for a decision.</p> : <div className="space-y-3">{ready.map((p) => <ProposalCard key={p.id} p={p} actions={actions} busy={busy} focused={p.id === focus} />)}</div>}
           </section>
           <section aria-labelledby="history">
             <h2 id="history" className="text-sm font-semibold mb-2">
@@ -152,5 +160,13 @@ export default function ProposalsPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function ProposalsPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <ProposalsInner />
+    </Suspense>
   );
 }

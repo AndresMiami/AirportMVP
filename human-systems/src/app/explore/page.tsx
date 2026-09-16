@@ -7,18 +7,20 @@
  * investigate. Candidates come only from the person's own drafts (kept in
  * this browser, never in the model) and from hypotheses deterministically
  * linked to the record. Catalogue prompts are questions to consider, never
- * candidates. Nothing here writes to the model; "Investigate this
- * explanation" is inert until the review step exists.
+ * candidates. Nothing here writes to the model: "Investigate this
+ * explanation" creates a PROPOSAL through the kernel, the person reviews
+ * it in /proposals, and only approval there creates the hypothesis.
  */
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useState } from "react";
 import { useModel } from "@/components/model-provider";
 import { Card, Loading, Note, PageHeader } from "@/components/ui";
 import {
   CAUSATION_DISCLAIMER,
   EXPLORE_QUESTIONS,
-  INVESTIGATE_INERT_TEXT,
+  INVESTIGATE_TEXT,
+  INVESTIGATE_UNAVAILABLE_TEXT,
   NO_CANDIDATE_YET,
   RELATED_HYPOTHESES_HEADING,
   RELATED_HYPOTHESES_NOTE,
@@ -34,6 +36,8 @@ import {
   type CrossContext,
   type PatternRef,
 } from "@/discovery";
+import { buildExploreProposal, createdFromPattern, mergeRelated, reconcileDraft, type ExploreDraft } from "@/features/explore/proposal";
+import type { MutationProposal } from "@/kernel";
 import { locusLabel, type DomainDefinition, type Locus } from "@/model/domain";
 import { subjectLabelFor } from "@/model/subjects";
 import type { SystemModel } from "@/types";
@@ -42,11 +46,8 @@ const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hove
 const LOCI: Locus[] = ["external_to_subject", "internal_to_subject", "interaction"];
 const DRAFTS_KEY = "human-systems.explore-drafts.v1";
 
-interface Draft {
-  id: string;
+interface Draft extends ExploreDraft {
   locus: Locus;
-  text: string;
-  promptId?: string;
 }
 
 /** Per-viewer drafts, in this browser only: never model state. */
@@ -131,21 +132,93 @@ function Occurrences({ r, model }: { r: CrossContext; model: SystemModel }) {
 
 function Explanations({ r, model, domain }: { r: CrossContext; model: SystemModel; domain: DomainDefinition }) {
   const ids = useId();
+  const router = useRouter();
+  const { proposals, proposalRecovery } = useModel();
   // drafts are keyed by the FULL pattern reference (interval included): a wider
   // evidence window has different contrast cases and is a different investigation
   const scope = `${model.id}|${encodePatternRef(r.pattern)}`;
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [editing, setEditing] = useState<{ locus: Locus; text: string; promptId?: string } | null>(null);
+  const [ledger, setLedger] = useState<MutationProposal[] | null>(null);
+  const [busyDraft, setBusyDraft] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const investigateReady = proposals !== null && proposalRecovery.status === "done";
+
   useEffect(() => {
     // localStorage is a per-viewer convenience: read once per pattern in an effect, never during render
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDrafts(readDrafts(scope));
   }, [scope]);
+
+  // Reconcile drafts that reference a proposal from the ledger: open ones stay
+  // linked, superseded ones follow their replacement, applied or rejected ones
+  // may leave browser storage. Creation alone never removes a draft.
+  useEffect(() => {
+    if (!investigateReady || !proposals) return;
+    let cancelled = false;
+    void proposals.list(model.id).then((all) => {
+      if (cancelled) return;
+      setLedger(all);
+      const byId = new Map(all.map((p) => [p.id, p]));
+      const current = readDrafts(scope);
+      let changed = false;
+      const next: Draft[] = [];
+      for (const d of current) {
+        if (!d.proposalId) {
+          next.push(d);
+          continue;
+        }
+        const rec = reconcileDraft(d.proposalId, (id) => byId.get(id) ?? null);
+        if (rec.action === "remove") changed = true;
+        else if (rec.action === "relink") {
+          next.push({ ...d, proposalId: rec.proposalId });
+          changed = true;
+        } else if (rec.action === "unlink") {
+          const { proposalId: _gone, ...rest } = d;
+          void _gone;
+          next.push(rest);
+          changed = true;
+        } else next.push(d);
+      }
+      if (changed) {
+        writeDrafts(scope, next);
+        setDrafts(next);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [investigateReady, proposals, model.id, scope]);
+
   const save = (next: Draft[]) => {
     setDrafts(next);
     writeDrafts(scope, next);
   };
+  const statusOf = (d: Draft) => (d.proposalId ? (ledger?.find((p) => p.id === d.proposalId)?.status ?? null) : null);
+
+  /** Investigate = create ONE proposal for this draft, then go review it. Never a model write. */
+  const investigate = async (d: Draft) => {
+    if (!proposals || !investigateReady) return;
+    if (d.proposalId) {
+      router.push(`/proposals?focus=${encodeURIComponent(d.proposalId)}`);
+      return;
+    }
+    setBusyDraft(d.id);
+    setProblem(null);
+    try {
+      const input = buildExploreProposal(d, r, domain);
+      const created = await proposals.create({ modelId: model.id, request: input.request, proposedBy: { kind: "person" }, rationale: input.rationale, basis: input.basis });
+      save(drafts.map((x) => (x.id === d.id ? { ...x, proposalId: created.id } : x)));
+      router.push(`/proposals?focus=${encodeURIComponent(created.id)}`);
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyDraft(null);
+    }
+  };
+
   const linked = linkedHypotheses(model, r.pattern.variableId);
+  const related = mergeRelated(linked, ledger ? createdFromPattern(ledger, r.pattern, model.hypotheses) : []);
   const prompts = domain.explanationCatalogue?.prompts ?? [];
   const linkWords: Record<string, string> = {
     prediction: "a prediction names this record",
@@ -161,18 +234,20 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
       <div>
         <h3 className="text-xs font-semibold text-muted mb-1">{RELATED_HYPOTHESES_HEADING}</h3>
         <p className="text-xs text-muted mb-1">{RELATED_HYPOTHESES_NOTE}</p>
-        {linked.length === 0 ? (
+        {related.length === 0 ? (
           <p className="text-sm text-muted">No hypothesis is linked to this record yet (links, never wording, decide this).</p>
         ) : (
           <ul className="text-sm space-y-1">
-            {linked.map(({ hypothesis, linkedVia }) => (
+            {related.map(({ hypothesis, linkedVia, createdFromThisPattern }) => (
               <li key={hypothesis.id}>
                 <Link href="/hypotheses" className="underline">
                   {hypothesis.statement}
                 </Link>{" "}
                 <span className="text-xs text-muted">
-                  · {hypothesis.status} · {linkedVia.map((v) => linkWords[v]).join("; ")}
+                  · {hypothesis.status} · {hypothesis.confidence === null ? "confidence not assessed" : `confidence ${Math.round(hypothesis.confidence * 100)}%`}
+                  {linkedVia.length > 0 ? ` · ${linkedVia.map((v) => linkWords[v]).join("; ")}` : ""}
                 </span>
+                {createdFromThisPattern ? <span className="ml-1 rounded border border-border bg-background px-1.5 py-0.5 text-xs">Created from this Explore pattern</span> : null}
               </li>
             ))}
           </ul>
@@ -189,20 +264,24 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
               <p className="text-sm text-muted">{NO_CANDIDATE_YET}</p>
             ) : (
               <ul className="text-sm space-y-2">
-                {mine.map((d) => (
-                  <li key={d.id} className="rounded border border-border px-3 py-2">
-                    <p>{d.text}</p>
-                    {d.promptId ? <p className="text-xs text-muted">from the question: {prompts.find((p) => p.id === d.promptId)?.question}</p> : null}
-                    <div className="mt-1.5 flex flex-wrap gap-2">
-                      <button type="button" className={BTN} disabled title={INVESTIGATE_INERT_TEXT} aria-describedby={`${ids}-inert`}>
-                        Investigate this explanation
-                      </button>
-                      <button type="button" className={BTN} onClick={() => save(drafts.filter((x) => x.id !== d.id))}>
-                        Remove draft
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                {mine.map((d) => {
+                  const st = statusOf(d);
+                  return (
+                    <li key={d.id} className="rounded border border-border px-3 py-2" data-draft-id={d.id} data-proposal-id={d.proposalId ?? ""}>
+                      <p>{d.text}</p>
+                      {d.promptId ? <p className="text-xs text-muted">from the question: {prompts.find((p) => p.id === d.promptId)?.question}</p> : null}
+                      {d.proposalId ? <p className="text-xs text-muted">A proposal exists for this explanation{st ? ` (${st})` : ""}; review it there. Nothing is created until you approve it.</p> : null}
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        <button type="button" className={BTN} disabled={!investigateReady || busyDraft !== null} title={investigateReady ? undefined : INVESTIGATE_UNAVAILABLE_TEXT} aria-describedby={`${ids}-investigate`} onClick={() => void investigate(d)}>
+                          {d.proposalId ? "Review proposal" : busyDraft === d.id ? "Proposing…" : "Investigate this explanation"}
+                        </button>
+                        <button type="button" className={BTN} onClick={() => save(drafts.filter((x) => x.id !== d.id))} disabled={busyDraft !== null}>
+                          Remove draft
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {questions.length > 0 ? (
@@ -253,8 +332,13 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
           </div>
         );
       })}
-      <p id={`${ids}-inert`} className="text-xs text-muted">
-        {INVESTIGATE_INERT_TEXT} Drafts stay in this browser and are not part of the model.
+      {problem ? (
+        <p className="text-xs text-warn" role="alert">
+          {problem}
+        </p>
+      ) : null}
+      <p id={`${ids}-investigate`} className="text-xs text-muted">
+        {investigateReady ? INVESTIGATE_TEXT : proposalRecovery.status === "error" ? `${INVESTIGATE_UNAVAILABLE_TEXT} ${proposalRecovery.message}` : INVESTIGATE_UNAVAILABLE_TEXT} Drafts stay in this browser and are not part of the model.
       </p>
     </div>
   );

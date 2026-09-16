@@ -6,6 +6,7 @@
  * proves it.
  */
 import { consequenceReasons } from "./registry";
+import { canonicalJSON } from "./revision";
 import type { DryRunResult, MutationBatch, MutationProposal, ProposalBasisRef, ResolvedBasis } from "./types";
 
 export const BASIS_DISCLAIMER = "These records explain why this proposal was made. They do not make the proposal true.";
@@ -63,12 +64,31 @@ function basisText(b: ResolvedBasis): BasisLine {
       return occ ? { ref: b.ref, text: `Pattern: ${b.ref.summary} — recorded at ${occ.length} distinct times in the current records.`, resolved: true } : { ref: b.ref, text: `Pattern: ${b.ref.summary} — the repetition is no longer in the records.`, resolved: false };
     }
     case "cross_context":
-      return { ref: b.ref, text: `Cross-context reading: ${b.ref.reading}`, resolved: true };
+      return c ? { ref: b.ref, text: `Explore comparison: ${crossContextSummary(c)}`, resolved: true } : { ref: b.ref, text: `Explore comparison (${b.ref.summary}): it can no longer be resolved from the current records.`, resolved: false };
     case "user_statement":
-      return { ref: b.ref, text: `You said: “${b.ref.text}”`, resolved: true };
+      return { ref: b.ref, text: `You wrote: “${b.ref.text}”`, resolved: true };
     case "catalogue_prompt":
-      return { ref: b.ref, text: `A question from the catalogue (${b.ref.promptId}).`, resolved: true };
+      return c ? { ref: b.ref, text: `Question that prompted the draft: “${String(c.question)}”`, resolved: true } : { ref: b.ref, text: `Question that prompted the draft is no longer in the catalogue (${b.ref.promptId}); it read: “${b.ref.question}”`, resolved: false };
   }
+}
+
+/** Plain words for a resolved Explore comparison. Counts and classifications
+ *  only, straight from the engine's factual groups; never cause, support,
+ *  confirmation or evidence for truth. */
+export function crossContextSummary(c: Record<string, unknown>): string {
+  const occ = (c.occurrences as unknown[] | undefined)?.length ?? 0;
+  const con = (c.contrasts as unknown[] | undefined)?.length ?? 0;
+  const g = (c.groups ?? {}) as Record<string, string[] | undefined>;
+  const n = (k: string) => g[k]?.length ?? 0;
+  const unresolved = n("insufficientAtOccurrences") + n("undecided") + n("contrastPartial");
+  const parts = [
+    `${occ} occurrence${occ === 1 ? "" : "s"} compared with ${con} time${con === 1 ? "" : "s"} recorded at another value`,
+    `${n("differingAtOccurrences")} condition${n("differingAtOccurrences") === 1 ? "" : "s"} differed across the occurrences`,
+    `${n("commonAtOccurrences")} recorded the same at every occurrence`,
+  ];
+  if (con > 0) parts.push(`of those, ${n("backgroundComplete")} also true at every contrast time, ${n("differentiatingComplete")} different at every contrast time, ${n("mixedComplete")} mixed`);
+  parts.push(`${unresolved} unresolved`);
+  return `${parts.join("; ")}.`;
 }
 
 export function consequencesOf(materialized: MutationBatch): string[] {
@@ -128,9 +148,20 @@ export function staleComparison(p: MutationProposal): StaleComparison | null {
   diffLines("Warning", p.previousPreview.warnings, p.preview.warnings, changedSince);
   if (p.previousPreview.consequenceClass !== p.preview.consequenceClass) changedSince.push(`This proposal is now ${p.preview.consequenceClass} (it was ${p.previousPreview.consequenceClass}).`);
   const prevBasis = new Map(before.basis.map((b, i) => [i, b.text]));
+  const prevContent = p.previousResolvedBasis ?? p.resolvedBasis;
   now.basis.forEach((b, i) => {
     const was = prevBasis.get(i);
-    if (was !== undefined && was !== b.text) changedSince.push(`A cited record changed. It read: ${was} It now reads: ${b.text}`);
+    if (was === undefined) return;
+    if (was !== b.text) {
+      changedSince.push(`A cited record changed. It read: ${was} It now reads: ${b.text}`);
+      return;
+    }
+    // same words, different resolved content: say WHAT moved, never guess why
+    const beforeC = prevContent[i]?.content;
+    const afterC = p.resolvedBasis[i]?.content;
+    if (canonicalJSON(beforeC) === canonicalJSON(afterC)) return;
+    if (b.ref.kind === "cross_context") changedSince.push(...crossContextDelta(beforeC, afterC));
+    else changedSince.push(`A cited record changed in detail while its summary stayed the same: ${b.text}`);
   });
   if (p.previousPreview.nothingElseChanges !== p.preview.nothingElseChanges) changedSince.push(p.preview.nothingElseChanges ? "Nothing else changes any more." : "Something else changes now.");
   const outsBefore = JSON.stringify(p.previousPreview.expectedOutputs);
@@ -138,6 +169,56 @@ export function staleComparison(p: MutationProposal): StaleComparison | null {
   if (outsBefore !== outsNow) changedSince.push("The records it would create get different identifiers now.");
   if (changedSince.length === 0) changedSince.push("The difference is in the mechanical detail only; open Details to compare.");
   return { before, changedSince, now };
+}
+
+/** Which readings of an Explore comparison moved between two resolutions:
+ *  occurrence and contrast sets, then each condition whose readings or
+ *  classification changed. Factual deltas only. */
+export function crossContextDelta(before: unknown, after: unknown): string[] {
+  const b = (before ?? {}) as Record<string, unknown>;
+  const a = (after ?? {}) as Record<string, unknown>;
+  const out: string[] = [];
+  const starts = (x: Record<string, unknown>, key: string) => ((x[key] as { application?: { start?: string } }[] | undefined) ?? []).map((s) => s.application?.start ?? "").join(", ");
+  if (starts(b, "occurrences") !== starts(a, "occurrences")) out.push(`The occurrence times of the Explore comparison changed (were: ${starts(b, "occurrences") || "none"}; now: ${starts(a, "occurrences") || "none"}).`);
+  if (starts(b, "contrasts") !== starts(a, "contrasts")) out.push(`The contrast times of the Explore comparison changed (were: ${starts(b, "contrasts") || "none"}; now: ${starts(a, "contrasts") || "none"}).`);
+  type Cond = { variableId: string; name?: string; occurrenceValues?: unknown[]; atOccurrences?: string; contrastShows?: string; contrastCoverage?: string; commonValue?: unknown };
+  const bc = new Map((((b.conditions as Cond[] | undefined) ?? [])).map((c) => [c.variableId, c]));
+  const ac = new Map((((a.conditions as Cond[] | undefined) ?? [])).map((c) => [c.variableId, c]));
+  const sig = (c: Cond | undefined) => (c ? canonicalJSON({ v: c.occurrenceValues, o: c.atOccurrences, s: c.contrastShows, k: c.contrastCoverage, m: c.commonValue }) : "absent");
+  const reportedConditions = new Set<string>();
+  for (const id of new Set([...bc.keys(), ...ac.keys()])) {
+    const x = bc.get(id);
+    const y = ac.get(id);
+    if (sig(x) === sig(y)) continue;
+    reportedConditions.add(id);
+    const name = y?.name ?? x?.name ?? id;
+    const word = (c: Cond | undefined) => (c ? `${c.atOccurrences ?? "?"} across occurrences${c.atOccurrences === "common" ? ` at ${String(c.commonValue)}` : ""}${c.contrastShows && c.contrastShows !== "none" ? `, contrasts ${c.contrastShows} (${c.contrastCoverage} coverage)` : ""}` : "not part of the comparison");
+    out.push(`The reading of “${name}” in the Explore comparison changed: it was ${word(x)}; it is now ${word(y)}.`);
+  }
+  // per-slice context readings (what each occurrence and contrast time showed for every condition)
+  type SliceLike = { role?: string; application?: { start?: string }; context?: { variableId: string; value: unknown; basis?: string }[] };
+  const slices = (x: Record<string, unknown>) => [...((x.occurrences as SliceLike[] | undefined) ?? []), ...((x.contrasts as SliceLike[] | undefined) ?? [])];
+  const readings = (x: Record<string, unknown>) => {
+    const m = new Map<string, { value: unknown; basis?: string; role?: string; start?: string; variableId: string }>();
+    for (const sl of slices(x)) for (const c of sl.context ?? []) m.set(`${sl.application?.start ?? ""}|${c.variableId}`, { value: c.value, basis: c.basis, role: sl.role, start: sl.application?.start, variableId: c.variableId });
+    return m;
+  };
+  const rb = readings(b);
+  const ra = readings(a);
+  const nameOf = (id: string) => ac.get(id)?.name ?? bc.get(id)?.name ?? id;
+  const said = (v: { value: unknown; basis?: string } | undefined) => (v === undefined ? "not read" : `${v.value === null ? "unknown" : String(v.value)}${v.basis ? ` (${String(v.basis).replace(/_/g, " ")})` : ""}`);
+  for (const key of new Set([...rb.keys(), ...ra.keys()])) {
+    const x = rb.get(key);
+    const y = ra.get(key);
+    if (canonicalJSON({ v: x?.value, b: x?.basis }) === canonicalJSON({ v: y?.value, b: y?.basis })) continue;
+    const at = (y ?? x)!;
+    if (reportedConditions.has(at.variableId)) continue; // the condition-level line already names it
+    out.push(`The reading of “${nameOf(at.variableId)}” at ${(at.start ?? "").slice(0, 10)} (${at.role === "contrast" ? "a contrast time" : "an occurrence"}) changed: it was ${said(x)}; it is now ${said(y)}.`);
+  }
+  const ev = (x: Record<string, unknown>) => canonicalJSON(((x.occurrences as { eventsNear?: unknown }[] | undefined) ?? []).map((s) => s.eventsNear));
+  if (ev(b) !== ev(a)) out.push("The events recorded near the occurrences changed.");
+  if (out.length === 0) out.push("The Explore comparison changed in a detail its summary does not show; open Details to compare.");
+  return out;
 }
 
 export const STATUS_WORDS: Record<MutationProposal["status"], string> = {

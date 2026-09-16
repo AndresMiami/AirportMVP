@@ -151,7 +151,7 @@ cause, generator, will continue, improved, weakened). Derived variables
 are excluded from repetition candidates and recomputed only on request
 under today's structure, caveated. Snapshots are secondary evidence
 ("recorded in k of n saved snapshots"). "Explore this pattern" is
-read-only until the proposal / approval kernel exists. EXPLORE
+read-only except for Investigate, which proposes (see INVESTIGATE below). EXPLORE
 (src/discovery/cross-context.ts, /explore): occurrences O = {t: Y(t) = y*}
 vs contrasts C = {t: Y(t) != y*}; COMMON ACROSS OCCURRENCES != EXPLANATORY;
 ABSENCE IS NOT DIFFERENCE (unknown, ambiguous or carried contrast readings
@@ -161,6 +161,14 @@ context is read over it; the engine knows only three loci (internal /
 external to the subject, interaction) and a domain supplies QUESTIONS,
 never candidates; hypotheses are linked by explicit links, never wording;
 no candidate is created, ranked, scored or given a confidence.
+INVESTIGATE (Step 4): "Investigate this explanation" creates a PROPOSAL
+(one addHypothesis: the draft's words, the pattern's subject, confidence
+null, nothing else invented) and never a hypothesis; the proposal's
+pattern, Explore-comparison and catalogue-question bases are RE-RESOLVED
+through the same deterministic engine at every revalidation, so the
+review expires when anything Explore showed changes even if the
+hypothesis text is identical; approval means "keep this as a working
+hypothesis to test", never "this explanation is true".
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

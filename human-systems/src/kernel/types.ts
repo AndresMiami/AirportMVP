@@ -23,10 +23,16 @@ export type ProposalAuthor =
   | { kind: "ai"; adapterId: string; conversationTurnId?: string }
   | { kind: "system_feature"; featureId: string };
 
-/** Why the proposal exists. A basis is a reference, never proof. */
+/** Why the proposal exists. A basis is a reference, never proof. Every ref
+ *  carries enough to RE-RESOLVE what the person saw (resolveBasis), so a
+ *  change in the cited record, pattern, Explore comparison or catalogue
+ *  question changes the review fingerprint. */
 export type ProposalBasisRef =
   | { kind: "pattern"; ref: PatternRef; summary: string }
-  | { kind: "cross_context"; conditionId: string; reading: string }
+  /** The deterministic Explore comparison (occurrences vs contrasts) for a
+   *  pattern; resolved by rerunning the existing engine under the model's
+   *  current domain scope. */
+  | { kind: "cross_context"; pattern: PatternRef; summary: string }
   | { kind: "observation"; id: string }
   | { kind: "event"; id: string }
   | { kind: "relationship"; id: string }
@@ -34,7 +40,9 @@ export type ProposalBasisRef =
   | { kind: "variable"; id: string }
   | { kind: "variable_history"; variableId: string; interval: IntervalRequest }
   | { kind: "user_statement"; text: string }
-  | { kind: "catalogue_prompt"; promptId: string };
+  /** A catalogue question that PROMPTED a draft (never evidence): resolved
+   *  against the named domain version; `question` is the reviewed snapshot. */
+  | { kind: "catalogue_prompt"; domainId: string; domainVersion: number; promptId: string; question: string };
 
 export type ConsequenceClass = "ordinary" | "consequential";
 

@@ -578,8 +578,31 @@ capture surface corrects this when it replaces that screen.
    raw record explicitly before any revision compare (a caller passing
    any expected revision, the old synthetic one included, cannot
    overwrite it); page-level Loading is suppressed under a storage
-   error. Remaining: Explore
-   -> proposal (Step 4), AI proposals (Step 5).
+   error. KERNEL STEP 4 DONE —
+   Explore -> Investigate -> proposal -> review -> approved hypothesis:
+   "Investigate this explanation" now creates ONE `addHypothesis` proposal
+   (the draft's words, the pattern's subject, confidence null; nothing
+   else invented, the Explore locus not written) through the kernel and
+   sends the person to `/proposals?focus=<id>`; only approval there
+   creates the hypothesis (status proposed, confidence not assessed).
+   The proposal's basis is RE-RESOLVABLE: `pattern` (occurrence times),
+   `cross_context` (the SAME deterministic `crossContext` rerun under
+   `contextSubjectsFor` for the model's current domain — the whole result
+   is the content, so the occurrence set, contrast set, every condition's
+   readings and classification, coverage, unresolved groups and nearby
+   events all take part in the review fingerprint), `user_statement`,
+   and `catalogue_prompt` (domain id/version + prompt id resolved to the
+   current question, the reviewed wording kept as a snapshot). A stale
+   card names what moved (a changed cited record, a condition whose
+   reading or classification changed, a reading at one occurrence or
+   contrast time, changed nearby events). Drafts carry `proposalId` so a
+   repeated click opens the review instead of creating a duplicate; on
+   return, open proposals stay linked, superseded ones follow their
+   replacement, applied and rejected ones release the draft. Hypotheses
+   created from a pattern are surfaced from the ledger's provenance
+   ("Created from this Explore pattern"), merged with model-linked ones,
+   never by wording. Source pins: Explore imports no mutation function
+   and no service save/apply path. Remaining: AI proposals (Step 5).
 5. Home / Map / History / Library shell with the mock adapter: Source
    records, capture box, deterministic "What I'm seeing", the four-place
    navigation, existing screens re-homed under Library and Details.

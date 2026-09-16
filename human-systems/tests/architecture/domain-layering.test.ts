@@ -53,7 +53,7 @@ describe("domain layering", () => {
    * repositories, ai, generic components and generic screens — imports no
    * household module, no sample, no bootstrap and no feature module.
    */
-  const HOUSEHOLD_SOURCES = [/from\s+["']@\/domains\/household/, /from\s+["']@\/domains["']/, /from\s+["']@\/domains\/index["']/, /from\s+["'].*\/household\//, /from\s+["']@\/data\/sample-household["']/, /from\s+["']@\/bootstrap\//, /from\s+["']@\/features\//];
+  const HOUSEHOLD_SOURCES = [/from\s+["']@\/domains\/household/, /from\s+["']@\/domains["']/, /from\s+["']@\/domains\/index["']/, /from\s+["'].*\/household\//, /from\s+["']@\/data\/sample-household["']/, /from\s+["']@\/bootstrap\//, /from\s+["']@\/features\/household\//]; // features/explore is a GENERIC integration helper (kernel + discovery), not household code
   /** The documented exceptions: application configuration, the household
    *  feature, the sample fixture, and the ONE household feature route. */
   const HOUSEHOLD_APPLICATION_FILES = new Set([

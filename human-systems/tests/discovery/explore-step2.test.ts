@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
 import { INPUT_IDS } from "@/domains/household/keys";
-import { EXPLORE_QUESTIONS, INVESTIGATE_INERT_TEXT, NO_CANDIDATE_YET, RELATED_HYPOTHESES_NOTE, containsForbiddenPhrase, contextSubjectsFor, decodePatternRef, encodePatternRef, linkedHypotheses, type PatternRef } from "@/discovery";
+import { EXPLORE_QUESTIONS, INVESTIGATE_TEXT, NO_CANDIDATE_YET, RELATED_HYPOTHESES_NOTE, containsForbiddenPhrase, contextSubjectsFor, decodePatternRef, encodePatternRef, linkedHypotheses, type PatternRef } from "@/discovery";
 import { DEFAULT_LOCUS_LABELS, locusLabel } from "@/model/domain";
 import * as M from "@/services/mutations";
 
@@ -105,8 +105,8 @@ describe("explore language", () => {
     expect(EXPLORE_QUESTIONS).toEqual(["This kept happening.", "What was different each time?", "What was the same each time?", "How did the other recorded times compare?", "What is still unresolved?", "Possible explanations to investigate"]);
     expect(NO_CANDIDATE_YET).toBe("No candidate of this kind yet."); // a draft is a candidate, never "grounded"
     expect(RELATED_HYPOTHESES_NOTE).toBe("These are linked to this record. That does not mean they explain this recurrence.");
-    expect(INVESTIGATE_INERT_TEXT).toMatch(/nothing is created from here/);
-    for (const t of [...EXPLORE_QUESTIONS, NO_CANDIDATE_YET, RELATED_HYPOTHESES_NOTE, INVESTIGATE_INERT_TEXT]) expect(containsForbiddenPhrase(t), t).toBeNull();
+    expect(INVESTIGATE_TEXT).toMatch(/Nothing is created from here/);
+    for (const t of [...EXPLORE_QUESTIONS, NO_CANDIDATE_YET, RELATED_HYPOTHESES_NOTE, INVESTIGATE_TEXT]) expect(containsForbiddenPhrase(t), t).toBeNull();
   });
 });
 

@@ -122,7 +122,7 @@ function Details({ changes }: { changes: EntityChange[] }) {
   );
 }
 
-export function ProposalCard({ p, actions, busy }: { p: MutationProposal; actions: ProposalActions; busy: boolean }) {
+export function ProposalCard({ p, actions, busy, focused = false }: { p: MutationProposal; actions: ProposalActions; busy: boolean; focused?: boolean }) {
   const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -148,7 +148,7 @@ export function ProposalCard({ p, actions, busy }: { p: MutationProposal; action
     });
 
   return (
-    <article className={`rounded-lg border ${p.status === "stale" || p.status === "failed" ? "border-warn" : consequential && p.status === "reviewed" ? "border-warn" : "border-border"} bg-surface p-4`} aria-labelledby={`${p.id}-title`} data-proposal-id={p.id} data-status={p.status}>
+    <article className={`rounded-lg border ${p.status === "stale" || p.status === "failed" ? "border-warn" : consequential && p.status === "reviewed" ? "border-warn" : "border-border"} bg-surface p-4 ${focused ? "ring-2 ring-accent" : ""}`} aria-labelledby={`${p.id}-title`} data-proposal-id={p.id} data-status={p.status}>
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id={`${p.id}-title`} className="text-sm font-semibold">
           {w.what[0] ?? "A change that cannot be applied"}

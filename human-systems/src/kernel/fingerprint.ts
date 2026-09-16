@@ -4,7 +4,9 @@
  * mutation result alone: a proposal based on observation A whose statement
  * later changes must go stale even when the mutation diff is identical.
  */
+import { contextSubjectsFor, crossContext, type PatternRef } from "@/discovery/cross-context";
 import { describeVariableHistory } from "@/discovery/describe-history";
+import { domainRegistry } from "@/model/domain";
 import type { SystemModel } from "@/types";
 import { canonicalJSON } from "./revision";
 import type { DryRunResult, MutationBatch, ProposalBasisRef, ResolvedBasis } from "./types";
@@ -34,11 +36,31 @@ export function resolveBasis(model: SystemModel, basis: readonly ProposalBasisRe
         return { ref, content: { subjectId: v.subjectId, occurrences: d.repeatedValues.find((r) => r.value === ref.ref.repeatedValue)?.applicationTimes ?? null } };
       }
       case "cross_context":
+        return { ref, content: resolveCrossContext(model, ref.pattern) };
+      case "catalogue_prompt": {
+        const domain = domainRegistry.get(ref.domainId, ref.domainVersion);
+        const prompt = domain?.explanationCatalogue?.prompts.find((p) => p.id === ref.promptId);
+        return { ref, content: prompt ? { question: prompt.question, locus: prompt.locus, hint: prompt.hint ?? null } : null };
+      }
       case "user_statement":
-      case "catalogue_prompt":
         return { ref, content: ref };
     }
   });
+}
+
+/**
+ * Rerun the SAME deterministic Explore comparison the screen shows, under
+ * the model's current domain scope (contextSubjectsFor). The whole result
+ * is the content: occurrence set, contrast set, every condition's
+ * classification and coverage, unresolved groups, events near occurrences,
+ * statements and caveats. null when the pattern no longer resolves. No
+ * second comparison algorithm lives here.
+ */
+export function resolveCrossContext(model: SystemModel, pattern: PatternRef | undefined): unknown {
+  if (!pattern || typeof pattern !== "object") return null;
+  const domain = domainRegistry.get(model.domainDefinitionId, model.domainDefinitionVersion);
+  const r = crossContext(model, pattern, { contextSubjectIds: contextSubjectsFor(model, pattern, domain) });
+  return r.ok ? r : null;
 }
 
 export function reviewFingerprint(materialized: MutationBatch, preview: DryRunResult, resolvedBasis: readonly ResolvedBasis[]): string {

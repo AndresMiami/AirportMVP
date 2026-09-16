@@ -62,8 +62,10 @@ export const NO_CANDIDATE_YET = "No candidate of this kind yet.";
 export const RELATED_HYPOTHESES_HEADING = "Related hypotheses already in the model";
 export const RELATED_HYPOTHESES_NOTE = "These are linked to this record. That does not mean they explain this recurrence.";
 
-/** The inert "Investigate this explanation" control's explanation. */
-export const INVESTIGATE_INERT_TEXT = "Investigating an explanation will propose a hypothesis for your review; that review step is not built yet, so nothing is created from here.";
+/** What "Investigate this explanation" does: it PROPOSES; only the review step creates anything. */
+export const INVESTIGATE_TEXT = "Investigating an explanation proposes a hypothesis for your review. Nothing is created from here; a hypothesis exists only once you approve the proposal, and even then it is a working hypothesis to test, not a conclusion.";
+/** Why Investigate may be unavailable: never a reason to write directly. */
+export const INVESTIGATE_UNAVAILABLE_TEXT = "Investigating is unavailable until the proposal ledger can be read; nothing is written around it.";
 
 /** The seven Explore questions, in order, as the screen shows them. */
 export const EXPLORE_QUESTIONS = [

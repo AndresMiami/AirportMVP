@@ -45,7 +45,7 @@ describe("describeProposal", () => {
     expect(w.basis.map((b) => [b.text, b.resolved])).toEqual([
       ["Observation: “Input A was read twice this month” (2026-09).", true],
       ["Observation obs_gone no longer exists in the model.", false],
-      ["You said: “I think so”", true],
+      ["You wrote: “I think so”", true],
     ]);
     expect(w.uncertainty).toEqual(["A cited record is gone: Observation obs_gone no longer exists in the model.", ENGINE_CANNOT_JUDGE]);
     expect(w.consequences).toEqual([]);
