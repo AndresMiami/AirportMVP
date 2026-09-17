@@ -142,6 +142,8 @@ export function basisRows(basis: readonly BasisLine[], resolved: readonly Resolv
         return { ...base, label: "Question", text: strip(b.text, "Question that prompted the draft: ") };
       case "ai_output":
         return { ...base, label: "Suggested wording", text: `“${b.ref.text}”`, note: AI_OUTPUT_NOT_EVIDENCE };
+      case "source_item":
+        return { ...base, label: "Source", text: strip(b.text, "Source: ") };
       case "observation":
         return { ...base, label: "Record", text: strip(b.text, "Observation: ") };
       case "event":

@@ -75,10 +75,11 @@ describe("schema: only the hypothesis contract relaxed", () => {
     expect(AttractorDescriptionSchema.parse({}).confidence).toBe(0.5);
   });
 
-  it("PIN: the schema file has exactly one nullable confidence (the hypothesis) and the same required ones as before", () => {
+  it("PIN: the schema file has exactly two nullable confidences (the hypothesis, and since 7B the value entry: a collected record nobody has assessed) and the same required ones as before", () => {
     const src = readFileSync(path.join(process.cwd(), "src/types/index.ts"), "utf8");
     expect((src.match(/confidence: unitInterval\.nullable\(\)\.default\(null\)/g) ?? []).length).toBe(1);
-    expect((src.match(/confidence: unitInterval,/g) ?? []).length).toBe(6);
+    expect((src.match(/confidence: unitInterval\.nullable\(\),/g) ?? []).length).toBe(1); // ValueEntry: explicit null = not assessed, never defaulted
+    expect((src.match(/confidence: unitInterval,/g) ?? []).length).toBe(5);
     expect((src.match(/confidence: unitInterval\.default\(0\.5\)/g) ?? []).length).toBe(1);
   });
 });

@@ -101,7 +101,15 @@ const intEnv = (raw: string | undefined, fallback: number): number => {
 };
 const effortEnv = (raw: string | undefined): ProviderCallInput["effort"] => (raw === "medium" || raw === "high" ? raw : "low");
 
-const defaultLimiter = new RateLimiter(REMOTE_LIMITS.ratePerTenMinutes);
+/** The instance's shared limiter, built from HSL_AI_RATE_PER_10MIN on first
+ *  use; its state survives across requests and resets only if the
+ *  configured rate changes (review finding, 2026-09-17: the setting was
+ *  documented but never read). */
+let sharedLimiter: { max: number; limiter: RateLimiter } | null = null;
+function limiterFor(max: number): RateLimiter {
+  if (!sharedLimiter || sharedLimiter.max !== max) sharedLimiter = { max, limiter: new RateLimiter(max) };
+  return sharedLimiter.limiter;
+}
 
 const failure = (category: RemoteFailureCategory): RemoteResponse => ({ ok: false, category });
 
@@ -132,7 +140,7 @@ async function decide(req: Request, deps: FunctionDeps): Promise<{ body: RemoteR
   }
   const { payload, contextHash } = parsed.data;
   if (contentHash(canonical(payload)) !== contextHash) return { body: failure("bad_request"), status: 400, task: payload.task };
-  const limiter = deps.limiter ?? defaultLimiter;
+  const limiter = deps.limiter ?? limiterFor(intEnv(env.HSL_AI_RATE_PER_10MIN, REMOTE_LIMITS.ratePerTenMinutes));
   const address = req.headers.get("x-nf-client-connection-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   if (!limiter.allow(address, now())) return { body: failure("rate_limited"), status: 429, task: payload.task };
   const call = deps.call ?? anthropicCall;

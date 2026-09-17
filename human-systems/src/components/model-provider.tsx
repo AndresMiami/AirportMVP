@@ -7,6 +7,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { HOUSEHOLD_APP, householdServiceOptions } from "@/bootstrap/household-app";
+import { LocalStorageSourceRepository, type SourceRepository } from "@/agents/source";
 import { LocalStorageProposalRepository, ProposalService, type ApproveResult, type RecoveryOutcome } from "@/kernel";
 import { domainRegistry, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem, type EvaluatedSystem } from "@/model/evaluate";
@@ -66,6 +67,8 @@ interface ModelContextValue {
   importModel: (text: string, replace: boolean) => Promise<ImportResult>;
   /** The proposal kernel over the SAME service and store; null until storage is ready. */
   proposals: ProposalService | null;
+  /** Imported source snapshots (research agents, Step 7B): a store separate from the model, read by the kernel to re-resolve source_item bases. */
+  sources: SourceRepository | null;
   proposalRecovery: ProposalRecoveryState;
   /** The ONLY approval path: ProposalService.approve -> guarded persistence
    *  -> the persisted model is ADOPTED as React state. Nothing is saved
@@ -80,6 +83,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
   const repoRef = useRef<LocalStorageModelRepository | null>(null);
   const proposalsRef = useRef<ProposalService | null>(null);
   const [proposals, setProposals] = useState<ProposalService | null>(null);
+  const [sources, setSources] = useState<SourceRepository | null>(null);
   const [proposalRecovery, setProposalRecovery] = useState<ProposalRecoveryState>({ status: "pending", outcomes: [], message: null });
   const [status, setStatus] = useState<ModelContextValue["status"]>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +127,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
     const service = new ModelService(repo, appOptions);
     repoRef.current = repo;
     serviceRef.current = service;
-    const kernel = new ProposalService(new LocalStorageProposalRepository(window.localStorage), service);
+    const sourceStore = new LocalStorageSourceRepository(window.localStorage);
+    const kernel = new ProposalService(new LocalStorageProposalRepository(window.localStorage), service, undefined, undefined, sourceStore);
     proposalsRef.current = kernel;
     service
       .loadActiveOrSeed()
@@ -132,6 +137,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
         setSeeded(seeded);
         setMigratedFrom(repo.reports.get(model.id)?.migratedFrom ?? null);
         setModels(await service.listModels());
+        setSources(sourceStore);
         await recoverProposals(model.id);
         setProposals(kernel);
         setStatus("ready");
@@ -294,6 +300,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       exportModel,
       importModel,
       proposals,
+      sources,
       proposalRecovery,
       approveProposal,
     }),
@@ -320,6 +327,7 @@ export function ModelProvider({ children }: { children: React.ReactNode }) {
       seed,
       availableDomains,
       proposals,
+      sources,
       proposalRecovery,
       approveProposal,
     ],

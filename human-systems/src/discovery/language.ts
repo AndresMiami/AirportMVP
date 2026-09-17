@@ -186,8 +186,13 @@ export function historySentenceFor(d: VariableHistoryDescription, lens: HistoryL
 }
 
 /** True when a sentence contains a forbidden phrase (word-boundary, case-insensitive). */
-export function containsForbiddenPhrase(text: string): string | null {
-  const lower = text.toLowerCase();
+/** A person's own words (variable names, units) are masked before the
+ *  check, so the guard polices the engine's sentences and never throws on
+ *  a variable named "Improved cash flow" (review finding, 2026-09-17). */
+export function containsForbiddenPhrase(text: string, options: { ignoring?: readonly string[] } = {}): string | null {
+  let lower = text.toLowerCase();
+  const names = [...new Set((options.ignoring ?? []).map((n) => n.trim().toLowerCase()).filter((n) => n.length > 0))].sort((a, b) => b.length - a.length);
+  for (const n of names) lower = lower.split(n).join("\u2026");
   for (const p of FORBIDDEN_PHRASES) if (new RegExp(`\\b${p.replace(/\s+/g, "\\s+")}\\b`).test(lower)) return p;
   return null;
 }
