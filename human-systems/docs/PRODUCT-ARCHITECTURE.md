@@ -1026,7 +1026,67 @@ capture surface corrects this when it replaces that screen.
    tests/architecture/shell.test.ts; Chromium desktop + mobile
    re-walked every flow with the new checks. REVIEW IS FROZEN at this
    commit unless a real usability test exposes a concrete problem.
-   Next: Map.
+   STEP 6E DONE — MAP: SIMPLIFY WITHOUT CHANGING RELATIONSHIP OR LOOP
+   SEMANTICS. Unchanged: relationship schema and kinds, loop detection,
+   dynamics eligibility, direction, strength, lag, confidence, enabled
+   state, participatesInDynamics, evaluateSystem, every mutation and
+   canonical storage; the editor is NOT routed through the proposal
+   kernel in this step. The page (src/app/feedback-map/page.tsx, wrapped
+   by /map) now opens with "Map — See what seems connected in your
+   system." and one epistemic sentence ("Connections are recorded
+   relationships and working hypotheses. The map does not prove that one
+   thing causes another."), then the SAME NetworkDiagram over the same
+   evaluated variables and allRelationships (node click, connection
+   click, loop highlighting, enabled/disabled and kind/dynamics
+   distinction, direction, lag labels, keyboard access all kept; lag
+   labels hidden only under 480px for readability) with one reading hint;
+   no stat boxes, no editor, no table above it. Wording lives in
+   src/features/map/wording.ts (KIND_LABELS maps the exact enum —
+   Causal hypothesis / Association / Defined relationship / Constraint /
+   Not classified yet; the connection sentence follows the stored
+   direction — "When X rises, Y is recorded as tending to rise/fall.";
+   "causes" appears only to name a recorded causal hypothesis as a
+   hypothesis) and the highlight rule in src/features/map/selection.ts
+   (the original feedback map's rule, pinned). Selecting a variable shows
+   "Connected with X" in ordinary language; selecting a connection shows
+   a read-only summary first (kind, direction sentence, explanation, lag,
+   use note) with strength (explicitly a person-entered judgment),
+   confidence, source, dynamics participation, enabled state, linked
+   observations, notes and the stored kind under Details, and "Edit
+   connection" opening the existing RelationshipEditor (same
+   useModel().apply + canonical mutations). "Feedback patterns" lists the
+   engine's loops exactly (chain "A → B → C → back to A" + Reinforcing /
+   Balancing feedback pattern), selection highlights the same loop nodes
+   and edges, and the full LoopList entry (polarity, hypothesis status,
+   mean strength, pressure, cycle time, slowest horizon, minimum
+   confidence, per-edge lags, linked observations, notes) sits under
+   Details. "Edit map" (collapsed) keeps New relationship, Connect on
+   diagram, the unclassified filter, the editor and the complete
+   relationships table with enable/disable; "About this map" (collapsed)
+   holds the five counts read from the evaluation and the full legend.
+   Unclassified connections get one compact line ("N connections still
+   need classification, so they are not included in feedback patterns.
+   Review connections →" opens Edit map with the existing filter); an
+   orphaned connection stays a visible warning above the map with its
+   Remove action. BACKLOG (recorded, not changed): defaultRelationshipDraft
+   still initialises strength 0.5 and confidence 0.5 — AI must not rely
+   on those defaults; a later epistemic cleanup decides whether "not
+   assessed" belongs in these canonical fields. Pinned in
+   tests/features/map-wording.test.ts (labels = the exact enum, direction
+   sentences, counts read not recounted, loop ids / polarity / edgeIds /
+   variableIds, the highlight rule for loop / variable / connection
+   selection, the unclassified and orphan predicates) and
+   tests/architecture/shell.test.ts; Chromium desktop + mobile walked map
+   first with no stats/editor/table wall, variable -> connections in plain
+   words, connection -> read-only summary -> Details -> Edit connection
+   -> the existing editor saving only the edited field, Edit map with New
+   relationship / Connect on diagram / the table, a new unclassified
+   connection -> notice -> filter with loops unchanged, a feedback pattern
+   selected and its Details intact, the orphan warning visible above the
+   map, no page overflow with the map panning inside its own box. The
+   screen-by-screen redesign ends here; next is a whole-product pass
+   (navigation continuity, language consistency, empty states, mobile
+   flow) — not 5E/5F, not Library.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

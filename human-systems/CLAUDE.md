@@ -308,9 +308,32 @@ proves it; a single addHypothesis reads "Create this working
 hypothesis." with status / confidence / disconfirming state under
 Details; zero basis reads "No supporting record was cited for this
 proposal." with no disclaimer; past decisions are compact rows with
-Details and no actions; a failed write states its reason once. Next:
-Map — one coherent product over the existing capability, not more AI
-work.
+Details and no actions; a failed write states its reason once. MAP
+(6E): SIMPLIFY WITHOUT CHANGING RELATIONSHIP OR LOOP SEMANTICS — /map
+(src/app/feedback-map/page.tsx) opens "See what seems connected in your
+system." with the SAME NetworkDiagram over the same evaluated variables
+and allRelationships; src/features/map/wording.ts labels the exact kind
+enum (Causal hypothesis / Association / Defined relationship /
+Constraint / Not classified yet) and words a connection from its stored
+direction ("When X rises, Y is recorded as tending to rise/fall."),
+never "causes" except to name a recorded causal hypothesis as one;
+src/features/map/selection.ts is the original highlight rule; a
+selected variable reads "Connected with X", a selected connection is
+read-only first (Details for strength — a person-entered judgment —
+confidence, source, dynamics, enabled, linked observations, stored
+kind) and "Edit connection" opens the existing editor through
+useModel().apply and the canonical mutations (NOT the proposal kernel
+yet); "Feedback patterns" are the engine's loops exactly (chain +
+Reinforcing/Balancing) with the full LoopList entry under Details;
+"Edit map" (collapsed) keeps New relationship, Connect on diagram, the
+unclassified filter, the editor and the full table; "About this map"
+holds the five counts and the legend; unclassified connections get one
+compact line, orphaned connections stay a visible warning. BACKLOG:
+defaultRelationshipDraft still initialises strength/confidence 0.5 —
+AI must not rely on it; a later epistemic cleanup decides "not
+assessed". Never change a relationship or loop semantic to simplify
+the map. The screen-by-screen redesign ends here; next is a
+whole-product pass, not 5E/5F, not Library.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

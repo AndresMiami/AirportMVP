@@ -213,6 +213,55 @@ describe("Review 6D.1: last engine language off the first layer", () => {
   });
 });
 
+describe("Map (6E: presentation simplified, relationship and loop semantics unchanged)", () => {
+  it("map first, the same diagram inputs, read-only connection before editing, feedback patterns from the engine's loops, everything technical behind Edit map / Details / About", () => {
+    const page = read("src/app/feedback-map/page.tsx");
+    expect(page).toMatch(/<h1[^>]*>Map<\/h1>/);
+    expect(page).toContain("See what seems connected in your system.");
+    expect(page).toContain("MAP_EPISTEMIC");
+    // the same diagram over the same evaluated inputs, with every interaction still wired
+    expect(page).toContain("variables={variables}");
+    expect(page).toContain("relationships={allRelationships}");
+    expect(page).toContain("onNodeClick={handleNodeClick}");
+    expect(page).toContain("onEdgeClick={connect.active ? undefined : handleEdgeClick}");
+    expect(page).toContain("highlightFor(evaluated, { loopId: selectedLoop, nodeId: selectedNode, edgeId: editing?.id ?? selectedEdge })");
+    // the map comes before every section; stats, editor and table are not above it
+    const mapAt = page.indexOf('data-testid="map"');
+    for (const t of ["connected-with", "connection", "patterns", "edit-map", "about", "relationships-table", "relationship-editor", "new-relationship"]) expect(page.indexOf(`data-testid="${t}"`), t).toBeGreaterThan(mapAt);
+    expect(page).not.toMatch(/<Stat\b/);
+    // a clicked connection is read-only first; editing needs the explicit action, through the same editor and the same mutations
+    expect(page).toContain('data-testid="edit-connection"');
+    expect(page).toMatch(/onClick=\{\(\) => openEditor\(selectedRel\.id\)\}/);
+    expect(page).toContain("<RelationshipEditor");
+    expect(page).toContain("commit={commit}");
+    expect(page).toMatch(/return apply\(mutation\);/);
+    expect(page).toContain("mutations.setRelationshipEnabled(m, r.id, enabled)");
+    expect(page).toContain("mutations.removeRelationship(m, r.id)");
+    expect(page).toContain('mutations.nextId(model, "rel")');
+    expect(page).not.toMatch(/@\/kernel|proposals\.create/); // editing is NOT routed through the proposal kernel in this step
+    // the unclassified filter, orphan detection and the full table are preserved
+    expect(page).toContain('allRelationships.filter((r) => r.kind === "unclassified")');
+    expect(page).toContain("model.relationships.filter((r) => !shownIds.has(r.id))");
+    expect(page).toContain('data-testid="orphan-warning"');
+    expect(page).toContain("<th>Strength</th>");
+    // feedback patterns are the engine's loops; the full LoopList entry stays under Details
+    expect(page).toContain("loops.map((l) =>");
+    expect(page).toContain("<LoopList loops={[l]}");
+    expect(page).toContain("patternLabel(l.polarity)");
+    expect(page).toContain("Feedback patterns");
+    // the five counts live under About, and the wording never says "causes" as a fact
+    for (const c of ["counts.stored", "counts.inDynamics", "counts.excluded", "counts.disabled", "counts.loops"]) expect(page).toContain(c);
+    const wording = read("src/features/map/wording.ts");
+    expect(wording).not.toMatch(/from "react"|@\/domains|@\/services|@\/kernel/);
+    expect(wording).toMatch(/causal_hypothesis: "Causal hypothesis"/);
+    expect(wording).toMatch(/unclassified: "Not classified yet"/);
+    // recorded default-value debt: the editor still initialises strength / confidence at 0.5 (backlog, not changed here)
+    const editor = read("src/components/relationship-editor.tsx");
+    expect(editor).toMatch(/strength: 0\.5,\s*lag: \{ value: 0, unit: "months" \},\s*confidence: 0\.5,/);
+    expect(page).toContain("BACKLOG (recorded, not this step): defaultRelationshipDraft()");
+  });
+});
+
 describe("Library and routes", () => {
   it("Library links every advanced screen, and every existing route still has a page", () => {
     const lib = read("src/app/library/page.tsx");
