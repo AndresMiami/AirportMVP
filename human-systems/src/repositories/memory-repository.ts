@@ -1,5 +1,5 @@
 import { SystemModelSchema, type SystemModel } from "@/types";
-import type { ModelRepository, ModelSummary } from "./model-repository";
+import type { GuardedSaveResult, ModelRepository, ModelSummary } from "./model-repository";
 
 export class MemoryModelRepository implements ModelRepository {
   private models = new Map<string, SystemModel>();
@@ -14,6 +14,20 @@ export class MemoryModelRepository implements ModelRepository {
   }
   async save(model: SystemModel): Promise<void> {
     this.models.set(model.id, structuredClone(SystemModelSchema.parse(model)));
+  }
+  async saveIfRevision(model: SystemModel, expectedRevision: string | null, revisionOf: (m: SystemModel | null) => string | null): Promise<GuardedSaveResult> {
+    const validated = SystemModelSchema.parse(model);
+    // read, compare and write without yielding
+    const current = revisionOf(this.models.get(validated.id) ?? null);
+    if (current !== expectedRevision) return { ok: false, currentRevision: current };
+    this.models.set(validated.id, structuredClone(validated));
+    return { ok: true };
+  }
+  async hasStoredModels(): Promise<boolean> {
+    return this.models.size > 0;
+  }
+  async unreadable(): Promise<{ id: string; error: string }[]> {
+    return [];
   }
   async delete(id: string): Promise<void> {
     this.models.delete(id);

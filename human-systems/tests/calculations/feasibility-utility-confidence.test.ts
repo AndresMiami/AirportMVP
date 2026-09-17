@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HOUSEHOLD_EVALUATION_DIMENSIONS } from "@/domains/household/evaluation-dimensions";
 import { derivedConfidence } from "@/calculations/confidence";
 import { checkFeasibility, feasible } from "@/calculations/feasibility";
 import { utilityView } from "@/calculations/utility";
@@ -77,16 +78,28 @@ describe("A14 feasibility", () => {
 
 describe("utility view", () => {
   it("lists every dimension and computes no total without weights", () => {
-    const v = utilityView({ stability: 0.5, risk: -0.2 });
+    const v = utilityView({ stability: 0.5, risk: -0.2 }, undefined, HOUSEHOLD_EVALUATION_DIMENSIONS);
     expect(v.dimensions).toHaveLength(14);
+    expect(v.dimensions.every((d) => d.declared)).toBe(true);
     expect(v.assessedCount).toBe(2);
     expect(v.weightedTotal).toBeNull();
   });
   it("weighted total is a weight-normalised sum over assessed dimensions", () => {
-    const v = utilityView({ stability: 0.5, risk: -0.5, upside: 1 }, { stability: 1, risk: 1, autonomy: 1 });
+    const v = utilityView({ stability: 0.5, risk: -0.5, upside: 1 }, { stability: 1, risk: 1, autonomy: 1 }, HOUSEHOLD_EVALUATION_DIMENSIONS);
     // autonomy unassessed -> ignored; (1*0.5 + 1*-0.5)/(1+1) = 0
     expect(v.weightedTotal).toBeCloseTo(0, 9);
-    expect(utilityView({ stability: 0.5 }, { risk: 1 }).weightedTotal).toBeNull();
+    expect(utilityView({ stability: 0.5 }, { risk: 1 }, HOUSEHOLD_EVALUATION_DIMENSIONS).weightedTotal).toBeNull();
+  });
+  it("a historical key the domain does not declare is shown as undeclared, never dropped or reinterpreted", () => {
+    const v = utilityView({ personalityFit: 0.3, stability: 0.5 }, { personalityFit: 1, stability: 1 }, [{ key: "stability", label: "Stability", higherIsBetter: true }]);
+    expect(v.dimensions.map((d) => [d.dimension, d.declared])).toEqual([
+      ["stability", true],
+      ["personalityFit", false],
+    ]);
+    expect(v.assessedCount).toBe(2);
+    expect(v.weightedTotal).toBeCloseTo(0.4, 9);
+    // a domain that declares nothing sees only historical keys
+    expect(utilityView({ upside: 1 }, undefined, []).dimensions).toEqual([{ dimension: "upside", label: "upside", higherIsBetter: true, value: 1, declared: false }]);
   });
 });
 

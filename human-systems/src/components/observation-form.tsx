@@ -23,7 +23,7 @@ export type ObservationFormValues = Omit<ObservationInput, "id" | "links">;
 const SOURCE_TYPES: readonly SourceType[] = SourceTypeSchema.options;
 
 /** Placeholder only (never prefilled): an example of something noticed or reported, as stated. */
-export const STATEMENT_PLACEHOLDER = "Mother's HHA income depends primarily on one client.";
+export const STATEMENT_PLACEHOLDER = "Most of the inflow depends on a single source.";
 
 const EVIDENCE_SOURCE_PLACEHOLDER = "bank statement · pay stubs · conversation 2026-09-01";
 

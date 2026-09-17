@@ -5,7 +5,7 @@
   --background: #f6f7f9;
   --surface: #ffffff;
   --foreground: #1f2933;
-  --muted: #5f6b7a;
+  --muted: #4d5966; /* readable on mobile at small sizes (Step 6A.1) */
   --border: #dde2e8;
   --accent: #2f5d8a; /* current system */
   --accent-soft: #e6eef7;

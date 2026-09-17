@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { HOUSEHOLD_DOMAIN } from "@/domains/household/definition";
+import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
 import { lagToMonths } from "@/calculations/lag";
 import { createSampleHousehold } from "@/data/sample-household";
-import { migrateModel } from "@/model/migrations";
+import { migrateModel, migrationOptionsFor } from "@/model/migrations";
 import { LocalStorageModelRepository, STORAGE_KEY, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { MODEL_SCHEMA_VERSION, SystemModelSchema, type SystemModel } from "@/types";
 
@@ -28,7 +28,7 @@ function v1LagMonths(): Record<string, number> {
 
 /** A v1-shaped raw object built by hand from the sample. */
 function buildV1(): Raw {
-  const v2 = JSON.parse(JSON.stringify(createSampleHousehold())) as Raw;
+  const v2 = foldCollectionsToV4(JSON.parse(JSON.stringify(createSampleHousehold())) as Raw);
   const lagMonths = v1LagMonths();
   const relationships = (v2.relationships as Raw[]).map((r) => {
     const { sourceVariableId, targetVariableId, lag: _lag, evidence: _e, notes: _n, enabled: _en, ...rest } = r;
@@ -87,17 +87,16 @@ describe("buildV1 (test fixture sanity)", () => {
   });
 });
 
-const SYSTEM_SCOPE_KEYS = new Set(HOUSEHOLD_DOMAIN.variables.filter((v) => v.scope === "system").map((v) => v.key));
 
 describe("migrateModel v1 -> v2 -> v3", () => {
   const v1 = buildV1();
-  const result = migrateModel(v1, { systemScopeKeys: SYSTEM_SCOPE_KEYS });
+  const result = migrateModel(v1, migrationOptionsFor(v1));
 
   it("reports ok with migratedFrom 1 and a schema-valid model", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.migratedFrom).toBe(1);
-    expect(result.model.schemaVersion).toBe(4);
+    expect(result.model.schemaVersion).toBe(6);
     expect(SystemModelSchema.safeParse(result.model).success).toBe(true);
     expect(result.model.id).toBe("sample_household_okafor_reyes");
   });
@@ -161,7 +160,7 @@ describe("migrateModel v1 -> v2 -> v3", () => {
     expect(result.model.domainDefinitionId).toBe("household");
     // Everything untouched by the migration is carried over as is.
     expect(result.model.variables).toEqual(createSampleHousehold().variables);
-    expect(result.model.incomeSources).toEqual(createSampleHousehold().incomeSources);
+    expect(result.model.collections.incomeSources).toEqual(createSampleHousehold().collections.incomeSources);
     expect(result.model.loopAnnotations).toEqual(createSampleHousehold().loopAnnotations);
   });
 
@@ -181,7 +180,7 @@ describe("migrateModel on current and invalid input", () => {
     if (!r.ok) return;
     expect(r.migratedFrom).toBeNull();
     expect(r.model).toEqual(input);
-    expect(MODEL_SCHEMA_VERSION).toBe(4);
+    expect(MODEL_SCHEMA_VERSION).toBe(6);
   });
 
   it("a future version fails with a message naming both versions", () => {
@@ -189,7 +188,7 @@ describe("migrateModel on current and invalid input", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toContain("version 99");
-    expect(r.error).toContain("up to 4");
+    expect(r.error).toContain("up to 6");
   });
 
   it("non-objects and objects without schemaVersion fail", () => {
@@ -228,16 +227,16 @@ describe("LocalStorageModelRepository migrates on load and persists the upgraded
 
     const loaded = await repo.load(id);
     expect(loaded).not.toBeNull();
-    const expected = migrateModel(v1, { systemScopeKeys: SYSTEM_SCOPE_KEYS });
+    const expected = migrateModel(v1, migrationOptionsFor(v1));
     if (!expected.ok) throw new Error(expected.error);
     expect(loaded).toEqual(expected.model);
-    expect(loaded!.schemaVersion).toBe(4);
+    expect(loaded!.schemaVersion).toBe(6);
     expect(loaded!.relationships.find((r) => r.id === "r06")!.lag).toEqual({ value: 12, unit: "months" });
     expect(repo.reports.get(id)).toEqual({ id, ok: true, migratedFrom: 1 });
 
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { activeId: string; models: Record<string, Raw> };
     expect(stored.activeId).toBe(id);
-    expect(stored.models[id].schemaVersion).toBe(4);
+    expect(stored.models[id].schemaVersion).toBe(6);
     expect((stored.models[id].relationships as Raw[])[0]).toHaveProperty("lag");
     expect((stored.models[id].relationships as Raw[])[0]).not.toHaveProperty("lagMonths");
     expect(stored.models[id].observations).toEqual([]);
@@ -266,7 +265,7 @@ describe("LocalStorageModelRepository migrates on load and persists the upgraded
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> };
     expect(stored.models[good.id as string].schemaVersion).toBe(1);
     const loaded = (await repo.load(good.id as string)) as SystemModel;
-    expect(loaded.schemaVersion).toBe(4);
-    expect((JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> }).models[good.id as string].schemaVersion).toBe(4);
+    expect(loaded.schemaVersion).toBe(6);
+    expect((JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw> }).models[good.id as string].schemaVersion).toBe(6);
   });
 });

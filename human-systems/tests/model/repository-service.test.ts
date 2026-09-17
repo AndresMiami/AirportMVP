@@ -3,9 +3,10 @@ import { evaluateSystem } from "@/model/evaluate";
 import { describe, expect, it } from "vitest";
 import { createSampleHousehold } from "@/data/sample-household";
 import { DERIVED_IDS, INPUT_IDS } from "@/domains/household/keys";
-import { LocalStorageModelRepository, LEGACY_V1_KEY, STORAGE_KEY, type KeyValueStorage } from "@/repositories/local-storage-repository";
+import { LocalStorageModelRepository, LEGACY_V1_KEY, STORAGE_KEY, StorageError, type KeyValueStorage } from "@/repositories/local-storage-repository";
 import { MemoryModelRepository } from "@/repositories/memory-repository";
-import { ModelService, SAMPLE_MODEL_ID } from "@/services/model-service";
+import { ModelService } from "@/services/model-service";
+import { HOUSEHOLD_APP, householdServiceOptions } from "@/bootstrap/household-app";
 
 class FakeStorage implements KeyValueStorage {
   data = new Map<string, string>();
@@ -21,7 +22,7 @@ class FakeStorage implements KeyValueStorage {
 }
 
 describe("LocalStorageModelRepository", () => {
-  it("round-trips several models, tracks the active id, and treats corrupt data as absent", async () => {
+  it("round-trips several models, tracks the active id, and REFUSES corrupt data instead of treating it as absent", async () => {
     const s = new FakeStorage();
     const repo = new LocalStorageModelRepository(s);
     expect(await repo.list()).toEqual([]);
@@ -38,10 +39,12 @@ describe("LocalStorageModelRepository", () => {
     expect(await repo.load("second")).toBeNull();
 
     s.setItem(STORAGE_KEY, "{ not json");
-    expect(await repo.list()).toEqual([]);
+    await expect(repo.list()).rejects.toThrow(StorageError);
+    expect(s.getItem(STORAGE_KEY)).toBe("{ not json");
     s.setItem(STORAGE_KEY, JSON.stringify({ activeId: "x", models: { x: { schemaVersion: 2 } } }));
     expect(await repo.load("x")).toBeNull();
     expect(repo.reports.get("x")?.ok).toBe(false);
+    expect(await repo.hasStoredModels()).toBe(true);
     await repo.clear();
     expect(s.data.size).toBe(0);
   });
@@ -61,10 +64,10 @@ describe("ModelService", () => {
   const clock = () => "2026-09-14T12:00:00.000Z";
 
   it("seeds the sample when storage is empty and reloads it afterwards", async () => {
-    const svc = new ModelService(new MemoryModelRepository(), { now: clock });
+    const svc = new ModelService(new MemoryModelRepository(), householdServiceOptions({ now: clock }));
     const first = await svc.loadActiveOrSeed();
     expect(first.seeded).toBe(true);
-    expect(first.model.id).toBe(SAMPLE_MODEL_ID);
+    expect(first.model.id).toBe(HOUSEHOLD_APP.seed.id);
     const second = await svc.loadActiveOrSeed();
     expect(second.seeded).toBe(false);
     expect(second.model.id).toBe(first.model.id);
@@ -72,18 +75,18 @@ describe("ModelService", () => {
 
   it("creates a blank system, activates it, lists both, and switches back", async () => {
     const repo = new MemoryModelRepository();
-    const svc = new ModelService(repo, { now: clock, newId: () => "sys_test" });
+    const svc = new ModelService(repo, householdServiceOptions({ now: clock, newId: () => "sys_test" }));
     await svc.loadActiveOrSeed();
-    const blank = await svc.createBlank({ name: "Real household", systemType: "household" });
+    const blank = await svc.createBlank({ name: "Real household", systemType: "household", domainId: HOUSEHOLD_APP.defaultDomain.id });
     expect(blank.id).toBe("sys_test");
     expect(blank.relationships).toEqual([]);
     expect(blank.variables.every((v) => v.kind === "derived")).toBe(true);
     expect(await repo.getActiveId()).toBe("sys_test");
-    expect((await svc.listModels()).map((m) => m.id).sort()).toEqual([SAMPLE_MODEL_ID, "sys_test"]);
-    const back = await svc.switchActive(SAMPLE_MODEL_ID);
-    expect(back.id).toBe(SAMPLE_MODEL_ID);
+    expect((await svc.listModels()).map((m) => m.id).sort()).toEqual([HOUSEHOLD_APP.seed.id, "sys_test"]);
+    const back = await svc.switchActive(HOUSEHOLD_APP.seed.id);
+    expect(back.id).toBe(HOUSEHOLD_APP.seed.id);
     await svc.deleteModel("sys_test");
-    expect((await svc.listModels()).map((m) => m.id)).toEqual([SAMPLE_MODEL_ID]);
+    expect((await svc.listModels()).map((m) => m.id)).toEqual([HOUSEHOLD_APP.seed.id]);
     await expect(svc.switchActive("sys_test")).rejects.toThrow();
   });
 

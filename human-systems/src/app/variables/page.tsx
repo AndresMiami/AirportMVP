@@ -5,14 +5,13 @@ import { fmtValue } from "@/components/format";
 import { AppliesAsOfField, BTN_SAVE, BTN_SMALL, HistoryToggle, ResolutionHint, TargetEditor, ValueHistoryList, validFromDate, todayIso } from "@/components/history";
 import { ConfirmButton } from "@/components/system-switcher";
 import { Card, CategoryBadge, ConfidenceBadge, Loading, Note, PageHeader, SourceBadge } from "@/components/ui";
-import { CATEGORY_META, SOURCE_TYPE_META } from "@/domain/vocabulary";
-import { refFor, resolveVariable, type SubjectScope, type VariableDefinition } from "@/model/domain";
+import { categoryMeta, SOURCE_TYPE_META } from "@/domain/vocabulary";
+import { categoryVocabulary, refFor, resolveVariable, type SubjectScope, type VariableDefinition } from "@/model/domain";
 import * as mutations from "@/services/mutations";
 import {
   ChangeSpeedSchema,
   SourceTypeSchema,
   TargetModeSchema,
-  VariableCategorySchema,
   type ChangeSpeed,
   type Member,
   type SourceType,
@@ -25,7 +24,7 @@ import {
 const ORDER: VariableCategory[] = ["structure", "asset", "buffer", "dependency", "event", "agency", "person_fit", "constraint", "shock"];
 
 const BTN_PRIMARY = "rounded bg-accent text-white px-3 py-1.5 text-sm disabled:opacity-50";
-const CATEGORIES = VariableCategorySchema.options;
+
 const CHANGE_SPEEDS = ChangeSpeedSchema.options;
 const TARGET_MODES = TargetModeSchema.options;
 const SOURCE_TYPES = SourceTypeSchema.options;
@@ -323,6 +322,8 @@ export default function VariablesPage() {
 
   if (!evaluated) return <Loading />;
   const { model, domain, unassignedVariables } = evaluated;
+  const domainCategories = domain.categories ?? [];
+  const CATEGORIES = categoryVocabulary(domain);
   const members = model.profile.members;
   const groups = new Map<VariableCategory, Variable[]>();
   for (const v of evaluated.variables) {
@@ -454,13 +455,13 @@ export default function VariablesPage() {
       {inputCount === 0 ? (
         <div className="mb-4">
           <Note>
-            No input variables recorded yet. The calculated variables below already exist and fill in from the income list and from inputs added with the form further down.
+            No input variables recorded yet. The calculated variables below already exist and fill in from the domain&apos;s collections and from inputs added with the form further down.
           </Note>
         </div>
       ) : null}
       <div className="space-y-4">
         {ORDER.filter((c) => groups.has(c)).map((c) => (
-          <Card key={c} title={`${CATEGORY_META[c].label} — ${CATEGORY_META[c].description}`}>
+          <Card key={c} title={`${categoryMeta(c, domainCategories).label} — ${categoryMeta(c, domainCategories).description}`}>
             <div className="overflow-x-auto">
               <table className="data">
                 <thead>
@@ -624,7 +625,7 @@ export default function VariablesPage() {
       <div className="mt-4">
         <Card title="Add a standard input from the domain">
           <p className="text-xs text-muted mb-2">
-            The {domain.name} domain defines its inputs by key and subject: household-level keys belong to the whole system, per-person keys to one member. The calculated
+            The {domain.name} domain defines its inputs by key and subject: system-level keys belong to the whole system, per-{domain.subjectLabel.toLowerCase()} keys to one {domain.subjectLabel.toLowerCase()}. The calculated
             variables and the compounding step models read them through those keys. Adding one here creates it with NO value and no provenance; enter the value in the table
             once it exists. Standard inputs not yet present for the whole system and its active members: {missingStandardTotal}.
           </p>
@@ -688,7 +689,7 @@ export default function VariablesPage() {
                 id={`${ids}-name`}
                 type="text"
                 className="w-full"
-                placeholder="e.g. Rent as share of income"
+                placeholder="e.g. Fixed costs as a share of inflow"
                 value={draft.name}
                 onChange={(e) => edit({ name: e.target.value })}
                 onKeyDown={onEnter}
@@ -718,11 +719,11 @@ export default function VariablesPage() {
               />
             </Field>
 
-            <Field id={`${ids}-category`} label="Category" hint={CATEGORY_META[draft.category].description}>
+            <Field id={`${ids}-category`} label="Category" hint={categoryMeta(draft.category, domainCategories).description}>
               <select id={`${ids}-category`} className="w-full" value={draft.category} onChange={(e) => edit({ category: e.target.value as VariableCategory })}>
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
-                    {CATEGORY_META[c].label}
+                    {categoryMeta(c, domainCategories).label}
                   </option>
                 ))}
               </select>

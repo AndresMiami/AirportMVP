@@ -8,6 +8,8 @@
  *  - extension envelopes survive migration and reload.
  */
 import { describe, expect, it } from "vitest";
+import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
+import { collectionItems } from "@/services/mutations";
 import { registerBuiltInDomains } from "@/domains";
 import { createSampleHousehold } from "@/data/sample-household";
 import { HOUSEHOLD_VARIABLES } from "@/domains/household/variables";
@@ -39,7 +41,7 @@ class FakeStorage implements KeyValueStorage {
 
 /** A v2-shaped raw record: the v3 sample with every 3a field removed. */
 function buildV2(): Raw {
-  const v3 = JSON.parse(JSON.stringify(createSampleHousehold())) as Raw;
+  const v3 = foldCollectionsToV4(JSON.parse(JSON.stringify(createSampleHousehold())) as Raw);
   const strip = (rows: unknown, keys: string[]) =>
     (rows as Raw[]).map((row) => {
       const out = { ...row };
@@ -83,7 +85,7 @@ describe("v2 -> v3 idempotence", () => {
   it("migrates once, then passes through unchanged with migratedFrom null", () => {
     const first = migrated();
     expect(first.migratedFrom).toBe(2);
-    expect(first.model.schemaVersion).toBe(4);
+    expect(first.model.schemaVersion).toBe(6);
     const again = migrateModel(first.model, { systemScopeKeys: SYSTEM_SCOPE_KEYS });
     if (!again.ok) throw new Error(again.error);
     expect(again.migratedFrom).toBeNull();
@@ -144,7 +146,7 @@ describe("no knowledge claim is created", () => {
 
   it("income earners, constraint/action/hypothesis subjects are null; stored snapshots keep the system as subject", () => {
     const { model } = migrated();
-    expect(model.incomeSources.every((s) => s.earnerId === null)).toBe(true);
+    expect(collectionItems(model, "incomeSources").every((s) => s.earnerId === null)).toBe(true);
     expect(model.constraints.every((c) => c.subjectId === null)).toBe(true);
     expect(model.actions.every((a) => a.subjectId === null && Object.keys(a.extensions).length === 0)).toBe(true);
     expect(model.hypotheses.every((h) => h.subjectId === null && h.reviewLog.length === 0 && h.killCriteria.length === 0)).toBe(true);
@@ -170,12 +172,12 @@ describe("repository: backup and failure discipline", () => {
     s.setItem(STORAGE_KEY, JSON.stringify({ activeId: id, models: { [id]: v2 } }));
     const repo = new LocalStorageModelRepository(s);
     const loaded = await repo.load(id);
-    expect(loaded?.schemaVersion).toBe(4);
+    expect(loaded?.schemaVersion).toBe(6);
     expect(repo.reports.get(id)).toEqual({ id, ok: true, migratedFrom: 2 });
     const backups = await repo.backupsFor(id);
     expect(backups["2"]).toEqual(v2);
     const stored = JSON.parse(s.getItem(STORAGE_KEY)!) as { models: Record<string, Raw>; backups: Record<string, Record<string, Raw>> };
-    expect(stored.models[id].schemaVersion).toBe(4);
+    expect(stored.models[id].schemaVersion).toBe(6);
     expect(stored.backups[id]["2"]).toEqual(v2);
     // second load: no migration, backup untouched
     await repo.load(id);
@@ -188,7 +190,7 @@ describe("repository: backup and failure discipline", () => {
 
   it("a migration that fails validation leaves the stored record byte-identical and reports the error", async () => {
     const v2 = buildV2();
-    (v2.variables as Raw[])[0].category = "not_a_category";
+    (v2.variables as Raw[])[0].changeSpeed = "not_a_speed";
     const id = v2.id as string;
     const s = new FakeStorage();
     const before = JSON.stringify({ activeId: id, models: { [id]: v2 } });

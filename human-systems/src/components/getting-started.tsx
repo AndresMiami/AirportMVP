@@ -1,13 +1,19 @@
 "use client";
 /**
- * Nine-step checklist for building a system up from blank. Each step links
- * to the screen where it is done and shows whether the model already
+ * Setup checklist for building a system up from blank. Each step links to
+ * the screen where it is done and shows whether the model already
  * satisfies it. Display only: the checks read the stored model and the
- * evaluated system; nothing here adds data or interprets anything.
+ * evaluated system; nothing here adds data or interprets anything. The
+ * subject step and the collection steps are worded and listed from the
+ * ACTIVE DOMAIN (subjectLabel; declared collections with onboarding
+ * metadata and a route) — a domain without collections gets no collection
+ * step.
  */
 import Link from "next/link";
 import { useState } from "react";
+import { subjectLabelPluralOf } from "@/model/domain";
 import type { EvaluatedSystem } from "@/model/evaluate";
+import { subjectsOf } from "@/model/subjects";
 import type { SystemModel } from "@/types";
 
 export interface SetupStep {
@@ -21,17 +27,29 @@ export interface SetupStep {
   tracked: boolean;
 }
 
-/** The nine steps, with each check computed from the model as it stands. */
+/** The steps, with each check computed from the model as it stands. */
 export function setupSteps(model: SystemModel, evaluated: EvaluatedSystem): SetupStep[] {
   const inputVariables = model.variables.filter((v) => v.kind === "input");
+  const { domain } = evaluated;
+  const subjectPlural = subjectLabelPluralOf(domain);
+  const collectionSteps: Omit<SetupStep, "tracked">[] = (domain.collections ?? [])
+    .filter((c) => c.onboarding && c.route)
+    .map((c) => ({
+      id: `collection:${c.name}`,
+      title: c.onboarding!.title,
+      href: c.route!,
+      screen: c.label,
+      detail: c.onboarding!.detail,
+      done: (model.collections[c.name]?.origin === "domain" ? model.collections[c.name].items.length : 0) > 0,
+    }));
   const tracked: Omit<SetupStep, "tracked">[] = [
     {
-      id: "members",
-      title: "Add household members",
+      id: "subjects",
+      title: `Add ${subjectPlural.toLowerCase()}`,
       href: "/profile",
       screen: "System profile",
-      detail: "Who the system includes. An observation can name a member as its subject.",
-      done: model.profile.members.length > 0,
+      detail: `Who or what the system includes. An observation can name a ${domain.subjectLabel.toLowerCase()} as its subject.`,
+      done: subjectsOf(model, { includeArchived: true }).length > 0,
     },
     {
       id: "observations",
@@ -41,14 +59,7 @@ export function setupSteps(model: SystemModel, evaluated: EvaluatedSystem): Setu
       detail: "Things noticed or reported, kept as stated. They are evidence, never values.",
       done: model.observations.length > 0,
     },
-    {
-      id: "income",
-      title: "Add income sources",
-      href: "/income",
-      screen: "Income sources",
-      detail: "Each source with its own reliability, volatility and failure group. The household-level numbers are calculated from this list.",
-      done: model.incomeSources.length > 0,
-    },
+    ...collectionSteps,
     {
       id: "variables",
       title: "Create structural variables",
@@ -98,7 +109,7 @@ export function setupSteps(model: SystemModel, evaluated: EvaluatedSystem): Setu
       title: "Run scenarios",
       href: "/scenarios",
       screen: "Scenario simulator",
-      detail: "Structural what-ifs on the model as entered; not a prediction. Marked once the eight steps above are in place — running a scenario itself is not tracked.",
+      detail: `Structural what-ifs on the model as entered; not a prediction. Marked once the ${tracked.length} steps above are in place — running a scenario itself is not tracked.`,
       done: ready,
       tracked: false,
     },
@@ -136,7 +147,7 @@ export function GettingStarted({
           <h2 className="text-sm font-semibold">{defaultOpen ? "Getting started" : "Setup progress"}</h2>
           <p className="text-xs text-muted">
             Setup progress: {done} of {steps.length}
-            {defaultOpen ? " · this system has no income sources or input variables yet" : ""}
+            {defaultOpen ? " · this system has no records or input variables yet" : ""}
           </p>
         </div>
         <button type="button" className={BTN} aria-expanded={open} onClick={() => setOpen((o) => !o)}>

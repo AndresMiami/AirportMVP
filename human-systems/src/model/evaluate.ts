@@ -31,7 +31,7 @@ import type {
   Variable,
 } from "@/types";
 import { computeDerivedVariables, type DerivedComputation } from "./derived";
-import { domainRegistry, unassignedVariables, type DomainDefinition } from "./domain";
+import { categoryVocabulary, domainRegistry, evaluationDimensionKeys, unassignedVariables, type DomainDefinition } from "./domain";
 import { describeResolution, normalizeInstant, resolveVariableAt } from "./history";
 
 export interface EvaluateOptions {
@@ -143,12 +143,62 @@ export function evaluateSystem(model: SystemModel, options: EvaluateOptions = {}
   const memberIds = model.profile.members.filter((m) => options.includeArchivedMembers || m.status === "active").map((m) => m.id);
   const inputs = model.variables.filter((v) => v.kind === "input").map((v) => resolveVariableAt(v, valuesAsOf));
   const shells = model.variables.filter((v) => v.kind === "derived");
-  const { variables, computations } = computeDerivedVariables(inputs, shells, model.incomeSources, domain.derived, model.id, memberIds, valuesAsOf);
+  // Domain validation of DECLARED collections: schema-valid storage is not
+  // domain-valid data. A collection with an item the pack's schema refuses
+  // is reported and withheld from every calculation (unknown, never a
+  // guessed number); the record itself stays intact for correction.
+  const usable: SystemModel["collections"] = {};
+  for (const [name, envelope] of Object.entries(model.collections)) {
+    const def = (domain.collections ?? []).find((c) => c.name === name);
+    if (!def || envelope.origin !== "domain") {
+      usable[name] = envelope;
+      continue;
+    }
+    const invalid = envelope.items.filter((item) => !def.itemSchema.safeParse(item).success);
+    if (invalid.length === 0) {
+      usable[name] = envelope;
+      continue;
+    }
+    issues.push({
+      level: "warning",
+      message: `${def.label}: ${invalid.length} record${invalid.length > 1 ? "s" : ""} (${invalid.map((i) => `"${i.id}"`).join(", ")}) do${invalid.length > 1 ? "" : "es"} not match this domain's definition; the collection is withheld from calculations until corrected.`,
+    });
+  }
+  const access = {
+    declared: new Map((domain.collections ?? []).map((c) => [c.name, { confidenceField: c.confidenceField }])),
+    collections: usable,
+  };
+  const { variables, computations } = computeDerivedVariables(inputs, shells, access, domain.derived, model.id, memberIds, valuesAsOf);
+  // Opaque collections: preserved data this domain does not declare. Never
+  // evaluated, never claimed valid or invalid; the person can see it exists.
+  for (const [name, envelope] of Object.entries(model.collections)) {
+    if (access.declared.has(name) && envelope.origin === "domain") continue;
+    if (envelope.items.length === 0) continue;
+    issues.push({
+      level: "info",
+      message: `Collection "${name}" holds ${envelope.items.length} preserved record${envelope.items.length > 1 ? "s" : ""} this domain does not declare${envelope.origin === "legacy_universal" ? " (kept from an older format)" : ""}; not used in any calculation.`,
+    });
+  }
   if (asOf) {
     issues.push({
       level: "info",
-      message: `Values and targets as of ${asOf.slice(0, 10)}; relationships, constraints, hypotheses, income sources and the domain definition are today's. A stored snapshot is the record of the whole model at a past date.`,
+      message: `Values and targets as of ${asOf.slice(0, 10)}; relationships, constraints, hypotheses, domain collections and the domain definition are today's. A stored snapshot is the record of the whole model at a past date.`,
     });
+  }
+  // Historical vocabulary outside the active domain is kept, never
+  // reinterpreted; it is reported so the person can see it.
+  const vocabulary = new Set<string>(categoryVocabulary(domain));
+  const foreignCategories = model.variables.filter((v) => !vocabulary.has(v.category));
+  if (foreignCategories.length > 0) {
+    issues.push({
+      level: "info",
+      message: `${foreignCategories.length} variable${foreignCategories.length > 1 ? "s use" : " uses"} a category this domain does not declare (${[...new Set(foreignCategories.map((v) => v.category))].join(", ")}); kept as recorded.`,
+    });
+  }
+  const declaredDims = new Set(evaluationDimensionKeys(domain));
+  const foreignDims = new Set(model.actions.flatMap((a) => Object.keys(a.utility).filter((k) => !declaredDims.has(k))));
+  if (foreignDims.size > 0) {
+    issues.push({ level: "info", message: `Actions carry evaluation dimensions this domain does not declare (${[...foreignDims].sort().join(", ")}); shown as recorded.` });
   }
   const ambiguous = inputs.filter((v) => v.valueResolution === "ambiguous" || v.targetResolution === "ambiguous");
   for (const v of ambiguous) {
@@ -254,7 +304,7 @@ export function evaluateSystem(model: SystemModel, options: EvaluateOptions = {}
         cost: action.cost,
         uncertainty: action.uncertainty,
       }),
-      utility: utilityView(action.utility, model.utilityWeights),
+      utility: utilityView(action.utility, model.utilityWeights, domain.evaluationDimensions ?? []),
       rank: null,
     };
   });

@@ -3,7 +3,7 @@
  * labelled model assumptions (A6, A7). A projection with any unknown input
  * is skipped by the engine, never zero-filled.
  */
-import { annualToMonthlyRate, projectCareerCapital, projectProductiveCapital, weeklyToMonthlyHours } from "@/calculations/compounding";
+import { annualToMonthlyRate, projectCareerCapital, projectProductiveCapital, weeklyToMonthlyHours } from "./compounding";
 import type { ProjectionDefinition } from "@/model/domain";
 import { DERIVED_IDS as D, INPUT_IDS as I } from "./keys";
 

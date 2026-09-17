@@ -1,112 +1,69 @@
 /**
  * Deterministic provider for development and tests. It does not call any
- * network. Its output mirrors the example in the working concept so the
- * review-screen contract can be built and tested before a real provider.
+ * network. It returns the example analysis it was constructed with (a
+ * domain pack may supply one through its prompt fragment); the default is
+ * a neutral example that assumes no kind of system.
  */
 import type { AiProvider, AnalysisRequest } from "./provider";
 import { AiAnalysisSchema, type ParseResult } from "./schema";
 
-export const MOCK_ANALYSIS_JSON = {
-  observations: [
-    { text: "Works four days per week.", quote: "works four days per week" },
-    {
-      text: "Spends much free time sleeping or playing games.",
-      quote: "spends much of his free time sleeping or playing games",
-    },
-    {
-      text: "Has saved $10,000 over 18 months toward buying a car.",
-      quote: "saved $10,000 over 18 months toward buying a car",
-    },
-  ],
+/** A neutral example: two quantities and one relationship, no domain words. */
+export const NEUTRAL_EXAMPLE_ANALYSIS = {
+  observations: [{ text: "Quantity A was recorded as 12.", quote: "A is 12" }],
   candidate_variables: [
     {
-      name: "Saving discipline",
-      description: "Ability to accumulate money toward a defined objective.",
-      category: "agency",
-      changeSpeed: "slow",
-      qualitativeValue: "likely high",
-      statedValue: null,
-      unit: "",
-      evidence: "$10,000 accumulated toward a defined objective over 18 months.",
-      confidence: 0.85,
-      caveat: "The saving rate relative to income is unknown.",
+      name: "Quantity A",
+      description: "A recorded input of the system.",
+      category: "event",
+      changeSpeed: "fast",
+      statedValue: 12,
+      qualitativeValue: "stated as 12",
+      unit: "units",
+      evidence: "A is 12",
+      confidence: 0.6,
+      caveat: "Stated once; not yet measured.",
     },
     {
-      name: "Career-development activity during free time",
-      description: "Time in free hours spent on activities that build career capital.",
-      category: "asset",
+      name: "Quantity B",
+      description: "A slower condition the text mentions without a number.",
+      category: "structure",
       changeSpeed: "slow",
-      qualitativeValue: "apparently low",
       statedValue: null,
-      unit: "",
-      evidence: "Reported current free-time activities (sleeping, games).",
-      confidence: 0.65,
-      caveat: "Rest may be recovery from physical work; this is not a motivation judgment.",
-    },
-    {
-      name: "Liquid savings",
-      description: "Money set aside, currently earmarked for a car.",
-      category: "buffer",
-      changeSpeed: "slow",
-      qualitativeValue: "stated",
-      statedValue: 10000,
-      unit: "$",
-      evidence: "Stated directly: $10,000.",
-      confidence: 0.9,
-      caveat: "Earmarked for a purchase, so it may not function as an emergency buffer.",
+      qualitativeValue: "apparently steady",
+      unit: "units",
+      evidence: "B has been about the same for a while",
+      confidence: 0.4,
+      caveat: "No value stated.",
     },
   ],
   candidate_relationships: [
     {
-      sourceVariable: "Saving discipline",
-      targetVariable: "Liquid savings",
+      sourceVariable: "Quantity A",
+      targetVariable: "Quantity B",
       direction: "positive",
-      strengthEstimate: 0.7,
-      lagEstimate: { value: 1, unit: "months" },
-      explanation: "Consistent saving behaviour accumulates reserves.",
-      confidence: 0.7,
+      strengthEstimate: 0.4,
+      lagEstimate: { value: 2, unit: "months" },
+      explanation: "The text says B tends to follow A.",
+      confidence: 0.4,
     },
   ],
   candidate_constraints: [],
   possible_feedback_loops: [],
-  missing_information: [
-    "Monthly income and essential expenses.",
-    "Whether the four-day schedule is chosen or imposed.",
-    "Physical demands of the work (relevant to interpreting rest time).",
-  ],
+  missing_information: ["A measured value for Quantity B."],
   contradictions: [],
-  confidence_notes: [
-    "Leisure behaviour is reported, not interpreted as motivation.",
-  ],
-  candidate_structural_dimensions: [
-    {
-      name: "Goal-directed saving capacity",
-      rationale: "The text shows sustained accumulation toward a defined purchase; the default definition measures buffer size but not the capacity to accumulate deliberately.",
-      suggestedContributingVariables: ["Saving discipline", "Capital conversion rate"],
-      confidence: 0.5,
-    },
-  ],
+  confidence_notes: ["One observation supports each candidate."],
+  candidate_structural_dimensions: [],
   questions_to_reduce_uncertainty: [
-    {
-      question: "What is the monthly income, and what are the essential monthly expenses?",
-      targetsDimension: "Reliable income floor",
-      whyItMatters: "Without both, the floor ratio and buffer months cannot be computed at all.",
-      expectedInformationGain: "high",
-    },
-    {
-      question: "Is the four-day schedule chosen or imposed, and are the remaining days available for anything else?",
-      targetsDimension: "Adaptive capacity",
-      whyItMatters: "Free hours are unknown; rest time is being observed, not explained.",
-      expectedInformationGain: "medium",
-    },
+    { question: "What is the current value of Quantity B?", whyItMatters: "Nothing depending on B can be evaluated without it.", expectedInformationGain: "high" },
   ],
 };
 
 export class MockAiProvider implements AiProvider {
   readonly name = "mock";
+  constructor(private readonly example: unknown = NEUTRAL_EXAMPLE_ANALYSIS) {}
   async analyze(_request: AnalysisRequest): Promise<ParseResult> {
     void _request;
-    const parsed = AiAnalysisSchema.safeParse(MOCK_ANALYSIS_JSON);
+    const parsed = AiAnalysisSchema.safeParse(this.example);
     if (!parsed.success) return { ok: false, error: parsed.error.message };
     return { ok: true, analysis: parsed.data };
   }

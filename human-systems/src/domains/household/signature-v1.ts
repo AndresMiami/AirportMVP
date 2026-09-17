@@ -14,7 +14,7 @@ const I = INPUT_IDS;
 export const HOUSEHOLD_SIGNATURE_V1: SignatureDefinition = SignatureDefinitionSchema.parse({
   id: "household_default",
   name: "Household structural signature",
-  domain: "household",
+  domainId: "household",
   version: 1,
   maturity: "experimental",
   description:

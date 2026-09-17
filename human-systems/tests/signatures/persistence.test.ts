@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
@@ -88,7 +89,8 @@ describe("persisted signatures survive reload and migration", () => {
       expect(result.model.signatures).toEqual([]);
       expect(result.model.domainDefinitionId).toBe("household");
     }
-    const v1 = { ...raw, schemaVersion: 1 };
+    // An older record is built in its own storage shape (no v5 `collections`).
+    const v1 = { ...foldCollectionsToV4(raw), schemaVersion: 1 };
     const fromV1 = migrateModel(v1);
     expect(fromV1.ok && fromV1.model.signatures).toEqual([]);
   });

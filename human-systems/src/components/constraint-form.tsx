@@ -38,18 +38,13 @@ export const TYPE_MEANING: Record<ConstraintType, string> = {
   soft: "lowers suitability, never excludes",
 };
 
-/** Dimension keys actions declare requirements on (see the sample fixture). */
-export const DIMENSION_SUGGESTIONS = [
-  "hoursPerWeek",
-  "capitalRequired",
-  "requiresRelocation",
-  "requiresDriving",
-  "requiresLicense",
-  "heavyLifting",
-  "physicalDemand",
-  "riskLevel",
-  "minimumMonthlyIncome",
-] as const;
+/** Dimension keys to suggest for a check: the ones the active domain's
+ *  constraint templates use, plus any the caller already knows (keys the
+ *  system's actions declare requirements on). Suggestions only; any key
+ *  is allowed. */
+export function dimensionSuggestions(templates: readonly ConstraintTemplate[], known: readonly string[] = []): string[] {
+  return [...new Set([...templates.flatMap((t) => (t.check ? [t.check.dimension] : [])), ...known])].sort();
+}
 
 function limitWord(limit: number | boolean): string {
   return typeof limit === "boolean" ? (limit ? "yes" : "no") : String(limit);
@@ -197,6 +192,7 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor?: st
 export function ConstraintForm({
   initial,
   templates,
+  knownDimensions = [],
   members,
   systemId,
   onSubmit,
@@ -209,6 +205,8 @@ export function ConstraintForm({
   initial?: Constraint;
   /** Quick-start templates from the active domain (evaluated.domain.constraintTemplates). */
   templates: readonly ConstraintTemplate[];
+  /** Dimension keys already in use in this system (actions' requirements), offered as suggestions. */
+  knownDimensions?: readonly string[];
   /** Members from model.profile.members, for the subject select. */
   members: readonly Member[];
   /** model.id: the subject meaning "whole system". */
@@ -398,7 +396,7 @@ export function ConstraintForm({
                   onChange={(e) => setDimension(e.target.value)}
                 />
                 <datalist id={listId}>
-                  {DIMENSION_SUGGESTIONS.map((d) => (
+                  {dimensionSuggestions(templates, knownDimensions).map((d) => (
                     <option key={d} value={d} />
                   ))}
                 </datalist>

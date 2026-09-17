@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { incomeSourcesOf } from "@/features/household/income";
 import { registerBuiltInDomains } from "@/domains";
 registerBuiltInDomains();
 import { createSampleHousehold } from "@/data/sample-household";
@@ -49,11 +50,11 @@ describe("computeDerivedVariables (through evaluateSystem)", () => {
   it("A13: confidence is the minimum of inputs, 0 when a value cannot be computed", () => {
     const m = createSampleHousehold();
     const ev = evaluateSystem(m);
-    const minSourceConf = Math.min(...m.incomeSources.map((s) => s.confidence));
+    const minSourceConf = Math.min(...incomeSourcesOf(m).map((s) => s.confidence));
     expect(ev.variableById.get(DERIVED_IDS.reliableFloor)!.confidence).toBe(minSourceConf);
     // buffer months = reserves (0.95) + essentials (0.85) -> 0.85
     expect(ev.variableById.get(DERIVED_IDS.bufferMonths)!.confidence).toBe(0.85);
-    const noIncome = evaluateSystem({ ...m, incomeSources: [] });
+    const noIncome = evaluateSystem({ ...m, collections: {} });
     const ti = noIncome.variableById.get(DERIVED_IDS.totalIncome)!;
     expect(ti.currentValue).toBeNull();
     expect(ti.confidence).toBe(0);

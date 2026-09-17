@@ -15,7 +15,7 @@
  */
 import { useMemo } from "react";
 import { formatLag } from "@/calculations/lag";
-import { CATEGORY_META } from "@/domain/vocabulary";
+import { categoryMeta } from "@/domain/vocabulary";
 import type { Relationship, Variable, VariableCategory } from "@/types";
 
 const CATEGORY_ORDER: VariableCategory[] = [
@@ -58,6 +58,45 @@ function activate(e: React.KeyboardEvent, fn: () => void) {
   }
 }
 
+/** The complete legend for the network: every stroke, the lag label, the calculated-variable ring, and the selection / pending markers when relevant. Rendered under the graph by default, or wherever a simplified surface keeps its full legend. */
+export function NetworkLegend({ selectedEdge = false, connectMode = false }: { selectedEdge?: boolean; connectMode?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted mt-2">
+      <span>
+        <span className="inline-block w-6 border-t-2 border-accent align-middle mr-1" /> positive (same direction)
+      </span>
+      <span>
+        <span className="inline-block w-6 border-t-2 border-dashed border-warn align-middle mr-1" /> negative (opposite direction)
+      </span>
+      <span>
+        <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.nonDynamics }} /> not in dynamics (unclassified / association / constraint)
+      </span>
+      <span>
+        <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.disabled, opacity: 0.6 }} /> disabled (kept, excluded from loops)
+      </span>
+      <span>
+        <span className="inline-block rounded border border-border bg-surface px-1 align-middle mr-1 tabular-nums" style={{ fontSize: "0.65rem" }}>
+          2 weeks
+        </span>
+        label = lag (none shown when immediate)
+      </span>
+      <span>
+        <span className="inline-block w-3 h-3 rounded-full border border-dashed border-muted bg-accent-soft align-middle mr-1" /> calculated variable
+      </span>
+      {selectedEdge ? (
+        <span>
+          <span className="inline-block w-6 border-t-4 align-middle mr-1" style={{ borderColor: COLOR.ink, opacity: 0.3 }} /> selected edge (open in the editor)
+        </span>
+      ) : null}
+      {connectMode ? (
+        <span>
+          <span className="inline-block w-3 h-3 rounded-full border-2 border-dashed border-desired align-middle mr-1" /> pending source
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function NetworkDiagram({
   variables,
   relationships,
@@ -68,6 +107,7 @@ export function NetworkDiagram({
   connectMode = false,
   showIsolatedNodes = false,
   showLagLabels = true,
+  showLegend = true,
   onNodeClick,
   onEdgeClick,
 }: {
@@ -84,6 +124,8 @@ export function NetworkDiagram({
   /** Also lay out variables that have no edge yet (used in connect mode). */
   showIsolatedNodes?: boolean;
   showLagLabels?: boolean;
+  /** The full technical legend under the graph (default). A simplified surface renders NetworkLegend elsewhere instead. */
+  showLegend?: boolean;
   onNodeClick?: (id: string) => void;
   /** Clicking an edge's path or its lag label. */
   onEdgeClick?: (id: string) => void;
@@ -281,50 +323,15 @@ export function NetworkDiagram({
                 strokeWidth={pending || hl ? 2.5 : 1.25}
                 strokeDasharray={derived ? "3 2" : undefined}
               />
-              <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="10" fill={COLOR.muted}>
-                {CATEGORY_META[v.category].short.slice(0, 5)}
-              </text>
               <text x={lx} y={ly} textAnchor={anchor} fontSize="12" fill={isolated ? COLOR.muted : COLOR.ink}>
                 {v.name.length > 26 ? `${v.name.slice(0, 25)}…` : v.name}
               </text>
-              <title>{`${v.name}\n${v.description}`}</title>
+              <title>{`${v.name} · ${categoryMeta(v.category).label}${derived ? " · calculated" : ""}\n${v.description}`}</title>
             </g>
           );
         })}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted mt-2">
-        <span>
-          <span className="inline-block w-6 border-t-2 border-accent align-middle mr-1" /> positive (same direction)
-        </span>
-        <span>
-          <span className="inline-block w-6 border-t-2 border-dashed border-warn align-middle mr-1" /> negative (opposite direction)
-        </span>
-        <span>
-          <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.nonDynamics }} /> not in dynamics (unclassified / association / constraint)
-        </span>
-        <span>
-          <span className="inline-block w-6 border-t border-dotted align-middle mr-1" style={{ borderColor: COLOR.disabled, opacity: 0.6 }} /> disabled (kept, excluded from loops)
-        </span>
-        <span>
-          <span className="inline-block rounded border border-border bg-surface px-1 align-middle mr-1 tabular-nums" style={{ fontSize: "0.65rem" }}>
-            2 weeks
-          </span>
-          label = lag (none shown when immediate)
-        </span>
-        <span>
-          <span className="inline-block w-3 h-3 rounded-full border border-dashed border-muted bg-accent-soft align-middle mr-1" /> calculated variable
-        </span>
-        {selectedEdgeId ? (
-          <span>
-            <span className="inline-block w-6 border-t-4 align-middle mr-1" style={{ borderColor: COLOR.ink, opacity: 0.3 }} /> selected edge (open in the editor)
-          </span>
-        ) : null}
-        {connectMode ? (
-          <span>
-            <span className="inline-block w-3 h-3 rounded-full border-2 border-dashed border-desired align-middle mr-1" /> pending source
-          </span>
-        ) : null}
-      </div>
+      {showLegend ? <NetworkLegend selectedEdge={selectedEdgeId !== null} connectMode={connectMode} /> : null}
     </div>
   );
 }

@@ -292,6 +292,7 @@ export default function ConstraintsPage() {
           <ConstraintForm
             key="create"
             templates={domain.constraintTemplates}
+            knownDimensions={[...new Set(model.actions.flatMap((a) => Object.keys(a.requirements)))]}
             members={members}
             systemId={model.id}
             onSubmit={(values: ConstraintFormValues) => {

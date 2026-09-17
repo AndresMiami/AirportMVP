@@ -7,48 +7,27 @@ import { useModel } from "@/components/model-provider";
 import { fmtDelta, fmtPct, fmtValue } from "@/components/format";
 import { Sparkline } from "@/components/sparkline";
 import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
-import { INPUT_IDS } from "@/domains/household/keys";
-import { resolveVariable, subjectRef, systemRef, type SubjectScope, type VariableRef } from "@/model/domain";
+import { resolveVariable, subjectRef, systemRef, type ScenarioPreset, type SubjectScope, type VariableRef } from "@/model/domain";
 import { compareScenario } from "@/scenarios/compare";
-import type { Member, Scenario, ScenarioChange, SystemModel } from "@/types";
+import { collectionItems } from "@/services/mutations";
+import type { CollectionItem, Member, Scenario, ScenarioChange, SystemModel } from "@/types";
 
 interface Draft {
   variableDeltas: Record<string, number>;
-  incomeAmounts: Record<string, number>;
+  /** Direct values for declared collection items: "collection\u0000itemId\u0000field" -> value. */
+  itemFields: Record<string, number>;
   horizonMonths: number;
 }
 
-const EMPTY: Draft = { variableDeltas: {}, incomeAmounts: {}, horizonMonths: 24 };
+const EMPTY: Draft = { variableDeltas: {}, itemFields: {}, horizonMonths: 24 };
 
-/** A preset names domain KEYS, never variable ids: each key is resolved
- *  for the chosen subject at click time (system-scope keys for the whole
- *  system, member-scope keys for the member picked on the left). */
-interface Preset {
-  name: string;
-  description: string;
-  deltas: { key: string; scope: SubjectScope; delta: number }[];
-}
+const fieldKey = (collection: string, itemId: string, field: string) => `${collection}\u0000${itemId}\u0000${field}`;
 
-const PRESETS: Preset[] = [
-  {
-    name: "Reserves +$10,000",
-    description: "A one-off addition to liquid reserves.",
-    deltas: [{ key: INPUT_IDS.liquidReserves, scope: "system", delta: 10000 }],
-  },
-  {
-    name: "Protected time +15 h/week",
-    description: "More hours reliably reserved for compounding, for the chosen member.",
-    deltas: [{ key: INPUT_IDS.protectedHours, scope: "member", delta: 15 }],
-  },
-  {
-    name: "One path instead of three",
-    description: "Major paths −2, switching frequency −1.5/yr, for the chosen member.",
-    deltas: [
-      { key: INPUT_IDS.majorPaths, scope: "member", delta: -2 },
-      { key: INPUT_IDS.switchingFrequency, scope: "member", delta: -1.5 },
-    ],
-  },
-];
+/** Presets come from the ACTIVE DOMAIN's presentation configuration. A
+ *  preset names domain KEYS, never variable ids: each key is resolved for
+ *  the chosen subject at click time (system-scope keys for the whole
+ *  system, member-scope keys for the subject picked on the left). */
+type Preset = ScenarioPreset;
 
 const NOT_IN_SYSTEM = "not in this system";
 
@@ -103,9 +82,12 @@ export default function ScenariosPage() {
     for (const [variableId, delta] of Object.entries(draft.variableDeltas)) {
       if (delta !== 0) changes.push({ kind: "adjustVariable", variableId, delta });
     }
-    for (const [incomeSourceId, monthlyAmount] of Object.entries(draft.incomeAmounts)) {
-      const current = evaluated.model.incomeSources.find((s) => s.id === incomeSourceId)?.monthlyAmount;
-      if (current !== undefined && monthlyAmount !== current) changes.push({ kind: "setIncomeSourceAmount", incomeSourceId, monthlyAmount });
+    for (const [key, value] of Object.entries(draft.itemFields)) {
+      const [collection, itemId, field] = key.split("\u0000");
+      const current = collectionItems(evaluated.model, collection).find((it) => it.id === itemId)?.[field];
+      if (typeof current === "number" && value !== current) {
+        changes.push({ kind: "updateCollectionItem", collection, itemId, patch: { [field]: value } });
+      }
     }
     return { id: "draft", name: "Draft scenario", description: "", changes, horizonMonths: draft.horizonMonths };
   }, [draft, evaluated]);
@@ -116,6 +98,10 @@ export default function ScenariosPage() {
   const { model, variableById } = evaluated;
   const members = model.profile.members;
   const activeMembers = members.filter((m) => m.status === "active");
+  const { domain } = evaluated;
+  const PRESETS: readonly Preset[] = domain.presentation?.scenarioPresets ?? [];
+  /** Declared collections offering numeric fields a scenario may set. */
+  const scenarioCollections = (domain.collections ?? []).filter((c) => (c.scenarioFields?.length ?? 0) > 0);
   const inputs = evaluated.variables.filter((v) => v.kind === "input" && v.currentValue !== null);
   const hasChanges = scenario.changes.length > 0;
   const changedDerived = comparison.variableDeltas.filter((d) => d.delta !== null && Math.abs(d.delta) > 1e-9);
@@ -159,7 +145,7 @@ export default function ScenariosPage() {
             {memberPresets ? (
               <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
                 <label htmlFor={`${ids}-preset-member`} className="text-muted">
-                  Per-person presets apply to
+                  Per-{domain.subjectLabel.toLowerCase()} presets apply to
                 </label>
                 <select
                   id={`${ids}-preset-member`}
@@ -167,7 +153,7 @@ export default function ScenariosPage() {
                   value={chosenMember ?? NO_MEMBER}
                   onChange={(e) => setPresetMember(e.target.value === NO_MEMBER ? null : e.target.value)}
                 >
-                  {activeMembers.length === 0 ? <option value={NO_MEMBER}>no active member</option> : null}
+                  {activeMembers.length === 0 ? <option value={NO_MEMBER}>no active {domain.subjectLabel.toLowerCase()}</option> : null}
                   {members.map((m) => (
                     <option key={m.id} value={m.id}>
                       {memberOptionLabel(m)}
@@ -225,30 +211,41 @@ export default function ScenariosPage() {
               </table>
             </div>
           </Card>
-          <Card title="Income sources (set monthly amount)">
-            <table className="data">
-              <tbody>
-                {model.incomeSources.map((s) => (
-                  <tr key={s.id}>
-                    <td className="text-xs">
-                      {s.name}
-                      <div className="text-muted tabular-nums">now ${s.monthlyAmount.toLocaleString()}</div>
-                    </td>
-                    <td>
-                      <NumberField
-                        value={draft.incomeAmounts[s.id] ?? s.monthlyAmount}
-                        min={0}
-                        className="w-24"
-                        ariaLabel={`Amount ${s.name}`}
-                        onCommit={(n) => setDraft((d) => ({ ...d, incomeAmounts: { ...d.incomeAmounts, [s.id]: n ?? 0 } }))}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="text-xs text-muted mt-2">Income concentration and volatility are calculated, so they change here by changing the sources.</p>
-          </Card>
+          {scenarioCollections.map((c) => (
+            <Card key={c.name} title={`${c.label} (set ${c.scenarioFields!.map((f) => f.label.toLowerCase()).join(", ")})`}>
+              <table className="data">
+                <tbody>
+                  {collectionItems(model, c.name).map((it) =>
+                    c.scenarioFields!.map((f) => {
+                      const current = (it as CollectionItem)[f.field];
+                      if (typeof current !== "number") return null;
+                      const key = fieldKey(c.name, it.id, f.field);
+                      const itemName = typeof it.name === "string" ? it.name : it.id;
+                      return (
+                        <tr key={key}>
+                          <td className="text-xs">
+                            {itemName}
+                            {c.scenarioFields!.length > 1 ? <span className="text-muted"> · {f.label}</span> : null}
+                            <div className="text-muted tabular-nums">now {current.toLocaleString()}</div>
+                          </td>
+                          <td>
+                            <NumberField
+                              value={draft.itemFields[key] ?? current}
+                              min={f.min}
+                              className="w-24"
+                              ariaLabel={`${f.label} ${itemName}`}
+                              onCommit={(n) => setDraft((d) => ({ ...d, itemFields: { ...d.itemFields, [key]: n ?? 0 } }))}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    }),
+                  )}
+                </tbody>
+              </table>
+              <p className="text-xs text-muted mt-2">Calculated values that read this collection change here by changing its records.</p>
+            </Card>
+          ))}
           <Card title="Projection horizon">
             <NumberField value={draft.horizonMonths} min={1} max={240} className="w-24" onCommit={(n) => setDraft((d) => ({ ...d, horizonMonths: Math.max(1, Math.min(240, Math.round(n ?? 24))) }))} /> <span className="text-xs text-muted">months</span>
           </Card>

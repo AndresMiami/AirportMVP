@@ -11,7 +11,7 @@
  * currentValue / sourceType / confidence are ALWAYS overwritten here.
  */
 import { derivedConfidence } from "@/calculations/confidence";
-import type { IncomeSource, StoredVariable, SubjectId, Variable } from "@/types";
+import type { CollectionItem, Collections, StoredVariable, SubjectId, Variable } from "@/types";
 import { resolveVariableAt } from "./history";
 import {
   refFor,
@@ -24,9 +24,18 @@ import {
   type VariableRef,
 } from "./domain";
 
-/** Confidence of the income-source list as a whole (A13: the minimum). */
-export function incomeSourcesConfidence(sources: readonly IncomeSource[]): number {
-  return derivedConfidence(sources.map((s) => s.confidence));
+/** Confidence of a collection as a whole (A13: the minimum of the items'
+ *  declared confidence field). null when there are no items or no field is
+ *  declared; an item without a numeric value counts as unknown (0). */
+export function collectionConfidence(items: readonly CollectionItem[], confidenceField: string | undefined): number | null {
+  if (items.length === 0 || !confidenceField) return null;
+  return derivedConfidence(items.map((it) => (typeof it[confidenceField] === "number" ? (it[confidenceField] as number) : 0)));
+}
+
+export interface CollectionAccess {
+  /** Declared collection names with their confidence field (undefined = none). */
+  declared: ReadonlyMap<string, { confidenceField?: string }>;
+  collections: Collections;
 }
 
 /** A derived SHELL for a definition and subject: the stored record that
@@ -85,7 +94,7 @@ function inputRef(input: DerivedInputRef, subjectId: SubjectId, systemId: string
 export function computeDerivedVariables(
   inputs: readonly Variable[],
   shells: readonly StoredVariable[],
-  incomeSources: readonly IncomeSource[],
+  access: CollectionAccess,
   definitions: readonly DerivedDefinition[],
   systemId: string,
   memberIds: readonly SubjectId[] = [],
@@ -97,7 +106,14 @@ export function computeDerivedVariables(
   const derivedValues = new Map<string, Map<SubjectId, number | null>>();
   const derivedConf = new Map<string, Map<SubjectId, number>>();
   const computations: DerivedComputation[] = [];
-  const srcConf = incomeSourcesConfidence(incomeSources);
+  /** Items of a DECLARED collection; reading an undeclared one is a
+   *  definition bug (an opaque legacy collection is never read). */
+  const itemsOf = (def: DerivedDefinition, name: string): readonly CollectionItem[] => {
+    if (!def.collectionsRead.includes(name)) throw new Error(`Derived definition "${def.key}" reads undeclared collection "${name}"; declare it in collectionsRead`);
+    if (!access.declared.has(name)) throw new Error(`Derived definition "${def.key}" reads collection "${name}" which this domain does not declare`);
+    const envelope = access.collections[name];
+    return envelope && envelope.origin === "domain" ? envelope.items : [];
+  };
 
   const declared = (def: DerivedDefinition, list: DerivedInputRef[], key: string, what: string): DerivedInputRef => {
     const found = list.find((i) => i.key === key);
@@ -116,9 +132,10 @@ export function computeDerivedVariables(
       };
       const ctx: DerivedContext = {
         subjectId,
-        incomeSources,
         value: (key) => inputVariable(key)?.currentValue ?? null,
         derived: (key) => derivedValues.get(key)?.get(derivedSubject(key)) ?? null,
+        collection: <T extends CollectionItem = CollectionItem>(name: string) => itemsOf(def, name) as readonly T[],
+        collectionConfidence: (name) => collectionConfidence(itemsOf(def, name), access.declared.get(name)?.confidenceField),
       };
       const current = def.compute(ctx);
       const confidences: number[] = [];
@@ -134,9 +151,15 @@ export function computeDerivedVariables(
         if (dv === null || dv === undefined) missingInputs.push(input.key);
         else confidences.push(derivedConf.get(input.key)?.get(target) ?? 0);
       }
-      if (def.usesIncomeSources) {
-        if (incomeSources.length === 0) missingInputs.push("incomeSources");
-        else confidences.push(srcConf);
+      for (const name of def.collectionsRead) {
+        const items = itemsOf(def, name);
+        if (items.length === 0) {
+          missingInputs.push(name);
+          continue;
+        }
+        // No declared confidence field = the collection's confidence is
+        // unknown; it pulls the minimum to 0 rather than being fabricated.
+        confidences.push(collectionConfidence(items, access.declared.get(name)?.confidenceField) ?? 0);
       }
       const confidence = current === null ? 0 : derivedConfidence(confidences);
       const shell = stored.get(storedKey(def.key, subjectId)) ?? defaultDerivedVariable(def, subjectId, systemId);

@@ -7,7 +7,7 @@ import {
   projectProductiveCapital,
   projectSeries,
   weeklyToMonthlyHours,
-} from "@/calculations/compounding";
+} from "@/domains/household/compounding";
 
 describe("A6 career capital", () => {
   it("adds rate*q*h*p and subtracts switching cost", () => {

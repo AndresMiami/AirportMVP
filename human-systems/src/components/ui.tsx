@@ -1,6 +1,8 @@
-import { CATEGORY_META, SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
+"use client";
+import { categoryMeta, SOURCE_TYPE_META, confidenceLabel } from "@/domain/vocabulary";
 import type { SourceType, VariableCategory } from "@/types";
 import { fmtConfidence } from "./format";
+import { useModel } from "./model-provider";
 
 export function PageHeader({ title, lede }: { title: string; lede?: string }) {
   return (
@@ -88,7 +90,7 @@ export function ConfidenceBadge({ confidence }: { confidence: number }) {
 }
 
 export function CategoryBadge({ category }: { category: VariableCategory }) {
-  const meta = CATEGORY_META[category];
+  const meta = categoryMeta(category);
   return (
     <span title={meta.description} className="inline-block rounded px-1.5 py-0.5 text-xs bg-background border border-border">
       {meta.short}
@@ -104,6 +106,10 @@ export function Note({ children, tone = "neutral" }: { children: React.ReactNode
   );
 }
 
+/** Page-level placeholder while the model loads. Under a terminal storage
+ *  error the storage notice already says what happened, so nothing is shown. */
 export function Loading() {
+  const { status } = useModel();
+  if (status === "error") return null;
   return <p className="text-sm text-muted">Loading the model from this browser…</p>;
 }

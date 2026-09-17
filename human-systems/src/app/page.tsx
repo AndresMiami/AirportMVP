@@ -1,274 +1,277 @@
 "use client";
+/**
+ * HOME (Step 6A, converged visually in 6A.1): the notebook is the product;
+ * analysis appears only when there is something worth noticing.
+ *
+ *   What are you thinking about?   -> a browser-local draft (never the model)
+ *   Something keeps showing up     -> ONE strongest repetition from the
+ *                                     deterministic History engine, worded
+ *                                     for Home; the rest is a count
+ *   Needs your review              -> the proposal ledger, only when open
+ *   Working explanations           -> the canonical hypotheses, only when any
+ *
+ * Home invents no analysis. "Reflect on this" runs the CONFIGURED task
+ * provider (Step 7A: the real reflection service when the site is built
+ * with NEXT_PUBLIC_AI_PROVIDER=remote, the deterministic demo otherwise)
+ * through the 5B/5C context and output contracts, read-only, only on the
+ * person's tap, and never before the boundary has been shown once in this
+ * browser; the result is bound to the contextHash it answered and hides the
+ * moment the model, the date or the text changes that context (6A.1.1).
+ * A failed call is one calm line with its safe category behind Details;
+ * nothing is retried, nothing is written. Absence renders nothing: no
+ * empty-state cards.
+ */
 import Link from "next/link";
-import { useId } from "react";
-import { GettingStarted } from "@/components/getting-started";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { providerPayload, type AiContext } from "@/ai/context";
+import { CONFIGURED_PROVIDER_KIND, createTaskProvider } from "@/ai/task-select";
+import { AiDisclosure, AiFailure } from "@/components/ai-boundary";
 import { useModel } from "@/components/model-provider";
-import { fmtPct, fmtValue } from "@/components/format";
-import { SystemSwitcher } from "@/components/system-switcher";
-import { Card, Loading, Note, PageHeader, Stat } from "@/components/ui";
-import { DERIVED_IDS, INPUT_IDS, OTHER_KEYS } from "@/domains/household/keys";
-import { resolveVariable, subjectRef, systemRef, type SubjectScope } from "@/model/domain";
-import type { Variable } from "@/types";
+import { Loading, Note } from "@/components/ui";
+import { readConsent, writeConsent } from "@/features/ai/consent";
+import { DISCLOSURE_NOTE, NOTHING_SAVED, REFLECTION_FAILED, needsDisclosure, providerBadge, responseHeading, sharedLines } from "@/features/ai/wording";
+import { openProposalCount, recurrenceOverview, workingHypotheses } from "@/features/home/cards";
+import { readDraft, writeDraft } from "@/features/home/draft";
+import { homeContext, visibleReflection, type HomeReflection } from "@/features/home/reflection";
+import type { MutationProposal } from "@/kernel";
 
-/** Headline keys of the household domain. System-scope keys resolve once;
- *  member-scope keys resolve once per active member. */
-const HEADLINE_KEYS: { key: string; scope: SubjectScope }[] = [
-  { key: DERIVED_IDS.floorRatio, scope: "system" },
-  { key: DERIVED_IDS.bufferMonths, scope: "system" },
-  { key: DERIVED_IDS.reliableFloor, scope: "system" },
-  { key: DERIVED_IDS.monthlySurplus, scope: "system" },
-  { key: DERIVED_IDS.incomeConcentration, scope: "system" },
-  { key: DERIVED_IDS.failureCorrelation, scope: "system" },
-  { key: OTHER_KEYS.financialPressure, scope: "system" },
-  { key: INPUT_IDS.protectedHours, scope: "member" },
-  { key: INPUT_IDS.careerCapital, scope: "member" },
-  { key: INPUT_IDS.majorPaths, scope: "member" },
-];
-
-const BTN = "rounded border border-border bg-background px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50";
-
-/** Today's calendar date in the browser's zone, as the date input expects it. */
-function todayIso(): string {
+const KIND = CONFIGURED_PROVIDER_KIND;
+const PAYLOAD_HREF = "/ai?task=interpret_free_text&source=home-draft";
+const todayIso = () => {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+};
 
-/** "View as of": a date input plus a way back to today. The date input
- *  cannot pick a future day; the engine treats a date as the end of that
- *  day. Display and input only: it changes how values are READ, never what
- *  is stored. */
-function ViewAsOfControl({ asOf, setAsOf }: { asOf: string | null; setAsOf: (d: string | null) => void }) {
-  const id = useId();
-  const today = todayIso();
+const truncate = (s: string, max = 110) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
+
+/** The one card Home allows real weight: a subtle surface, one label in
+ *  sentence case, one sentence, one action. */
+function Insight({ label, title, children, action, tone = "neutral" }: { label: string; title: string; children?: React.ReactNode; action: { href: string; label: string }; tone?: "neutral" | "attention" }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <label htmlFor={id} className="text-muted">
-        View as of
-      </label>
-      <input
-        id={id}
-        type="date"
-        max={today}
-        value={asOf ? asOf.slice(0, 10) : ""}
-        onChange={(e) => {
-          const v = e.target.value;
-          setAsOf(v && v <= today ? v : null);
-        }}
-      />
-      <button type="button" className={BTN} disabled={!asOf} onClick={() => setAsOf(null)}>
-        Back to today
-      </button>
-      {asOf ? null : <span className="text-muted">Showing today&apos;s values.</span>}
-    </div>
+    <section className={`rounded-xl border bg-surface px-5 py-4 ${tone === "attention" ? "border-warn/40" : "border-border/70"}`} data-home-card={label}>
+      <p className="text-sm text-muted">{label}</p>
+      <h2 className="mt-1.5 text-[17px] font-medium leading-snug">{title}</h2>
+      {children ? <div className="mt-1.5 text-[15px] leading-relaxed text-muted">{children}</div> : null}
+      <Link href={action.href} className="mt-3 inline-block text-[15px] font-medium text-accent hover:underline">
+        {action.label} →
+      </Link>
+    </section>
   );
 }
 
-export default function DashboardPage() {
-  const { status, evaluated, isSample, migratedFrom, models, resetToSample, error, asOf, setAsOf } = useModel();
-  if (status === "error") return <Note tone="warn">Could not load the model: {error}</Note>;
-  if (status === "loading" || !evaluated) return <Loading />;
+export default function HomePage() {
+  const { status, model, evaluated, proposals, proposalRecovery, asOf, isSample } = useModel();
+  const [draft, setDraft] = useState("");
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [ledger, setLedger] = useState<MutationProposal[] | null>(null);
+  const [reflection, setReflection] = useState<HomeReflection | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [disclosing, setDisclosing] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [showShared, setShowShared] = useState(false);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const today = todayIso();
 
-  const { model, loops, gap, issues, unassignedVariables } = evaluated;
-  const infoNotes = issues.filter((i) => i.level === "info");
-  const problems = issues.filter((i) => i.level !== "info");
-  const activeMembers = model.profile.members.filter((m) => m.status === "active");
-  /** Headline variables present in this system, labelled per member where the key is per person. */
-  const headline: { variable: Variable; label: string }[] = [];
-  for (const { key, scope } of HEADLINE_KEYS) {
-    if (scope === "system") {
-      const v = resolveVariable(evaluated.variables, model.id, systemRef(key));
-      if (v) headline.push({ variable: v, label: v.name });
-    } else {
-      for (const m of activeMembers) {
-        const v = resolveVariable(evaluated.variables, model.id, subjectRef(key, m.id));
-        if (v) headline.push({ variable: v, label: `${v.name} — ${m.label}` });
-      }
+  useEffect(() => {
+    // the boundary acknowledgement is a per-browser convenience, read once
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAcknowledged(readConsent());
+  }, []);
+
+  useEffect(() => {
+    if (!model || loaded === model.id) return;
+    // the draft is a per-viewer convenience in this browser, never model state
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(readDraft(model.id));
+    setLoaded(model.id);
+  }, [model, loaded]);
+
+  // the writing surface grows with the note instead of scrolling or resizing
+  useEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 168)}px`;
+  }, [draft, model]);
+
+  useEffect(() => {
+    if (!proposals || !model || proposalRecovery.status !== "done") return;
+    let cancelled = false;
+    void proposals.list(model.id).then((all) => {
+      if (!cancelled) setLedger(all);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [proposals, model, proposalRecovery.status]);
+
+  const patterns = useMemo(() => (model ? recurrenceOverview(model, asOf ? asOf.slice(0, 10) : today) : { strongest: null, more: 0 }), [model, asOf, today]);
+  // the context the demo would answer RIGHT NOW; a stored reflection is shown only while it matches
+  const current = useMemo(() => (model ? homeContext(model, draft, asOf, today) : null), [model, draft, asOf, today]);
+
+  if (status === "error") return null; // the storage notice above says what happened
+  if (status === "loading" || !model || !evaluated) return <Loading />;
+
+  const open = ledger ? openProposalCount(ledger) : null;
+  const working = workingHypotheses(model);
+  const hasText = draft.trim().length > 0;
+  const shown = visibleReflection(reflection, current);
+  const update = (text: string) => {
+    setDraft(text);
+    writeDraft(model.id, text);
+  };
+  /** ONE call per tap, never on load, typing or navigation; the answer is bound to the hash it answered. */
+  const runReflection = async (ctx: AiContext) => {
+    setBusy(true);
+    try {
+      const r = await createTaskProvider(KIND).run(providerPayload(ctx), ctx.contextHash);
+      setReflection({ forHash: ctx.contextHash, result: r.ok ? { ok: true, items: r.response.items } : { ok: false, error: r.error } });
+    } finally {
+      setBusy(false);
     }
-  }
-  const reinforcing = loops.filter((l) => l.polarity === "reinforcing");
-  const balancing = loops.filter((l) => l.polarity === "balancing");
-  const topLoop = [...loops].sort((a, b) => (b.pressure ?? -1) - (a.pressure ?? -1))[0];
-  const inputVariableCount = model.variables.filter((v) => v.kind === "input").length;
-  const isEmpty = model.incomeSources.length === 0 && inputVariableCount === 0;
-  const otherSystems = Math.max(0, models.length - 1);
+  };
+  const reflect = async () => {
+    if (!current || "error" in current || busy) return;
+    if (needsDisclosure(KIND, acknowledged)) {
+      setDisclosing(true);
+      return;
+    }
+    await runReflection(current.ctx);
+  };
+  const confirmDisclosure = async () => {
+    writeConsent();
+    setAcknowledged(true);
+    setDisclosing(false);
+    if (current && "ctx" in current) await runReflection(current.ctx);
+  };
+  const badge = providerBadge(KIND);
 
   return (
-    <div>
-      <div className="mb-4">
-        <SystemSwitcher compact />
-      </div>
-
-      <div className="mb-4">
-        <ViewAsOfControl asOf={asOf} setAsOf={setAsOf} />
-      </div>
-
-      {asOf ? (
-        <div className="mb-4">
-          <Card tone="warn" title="Showing a past date">
-            <p className="text-sm">
-              Showing values and targets as of <span className="font-medium tabular-nums">{asOf.slice(0, 10)}</span>. Relationships, constraints,
-              hypotheses and calculations use today&apos;s structure. A saved snapshot is the record of the whole system at a past date.
-            </p>
-            <p className="text-xs text-muted mt-1">Anything not recorded by that date shows as unknown, never as a later value.</p>
-            <button type="button" className={`${BTN} mt-2`} onClick={() => setAsOf(null)}>
-              Back to today
+    <div className="mx-auto max-w-2xl">
+      <section className="mb-10">
+        <label htmlFor="home-thinking" className="block text-2xl font-semibold tracking-tight md:text-3xl">
+          What are you thinking about?
+        </label>
+        <p className="mt-2 text-[15px] leading-relaxed text-muted">Write what&apos;s on your mind. You don&apos;t need to organize it first.</p>
+        <textarea ref={area} id="home-thinking" className="mt-5 block w-full resize-none overflow-hidden rounded-xl border border-border/70 bg-surface px-5 py-4 text-[17px] leading-relaxed placeholder:text-muted/70 focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/20" rows={6} value={draft} onChange={(e) => update(e.target.value)} placeholder="Something changed at work this month and I keep coming back to it…" />
+        {hasText ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button type="button" className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-[15px] font-medium text-white hover:opacity-90 disabled:opacity-60" disabled={busy} onClick={() => void reflect()} data-testid="reflect">
+              {busy ? "Reflecting…" : "Reflect on this"}
+              {badge ? <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-medium">{badge}</span> : null}
             </button>
-          </Card>
-        </div>
-      ) : null}
-
-      {infoNotes.length > 0 ? (
-        <div className="mb-4 space-y-2">
-          {infoNotes.map((i, k) => (
-            <Note key={k}>{i.message}</Note>
-          ))}
-        </div>
-      ) : null}
-
-      <PageHeader
-        title={model.profile.name}
-        lede={`Current system versus desired system. Values on the left are what the model ${asOf ? `held as of ${asOf.slice(0, 10)}` : "holds today"}; values on the right are the ${asOf ? "targets recorded by then" : "stated targets"}. Every number carries a source type and a confidence on the Structural variables page.`}
-      />
-
-      {migratedFrom !== null ? (
-        <div className="mb-4">
-          <Note>
-            {model.profile.name} was stored under schema version {migratedFrom} and was upgraded on load. Its values are unchanged; the stored copy now uses the current schema.
-          </Note>
-        </div>
-      ) : null}
-
-      {isSample ? (
-        <div className="mb-4">
-          <Note>
-            This is the fictional sample household. Edit values on the Income and Variables pages; changes stay in this browser only.{" "}
-            <button type="button" className="underline" onClick={() => void resetToSample()}>
-              Reset to sample
-            </button>
-          </Note>
-        </div>
-      ) : (
-        <div className="mb-4">
-          <Note>
-            {model.profile.name} · {model.profile.systemType} ·{" "}
-            {otherSystems === 0 ? "no other systems stored in this browser" : `${otherSystems} other system${otherSystems > 1 ? "s" : ""} stored in this browser`}
-          </Note>
-        </div>
-      )}
-
-      {unassignedVariables.length > 0 ? (
-        <div className="mb-4">
-          <Note tone="warn">
-            {unassignedVariables.length} variable{unassignedVariables.length > 1 ? "s have" : " has"} no subject assigned and feed{unassignedVariables.length > 1 ? "" : "s"} no calculation.{" "}
-            <Link href="/variables" className="underline">
-              Assign subjects
-            </Link>
-          </Note>
-        </div>
-      ) : null}
-
-      {isEmpty ? (
-        <div className="mb-4">
-          <GettingStarted model={model} evaluated={evaluated} defaultOpen />
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card tone="current" title={<span className="text-accent">CURRENT SYSTEM</span>}>
-          {isEmpty ? (
-            <p className="text-sm text-muted">No values yet. The calculated variables fill in once income sources and input variables exist.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {headline.map(({ variable: v, label }) => (
-                <Stat
-                  key={v.id}
-                  tone="current"
-                  label={label}
-                  value={fmtValue(v.currentValue, v.unit)}
-                  sub={`${v.sourceType.replace("_", " ")} · ${Math.round(v.confidence * 100)}% conf.`}
-                />
-              ))}
-            </div>
-          )}
-          <p className="text-xs text-muted mt-3">{model.currentAttractor.summary || "No current attractor described yet (System profile)."}</p>
-        </Card>
-        <Card tone="desired" title={<span className="text-desired">DESIRED SYSTEM</span>}>
-          {isEmpty ? (
-            <p className="text-sm text-muted">No targets yet. A desired value can be set on any variable once one exists.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {headline.map(({ variable: v, label }) => {
-                const g = gap.gaps.find((x) => x.variableId === v.id);
-                return (
-                  <Stat
-                    key={v.id}
-                    tone="desired"
-                    label={label}
-                    value={fmtValue(v.desiredValue, v.unit)}
-                    sub={g ? `gap ${fmtPct(g.normalizedGap)} of range` : "no target set"}
-                  />
-                );
-              })}
-            </div>
-          )}
-          <p className="text-xs text-muted mt-3">{model.desiredAttractor.summary || "No desired attractor described yet (System profile)."}</p>
-        </Card>
-      </div>
-
-      {isEmpty ? null : (
-        <div className="grid gap-4 md:grid-cols-3 mt-4">
-          <Card title="Structural gap">
-            <div className="text-2xl font-semibold tabular-nums">
-              {gap.openCount} <span className="text-sm font-normal text-muted">open</span> · {gap.closedCount}{" "}
-              <span className="text-sm font-normal text-muted">at target</span>
-            </div>
-            <div className="text-xs text-muted">
-              across {gap.gaps.length} variable{gap.gaps.length === 1 ? "" : "s"} with targets; one gap per variable, never summed
-            </div>
-            <Link href="/gap" className="text-xs underline mt-2 inline-block">
-              Per-variable gap
-            </Link>
-          </Card>
-          <Card title="Feedback loops">
-            <div className="text-2xl font-semibold tabular-nums">
-              {reinforcing.length} <span className="text-sm font-normal text-muted">reinforcing</span> · {balancing.length}{" "}
-              <span className="text-sm font-normal text-muted">balancing</span>
-            </div>
-            {topLoop ? (
-              <div className="text-xs text-muted mt-1">
-                Highest pressure: {topLoop.annotation?.name ?? topLoop.id} ({topLoop.polarity}, index{" "}
-                {topLoop.pressure?.toFixed(2)})
-              </div>
-            ) : null}
-            <Link href="/feedback-map" className="text-xs underline mt-2 inline-block">
-              Feedback map
-            </Link>
-          </Card>
-          <Card title="Model health">
-            {problems.length === 0 ? (
-              <div className="text-sm">No structural issues detected.</div>
+            {KIND === "mock" ? (
+              <span className="text-sm text-muted">Demo response · nothing is saved to your notebook.</span>
             ) : (
-              <ul className="text-xs space-y-1">
-                {problems.map((i, k) => (
-                  <li key={k} className={i.level === "error" ? "text-neg" : "text-warn"}>
-                    {i.message}
-                  </li>
-                ))}
-              </ul>
+              <span className="text-sm text-muted">
+                {NOTHING_SAVED}{" "}
+                <button type="button" className="underline hover:text-foreground" onClick={() => setShowShared((v) => !v)} aria-expanded={showShared} data-testid="what-is-shared-toggle">
+                  What is shared
+                </button>
+              </span>
             )}
-            <Link href="/evidence" className="text-xs underline mt-2 inline-block">
-              Evidence and assumptions
+          </div>
+        ) : null}
+        {hasText && showShared && KIND === "remote" && current && "ctx" in current ? (
+          <div className="mt-3 text-sm text-muted" data-testid="what-is-shared">
+            <p>{DISCLOSURE_NOTE}</p>
+            <ul className="mt-1 list-disc pl-5">
+              {sharedLines(current.ctx.manifest).map((l) => (
+                <li key={l}>{l}</li>
+              ))}
+            </ul>
+            <Link href={PAYLOAD_HREF} className="mt-1 inline-block underline">
+              See the exact payload →
             </Link>
-          </Card>
-        </div>
-      )}
+          </div>
+        ) : null}
+        {current && "error" in current ? <Note tone="warn">{current.error}</Note> : null}
+        {disclosing && current && "ctx" in current ? <AiDisclosure sentence={DISCLOSURE_NOTE} lines={sharedLines(current.ctx.manifest)} payloadHref={PAYLOAD_HREF} busy={busy} onConfirm={() => void confirmDisclosure()} onCancel={() => setDisclosing(false)} /> : null}
+        {shown ? (
+          shown.ok ? (
+            <div className="mt-4 rounded-xl border border-border/70 bg-surface px-5 py-4" data-testid="reflection">
+              <p className="text-sm text-muted">{responseHeading(KIND)}</p>
+              <div className="mt-2 space-y-3 text-[15px] leading-relaxed">
+                {shown.items.map((it) =>
+                  it.kind === "interpretation" ? (
+                    <p key={it.id}>
+                      {it.text}
+                      {it.caveat ? <span className="mt-1 block text-sm text-muted">{it.caveat}</span> : null}
+                    </p>
+                  ) : it.kind === "question" ? (
+                    <p key={it.id}>
+                      <span className="block text-sm text-muted">Question to consider</span>
+                      {it.text}
+                    </p>
+                  ) : null,
+                )}
+                {shown.items.length === 0 ? <p className="text-muted">{KIND === "mock" ? "The demo has nothing to say about this yet." : "Nothing came back for this note."}</p> : null}
+              </div>
+              {KIND === "mock" ? (
+                <Link href="/ai" className="mt-3 inline-block text-sm text-muted underline">
+                  See exactly what a real assistant would receive
+                </Link>
+              ) : (
+                <Link href={PAYLOAD_HREF} className="mt-3 inline-block text-sm text-muted underline">
+                  See exactly what was sent
+                </Link>
+              )}
+            </div>
+          ) : (
+            <AiFailure line={REFLECTION_FAILED} detail={shown.error} />
+          )
+        ) : null}
+      </section>
 
-      {isEmpty ? null : (
-        <div className="mt-4">
-          <GettingStarted model={model} evaluated={evaluated} defaultOpen={false} />
-        </div>
-      )}
+      <div className="space-y-6">
+        {model.variables.length === 0 && working.length === 0 ? (
+          <p className="text-[15px] leading-relaxed text-muted" data-testid="empty-notebook">
+            Nothing has been recorded in this notebook yet. Keep writing here, or add records and the model in Library.
+          </p>
+        ) : null}
+        {patterns.strongest ? (
+          <div>
+            <Insight label="Something keeps showing up" title={patterns.strongest.sentence} action={{ href: patterns.strongest.exploreHref, label: "Explore what was happening" }} />
+            {patterns.more > 0 ? (
+              <p className="mt-2 px-5 text-sm text-muted">
+                <Link href="/history" className="hover:underline" data-testid="more-patterns">
+                  {patterns.more === 1 ? "1 more pattern in History" : `${patterns.more} more patterns in History`} →
+                </Link>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {proposalRecovery.status === "error" ? (
+          <Note tone="warn">Your proposals could not be read: {proposalRecovery.message}</Note>
+        ) : open !== null && open > 0 ? (
+          <Insight label="Needs your review" title={open === 1 ? "1 proposed change is waiting for you." : `${open} proposed changes are waiting for you.`} action={{ href: "/proposals", label: "Review" }} tone="attention">
+            Nothing changes in your notebook until you decide.
+          </Insight>
+        ) : null}
+
+        {working.length > 0 ? (
+          <section className="px-5" data-home-card="Working explanations">
+            <p className="text-[15px] leading-relaxed">
+              <span className="font-medium">{working.length === 1 ? "You're investigating 1 explanation" : `You're investigating ${working.length} explanations`}</span>
+              <span className="block text-muted">“{truncate(working[0].statement)}”</span>
+            </p>
+            <Link href="/hypotheses" className="mt-1.5 inline-block text-sm font-medium text-accent hover:underline">
+              All explanations →
+            </Link>
+          </section>
+        ) : null}
+      </div>
+
+      <p className="mt-14 text-sm text-muted">
+        {isSample ? <>Fictional sample · </> : null}
+        Your systems and advanced details are in{" "}
+        <Link href="/library" className="underline">
+          Library
+        </Link>
+        .
+      </p>
     </div>
   );
 }

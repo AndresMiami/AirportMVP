@@ -9,16 +9,19 @@
  *   CORE ENGINE  <-  this interface  <-  src/domains/<domain> configuration
  */
 import type { SignatureDefinition } from "@/types/signature";
-import type {
-  ChangeSpeed,
-  Constraint,
-  IncomeSource,
-  SubjectId,
-  SystemType,
-  TargetMode,
-  Variable,
-  VariableCategory,
+import {
+  GENERIC_CATEGORIES,
+  type ChangeSpeed,
+  type CollectionItem,
+  type Constraint,
+  type SubjectId,
+  type SystemType,
+  type TargetMode,
+  type Variable,
+  type VariableCategory,
 } from "@/types";
+import type { ModelAssumption } from "@/domain/assumptions";
+import type { ZodType } from "zod";
 
 export type SubjectScope = "system" | "member";
 
@@ -29,7 +32,7 @@ export interface VariableDefinition {
   unit: string;
   category: VariableCategory;
   changeSpeed: ChangeSpeed;
-  /** system: one per system; member: one per person. */
+  /** system: one per system; member: one per subject. */
   scope: SubjectScope;
   targetMode: TargetMode;
   referenceRange?: { min: number; max: number };
@@ -48,13 +51,94 @@ export interface DerivedInputRef {
 }
 
 /** Values visible to a derived formula. Only DECLARED inputs resolve; an
- *  undeclared key is a definition bug and throws. */
+ *  undeclared key or collection is a definition bug and throws. */
 export interface DerivedContext {
   /** The subject this evaluation is for (system id or member id). */
   subjectId: SubjectId;
   value: (key: string) => number | null;
   derived: (key: string) => number | null;
-  incomeSources: readonly IncomeSource[];
+  /** Items of a collection the definition declared in `collectionsRead`
+   *  (typed by the domain that owns it). Empty when nothing is recorded. */
+  collection: <T extends CollectionItem = CollectionItem>(name: string) => readonly T[];
+  /** Minimum of the items' declared confidence field; null when the
+   *  collection is empty or declares no confidence field (never fabricated). */
+  collectionConfidence: (name: string) => number | null;
+}
+
+/** A collection a domain pack owns. The engine stores the envelope; the
+ *  pack owns the meaning. */
+export interface CollectionDefinition {
+  name: string;
+  label: string;
+  description?: string;
+  /** Item schema; must accept { id: string } plus the pack's fields. */
+  itemSchema: ZodType<CollectionItem>;
+  /** Item fields that hold a subject id (member id or null), so the engine
+   *  can check them and count references without knowing their meaning. */
+  subjectFields: string[];
+  /** Item field holding a 0..1 confidence, if the pack records one. */
+  confidenceField?: string;
+  /** Item field holding the item's provenance (a SourceType), if the pack
+   *  records one. The generic layer counts provenance ONLY through this
+   *  declaration, never by finding a field that happens to be so named. */
+  provenanceField?: string;
+  /** Optional screen route for the collection (the nav lists it under
+   *  `label` when the active domain declares the collection). */
+  route?: string;
+  /** Presentation metadata (optional): how the generic screens present
+   *  this collection. The engine never reads it. */
+  onboarding?: {
+    /** Getting-started step title ("Add income sources"). */
+    title: string;
+    /** One-line explanation for the step. */
+    detail: string;
+  };
+  /** Numeric item fields a scenario may set directly (the generic scenario
+   *  screen offers one field per item; the change is updateCollectionItem). */
+  scenarioFields?: { field: string; label: string; min?: number }[];
+}
+
+/** A scenario preset a domain offers: KEYS with explicit scope, never
+ *  variable ids; each key is resolved for the chosen subject at click time. */
+export interface ScenarioPreset {
+  name: string;
+  description: string;
+  deltas: { key: string; scope: SubjectScope; delta: number }[];
+}
+
+/** Where a candidate explanation places the generator, relative to the
+ *  subject whose pattern is being explored. The ONLY explanation semantics
+ *  the engine knows; a domain names them in its own words ("person",
+ *  "environment", "interaction") and never gets a universal ontology. */
+export type Locus = "internal_to_subject" | "external_to_subject" | "interaction";
+
+/** A domain-owned PROMPT for a possible explanation: a question to
+ *  consider, never a pre-created candidate or hypothesis. The engine never
+ *  branches on `id`. */
+export interface ExplanationPrompt {
+  id: string;
+  locus: Locus;
+  /** Ordinary-language question ("Could the work available have been mostly contract or gig work?"). */
+  question: string;
+  /** Optional hint in the domain's words. */
+  hint?: string;
+}
+
+/** Optional domain vocabulary for "Explore this pattern": labels for the
+ *  three generic loci and prompts to consider. Configuration only. */
+export interface ExplanationCatalogue {
+  locusLabels?: Partial<Record<Locus, string>>;
+  prompts: ExplanationPrompt[];
+}
+
+/** Presentation configuration a domain may supply for the generic
+ *  screens. Configuration only: the engine never reads it, and nothing in
+ *  it changes a calculation. */
+export interface DomainPresentation {
+  /** Variables the dashboard shows first (system keys once, member keys per
+   *  active subject). Absent keys are skipped. */
+  headlineKeys?: { key: string; scope: SubjectScope }[];
+  scenarioPresets?: ScenarioPreset[];
 }
 
 export interface DerivedDefinition {
@@ -73,7 +157,8 @@ export interface DerivedDefinition {
   inputs: DerivedInputRef[];
   /** Earlier derived definitions the formula reads, each with its source. */
   derivedInputs: DerivedInputRef[];
-  usesIncomeSources: boolean;
+  /** Collections the formula reads (must be declared by the domain). */
+  collectionsRead: string[];
   assumptionIds: string[];
   compute: (ctx: DerivedContext) => number | null;
   defaultReferenceRange?: { min: number; max: number };
@@ -109,18 +194,101 @@ export interface ConstraintTemplate {
   softPenalty?: number;
 }
 
+/** A named option-evaluation dimension. The engine reads only the key
+ *  and the direction; the meaning is the domain's. */
+export interface EvaluationDimension {
+  key: string;
+  label: string;
+  higherIsBetter: boolean;
+}
+
+export interface CategoryDefinition {
+  id: string;
+  label: string;
+  description: string;
+}
+
+/** Domain vocabulary for the AI layer. The generic constitution is fixed
+ *  in src/ai/prompt.ts; this fragment adds words, examples and questions. */
+export interface PromptFragment {
+  /** One paragraph naming the kind of system and its usual vocabulary. */
+  vocabulary: string;
+  /** Optional worked examples or wording guidance. */
+  examples?: string;
+  /** Questions that usually reduce uncertainty in this domain. */
+  questions?: string[];
+  /** Optional example analysis a mock provider may return for demos. */
+  exampleAnalysis?: unknown;
+}
+
 export interface DomainDefinition {
   id: string;
   version: number;
   name: string;
   description: string;
-  systemTypes: SystemType[];
+  /** SUGGESTED kinds of system for a picker; the engine never interprets
+   *  them, any label is allowed, and a kind never implies a domain (the
+   *  domain is chosen explicitly and stored as domainDefinitionId). */
+  kinds: { id: SystemType; label: string }[];
+  /** What the domain calls a subject ("Person", "Segment", "Unit"). */
+  subjectLabel: string;
+  /** Plural of subjectLabel ("People"); defaults to subjectLabel + "s". */
+  subjectLabelPlural?: string;
+  /** Categories added to the generic vocabulary. */
+  categories?: CategoryDefinition[];
   variables: VariableDefinition[];
   derived: DerivedDefinition[];
   projections: ProjectionDefinition[];
   signatureDefinition: SignatureDefinition;
   constraintTemplates: ConstraintTemplate[];
   eventTypes: string[];
+  /** Collections this domain owns (may be empty). */
+  collections?: CollectionDefinition[];
+  /** Option-evaluation dimensions this domain declares (may be empty). */
+  evaluationDimensions?: EvaluationDimension[];
+  /** The domain's own model assumptions (ids unique across the registry). */
+  assumptions?: ModelAssumption[];
+  promptFragment?: PromptFragment;
+  /** Optional presentation configuration for the generic screens. */
+  presentation?: DomainPresentation;
+  /** Optional prompts for "Explore this pattern" (questions, not candidates). */
+  explanationCatalogue?: ExplanationCatalogue;
+  /** Optional Explore context scope. Default (conservative): a pattern's
+   *  context is its own subject plus the system. A domain may opt in to
+   *  reading every assigned subject's records as context for a
+   *  SYSTEM-level pattern (a household reads its members). */
+  exploreContext?: { systemPatternIncludesSubjects: boolean };
+  /** Optional AI-context privacy configuration (Step 5B). Items of these
+   *  kinds, or variables with these keys, are SENSITIVE: excluded from any
+   *  AI context unless the call explicitly includes them. Configuration
+   *  only; the engine never reads it. */
+  aiContext?: { sensitive?: { itemKinds?: readonly string[]; variableKeys?: readonly string[] } };
+}
+
+export const DEFAULT_LOCUS_LABELS: Record<Locus, string> = {
+  internal_to_subject: "Internal to the subject",
+  external_to_subject: "External to the subject",
+  interaction: "Interaction",
+};
+
+/** The domain's word for a locus, or the generic one. */
+export function locusLabel(domain: Pick<DomainDefinition, "explanationCatalogue"> | undefined, locus: Locus): string {
+  return domain?.explanationCatalogue?.locusLabels?.[locus] ?? DEFAULT_LOCUS_LABELS[locus];
+}
+
+/** The plural word for subjects in this domain. */
+export function subjectLabelPluralOf(domain: Pick<DomainDefinition, "subjectLabel" | "subjectLabelPlural">): string {
+  return domain.subjectLabelPlural ?? `${domain.subjectLabel}s`;
+}
+
+/** The category words a domain accepts: generic plus its own. */
+export function categoryVocabulary(domain?: Pick<DomainDefinition, "categories">): VariableCategory[] {
+  return [...GENERIC_CATEGORIES, ...(domain?.categories?.map((c) => c.id) ?? [])];
+}
+
+/** Declared evaluation-dimension keys (empty = the domain declares none). */
+export function evaluationDimensionKeys(domain?: Pick<DomainDefinition, "evaluationDimensions">): string[] {
+  return domain?.evaluationDimensions?.map((d) => d.key) ?? [];
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,4 +394,10 @@ export function derivedDefinitionFor(domain: DomainDefinition, key: string): Der
 /** Variables whose subject has not been assigned. */
 export function unassignedVariables<V extends Pick<Variable, "subjectId">>(variables: readonly V[]): V[] {
   return variables.filter((v) => v.subjectId === null);
+}
+
+/** The declared collection definition, or undefined when the domain does
+ *  not declare it (an undeclared collection is opaque to the engine). */
+export function collectionDefinitionFor(domain: Pick<DomainDefinition, "collections"> | undefined, name: string): CollectionDefinition | undefined {
+  return domain?.collections?.find((c) => c.name === name);
 }

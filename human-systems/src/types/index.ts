@@ -34,30 +34,28 @@ export * from "./signature";
 /* Vocabulary                                                          */
 /* ------------------------------------------------------------------ */
 
-/** System types. Only individual + household are implemented in the MVP;
- *  the others exist so the schema does not need to change later. */
-export const SystemTypeSchema = z.enum([
-  "individual",
-  "household",
-  "organization",
-  "country",
-]);
+/** The KIND of system, as a human-readable label ("household", "market",
+ *  "ecosystem"). The engine never interprets it; the domain pack may
+ *  suggest values for a picker. Engine identity is the domain definition
+ *  (domainDefinitionId + version), not this label. */
+export const SystemTypeSchema = z.string().min(1);
 export type SystemType = z.infer<typeof SystemTypeSchema>;
 
-/** The ten distinctions from the working concept, collapsed into a
- *  category enum. `changeSpeed` carries the fast/slow distinction
- *  separately because any category can move fast or slow. */
-export const VariableCategorySchema = z.enum([
+/** Variable category: a vocabulary word, never an engine mechanic (no
+ *  calculation branches on it). The engine ships the generic categories
+ *  below; a domain pack may add its own (e.g. the household pack adds
+ *  person_fit and agency). Stored values are validated against the active
+ *  domain's vocabulary on NEW writes only; historical values are kept. */
+export const GENERIC_CATEGORIES = [
   "event", // fast-changing visible state
   "structure", // slow-changing structural condition
   "constraint", // limits the action space
   "dependency", // single point of failure / fragility
   "buffer", // reserve, redundancy, slack
-  "person_fit", // values, preferences, physical feasibility
-  "agency", // execution, persistence, readiness
   "shock", // external event
-  "asset", // productive asset / career capital that compounds
-]);
+  "asset", // something that accumulates or compounds
+] as const;
+export const VariableCategorySchema = z.string().min(1);
 export type VariableCategory = z.infer<typeof VariableCategorySchema>;
 
 export const ChangeSpeedSchema = z.enum(["fast", "slow"]);
@@ -152,7 +150,7 @@ export const VariableSchema = z.object({
   /** Definition key inside the active domain (e.g. "career_capital").
    *  Ids stay globally unique; keys are resolved per subject. */
   key: z.string().min(1),
-  /** Whose variable this is. null = UNASSIGNED (not the household). */
+  /** Whose variable this is. null = UNASSIGNED (never the whole system). */
   subjectId: SubjectIdSchema.nullable(),
   name: z.string().min(1),
   description: z.string().default(""),
@@ -223,32 +221,45 @@ export type Variable = StoredVariable & {
 };
 
 /* ------------------------------------------------------------------ */
-/* Income sources                                                      */
+/* Collections (domain-owned, schema v5)                               */
 /* ------------------------------------------------------------------ */
 
-export const IncomeSourceSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  /** Who in the household earns it (free text label, kept for display). */
-  earner: z.string().default(""),
-  /** The member who earns it; null = not yet attributed. */
-  earnerId: SubjectIdSchema.nullable().default(null),
-  monthlyAmount: z.number().min(0),
-  /** Fraction of monthlyAmount that can be counted on in a bad month. */
-  reliability: unitInterval,
-  /** Month-to-month variability, 0 = fixed salary, 1 = fully unpredictable. */
-  volatility: unitInterval,
-  /** Sources sharing a group are assumed to fail together
-   *  (same employer, same platform, same local industry). */
-  correlationGroup: z.string().min(1),
-  /** Months needed to replace this source if it disappears. */
-  replacementLatencyMonths: z.number().min(0),
-  sourceType: SourceTypeSchema,
-  confidence: unitInterval,
-  evidence: z.array(EvidenceSchema).default([]),
-  notes: z.string().default(""),
-});
-export type IncomeSource = z.infer<typeof IncomeSourceSchema>;
+/** The engine knows a collection ITEM only as "an object with an id". The
+ *  registered domain pack supplies the item schema, subject-reference
+ *  fields, confidence field and meaning. */
+export const CollectionItemSchema = z.looseObject({ id: z.string().min(1) });
+export type CollectionItem = z.infer<typeof CollectionItemSchema>;
+
+/** Why a collection exists on this model:
+ *  - domain: the active domain declares it (validated against its schema);
+ *  - legacy_universal: preserved from the schema-v4 universal
+ *    `incomeSources` field on a record whose domain does not declare it.
+ *    Kept verbatim, never evaluated, never edited through typed tools, and
+ *    never a reason to call the model invalid. "I preserved this
+ *    information, but I do not know what it means in this domain." */
+export const CollectionOriginSchema = z.enum(["domain", "legacy_universal"]);
+export type CollectionOrigin = z.infer<typeof CollectionOriginSchema>;
+
+export const CollectionEnvelopeSchema = z
+  .object({
+    items: z.array(CollectionItemSchema).default([]),
+    origin: CollectionOriginSchema.default("domain"),
+    note: z.string().optional(),
+  })
+  .superRefine((c, ctx) => {
+    const seen = new Set<string>();
+    for (const item of c.items) {
+      if (seen.has(item.id)) ctx.addIssue({ code: "custom", path: ["items"], message: `duplicate collection item id "${item.id}"` });
+      seen.add(item.id);
+    }
+  });
+export type CollectionEnvelope = z.infer<typeof CollectionEnvelopeSchema>;
+export const CollectionsSchema = z.record(z.string().min(1), CollectionEnvelopeSchema);
+export type Collections = z.infer<typeof CollectionsSchema>;
+
+/** A reference from an event to an item of a named collection. */
+export const CollectionItemRefSchema = z.object({ collection: z.string().min(1), id: z.string().min(1) });
+export type CollectionItemRef = z.infer<typeof CollectionItemRefSchema>;
 
 /* ------------------------------------------------------------------ */
 /* Relationships (directed edges)                                      */
@@ -350,34 +361,24 @@ export const ConstraintSchema = z.object({
 });
 export type Constraint = z.infer<typeof ConstraintSchema>;
 
-export const UtilityDimensionSchema = z.enum([
-  "financialImprovement",
-  "stability",
-  "upside",
-  "physicalFit",
-  "personalityFit",
-  "valuesFit",
-  "autonomy",
-  "scheduleFit",
-  "stress",
-  "timeRequirement",
-  "risk",
-  "reversibility",
-  "careerCompounding",
-  "assetCompounding",
-]);
+/** An option-evaluation dimension KEY. The engine knows only "a named
+ *  dimension with a signed judgment"; the meaning of a key (e.g. the
+ *  household pack's "scheduleFit") is declared by the domain pack. New
+ *  writes are validated against the active domain's declared dimensions;
+ *  historical values are preserved without being reinterpreted. */
+export const UtilityDimensionSchema = z.string().min(1);
 export type UtilityDimension = z.infer<typeof UtilityDimensionSchema>;
 
 /** -1..1 per dimension: negative = the action makes this worse. */
-export const UtilityVectorSchema = z.partialRecord(
-  UtilityDimensionSchema,
+export const UtilityVectorSchema = z.record(
+  z.string().min(1),
   z.number().min(-1).max(1),
 );
 export type UtilityVector = z.infer<typeof UtilityVectorSchema>;
 
 /** Optional priorities. Absent = unweighted view only. */
-export const UtilityWeightsSchema = z.partialRecord(
-  UtilityDimensionSchema,
+export const UtilityWeightsSchema = z.record(
+  z.string().min(1),
   z.number().min(0).max(1),
 );
 export type UtilityWeights = z.infer<typeof UtilityWeightsSchema>;
@@ -503,7 +504,10 @@ export const HypothesisSchema = z.object({
   relationshipIds: z.array(z.string()).default([]),
   supportingObservationIds: z.array(z.string()).default([]),
   contradictingObservationIds: z.array(z.string()).default([]),
-  confidence: unitInterval,
+  /** The person's recorded confidence judgment (0..1), or null = NOT
+   *  ASSESSED. null is not zero and is never read as low confidence; no
+   *  calculation reads this field (schema v6). */
+  confidence: unitInterval.nullable().default(null),
   status: HypothesisStatusSchema.default("proposed"),
   notes: z.string().default(""),
 });
@@ -524,7 +528,8 @@ export const EventLinksSchema = z.object({
   hypothesisIds: z.array(z.string()).default([]),
   actionIds: z.array(z.string()).default([]),
   eventIds: z.array(z.string()).default([]),
-  incomeSourceIds: z.array(z.string()).default([]),
+  /** Items of domain collections (schema v5; was incomeSourceIds in v4). */
+  collectionItemRefs: z.array(CollectionItemRefSchema).default([]),
 });
 
 /** A dated fact: something that happened, was changed, or was tried. It is
@@ -594,7 +599,7 @@ export const SystemProfileSchema = z.object({
 export type SystemProfile = z.infer<typeof SystemProfileSchema>;
 
 /** Bump when the stored shape changes; add a step in model/migrations. */
-export const MODEL_SCHEMA_VERSION = 4;
+export const MODEL_SCHEMA_VERSION = 6;
 
 export const SystemModelSchema = z.object({
   schemaVersion: z.literal(MODEL_SCHEMA_VERSION),
@@ -604,7 +609,8 @@ export const SystemModelSchema = z.object({
   domainDefinitionVersion: z.number().int().min(1),
   profile: SystemProfileSchema,
   variables: z.array(VariableSchema),
-  incomeSources: z.array(IncomeSourceSchema),
+  /** Domain-owned collections by name (schema v5). */
+  collections: CollectionsSchema.default({}),
   relationships: z.array(RelationshipSchema),
   events: z.array(EventSchema).default([]),
   loopAnnotations: z.record(z.string(), LoopAnnotationSchema).default({}),
@@ -629,13 +635,11 @@ export type SystemModel = z.infer<typeof SystemModelSchema>;
 export const ScenarioChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("setVariable"), variableId: z.string(), value: z.number() }),
   z.object({ kind: z.literal("adjustVariable"), variableId: z.string(), delta: z.number() }),
-  z.object({
-    kind: z.literal("setIncomeSourceAmount"),
-    incomeSourceId: z.string(),
-    monthlyAmount: z.number().min(0),
-  }),
-  z.object({ kind: z.literal("addIncomeSource"), source: IncomeSourceSchema }),
-  z.object({ kind: z.literal("removeIncomeSource"), incomeSourceId: z.string() }),
+  /** Collection changes are validated by applyScenario against the active
+   *  domain's declared item schema; an undeclared collection is refused. */
+  z.object({ kind: z.literal("addCollectionItem"), collection: z.string().min(1), item: CollectionItemSchema }),
+  z.object({ kind: z.literal("updateCollectionItem"), collection: z.string().min(1), itemId: z.string().min(1), patch: z.record(z.string(), z.unknown()) }),
+  z.object({ kind: z.literal("removeCollectionItem"), collection: z.string().min(1), itemId: z.string().min(1) }),
 ]);
 export type ScenarioChange = z.infer<typeof ScenarioChangeSchema>;
 

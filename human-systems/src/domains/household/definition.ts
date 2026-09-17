@@ -3,9 +3,15 @@
  * Systems engine. Nothing in the engine depends on this file.
  */
 import type { DomainDefinition } from "@/model/domain";
+import { HOUSEHOLD_AI_EXAMPLE, HOUSEHOLD_PROMPT_FRAGMENT } from "./ai-example";
+import { HOUSEHOLD_ASSUMPTIONS } from "./assumptions";
 import { HOUSEHOLD_CONSTRAINT_TEMPLATES } from "./constraint-templates";
+import { HOUSEHOLD_CATEGORIES, HOUSEHOLD_EVALUATION_DIMENSIONS } from "./evaluation-dimensions";
+import { INCOME_SOURCES, IncomeSourceSchema } from "./income";
 import { HOUSEHOLD_DERIVED } from "./derived";
 import { HOUSEHOLD_DOMAIN_ID, HOUSEHOLD_DOMAIN_VERSION } from "./keys";
+import { HOUSEHOLD_EXPLANATION_CATALOGUE } from "./explanation-catalogue";
+import { HOUSEHOLD_PRESENTATION } from "./presentation";
 import { HOUSEHOLD_PROJECTIONS } from "./projections";
 import { HOUSEHOLD_SIGNATURE_V1 } from "./signature-v1";
 import { HOUSEHOLD_VARIABLES } from "./variables";
@@ -35,7 +41,37 @@ export const HOUSEHOLD_DOMAIN: DomainDefinition = {
   name: "Personal / household",
   description:
     "Income, expenses, buffers, dependencies, career capital and agency for an individual or a household. The first configuration of the engine; its thresholds and formulas are conventions, not findings.",
-  systemTypes: ["individual", "household"],
+  kinds: [
+    { id: "individual", label: "One person" },
+    { id: "household", label: "Household" },
+  ],
+  subjectLabel: "Person",
+  subjectLabelPlural: "People",
+  collections: [
+    {
+      name: INCOME_SOURCES,
+      label: "Income sources",
+      description: "Each source with its reliability, volatility, correlation group and replacement latency.",
+      itemSchema: IncomeSourceSchema,
+      subjectFields: ["earnerId"],
+      confidenceField: "confidence",
+      provenanceField: "sourceType",
+      route: "/income",
+      onboarding: {
+        title: "Add income sources",
+        detail: "Each source with its own reliability, volatility and failure group. The household-level numbers are calculated from this list.",
+      },
+      scenarioFields: [{ field: "monthlyAmount", label: "Monthly amount", min: 0 }],
+    },
+  ],
+  presentation: HOUSEHOLD_PRESENTATION,
+  explanationCatalogue: HOUSEHOLD_EXPLANATION_CATALOGUE,
+  // a household-level recurring pattern is explored against every member's records too
+  exploreContext: { systemPatternIncludesSubjects: true },
+  categories: HOUSEHOLD_CATEGORIES,
+  evaluationDimensions: HOUSEHOLD_EVALUATION_DIMENSIONS,
+  assumptions: HOUSEHOLD_ASSUMPTIONS,
+  promptFragment: { ...HOUSEHOLD_PROMPT_FRAGMENT, exampleAnalysis: HOUSEHOLD_AI_EXAMPLE },
   variables: HOUSEHOLD_VARIABLES,
   derived: HOUSEHOLD_DERIVED,
   projections: HOUSEHOLD_PROJECTIONS,

@@ -1,23 +1,35 @@
 /**
- * Multidimensional utility view. There is deliberately no universal score:
- * a weighted total is computed only when the person supplied weights.
+ * Multidimensional option-evaluation view. There is deliberately no
+ * universal score: a weighted total is computed only when the person
+ * supplied weights. The dimensions and their meaning come from the domain;
+ * the engine sees keys and signed judgments only. A key present on an
+ * action but not declared by the domain is a HISTORICAL value: it is shown
+ * (flagged undeclared), never dropped and never reinterpreted.
  */
-import { UTILITY_DIMENSIONS } from "@/domain/vocabulary";
-import type { UtilityDimension, UtilityVector, UtilityWeights } from "@/types";
+import type { EvaluationDimension } from "@/model/domain";
+import type { UtilityVector, UtilityWeights } from "@/types";
 
 export interface UtilityView {
-  /** Every dimension, in canonical order; null when not assessed. */
-  dimensions: { dimension: UtilityDimension; value: number | null }[];
+  /** Declared dimensions in the domain's order, then undeclared historical keys. */
+  dimensions: { dimension: string; label: string; higherIsBetter: boolean; value: number | null; declared: boolean }[];
   assessedCount: number;
   /** Present only when weights were supplied. */
   weightedTotal: number | null;
 }
 
-export function utilityView(vector: UtilityVector, weights?: UtilityWeights): UtilityView {
-  const dimensions = UTILITY_DIMENSIONS.map((dimension) => ({
-    dimension,
-    value: vector[dimension] ?? null,
+export function utilityView(vector: UtilityVector, weights: UtilityWeights | undefined, declared: readonly EvaluationDimension[]): UtilityView {
+  const dimensions: UtilityView["dimensions"] = declared.map((d) => ({
+    dimension: d.key,
+    label: d.label,
+    higherIsBetter: d.higherIsBetter,
+    value: vector[d.key] ?? null,
+    declared: true,
   }));
+  const declaredKeys = new Set(declared.map((d) => d.key));
+  for (const key of Object.keys(vector).sort()) {
+    if (declaredKeys.has(key)) continue;
+    dimensions.push({ dimension: key, label: key, higherIsBetter: true, value: vector[key] ?? null, declared: false });
+  }
   const assessedCount = dimensions.filter((d) => d.value !== null).length;
   let weightedTotal: number | null = null;
   if (weights && Object.keys(weights).length > 0) {

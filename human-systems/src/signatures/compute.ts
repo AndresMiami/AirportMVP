@@ -126,7 +126,7 @@ export function computeDimension(
 ): StructuralDimensionSnapshot {
   const isSystemSubject = subjectId === evaluated.model.id;
   // A member-scope dimension has no value for the system subject, and a
-  // system-scope dimension reads household keys whatever the subject.
+  // system-scope dimension reads system-scope keys whatever the subject.
   const scopeMismatch = def.subjectScope === "member" && isSystemSubject;
   const refFor = (key: string): VariableRef | null =>
     scopeMismatch ? null : def.subjectScope === "member" ? subjectRef(key, subjectId) : systemRef(key);
@@ -149,7 +149,7 @@ export function computeDimension(
 
   if (isUnknown) {
     const why = scopeMismatch
-      ? "this dimension describes one person; it is unknown for the household as a whole"
+      ? "this dimension describes one subject; it is unknown for the system as a whole"
       : missingRequired.length > 0
         ? `required input ${missingRequired.map((c) => c.name).join(", ")} has no value`
         : `${known.length} of ${contributions.length} inputs known; at least ${def.minimumKnownInputs} needed`;

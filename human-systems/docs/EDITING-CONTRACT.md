@@ -1,4 +1,4 @@
-# Editing contract (schema v4)
+# Editing contract (schema v6)
 
 How UI screens change the model. Read this before writing an editor, and
 read docs/FOUNDATIONS.md before this: every screen is bound by its
@@ -64,8 +64,11 @@ screen  --apply(mutation)-->  ModelProvider  --service.save-->  repository (loca
 ```
 
 - `useModel()` (src/components/model-provider.tsx) gives `model`, `evaluated`,
-  `apply(fn)`, `lastError`, `clearError`, `models`, `isSample`, `migratedFrom`,
-  `createBlank`, `switchModel`, `deleteModel`, `resetToSample`, plus (3b)
+  `apply(fn)`, `lastError`, `clearError`, `models`, `isSample`, `seedId`,
+  `seedLabel`, `availableDomains`, `defaultDomain`, `migratedFrom`,
+  `createBlank({name, systemType, domainId, domainVersion?, location?})`
+  (the domain is EXPLICIT; the kind is a label), `switchModel`,
+  `deleteModel`, `resetToSample` (the application's seed), plus (3b)
   `asOf` / `setAsOf(date | null)` (evaluate values and targets as of a past
   date; reset on every system switch) and `exportModel()` /
   `importModel(text, replace)`.
@@ -109,8 +112,8 @@ screen  --apply(mutation)-->  ModelProvider  --service.save-->  repository (loca
   computed only with `includeArchivedMembers`.
 - `evaluateSystem(model, { now?, asOf?, includeArchivedMembers? })`:
   `asOf` reconstructs VALUES and TARGETS at that instant under TODAY'S
-  relationships, constraints, hypotheses, domain definition AND income
-  sources (income is not dated until 3d); `evaluated.clock` says which
+  relationships, constraints, hypotheses, domain definition AND domain
+  collections (collection items are not dated until 3d); `evaluated.clock` says which
   instant was used and `evaluated.issues` carries an "info" note. A stored
   signature snapshot (now stamped `valuesAsOf`) remains the record of a
   whole past model.
@@ -132,8 +135,33 @@ Profile/members: `updateProfile`, `addMember`, `updateMember`,
 `archiveMember` / `restoreMember` (the normal lifecycle), `removeMember`
 (refused while `memberReferences(model, id).total > 0`),
 `setCurrentAttractor`, `setDesiredAttractor`.
-Income: `addIncomeSource` (`earnerId`: member id or null), `updateIncomeSource`,
-`removeIncomeSource`.
+Hypothesis confidence (schema v6): `Hypothesis.confidence` is a number in
+0..1 the person recorded, or `null` = NOT ASSESSED. `addHypothesis` and
+`ensureLoopHypothesis` store null unless a judgment is explicitly supplied
+(no code path manufactures 0.5), the form starts at "Not assessed" with an
+empty percent field and a clear control, null renders as "Not assessed"
+(never as a low number), and no calculation reads the field. The v5 -> v6
+migration preserves every stored number exactly (0.5 stays 0.5) and
+refuses malformed v5 data (missing, null, string, out of range) instead of
+reading it as "not assessed".
+
+Collections (schema v5): `addCollectionItem(model, name, item)`,
+`updateCollectionItem(model, name, id, patch)`, `removeCollectionItem(model,
+name, id)` (also drops the item's event refs), `collectionItems(model, name)`.
+The collection must be DECLARED by the system's registered domain and hold
+`origin: "domain"`; items are validated with the pack's item schema and
+their `subjectFields` must name an existing member (active or archived) or
+null. A collection preserved from an older format (`origin:
+"legacy_universal"`) or undeclared by the domain is opaque: kept, exported,
+never evaluated, never edited here, and it blocks hard deletion of a member
+(`memberReferences(...).unresolvedCollections`). The household pack's typed
+wrappers (`addIncomeSource`, `updateIncomeSource`, `removeIncomeSource`,
+`incomeSourcesOf`) live in `src/features/household/income.ts` (a FEATURE
+module above the generic services; only household application code imports
+it). Schema-valid
+is not domain-valid: `collectionProblems(model)` names the first invalid
+item of a declared collection; `commit` and `ModelService.save` refuse it,
+`evaluateSystem` withholds that collection from calculations with a warning.
 Variables: `addVariable` (inputs only; `subjectId` is REQUIRED — a member id,
 the system id, or `null` = unassigned; `key` defaults to the id or a slug of
 the name; a domain-derived key is refused), `updateVariable` (derived fields
@@ -171,7 +199,7 @@ Ids: pass none and `nextId(model, prefix)` assigns one.
 - Observation links and hypothesis references must point at existing
   entities; an observation cannot both support and contradict one hypothesis.
 - One loop hypothesis per loop id.
-- Subjects: every `subjectId` / `earnerId` must be the system id, an existing
+- Subjects: every `subjectId` / collection subject field must be the system id, an existing
   member id (active OR archived — history keeps its subject), or `null`.
   Nothing ever defaults an unknown subject to the household.
 - Dynamics: `participatesInDynamics: true` on an ineligible kind is refused
@@ -210,6 +238,59 @@ Stored as `{value, unit}` with unit days | weeks | months | years. Use
 `formatLag(lag)` for display, `lagToMonths` only for arithmetic,
 `horizonOfMonths` / `formatMonths` for cumulative values. Never show a lag
 in a unit the person did not choose without saying so.
+
+## History screen (structural discovery, read-only)
+
+`/history` calls `describeInterval` from `src/discovery` on the stored
+model and renders its buckets and sentences. It never writes: no
+mutation, no hypothesis, no snapshot. "Explore this pattern" opens an
+explanatory card; proposing a hypothesis from it is a later stage behind
+the proposal / approval kernel. The screen's words are the discovery
+layer's templates (`historySentences`, `CAUSATION_DISCLAIMER`,
+`EXPLORE_PATTERN_TEXT`), pinned by tests/discovery/language.test.ts: a
+value recorded again is a repeated record, never evidence that it held in
+between; a value that still resolves is the model's state, never an
+observation in the period; low variation is the A23 display convention
+and only with a reference range; nothing names a cause.
+
+## Explore screen (structural discovery step 2, read-only)
+
+`/explore` opens from a "repeated" History row (exact recurrence only) with
+a `PatternRef` in the URL (`encodePatternRef` / `decodePatternRef`; a
+malformed reference is refused, never repaired) and renders `crossContext`:
+occurrences and contrasts with their own temporal extents, what differed,
+what was the same, what was also true when the pattern did not happen,
+what is unresolved (missing != conflicting != varied within a broad period
+!= only an older value standing != incomplete contrast evidence), and
+possible explanations. Candidates come ONLY from the person's own drafts
+(per-viewer browser storage, never the model) and from hypotheses linked
+to the record deterministically (`linkedHypotheses`: predictions, kill
+criteria, relationships, observations; never wording). The domain's
+`explanationCatalogue` supplies QUESTIONS under the three generic loci
+(`internal_to_subject`, `external_to_subject`, `interaction`, labelled in
+the domain's words); a question becomes a candidate only when the person
+writes one from it. A heading with nothing grounded shows "No grounded
+candidate of this kind yet." "Investigate this explanation" creates a proposal through the kernel
+(reviewed and approved in `/proposals`; it never writes the model) —
+historically it was inert until
+the proposal / approval kernel existed. Explore itself still performs no
+mutation and assigns no confidence, ranking or score.
+
+## Domain-driven screens (Checkpoint 3)
+
+Generic screens read the ACTIVE DOMAIN (`evaluated.domain`) for every word
+or list that depends on the kind of system: `subjectLabel` /
+`subjectLabelPluralOf(domain)` for subjects (the stored field stays
+`profile.members`; read it through `subjectsOf(model)`), `kinds` as
+datalist SUGGESTIONS for the kind label (any label is allowed and never
+implies the domain), `collections[].route/label` for navigation,
+`collections[].onboarding` for getting-started steps,
+`collections[].scenarioFields` for direct item edits in the scenario
+screen, `collections[].provenanceField` for provenance counts, and
+`presentation.headlineKeys` / `presentation.scenarioPresets` for the
+dashboard and the presets. A screen never imports `@/domains/household`;
+the one household route (`/income`) and the household feature module are
+the documented exceptions, pinned by tests/architecture.
 
 ## Wording
 

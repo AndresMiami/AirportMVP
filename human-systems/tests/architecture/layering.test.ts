@@ -6,7 +6,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const PURE_DIRS = ["types", "domain", "calculations", "model", "scenarios", "ai", "data", "repositories", "services"];
+const PURE_DIRS = ["types", "domain", "calculations", "model", "scenarios", "signatures", "discovery", "kernel", "ai", "data", "repositories", "services"];
 const FORBIDDEN = [/from\s+["']react["']/, /from\s+["']react-dom/, /from\s+["']next\//, /from\s+["']@\/components/, /from\s+["']@\/app/];
 
 function walk(dir: string): string[] {

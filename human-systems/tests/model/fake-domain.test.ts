@@ -5,6 +5,7 @@
  * through the engine-owned registry.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { foldCollectionsToV4 } from "../helpers/legacy-shapes";
 import { createBlankModel } from "@/model/blank";
 import { domainRegistry, resolveVariable, subjectRef, systemRef, variableIdFor, type DomainDefinition } from "@/model/domain";
 import { evaluateSystem } from "@/model/evaluate";
@@ -24,7 +25,8 @@ const WORKSHOP: DomainDefinition = {
   version: 1,
   name: "Workshop (test)",
   description: "A fake domain used only to prove the engine is domain-agnostic.",
-  systemTypes: ["organization"],
+  kinds: [{ id: "organization", label: "Organisation" }],
+  subjectLabel: "Member of staff",
   variables: [
     { key: "orders_per_month", name: "Orders per month", description: "", unit: "orders", category: "event", changeSpeed: "fast", scope: "system", targetMode: "at_least" },
     { key: "hours_per_order", name: "Hours per order", description: "", unit: "h", category: "structure", changeSpeed: "slow", scope: "system", targetMode: "at_most" },
@@ -45,7 +47,7 @@ const WORKSHOP: DomainDefinition = {
         { key: "hours_per_order", from: "system" },
       ],
       derivedInputs: [],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const o = ctx.value("orders_per_month");
@@ -64,7 +66,7 @@ const WORKSHOP: DomainDefinition = {
       scope: "member",
       inputs: [{ key: "skill_level", from: "subject" }],
       derivedInputs: [],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const s = ctx.value("skill_level");
@@ -85,7 +87,7 @@ const WORKSHOP: DomainDefinition = {
         { key: "hours_per_month", from: "system" },
         { key: "capacity_hours", from: "subject" },
       ],
-      usesIncomeSources: false,
+      collectionsRead: [],
       assumptionIds: [],
       compute: (ctx) => {
         const total = ctx.derived("hours_per_month");
@@ -108,7 +110,7 @@ const WORKSHOP: DomainDefinition = {
   signatureDefinition: SignatureDefinitionSchema.parse({
     id: "workshop_v1",
     name: "Workshop signature",
-    domain: "organization",
+    domainId: "workshop",
     version: 1,
     dimensions: [
       { id: "load", name: "Load", explanation: "Orders relative to a full book", inputs: [{ variableKey: "orders_per_month", transform: { kind: "ratio", strongAt: 40 }, question: "How many orders?" }] },
@@ -182,7 +184,9 @@ describe("a second minimal domain works without engine changes", () => {
     m = M.addVariable(m, input("Orders per month", "orders_per_month", "shop", 20));
     m = M.addVariable(m, { ...input("Skill level", "skill_level", "ana", 4), id: "skill_level" });
     // Pretend the record predates attribution (v2 ids doubled as keys).
-    const v2 = JSON.parse(JSON.stringify(m)) as Record<string, unknown>;
+    // Folded to the pre-v5 storage shape first: a v2 record never carried
+    // `collections`, and the v4 -> v5 step refuses one that does.
+    const v2 = foldCollectionsToV4(JSON.parse(JSON.stringify(m)) as Record<string, unknown>);
     v2.schemaVersion = 2;
     for (const v of v2.variables as Record<string, unknown>[]) {
       delete v.subjectId;

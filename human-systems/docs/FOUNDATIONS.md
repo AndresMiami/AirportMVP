@@ -221,7 +221,11 @@ for a cloud or privacy system to be built now):
 - allow deletion, whole and per system, including backups;
 - keep inferred information distinguishable from what the person entered
   (the `ai_inferred` and `estimated` source types exist for this and must
-  never be collapsed into `self_reported`);
+  never be collapsed into `self_reported`); provenance follows the
+  ORIGINAL source, not the carrier: a value the person states through an
+  AI translator is `self_reported` with the utterance as evidence, and
+  only the AI's own reading is `ai_inferred` (docs/PRODUCT-ARCHITECTURE.md
+  section 3);
 - avoid creating sensitive profiles the person did not ask for; a
   derived value is computed on demand, not accumulated into a dossier;
 - never silently repurpose information collected for one purpose into

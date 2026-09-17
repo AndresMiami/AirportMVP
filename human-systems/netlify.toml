@@ -19,10 +19,22 @@
   NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
 
-# The site is a static export: no Next runtime, no serverless functions,
-# no environment secrets and no database. All data lives in the visitor's
-# browser (localStorage). Deep links work because every route is written
-# as its own folder with an index.html (trailingSlash).
+# The site is a static export: no Next runtime and no database. All
+# notebook data lives in the visitor's browser (localStorage). Deep links
+# work because every route is written as its own folder with an index.html
+# (trailingSlash).
+#
+# ONE serverless function exists (Step 7A): netlify/functions/ai-task.ts,
+# served at /api/ai-task. It is the only place the AI provider key lives
+# (site environment variable ANTHROPIC_API_KEY, Functions scope; never in
+# the build, never in the bundle). Without that variable the function
+# answers "not configured" and the app keeps its offline demo; the browser
+# selects the real provider only when the build variable
+# NEXT_PUBLIC_AI_PROVIDER=remote is set. See docs/DEPLOY-NETLIFY.md.
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
 [[headers]]
   for = "/*"
