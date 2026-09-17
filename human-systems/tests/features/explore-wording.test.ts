@@ -77,7 +77,7 @@ describe("exploreSections", () => {
 
   it("one sentence shape per group, over the assessment's own facts", () => {
     const base: ConditionAssessment = { variableId: "x", name: "Buffer", unit: "months", occurrenceValues: [1.5, 3, 1.5], occurrenceBases: [], occurrenceUsable: 3, occurrenceTotal: 3, atOccurrences: "differing", commonValue: null, contrastTotal: 2, contrastUsable: 2, contrastSame: 0, contrastDifferent: 2, contrastShows: "different", contrastCoverage: "complete", reliesOnRecordedBasis: false, statement: "" };
-    expect(conditionSentence(base, "differingAtOccurrences")).toBe("Buffer was 1.5 months, then 3 months, then 1.5 months.");
+    expect(conditionSentence(base, "differingAtOccurrences")).toBe("Buffer changed each time: 1.5 months → 3 months → 1.5 months.");
     const common: ConditionAssessment = { ...base, occurrenceValues: [3, 3, 3], atOccurrences: "common", commonValue: 3 };
     expect(conditionSentence(common, "commonAtOccurrences")).toBe("Buffer was 3 months each time.");
     expect(conditionSentence(common, "backgroundComplete")).toBe("Buffer was 3 months each time, and also at every other recorded time.");

@@ -81,7 +81,7 @@ describe("6D.1: Explore-origin basis, rationale and hypothesis metadata on the f
   it("words a RESOLVED pattern and comparison in product language from the resolved content only, and keeps the kernel text for an unresolved one", () => {
     const rows = basisRows(lines, resolved);
     expect(rows[0]).toMatchObject({ label: "Pattern", text: "Total debt was $4,000 on 3 recorded dates between February 2025 and June 2026." });
-    expect(rows[1]).toMatchObject({ label: "Comparison", text: "3 repeated times were compared with 1 other recorded time. 1 condition differed across the repeated times; 0 were recorded the same every time; 3 conditions are still unresolved." });
+    expect(rows[1]).toMatchObject({ label: "Comparison", text: "3 repeated times were compared with 1 other recorded time. 1 condition differed across the repeated times; none were recorded the same every time; 3 conditions are still unresolved." });
     expect(rows[1].text).not.toMatch(/occurrence|contrast time|4000 \$/);
     expect(rows[1].text).not.toMatch(/caused|explains|strong evidence|likely cause|predictor/);
     // no resolved content -> the kernel's own sentence, prefix stripped (nothing invented)

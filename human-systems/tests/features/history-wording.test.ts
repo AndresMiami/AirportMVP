@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { containsForbiddenPhrase, decodePatternRef, describeInterval, encodePatternRef, historySentenceFor } from "@/discovery";
-import { explorePatternHref, GROUP_THRESHOLD, historyQuestions, historyRows, needsInformationGroups, periodSummary } from "@/features/history/wording";
+import { eventWhen, explorePatternHref, GROUP_THRESHOLD, historyQuestions, historyRows, needsInformationGroups, periodSummary } from "@/features/history/wording";
 import { plainQuantity, plainSpan } from "@/features/plain-language";
 import { CC_DATE, CC_PATTERN, ccEntry, ccSystem, ccVariable } from "../helpers/cross-context-fixture";
 
@@ -102,6 +102,15 @@ describe("the three questions", () => {
     expect(groups[1].summary).toBe(`${GROUP_THRESHOLD + 1} variables have only one recorded value in this period (all in September 2026), so nothing can be said about them repeating.`);
     for (const g of groups) expect(containsForbiddenPhrase(g.summary)).toBeNull();
     expect(needsInformationGroups([])).toEqual([]);
+  });
+
+  it("event dates read as calendar words when the record is a plain date or range, and stay the person's own words otherwise (6G)", () => {
+    expect(eventWhen({ occurredText: "2025-07-01", occurredStart: "2025-07-01T00:00:00.000Z", occurredEnd: "2025-07-01T00:00:00.000Z" })).toBe("July 1, 2025");
+    expect(eventWhen({ occurredText: "2026-03-01 to 2026-08-31", occurredStart: null, occurredEnd: null })).toBe("March 2026 to August 2026");
+    expect(eventWhen({ occurredText: "2026-03-01 to 2026-03-15", occurredStart: null, occurredEnd: null })).toBe("March 1, 2026 to March 15, 2026");
+    expect(eventWhen({ occurredText: "Mar–Aug 2026 (two months within)", occurredStart: "2026-03-01T00:00:00.000Z", occurredEnd: "2026-08-31T00:00:00.000Z" })).toBe("Mar–Aug 2026 (two months within)");
+    expect(eventWhen({ occurredText: "", occurredStart: "2026-03-01T00:00:00.000Z", occurredEnd: "2026-08-31T00:00:00.000Z" })).toBe("March 2026 to August 2026");
+    expect(eventWhen({ occurredText: "", occurredStart: null, occurredEnd: null })).toBe("date not recorded");
   });
 
   it("quantities and spans read plainly; the period line counts what the engine counted", () => {

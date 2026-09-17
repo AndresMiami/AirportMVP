@@ -26,7 +26,7 @@ import { temporalInterval } from "@/calculations/time";
 import { useModel } from "@/components/model-provider";
 import { ConfidenceBadge, Loading, Note, SourceBadge } from "@/components/ui";
 import { CAUSATION_DISCLAIMER, DiscoveryError, dayMonthYear, describeInterval, explorePatternText, formatValue, historySentenceFor, normalizeIntervalStart, type DescribedVariable, type HistoryLens, type IntervalDescription } from "@/discovery";
-import { historyQuestions, needsInformationGroups, periodSummary, type HistoryRow, type RowGroup } from "@/features/history/wording";
+import { eventWhen, historyQuestions, needsInformationGroups, periodSummary, type HistoryRow, type RowGroup } from "@/features/history/wording";
 import { monthName } from "@/features/plain-language";
 import { subjectLabelFor, subjectsOf } from "@/model/subjects";
 import type { SystemModel } from "@/types";
@@ -157,7 +157,7 @@ function Row({ row, item, description, model }: { row: HistoryRow; item: Describ
       <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
         {row.lens === "repeated" ? (
           row.exploreHref ? (
-            <Link href={row.exploreHref} className={ACTION} data-testid="explore-pattern">
+            <Link href={row.exploreHref} className={ACTION} data-testid="explore-pattern" aria-label={`Explore what was happening with ${d.name}`}>
               Explore what was happening →
             </Link>
           ) : (
@@ -171,7 +171,7 @@ function Row({ row, item, description, model }: { row: HistoryRow; item: Describ
             Look closer
           </button>
         ) : null}
-        <button type="button" className={TOGGLE} aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+        <button type="button" className={TOGGLE} aria-expanded={open} aria-label={`${open ? "Hide details" : "Details"} for ${d.name}`} onClick={() => setOpen((x) => !x)}>
           {open ? "Hide details" : "Details"}
         </button>
       </div>
@@ -397,8 +397,8 @@ function HistoryBody({ description, model, advancedOpen, caveatsOpen, onToggleCa
                   {e.title}
                   <span className="text-sm text-muted">
                     {" "}
-                    · {e.occurredText}
-                    {e.subjectId ? ` · ${subjectLabelFor(model, e.subjectId)}` : ""}
+                    · {eventWhen(e)}
+                    {e.subjectId && e.subjectId !== model.id ? ` · ${subjectLabelFor(model, e.subjectId)}` : ""}
                   </span>
                 </p>
               </li>

@@ -71,7 +71,7 @@ export function conditionSentence(c: ConditionAssessment, group: keyof CrossCont
   const v = fmt(c.commonValue, c.unit);
   switch (group) {
     case "differingAtOccurrences":
-      return `${c.name} was ${c.occurrenceValues.map((x) => fmt(x, c.unit)).join(", then ")}.`;
+      return `${c.name} changed each time: ${c.occurrenceValues.map((x) => fmt(x, c.unit)).join(" → ")}.`;
     case "commonAtOccurrences":
       return `${c.name} was ${v} each time.`;
     case "backgroundComplete":

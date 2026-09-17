@@ -175,6 +175,11 @@ export default function HomePage() {
       </section>
 
       <div className="space-y-6">
+        {model.variables.length === 0 && working.length === 0 ? (
+          <p className="text-[15px] leading-relaxed text-muted" data-testid="empty-notebook">
+            Nothing has been recorded in this notebook yet. Keep writing here, or add records and the model in Library.
+          </p>
+        ) : null}
         {patterns.strongest ? (
           <div>
             <Insight label="Something keeps showing up" title={patterns.strongest.sentence} action={{ href: patterns.strongest.exploreHref, label: "Explore what was happening" }} />

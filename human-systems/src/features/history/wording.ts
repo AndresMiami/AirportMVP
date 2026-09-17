@@ -13,7 +13,7 @@
  * React; no household.
  */
 import { dayMonthYear, encodePatternRef, type HistoryLens, type IntervalDescription, type VariableHistoryDescription } from "@/discovery";
-import { monthName, plainQuantity, plainSpan, recurrenceSentence } from "@/features/plain-language";
+import { longDate, monthName, plainQuantity, plainSpan, recurrenceSentence } from "@/features/plain-language";
 
 export type HistoryQuestion = "changed" | "recurring" | "needs_information";
 
@@ -188,6 +188,19 @@ export function needsInformationGroups(rows: HistoryRow[]): RowGroup[] {
       const months = [...new Set(g.map((r) => r.text.match(/ in ([A-Z][a-z]+ \d{4}),/)?.[1]).filter((m): m is string => Boolean(m)))];
       return { tag, rows: g, summary: GROUP_SUMMARY[tag](g.length, months), collapsed: g.length > GROUP_THRESHOLD };
     });
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_RANGE = /^(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})$/;
+
+/** When an event happened, in calendar words when the record is a plain date or date range; the person's own text otherwise ("around March", "Mar–Aug 2026 (two months within)"). */
+export function eventWhen(e: { occurredText: string; occurredStart: string | null; occurredEnd: string | null }): string {
+  const t = e.occurredText.trim();
+  if (ISO_DATE.test(t)) return longDate(t);
+  const range = t.match(ISO_RANGE);
+  if (range) return monthName(range[1]) === monthName(range[2]) ? `${longDate(range[1])} to ${longDate(range[2])}` : `${monthName(range[1])} to ${monthName(range[2])}`;
+  if (t === "" && e.occurredStart) return e.occurredEnd && e.occurredEnd !== e.occurredStart ? `${monthName(e.occurredStart)} to ${monthName(e.occurredEnd)}` : longDate(e.occurredStart);
+  return t || "date not recorded";
 }
 
 /** "3 recorded variables, 12 dated values and 2 events" — engineering counts, shown under Advanced only (6B.1), never in the first layer. */

@@ -107,7 +107,7 @@ export function comparisonSentence(c: ComparisonContent): string {
   const n = (k: string) => g[k]?.length ?? 0;
   const same = n("commonAtOccurrences");
   const unresolved = n("insufficientAtOccurrences") + n("undecided") + n("contrastPartial");
-  const parts = [`${plural(occ, "repeated time was", "repeated times were")} compared with ${plural(con, "other recorded time", "other recorded times")}.`, `${plural(n("differingAtOccurrences"), "condition", "conditions")} differed across the repeated times; ${same === 1 ? "1 was" : `${same} were`} recorded the same every time`];
+  const parts = [`${plural(occ, "repeated time was", "repeated times were")} compared with ${plural(con, "other recorded time", "other recorded times")}.`, `${plural(n("differingAtOccurrences"), "condition", "conditions")} differed across the repeated times; ${same === 0 ? "none were" : same === 1 ? "1 was" : `${same} were`} recorded the same every time`];
   if (con > 0 && same > 0) parts.push(`(${n("backgroundComplete")} also true at the other times, ${n("differentiatingComplete")} different, ${n("mixedComplete")} mixed)`);
   return `${parts[0]} ${parts.slice(1).join(" ")}; ${plural(unresolved, "condition is", "conditions are")} still unresolved.`;
 }

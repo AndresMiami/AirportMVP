@@ -309,6 +309,23 @@ describe("6F whole-product consistency", () => {
   });
 });
 
+describe("6G convergence", () => {
+  it("event dates in calendar words with no repeated system subject, an empty notebook that says so, empty node circles with the category in the tooltip and the variable heading, distinct labels on repeated controls", () => {
+    const history = read("src/app/history/page.tsx");
+    expect(history).toContain("· {eventWhen(e)}");
+    expect(history).toContain("e.subjectId && e.subjectId !== model.id");
+    expect(history).toMatch(/aria-label=\{`Explore what was happening with \$\{d\.name\}`\}/);
+    expect(read("src/app/page.tsx")).toContain('data-testid="empty-notebook"');
+    const diagram = read("src/components/network-diagram.tsx");
+    expect(diagram).not.toMatch(/short\.slice\(0, 5\)/);
+    expect(diagram).toContain("categoryMeta(v.category).label");
+    const map = read("src/app/feedback-map/page.tsx");
+    expect(map).toContain("categoryMeta(variableById.get(selectedNode)!.category).label");
+    expect(map).toMatch(/aria-label=\{`Show the pattern starting at/);
+    expect(read("src/app/explore/page.tsx")).toMatch(/aria-label=\{`\$\{open \? "Hide details" : "Details"\} for /);
+  });
+});
+
 describe("Library and routes", () => {
   it("Library links every advanced screen, and every existing route still has a page", () => {
     const lib = read("src/app/library/page.tsx");

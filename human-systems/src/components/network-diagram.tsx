@@ -323,13 +323,10 @@ export function NetworkDiagram({
                 strokeWidth={pending || hl ? 2.5 : 1.25}
                 strokeDasharray={derived ? "3 2" : undefined}
               />
-              <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="10" fill={COLOR.muted}>
-                {categoryMeta(v.category).short.slice(0, 5)}
-              </text>
               <text x={lx} y={ly} textAnchor={anchor} fontSize="12" fill={isolated ? COLOR.muted : COLOR.ink}>
                 {v.name.length > 26 ? `${v.name.slice(0, 25)}…` : v.name}
               </text>
-              <title>{`${v.name}\n${v.description}`}</title>
+              <title>{`${v.name} · ${categoryMeta(v.category).label}${derived ? " · calculated" : ""}\n${v.description}`}</title>
             </g>
           );
         })}

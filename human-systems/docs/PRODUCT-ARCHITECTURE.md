@@ -1158,6 +1158,28 @@ capture surface corrects this when it replaces that screen.
    Review's "0 were recorded the same", Map node abbreviations, the
    0.5 relationship defaults. Next decision (product, not roadmap):
    real AI integration (5F) or an intentionally designed Library.
+   STEP 6G DONE — AUTONOMOUS PRODUCT CONVERGENCE PASS (own judgment
+   inside the frozen semantics; one pass, no 6G.1 unless a real defect).
+   Changed: History event dates read as calendar words when the record
+   is a plain date or range ("July 1, 2025", "March 2026 to August
+   2026") and stay the person's own words otherwise ("Mar–Aug 2026 (two
+   months within)"), and a system-level event no longer repeats the
+   system's name; Explore's changed-each-time row reads as a sequence
+   ("Liquid reserves changed each time: $2,000 → $4,500 → …"); Review's
+   comparison says "none were recorded the same every time" instead of
+   "0 were"; Map's node circles no longer carry the five-letter category
+   codes (Agenc, Struc, …) — the category is in the node tooltip and
+   under the "Connected with X" heading; Home says "Nothing has been
+   recorded in this notebook yet …" when a notebook has no variables and
+   no explanations; repeated "Details" / "Show on map" / "Explore what
+   was happening" controls carry distinct accessible names. Deliberately
+   left alone: the three contextual causation cautions, Review's
+   auxiliary (no-tab) position, the technical AI demo page under
+   Library, Library itself, the relationship 0.5-default debt (still
+   backlog), and every frozen layout. Verified from the final tree:
+   tsc, eslint, 642 tests, the static build, and six Chromium harnesses
+   (two full desktop + mobile journeys, Home shell, History, Explore,
+   Review, Map) all green.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

@@ -41,6 +41,7 @@ import { useModel, type ModelMutation } from "@/components/model-provider";
 import { NetworkDiagram, NetworkLegend } from "@/components/network-diagram";
 import { JudgmentBanner, RELATIONSHIP_KIND_META, RelationshipEditor } from "@/components/relationship-editor";
 import { ConfidenceBadge, Loading, SourceBadge } from "@/components/ui";
+import { categoryMeta } from "@/domain/vocabulary";
 import { connectionsOf, highlightFor } from "@/features/map/selection";
 import { KIND_LABELS, KIND_MEANINGS, MAP_EPISTEMIC, MAP_READING_HINT, MAP_SWIPE_HINT, STRENGTH_NOTE, connectionSentence, connectionTitle, connectionUseNote, loopChainSentence, mapCounts, orphanNotice, patternLabel, unclassifiedNotice } from "@/features/map/wording";
 import * as mutations from "@/services/mutations";
@@ -255,6 +256,12 @@ export default function FeedbackMapPage() {
         {selectedNode && !selectedRel ? (
           <section data-testid="connected-with">
             <h2 className="text-lg font-semibold tracking-tight">Connected with {nameOf(selectedNode)}</h2>
+            {variableById.get(selectedNode) ? (
+              <p className="mt-1 text-sm text-muted">
+                {categoryMeta(variableById.get(selectedNode)!.category).label}
+                {variableById.get(selectedNode)!.kind === "derived" ? " · calculated from other variables" : ""}
+              </p>
+            ) : null}
             {connectionsOf(allRelationships, selectedNode).length === 0 ? (
               <p className="mt-2 text-[15px] text-muted">No recorded connection yet.</p>
             ) : (
@@ -363,6 +370,7 @@ export default function FeedbackMapPage() {
                             bringIntoView(mapRef);
                           }}
                           data-testid="show-on-map"
+                          aria-label={`Show the pattern starting at ${nameOf(l.variableIds[0] ?? "")} on the map`}
                         >
                           Show on map
                         </button>
@@ -371,7 +379,7 @@ export default function FeedbackMapPage() {
                           Clear
                         </button>
                       )}
-                      <button type="button" className={TOGGLE} aria-expanded={loopDetails === l.id} onClick={() => setLoopDetails((x) => (x === l.id ? null : l.id))}>
+                      <button type="button" className={TOGGLE} aria-expanded={loopDetails === l.id} aria-label={`${loopDetails === l.id ? "Hide details" : "Details"} for the pattern starting at ${nameOf(l.variableIds[0] ?? "")}`} onClick={() => setLoopDetails((x) => (x === l.id ? null : l.id))}>
                         {loopDetails === l.id ? "Hide details" : "Details"}
                       </button>
                     </div>

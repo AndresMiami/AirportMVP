@@ -77,7 +77,7 @@ function ConditionRow({ row }: { row: ExploreRow }) {
     <li className="py-3" data-explore-row={row.group} data-variable={row.variableId}>
       {row.tag ? <p className="text-sm text-muted">{row.tag}</p> : null}
       <p className="text-[15px] leading-relaxed">{row.text}</p>
-      <button type="button" className={`mt-1 ${TOGGLE}`} aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+      <button type="button" className={`mt-1 ${TOGGLE}`} aria-expanded={open} aria-label={`${open ? "Hide details" : "Details"} for ${row.text.split(/ changed each time| was | could not| is unknown/)[0]}`} onClick={() => setOpen((x) => !x)}>
         {open ? "Hide details" : "Details"}
       </button>
       {open ? (

@@ -349,7 +349,14 @@ and calls the decision screen Review; Library names screens as they
 name themselves (Review, Map — connections and feedback patterns);
 Home's explanations link reads "All explanations →"; the collapsed
 technical footers are "About this period / comparison / map". Keep
-these agreements when touching any screen. Next is a product decision
+these agreements when touching any screen. CONVERGENCE PASS (6G, done;
+autonomous within the frozen semantics): event dates in calendar words
+(the person's own text kept when it is not a plain date), Explore's
+"changed each time: a → b → c", Review's "none were recorded the same",
+Map node circles without category codes (category in the tooltip and
+under "Connected with X"), an empty-notebook line on Home, distinct
+accessible names on repeated controls. The simplified product is
+considered finished enough to use; the next step is a product decision
 (real AI integration or an intentionally designed Library), not the
 roadmap by default.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
