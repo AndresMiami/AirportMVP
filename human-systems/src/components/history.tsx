@@ -156,7 +156,7 @@ export function ValueHistoryList({ variable, onRetract, id }: { variable: Variab
           <span>{appliesLine(e)}</span>
           <span>Recorded on {e.recordedAt.slice(0, 10)}</span>
           <SourceBadge sourceType={e.sourceType} />
-          <span className="tabular-nums">{fmtConfidence(e.confidence)} conf.</span>
+          <span className="tabular-nums">{e.confidence === null ? "confidence not assessed" : `${fmtConfidence(e.confidence)} conf.`}</span>
           {e.note ? <span>Note: {e.note}</span> : null}
           <StatusTag entry={e} />
           {e.status === "active" ? <RetractControl label={`Retract value recorded on ${e.recordedAt.slice(0, 10)}`} onRetract={(reason) => onRetract(e.id, reason)} /> : null}

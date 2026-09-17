@@ -113,7 +113,11 @@ export const ValueEntrySchema = z.object({
   /** When the app recorded this entry (ISO instant). */
   recordedAt: z.string().min(1),
   sourceType: SourceTypeSchema,
-  confidence: unitInterval,
+  /** The person's confidence judgment (0..1), or null = NOT ASSESSED: a
+   *  collected record whose confidence nobody has judged yet. null is not
+   *  zero for display; for confidence propagation it counts as unknown,
+   *  the same conservative reading A13 gives an unassessed collection item. */
+  confidence: unitInterval.nullable(),
   evidence: z.array(EvidenceSchema).default([]),
   observationIds: z.array(z.string()).default([]),
   note: z.string().default(""),
@@ -459,6 +463,9 @@ export type HypothesisKind = z.infer<typeof HypothesisKindSchema>;
 /** An INTERPRETATION under review. "accepted" means the person accepts it
  *  as a working reading of their system, never that it is proven. */
 export const HypothesisPredictionSchema = z.object({
+  /** Stable identity a collector can bind evidence to (Step 7B). Optional:
+   *  older predictions are identified by a content-derived id instead. */
+  id: z.string().min(1).optional(),
   statement: z.string().min(1),
   variableId: z.string().optional(),
   expectedDirection: z.enum(["up", "down"]).optional(),

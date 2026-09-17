@@ -23,11 +23,33 @@ export type SourceType = z.infer<typeof SourceTypeSchema>;
 export const TargetModeSchema = z.enum(["at_least", "at_most", "exact"]);
 export type TargetMode = z.infer<typeof TargetModeSchema>;
 
+/** Where a piece of evidence was read from, when a collector (a research
+ *  agent, an import) brought it in. The source's own version marker is kept
+ *  so a later change to the source can be told from the version reviewed. */
+export const EvidenceSourceSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  url: z.string().optional(),
+  /** The source's version at retrieval: an etag, a content hash, a publication date. */
+  version: z.string().min(1),
+  /** ISO instant the source was retrieved. */
+  retrievedAt: z.string().min(1),
+  /** Where inside the source: a row key, a page, an anchor. */
+  locator: z.string().optional(),
+});
+export type EvidenceSource = z.infer<typeof EvidenceSourceSchema>;
+
 export const EvidenceSchema = z.object({
   text: z.string().min(1),
   sourceType: SourceTypeSchema.default("self_reported"),
   /** ISO date the evidence was recorded, if known. */
   recordedAt: z.string().optional(),
+  /** Structured origin for collected evidence (Step 7B); absent for hand-typed evidence. */
+  source: EvidenceSourceSchema.optional(),
+  /** The period the supporting content applies to, in the source's own words. */
+  period: z.string().optional(),
+  /** The exact supporting content, verbatim. */
+  quote: z.string().optional(),
 });
 export type Evidence = z.infer<typeof EvidenceSchema>;
 

@@ -387,6 +387,19 @@ proposals for other kinds, do not widen the proposal whitelist, and do
 not make the provider write anything: candidates reach the model only
 through Review. Deployment facts still Andres's: the two Netlify
 variables, the site's function time limit, a provider spend limit.
+RESEARCH AGENT (7B, first increment): src/agents — a thesis is a
+hypothesis's predictions/kill criteria that name a variable; a source
+snapshot (JSON, versioned, append-only store separate from the model) is
+read by a DETERMINISTIC collector that proposes recordValue ONLY
+(AGENT_MUTATION_KINDS pinned): confidence null, the source's own
+provenance on the record, exact quote/period/version on the evidence,
+the agent as proposal author only. Basis kind source_item re-resolves
+against the store's current version (ProposalService's optional fifth
+argument; revalidate re-resolves external bases on every call), so a
+changed source stales pending reviews. Repeated retrieval never adds a
+proposal for content already proposed or recorded. Value confidence is
+nullable = not assessed. Never let the collector reach a hypothesis
+mutation; never invent a confidence; never write outside Review.
 REVIEW FIXES (7A.1): sensitivity closes over calculations and citations
 (a calculation of a sensitive calculation, a hypothesis citing a withheld
 observation: both withheld); every prose field an AI response renders is

@@ -12,7 +12,13 @@ import { canonicalJSON } from "./revision";
 import type { DryRunResult, MutationBatch, ProposalBasisRef, ResolvedBasis } from "./types";
 
 /** Resolve every basis ref to the content it points at RIGHT NOW. */
-export function resolveBasis(model: SystemModel, basis: readonly ProposalBasisRef[]): ResolvedBasis[] {
+/** Where source_item bases re-resolve: the CURRENT version of an imported
+ *  source. Without a store the reviewed snapshot stands in (never stale). */
+export interface BasisSources {
+  itemContent(sourceId: string, itemKey: string): unknown | null;
+}
+
+export function resolveBasis(model: SystemModel, basis: readonly ProposalBasisRef[], sources?: BasisSources): ResolvedBasis[] {
   return basis.map((ref): ResolvedBasis => {
     switch (ref.kind) {
       case "observation":
@@ -45,6 +51,8 @@ export function resolveBasis(model: SystemModel, basis: readonly ProposalBasisRe
       case "user_statement":
       case "ai_output":
         return { ref, content: ref }; // immutable snapshots: their own content
+      case "source_item":
+        return { ref, content: sources ? sources.itemContent(ref.sourceId, ref.itemKey) : { contentHash: ref.contentHash, summary: ref.summary } };
     }
   });
 }

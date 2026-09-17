@@ -122,6 +122,9 @@ Rules the code enforces:
   (recomputed by a named formula; its stored value is never trusted).
 - Scenarios change inputs and income sources only; everything else is
   recomputed through the same `evaluateSystem` the screens use.
+- Research (Library → Research) collects evidence for an explanation from
+  an imported source snapshot; every item is a proposal the person decides
+  on in Review, with the source's own provenance and exact quote kept.
 - AI output is validated with Zod and lands on a review screen; approved
   items enter the model stamped `ai_inferred` with the cited evidence.
 - Every edit is a pure mutation in `src/services/mutations.ts` that returns

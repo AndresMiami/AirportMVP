@@ -21,7 +21,11 @@ import type { MutationStep } from "./registry";
 export type ProposalAuthor =
   | { kind: "person"; actorId?: string }
   | { kind: "ai"; adapterId: string; conversationTurnId?: string }
-  | { kind: "system_feature"; featureId: string };
+  | { kind: "system_feature"; featureId: string }
+  /** A research agent collecting evidence for a thesis (Step 7B). The
+   *  COLLECTOR, never the provenance: the record it proposes carries the
+   *  source's own source type, and the agent earns no weight. */
+  | { kind: "agent"; agentId: string; thesisId: string; sourceId: string };
 
 /** Why the proposal exists. A basis is a reference, never proof. Every ref
  *  carries enough to RE-RESOLVE what the person saw (resolveBasis), so a
@@ -47,7 +51,13 @@ export type ProposalBasisRef =
    *  snapshot (a finished response never mutates), NEVER evidence. The
    *  cited records carried beside it are the basis. Provider payload,
    *  manifest and withheld material are never stored here. */
-  | { kind: "ai_output"; adapterId: string; task: string; contextHash: string; sourceRevisionHash: string; outputItemId: string; outputKind: string; text: string; state?: string };
+  | { kind: "ai_output"; adapterId: string; task: string; contextHash: string; sourceRevisionHash: string; outputItemId: string; outputKind: string; text: string; state?: string }
+  /** One item of an imported SOURCE SNAPSHOT (research agents, Step 7B):
+   *  re-resolved against the source store's CURRENT version of that source,
+   *  so a material change to the item, or its disappearance, changes the
+   *  review fingerprint; the same item unchanged in a newer version does
+   *  not. `contentHash` is the item as reviewed; `summary` its words. */
+  | { kind: "source_item"; sourceId: string; itemKey: string; version: string; contentHash: string; summary: string };
 
 export type ConsequenceClass = "ordinary" | "consequential";
 

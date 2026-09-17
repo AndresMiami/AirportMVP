@@ -458,7 +458,8 @@ function uniqueId(model: SystemModel, base: string): string {
 export interface RecordValueInput {
   value: number | null;
   sourceType: ValueEntry["sourceType"];
-  confidence: number;
+  /** null = not assessed (a collected record nobody has judged yet). */
+  confidence: number | null;
   /** When the value applies. Omitted = the recording instant with basis
    *  "recorded" (known from now on; onset not stated). Given = basis
    *  "asserted", approximate or unknown time preserved as such. */

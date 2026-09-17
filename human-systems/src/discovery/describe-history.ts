@@ -47,7 +47,8 @@ export interface HistoryRecord {
   /** When the app recorded the entry (its own clock; never an application or observation time). */
   recordedAt: string;
   sourceType: SourceType;
-  confidence: number;
+  /** null = not assessed. */
+  confidence: number | null;
   note: string;
   orderable: boolean;
   approximate: boolean;
@@ -380,7 +381,7 @@ export function describeVariableHistory(variable: StoredVariable, request: Inter
   const observedEnds = records.map((r) => r.observedEnd).filter((s): s is string => s !== null).sort();
   const provenance: Partial<Record<SourceType, number>> = {};
   for (const r of overlapping) provenance[r.sourceType] = (provenance[r.sourceType] ?? 0) + 1;
-  const confidences = overlapping.map((r) => r.confidence);
+  const confidences = overlapping.map((r) => r.confidence).filter((c): c is number => c !== null);
 
   const facts: EvidenceFacts = {
     exactRepetition: repeatedValues.length > 0,

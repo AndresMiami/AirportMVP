@@ -175,7 +175,7 @@ function ValueEditor({ variable, onSave, error }: { variable: Variable; onSave: 
   const begin = () => {
     setValue(variable.currentValue === null ? "" : String(variable.currentValue));
     setSourceType(variable.valueEntry?.sourceType ?? "self_reported");
-    setConfidence(variable.valueEntry ? String(variable.valueEntry.confidence) : "");
+    setConfidence(variable.valueEntry && variable.valueEntry.confidence !== null ? String(variable.valueEntry.confidence) : "");
     setDate(todayIso());
     setNote("");
     setLocalError(null);
