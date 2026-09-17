@@ -77,7 +77,10 @@ describe("Home wording (6A.1) over the engine's facts", () => {
   it("Home gets one strongest pattern and a count of the rest; nothing when nothing repeats", () => {
     const o = recurrenceOverview(ccSystem(), "2026-09-16");
     expect(o.strongest?.variableId).toBe("autonomy_pref");
-    expect(o.more).toBe(recurrenceCards(ccSystem(), "2026-09-16", 100).length - 1);
+    // "N more patterns in History" counts the way History lists them: one pattern per repeated value (6F)
+    const all = recurrenceCards(ccSystem(), "2026-09-16", 100);
+    expect(o.more).toBe(all.reduce((n, c) => n + c.patternCount, 0) - 1);
+    expect(all.reduce((n, c) => n + c.patternCount, 0)).toBeGreaterThan(all.length); // the fixture has a variable with two repeated values
     expect(o.more).toBeGreaterThan(1);
     expect(recurrenceOverview(ccSystem(), "2024-01-01")).toEqual({ strongest: null, more: 0 });
   });

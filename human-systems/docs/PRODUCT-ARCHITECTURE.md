@@ -1113,6 +1113,51 @@ capture surface corrects this when it replaces that screen.
    mismatches, navigation dead ends, repeated concepts, empty-state
    inconsistencies, mobile continuity) — not 5E/5F, not Library, not
    another subsystem.
+   STEP 6F DONE — WHOLE-PRODUCT USABILITY AND LANGUAGE PASS (audit of
+   the frozen screens as one product; no screen redesigned; engines,
+   discovery, cross-context, proposal semantics, kernel, schemas, AI
+   contracts, mutations, loop detection and map semantics untouched).
+   Method: a Chromium crawl of every primary route captured headings,
+   ledes, links, buttons, active tabs and empty states; then two full
+   journeys (desktop 1200px, mobile 390px) walked Home -> History ->
+   Explore -> AI demo -> Explore -> Investigate -> Review -> back to the
+   pattern -> approve -> Explore ("Already investigating") -> Home ->
+   all explanations -> Map (variable, connection, Details, Edit) ->
+   Library -> Overview -> Home, then set an as-of date and compared Home
+   with History. Six cross-screen inconsistencies were found and fixed:
+   (1) Home's "N more patterns in History" counted patterns per variable
+   while History lists one row per repeated value, so the promise did
+   not match the page — Home now counts the way History lists (pinned:
+   History repeated rows = Home's N + 1). (2) With "Values as of" set,
+   Home limited its patterns to that date but History's default period
+   still ended today, so the strip meant different things on adjacent
+   screens — History's default period now ends at the as-of date (the
+   URL period still wins), and the counts agree again under as-of.
+   (3) Review had no way back to the pattern an Explore-created
+   proposal came from — an Explore-origin card now carries "Open the
+   pattern in Explore →" built from its own pattern basis (pinned to
+   encode exactly what Explore reads). (4) The AI demo reached from
+   Explore ("Help me think about this pattern") had no way back and
+   called the decision screen "Proposals" — it now has "← Back to
+   Explore" for the same pattern and says Review. (5) Library named the
+   decision screen "Proposals — changes waiting for your review" and
+   Map "relationships and loops" — now "Review — decisions waiting for
+   you" and "Map — connections and feedback patterns", matching the
+   screens they open. (6) Home's "View all →" landed on the dense
+   Hypotheses screen with no hint of what "all" meant — now "All
+   explanations →" (same target). History's footer toggle was renamed
+   "About this period" to match "About this comparison" / "About this
+   map". Confirmed consistent and left alone: Review lights no primary
+   tab, Explore lights History, advanced routes light Library; the
+   as-of strip is the one treatment everywhere; empty states are calm
+   sentences on every screen; "Details" means the technical layer on
+   every screen; sample wording is "fictional sample" everywhere; the
+   three causation cautions (History, Explore, Map) are contextual, not
+   duplicates; no page overflows on mobile. Recorded backlog untouched:
+   History event-date wording, Explore's differed-each-time colon form,
+   Review's "0 were recorded the same", Map node abbreviations, the
+   0.5 relationship defaults. Next decision (product, not roadmap):
+   real AI integration (5F) or an intentionally designed Library.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

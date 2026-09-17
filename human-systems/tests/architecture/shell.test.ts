@@ -283,6 +283,32 @@ describe("Map (6E: presentation simplified, relationship and loop semantics unch
   });
 });
 
+describe("6F whole-product consistency", () => {
+  it("counts, names and return paths agree across the frozen screens", () => {
+    const home = read("src/app/page.tsx");
+    expect(home).toContain("All explanations →");
+    expect(home).not.toMatch(/View all →/);
+    expect(read("src/features/home/cards.ts")).toContain("const total = all.reduce((n, c) => n + c.patternCount, 0);");
+    const history = read("src/app/history/page.tsx");
+    expect(history).toContain('const defaultTo = asOf ? asOf.slice(0, 10) : today;');
+    expect(history).toContain("const to = toInput ?? defaultTo;");
+    expect(history).toMatch(/About this period \(\$\{d\.caveats\.length\}\)/);
+    expect(history).not.toMatch(/Notes on this period/);
+    const card = read("src/components/proposal-card.tsx");
+    expect(card).toContain('data-testid="back-to-pattern"');
+    expect(card).toContain("Open the pattern in Explore →");
+    expect(read("src/features/review/wording.ts")).toMatch(/export function explorePatternHref/);
+    const ai = read("src/app/ai/page.tsx");
+    expect(ai).toContain('data-testid="back-to-explore"');
+    expect(ai).toMatch(/href="\/proposals" className="underline">\s*Review/);
+    expect(ai).not.toMatch(/decide on in Proposals/);
+    const lib = read("src/app/library/page.tsx");
+    expect(lib).toContain('{ href: "/proposals", label: "Review", note: "decisions waiting for you" }');
+    expect(lib).toContain('{ href: "/map", label: "Map", note: "connections and feedback patterns" }');
+    expect(lib).not.toMatch(/relationships and loops|changes waiting for your review/);
+  });
+});
+
 describe("Library and routes", () => {
   it("Library links every advanced screen, and every existing route still has a page", () => {
     const lib = read("src/app/library/page.tsx");

@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { AI_OUTPUT_NOT_EVIDENCE, ENGINE_CANNOT_JUDGE, type BasisLine, type MutationProposal } from "@/kernel";
 import type { ResolvedBasis } from "@/kernel";
-import { NO_BASIS, STATE_LINES, basisRows, comparisonSentence, decisionDate, decisionHeading, firstLayerChanges, firstLayerWhy, isExploreOrigin, recoveryLine, specificUncertainty } from "@/features/review/wording";
+import { NO_BASIS, STATE_LINES, basisRows, comparisonSentence, decisionDate, decisionHeading, explorePatternHref, firstLayerChanges, firstLayerWhy, isExploreOrigin, recoveryLine, specificUncertainty } from "@/features/review/wording";
 
 describe("decisionHeading", () => {
   it("reads an addHypothesis proposal as a question with the statement quoted; anything else falls back to the kernel's first summary", () => {
@@ -94,6 +94,12 @@ describe("6D.1: Explore-origin basis, rationale and hypothesis metadata on the f
     const withSame = { ...comparison, groups: { ...comparison.groups, commonAtOccurrences: ["x", "y", "z"], backgroundComplete: ["x"], differentiatingComplete: ["y"], mixedComplete: ["z"] } };
     expect(comparisonSentence(withSame)).toBe("3 repeated times were compared with 1 other recorded time. 1 condition differed across the repeated times; 3 were recorded the same every time (1 also true at the other times, 1 different, 1 mixed); 3 conditions are still unresolved.");
     expect(comparisonSentence({ ...withSame, contrasts: [] })).toBe("3 repeated times were compared with 0 other recorded times. 1 condition differed across the repeated times; 3 were recorded the same every time; 3 conditions are still unresolved.");
+  });
+
+  it("an Explore-origin proposal links back to its own pattern, encoded exactly as Explore reads it; nothing else gets a link", () => {
+    expect(explorePatternHref([refs.pattern, refs.cc, refs.you])).toBe("/explore?variable=total_debt&subject=sys&from=2025-01-01&to=2026-09-16&value=4000&times=");
+    expect(explorePatternHref([refs.you])).toBeNull();
+    expect(explorePatternHref([refs.pattern])).toBeNull();
   });
 
   it("Explore origin is provenance (pattern + comparison basis), never wording; the humanized rationale applies only then", () => {

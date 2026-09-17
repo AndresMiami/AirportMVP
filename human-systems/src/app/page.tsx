@@ -203,7 +203,7 @@ export default function HomePage() {
               <span className="block text-muted">“{truncate(working[0].statement)}”</span>
             </p>
             <Link href="/hypotheses" className="mt-1.5 inline-block text-sm font-medium text-accent hover:underline">
-              View all →
+              All explanations →
             </Link>
           </section>
         ) : null}

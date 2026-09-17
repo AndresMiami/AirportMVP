@@ -24,7 +24,7 @@ import { AI_TASKS, TASK_POLICIES, buildAiContext, hashedContent, providerPayload
 import { suggestionState, toProposalSet, type AiProposalCandidate, type SuggestionState } from "@/ai/proposal-bridge";
 import type { AiOutputItem, AiResponse } from "@/ai/response";
 import { MockAiTaskProvider } from "@/ai/task-mock";
-import { decodePatternRef, type PatternRef } from "@/discovery";
+import { decodePatternRef, encodePatternRef, type PatternRef } from "@/discovery";
 import type { MutationProposal } from "@/kernel";
 import { MockAiProvider } from "@/ai/mock-provider";
 import { ANALYSIS_SYSTEM_PROMPT } from "@/ai/prompt";
@@ -238,7 +238,7 @@ function ContextPanel({ pattern, initialTask }: { pattern: PatternRef | null; in
 
       {ctx && payload ? (
         <Card title="Mock interpretation — nothing will be added to your model" className="mt-4">
-          <p className="text-xs text-muted mb-2">A deterministic mock answers the exact payload above under the new contract; its output is validated against that payload before it is shown. Nothing here writes the model. A candidate explanation can be sent to review with “Review as hypothesis”; that creates a proposal you decide on in Proposals, never a hypothesis directly.</p>
+          <p className="text-xs text-muted mb-2">A deterministic mock answers the exact payload above under the new contract; its output is validated against that payload before it is shown. Nothing here writes the model. A candidate explanation can be sent to review with “Review as hypothesis”; that creates a proposal you decide on in Review, never a hypothesis directly.</p>
           <button type="button" className="rounded border border-border bg-background px-3 py-1.5 text-sm hover:border-accent" onClick={() => void runMock()}>
             Run the task mock (no network)
           </button>
@@ -386,6 +386,13 @@ function AiInner() {
 
   return (
     <div>
+      {pattern ? (
+        <p className="mb-3 text-sm">
+          <Link href={`/explore?${encodePatternRef(pattern)}`} className="text-muted hover:underline" data-testid="back-to-explore">
+            ← Back to Explore
+          </Link>
+        </p>
+      ) : null}
       <PageHeader title="AI" lede="AI interprets; evidence constrains; the model calculates; the human approves. Below: exactly what a task would send to an AI provider, and the legacy mock analysis, now read-only." />
       <ContextPanel pattern={pattern} initialTask={initialTask} />
 
@@ -395,7 +402,7 @@ function AiInner() {
         <Note tone="warn">
           LEGACY, READ-ONLY. This is the old mock analysis contract: it asks the AI for numeric confidences, strengths and lags, which the current architecture no longer accepts. Nothing here can enter the model. Every change to the model goes through{" "}
           <Link href="/proposals" className="underline">
-            Proposals
+            Review
           </Link>
           ; the old candidate schema is not routed there and will be replaced.
         </Note>

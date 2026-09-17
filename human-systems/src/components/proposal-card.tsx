@@ -19,7 +19,8 @@
  */
 import { useState } from "react";
 import { BASIS_DISCLAIMER, STATUS_WORDS, describeProposal, staleComparison, type ApproveResult, type EntityChange, type MutationProposal, type ProposalWording } from "@/kernel";
-import { NO_BASIS, STATE_LINES, basisRows, decisionDate, decisionHeading, firstLayerChanges, firstLayerWhy, specificUncertainty } from "@/features/review/wording";
+import Link from "next/link";
+import { NO_BASIS, STATE_LINES, basisRows, decisionDate, decisionHeading, explorePatternHref, firstLayerChanges, firstLayerWhy, specificUncertainty } from "@/features/review/wording";
 import type { ResolvedBasis } from "@/kernel";
 
 const TOGGLE = "text-sm text-muted hover:text-foreground hover:underline disabled:opacity-50 disabled:cursor-not-allowed";
@@ -74,6 +75,11 @@ function FirstLayer({ p, w, resolved }: { p: MutationProposal; w: ProposalWordin
       <div data-testid="why">
         <Label>Why you&apos;re seeing this</Label>
         <p className="mt-0.5">{firstLayerWhy(p.basis, w)}</p>
+        {explorePatternHref(p.basis) ? (
+          <Link href={explorePatternHref(p.basis) as string} className="mt-1 inline-block text-sm text-accent hover:underline" data-testid="back-to-pattern">
+            Open the pattern in Explore →
+          </Link>
+        ) : null}
       </div>
       <div data-testid="based-on">
         <Label>Based on</Label>

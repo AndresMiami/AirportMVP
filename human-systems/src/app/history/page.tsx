@@ -250,7 +250,7 @@ function urlDate(v: string | null): string | null {
 }
 
 function HistoryInner() {
-  const { status, model, evaluated, error } = useModel();
+  const { status, model, evaluated, error, asOf } = useModel();
   const ids = useId();
   const params = useSearchParams();
   // initial state from the URL (Home and Explore return here with a period); malformed values fall back
@@ -265,8 +265,10 @@ function HistoryInner() {
 
   const earliest = useMemo(() => (model ? earliestRecordedDate(model) : null), [model]);
   const today = todayIso();
-  const from = fromInput ?? earliest ?? today;
-  const to = toInput ?? today;
+  // while "Values as of" is set, the records shown end at that date too (6F: the as-of strip means the same thing on every screen; Home counts patterns the same way)
+  const defaultTo = asOf ? asOf.slice(0, 10) : today;
+  const from = fromInput ?? earliest ?? defaultTo;
+  const to = toInput ?? defaultTo;
   // a URL subject is honoured only when it names the system or an existing subject
   const subject = subjectInput !== null && model && (subjectInput === model.id || model.profile.members.some((m) => m.id === subjectInput)) ? subjectInput : ALL;
 
@@ -469,7 +471,7 @@ function HistoryBody({ description, model, advancedOpen, caveatsOpen, onToggleCa
         {d.caveats.length > 0 ? (
           <div>
             <button type="button" className={TOGGLE} aria-expanded={caveatsOpen} onClick={onToggleCaveats} data-testid="caveats">
-              {caveatsOpen ? "Hide notes" : `Notes on this period (${d.caveats.length})`}
+              {caveatsOpen ? "Hide" : `About this period (${d.caveats.length})`}
             </button>
             {caveatsOpen ? (
               <ul className="mt-2 list-disc space-y-1 pl-5">

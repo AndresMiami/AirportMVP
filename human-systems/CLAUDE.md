@@ -338,9 +338,20 @@ under About this map (`showLegend={false}` on /map, exported
 narrow screens, and only the four explicit cross-section actions (Show
 on map, Edit connection, Review connections, Connect on diagram) scroll
 their result into view — passive state changes never do. The
-screen-by-screen redesign ends here; next is a whole-product usability
-pass across Home, History, Explore, Review and Map — not 5E/5F, not
-Library, not another subsystem.
+screen-by-screen redesign ends here. WHOLE-PRODUCT PASS (6F, done):
+the frozen screens agree as one product — Home's "N more patterns in
+History" counts one pattern per repeated value exactly as History
+lists them; History's default period ends at the as-of date when
+"Values as of" is set (the strip means the same thing on every
+screen); an Explore-origin proposal links back to its pattern from
+Review; the AI demo page links back to the pattern it was opened for
+and calls the decision screen Review; Library names screens as they
+name themselves (Review, Map — connections and feedback patterns);
+Home's explanations link reads "All explanations →"; the collapsed
+technical footers are "About this period / comparison / map". Keep
+these agreements when touching any screen. Next is a product decision
+(real AI integration or an intentionally designed Library), not the
+roadmap by default.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

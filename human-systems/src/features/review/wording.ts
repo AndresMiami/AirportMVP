@@ -9,6 +9,7 @@
  * complete rationale, the raw basis lines, the mechanical diff) stays
  * available under Details. Pure; no React.
  */
+import { encodePatternRef } from "@/discovery";
 import { AI_OUTPUT_NOT_EVIDENCE, ENGINE_CANNOT_JUDGE } from "@/kernel/wording";
 import type { BasisLine, MutationProposal, ProposalWording, ResolvedBasis } from "@/kernel";
 import { longDate, recurrenceSentence } from "@/features/plain-language";
@@ -57,6 +58,14 @@ export function firstLayerChanges(p: Pick<MutationProposal, "materialized">, w: 
 export function isExploreOrigin(basis: readonly { kind: string }[]): boolean {
   return basis.some((b) => b.kind === "pattern") && basis.some((b) => b.kind === "cross_context");
 }
+
+/** The way back to the pattern an Explore-origin proposal came from (its own pattern basis, encoded as Explore expects); null otherwise. */
+export function explorePatternHref(basis: readonly ProposalBasisRefLike[]): string | null {
+  if (!isExploreOrigin(basis)) return null;
+  const pattern = basis.find((b): b is Extract<ProposalBasisRefLike, { kind: "pattern" }> => b.kind === "pattern");
+  return pattern ? `/explore?${encodePatternRef(pattern.ref)}` : null;
+}
+type ProposalBasisRefLike = MutationProposal["basis"][number];
 
 /** "Why you're seeing this" for the first layer; the complete kernel rationale stays under Details. */
 export function firstLayerWhy(basis: readonly { kind: string }[], w: Pick<ProposalWording, "why">): string {

@@ -27,6 +27,8 @@ export interface RecurrenceCard {
    *  recorded dates between February 2025 and June 2026." */
   sentence: string;
   occurrences: number;
+  /** How many repeated values this variable carries: History lists one row per repeated value, so Home counts the same way (6F). */
+  patternCount: number;
   /** The Explore hand-off for the strongest repetition. */
   exploreHref: string;
   /** Back to History with the same period. */
@@ -76,6 +78,7 @@ export function recurrenceCards(model: SystemModel, today: string, limit = 3): R
       details: sentences.details,
       sentence: recurrenceSentence(d.name, strongest.value, d.unit, strongest.applicationTimes),
       occurrences: strongest.applicationTimes.length,
+      patternCount: d.repeatedValues.length,
       exploreHref: `/explore?${encodePatternRef({ variableId: v.id, subjectId: v.subjectId, interval: { from, to }, repeatedValue: strongest.value, occurrenceTimes: strongest.applicationTimes })}`,
       historyHref: `/history?${new URLSearchParams({ from, to }).toString()}`,
     });
@@ -91,10 +94,11 @@ export interface RecurrenceOverview {
   more: number;
 }
 
-/** Home shows ONE pattern and counts the rest; History shows them all. */
+/** Home shows ONE pattern and counts the rest the way History lists them: one pattern per repeated value, so "N more patterns in History" matches the rows History shows. */
 export function recurrenceOverview(model: SystemModel, today: string): RecurrenceOverview {
   const all = recurrenceCards(model, today, Number.POSITIVE_INFINITY);
-  return { strongest: all[0] ?? null, more: Math.max(0, all.length - 1) };
+  const total = all.reduce((n, c) => n + c.patternCount, 0);
+  return { strongest: all[0] ?? null, more: Math.max(0, total - 1) };
 }
 
 /** Proposals waiting for the person: proposed, reviewed, stale, failed or applying. */
