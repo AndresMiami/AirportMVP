@@ -1263,6 +1263,32 @@ capture surface corrects this when it replaces that screen.
    console (the per-address limiter is best effort); decide whether
    sensitive items may ever be included from Home (today only the
    diagnostics screen can include them, per call).
+   STEP 7A.1 DONE — REVIEW FIXES (Astra's code review of cb4881d,
+   2026-09-17; all four reproduced, each fixed behind a test that fails on
+   the old code): (1) SENSITIVITY CLOSES: a derived variable that reads a
+   sensitive variable is sensitive, and so is one that reads THAT one, to a
+   fixed point over the domain's definitions; observations and events
+   withheld for their links are sensitive for everything that cites them,
+   so a hypothesis supported by a withheld observation is withheld too
+   (tests/ai/context-sensitivity-chains). (2) EVERY DISPLAYED FIELD IS
+   CHECKED for forbidden claims: an interpretation's caveat, a question's
+   text and whyItMatters, a summary's heading (tests/ai/claim-fields);
+   phrase filtering is recorded as a limited safeguard that catches
+   wording, never whether a cited record supports the claim. (3) THE
+   ENGINE'S LANGUAGE GUARD polices only its own words: variable names and
+   units are masked before the check, so a variable named "Improved cash
+   flow" no longer throws in Explore (tests/discovery/name-guard). (4)
+   HSL_AI_RATE_PER_10MIN is read: the function's shared limiter is built
+   from it on first use and keeps its state across requests. Alignment
+   notes from the same review, recorded not changed: the person's own
+   editing forms still write through apply/save (the Review path covers
+   proposals; folding the forms in is future work), and the 5D bridge
+   carries only the AI's statement into a proposal by design — weakenedBy
+   stays prose and the person writes predictions and kill criteria;
+   carrying weakenedBy across as proposed disconfirming conditions is a
+   candidate next step. Recurrence still means exact equality of a
+   recorded numeric value; threshold and lateness patterns need explicit,
+   visible domain conventions before the method travels to them.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

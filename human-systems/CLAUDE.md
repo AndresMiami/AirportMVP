@@ -387,6 +387,15 @@ proposals for other kinds, do not widen the proposal whitelist, and do
 not make the provider write anything: candidates reach the model only
 through Review. Deployment facts still Andres's: the two Netlify
 variables, the site's function time limit, a provider spend limit.
+REVIEW FIXES (7A.1): sensitivity closes over calculations and citations
+(a calculation of a sensitive calculation, a hypothesis citing a withheld
+observation: both withheld); every prose field an AI response renders is
+claim-checked (caveat, question text, whyItMatters, summary heading); the
+engine's language guard masks variable names and units before checking;
+HSL_AI_RATE_PER_10MIN configures the shared limiter. Known and recorded:
+the editing forms still write outside Review; the bridge carries only the
+AI statement (weakenedBy stays prose); recurrence is exact numeric
+equality.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

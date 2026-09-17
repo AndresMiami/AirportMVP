@@ -25,6 +25,9 @@
  * pattern, Explore comparison, hypothesis, observation links) unless the
  * call explicitly includes sensitive material; a composite is withheld
  * WHOLE, never trimmed (a trimmed comparison would misstate the engine).
+ * The closure is complete: a calculation that reads a sensitive
+ * calculation is sensitive, and an item that cites a withheld observation
+ * or event is withheld with it.
  *
  * Epistemic vocabulary for later AI output (never mapped to numbers):
  *   directly_stated  the supplied source explicitly says it (NOT true, verified or certain)
@@ -282,8 +285,32 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
   const allows = (k: ContextItemKind) => policy.kinds.includes(k);
   const sensitiveKinds = new Set(domain?.aiContext?.sensitive?.itemKinds ?? []);
   const sensitiveKeys = new Set(domain?.aiContext?.sensitive?.variableKeys ?? []);
+  const keyToId = new Map(model.variables.map((v) => [`${v.key}\u0000${v.subjectId ?? ""}`, v.id]));
+  const idsForKeys = (keys: readonly string[], subjectId: string | null) => keys.flatMap((k) => [keyToId.get(`${k}\u0000${subjectId ?? ""}`), keyToId.get(`${k}\u0000${model.id}`)].filter((x): x is string => typeof x === "string"));
   const sensitiveVariableIds = new Set(model.variables.filter((v) => sensitiveKinds.has("variable") || sensitiveKeys.has(v.key)).map((v) => v.id));
+  // SENSITIVITY CLOSES OVER CALCULATIONS: a derived variable that reads a
+  // sensitive variable is sensitive, and so is one that reads THAT one, to a
+  // fixed point (review finding, 2026-09-17: a second-order calculation used
+  // to pass through because only directly marked keys were in the set).
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const v of model.variables) {
+      if (v.kind !== "derived" || sensitiveVariableIds.has(v.id)) continue;
+      const def = domain?.derived.find((d) => d.key === v.key);
+      if (!def) continue;
+      if (idsForKeys([...def.inputs, ...def.derivedInputs].map((i) => i.key), v.subjectId).some((id) => sensitiveVariableIds.has(id))) {
+        sensitiveVariableIds.add(v.id);
+        changed = true;
+      }
+    }
+  }
   const sensitiveRelationshipIds = new Set(model.relationships.filter((r) => sensitiveKinds.has("relationship") || sensitiveVariableIds.has(r.sourceVariableId) || sensitiveVariableIds.has(r.targetVariableId)).map((r) => r.id));
+  // Observations and events withheld for their links are sensitive for
+  // everything that cites them (a hypothesis supported by a withheld
+  // observation is withheld too), whether or not they are in this payload.
+  const linksSensitive = (links: { variableIds: readonly string[]; relationshipIds: readonly string[] }) => links.variableIds.some((id) => sensitiveVariableIds.has(id)) || links.relationshipIds.some((id) => sensitiveRelationshipIds.has(id));
+  const sensitiveObservationIds = new Set(model.observations.filter((o) => sensitiveKinds.has("observation") || linksSensitive(o.links)).map((o) => o.id));
+  const sensitiveEventIds = new Set(model.events.filter((e) => sensitiveKinds.has("event") || linksSensitive(e.links)).map((e) => e.id));
   /** Everything an item carries that sensitivity can attach to. */
   interface Constituents {
     variableIds?: readonly string[];
@@ -297,8 +324,8 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
     sensitiveKinds.has(c.ownKind) ||
     (c.variableIds ?? []).some((id) => sensitiveVariableIds.has(id)) ||
     (c.relationshipIds ?? []).some((id) => sensitiveRelationshipIds.has(id)) ||
-    ((c.eventIds ?? []).length > 0 && sensitiveKinds.has("event")) ||
-    ((c.observationIds ?? []).length > 0 && sensitiveKinds.has("observation"));
+    (c.eventIds ?? []).some((id) => sensitiveEventIds.has(id)) ||
+    (c.observationIds ?? []).some((id) => sensitiveObservationIds.has(id));
   const sensitiveExcluded: string[] = [];
   const withheld: string[] = [];
   const items: ContextItem[] = [];
@@ -315,8 +342,6 @@ export function buildAiContext(model: SystemModel, task: AiTask, selection: Task
   if ((allows("value") || allows("derived")) && !selection.asOf) throw new AiContextError(`Task ${task} needs an explicit "values as of" instant in the selection`);
   const asOf = selection.asOf ?? "";
   const wantVariable = (v: StoredVariable) => inScope(v.subjectId) && (!selection.variableIds || selection.variableIds.includes(v.id));
-  const keyToId = new Map(model.variables.map((v) => [`${v.key}\u0000${v.subjectId ?? ""}`, v.id]));
-  const idsForKeys = (keys: readonly string[], subjectId: string | null) => keys.flatMap((k) => [keyToId.get(`${k}\u0000${subjectId ?? ""}`), keyToId.get(`${k}\u0000${model.id}`)].filter((x): x is string => typeof x === "string"));
 
   // ---- system ----
   if (allows("system")) {
