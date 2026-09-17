@@ -12,7 +12,8 @@ const LINKS: { href: string; label: string; matches: (path: string) => boolean }
   { href: "/", label: "Home", matches: (p) => p === "/" },
   { href: "/history", label: "History", matches: (p) => p.startsWith("/history") || p.startsWith("/explore") },
   { href: "/map", label: "Map", matches: (p) => p.startsWith("/map") || p.startsWith("/feedback-map") },
-  { href: "/library", label: "Library", matches: (p) => p !== "/" && !p.startsWith("/history") && !p.startsWith("/explore") && !p.startsWith("/map") && !p.startsWith("/feedback-map") },
+  // Review (/proposals) is an auxiliary decision flow reached from several places: it lights no primary tab (6D.1)
+  { href: "/library", label: "Library", matches: (p) => p !== "/" && !p.startsWith("/history") && !p.startsWith("/explore") && !p.startsWith("/map") && !p.startsWith("/feedback-map") && !p.startsWith("/proposals") },
 ];
 
 /** The ONE as-of treatment (Step 6A.1): a slim strip under the primary

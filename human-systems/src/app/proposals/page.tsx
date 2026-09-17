@@ -10,13 +10,15 @@
  *
  * Order: a focused proposal (?focus=id, the one Explore just created)
  * first; other actionable proposals under "Other things waiting for you";
- * applied / rejected / superseded under a collapsed "Past decisions"; the
- * manual composer under a collapsed "Advanced" near the bottom.
+ * applied / rejected / superseded as compact rows under a collapsed "Past
+ * decisions" (outcome, decision, date, Details — never a second review
+ * card, never an action); the manual composer under a collapsed
+ * "Advanced" near the bottom. Review lights no primary tab.
  */
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useModel } from "@/components/model-provider";
-import { ProposalCard, type ProposalActions } from "@/components/proposal-card";
+import { PastDecisionRow, ProposalCard, type ProposalActions } from "@/components/proposal-card";
 import { ProposalCompose, type ComposeSubmit } from "@/components/proposal-compose";
 import { Loading, Note } from "@/components/ui";
 import { recoveryLine } from "@/features/review/wording";
@@ -110,7 +112,7 @@ function ProposalsInner() {
     <div className="mx-auto max-w-2xl">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
-        <p className="mt-2 text-[15px] leading-relaxed text-muted">Check what would change before anything is added to your notebook. Nothing changes until you decide.</p>
+        <p className="mt-2 text-[15px] leading-relaxed text-muted">Check what would change before anything changes in your notebook. Nothing changes until you decide.</p>
       </header>
 
       {proposalRecovery.status === "pending" ? <Note>Checking for changes that were approved but not completed…</Note> : null}
@@ -165,11 +167,11 @@ function ProposalsInner() {
               past.length === 0 ? (
                 <p className="mt-2 text-[15px] text-muted">No decision yet.</p>
               ) : (
-                <div className="mt-2 divide-y divide-border/70">
+                <ul className="mt-2 divide-y divide-border/70" data-testid="past-rows">
                   {past.map((p) => (
-                    <ProposalCard key={p.id} p={p} actions={actions} busy={busy} />
+                    <PastDecisionRow key={p.id} p={p} />
                   ))}
-                </div>
+                </ul>
               )
             ) : null}
           </section>

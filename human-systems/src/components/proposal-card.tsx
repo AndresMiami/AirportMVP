@@ -19,7 +19,8 @@
  */
 import { useState } from "react";
 import { BASIS_DISCLAIMER, STATUS_WORDS, describeProposal, staleComparison, type ApproveResult, type EntityChange, type MutationProposal, type ProposalWording } from "@/kernel";
-import { STATE_LINES, basisRows, decisionHeading, specificUncertainty } from "@/features/review/wording";
+import { NO_BASIS, STATE_LINES, basisRows, decisionDate, decisionHeading, firstLayerChanges, firstLayerWhy, specificUncertainty } from "@/features/review/wording";
+import type { ResolvedBasis } from "@/kernel";
 
 const TOGGLE = "text-sm text-muted hover:text-foreground hover:underline disabled:opacity-50 disabled:cursor-not-allowed";
 const PRIMARY = "rounded-full bg-accent px-4 py-2 text-[15px] font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -48,18 +49,19 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 /** The first layer: what would change, why, based on what, still uncertain, and — when it cannot be applied — why. */
-function FirstLayer({ w }: { w: ProposalWording }) {
+function FirstLayer({ p, w, resolved }: { p: MutationProposal; w: ProposalWording; resolved: readonly ResolvedBasis[] }) {
   const uncertain = specificUncertainty(w);
-  const rows = basisRows(w.basis);
+  const rows = basisRows(w.basis, resolved);
+  const changes = firstLayerChanges(p, w);
   return (
     <div className="mt-4 space-y-4 text-[15px] leading-relaxed">
       <div data-testid="would-change">
         <Label>What this would change</Label>
-        {w.willChange.length === 0 ? (
+        {changes.length === 0 ? (
           <p className="text-muted">Nothing: it cannot be applied.</p>
         ) : (
           <ul className="mt-0.5 space-y-1">
-            {w.willChange.map((c, i) => (
+            {changes.map((c, i) => (
               <li key={i}>
                 {c.summary}
                 {c.subject ? <span className="text-sm text-muted"> · {c.subject}</span> : null}
@@ -71,24 +73,26 @@ function FirstLayer({ w }: { w: ProposalWording }) {
       </div>
       <div data-testid="why">
         <Label>Why you&apos;re seeing this</Label>
-        <p className="mt-0.5">{w.why}</p>
+        <p className="mt-0.5">{firstLayerWhy(p.basis, w)}</p>
       </div>
       <div data-testid="based-on">
         <Label>Based on</Label>
         {rows.length === 0 ? (
-          <p className="mt-0.5 text-muted">No record was cited.</p>
+          <p className="mt-0.5 text-muted">{NO_BASIS}</p>
         ) : (
-          <ul className="mt-0.5 space-y-2">
-            {rows.map((b, i) => (
-              <li key={i} className={b.resolved ? "" : "text-muted"}>
-                <span className="text-sm text-muted">{b.label}</span>
-                <span className="block">{b.text}</span>
-                {b.note ? <span className="block text-sm text-muted">{b.note}</span> : null}
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="mt-0.5 space-y-2">
+              {rows.map((b, i) => (
+                <li key={i} className={b.resolved ? "" : "text-muted"}>
+                  <span className="text-sm text-muted">{b.label}</span>
+                  <span className="block">{b.text}</span>
+                  {b.note ? <span className="block text-sm text-muted">{b.note}</span> : null}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-sm text-muted">{BASIS_DISCLAIMER}</p>
+          </>
         )}
-        <p className="mt-1.5 text-sm text-muted">{BASIS_DISCLAIMER}</p>
       </div>
       {uncertain.length > 0 ? (
         <div data-testid="uncertain">
@@ -122,6 +126,18 @@ function FullWording({ w }: { w: ProposalWording }) {
       <div>
         <p className="text-muted">What is being proposed</p>
         {lines(w.what, "Nothing can be described: the proposal cannot be applied.")}
+      </div>
+      <div>
+        <p className="text-muted">Why it was proposed, in full</p>
+        <p>{w.why}</p>
+      </div>
+      <div>
+        <p className="text-muted">What will change, in full</p>
+        {w.willChange.length === 0 ? <p className="text-muted">Nothing: it cannot be applied.</p> : <ul className="list-disc space-y-0.5 pl-5">{w.willChange.map((c, i) => <li key={i}>{c.summary}{c.subject ? ` · ${c.subject}` : ""}{c.details.length > 0 ? ` ${c.details.join(" ")}` : ""}</li>)}</ul>}
+      </div>
+      <div>
+        <p className="text-muted">Records cited, as the kernel words them</p>
+        {lines(w.basis.map((b) => b.text), "No record was cited.")}
       </div>
       <div>
         <p className="text-muted">What else will change</p>
@@ -164,6 +180,44 @@ function Diff({ changes }: { changes: EntityChange[] }) {
         </ul>
       )}
     </div>
+  );
+}
+
+/** A past decision as one compact row: outcome, the decision, the date, a
+ *  note if one was left, and Details holding everything the record still
+ *  knows (bookkeeping, the kernel's full wording, cited records, the
+ *  mechanical diff). No actions: the decision is made. */
+export function PastDecisionRow({ p }: { p: MutationProposal }) {
+  const [open, setOpen] = useState(false);
+  const w = describeProposal(p);
+  const heading = decisionHeading(p, w);
+  const date = decisionDate(p);
+  const lastNote = p.review.at(-1)?.note ?? "";
+  const consequential = p.preview.consequenceClass === "consequential";
+  return (
+    <li className="py-4" data-past-id={p.id} data-status={p.status}>
+      <p className={`text-sm ${p.status === "applied" ? "text-desired" : "text-muted"}`}>{STATE_LINES[p.status]}</p>
+      <p className="mt-0.5 text-[15px] leading-relaxed">{heading.detail ?? heading.question}</p>
+      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+        {date ? <span>{date}</span> : null}
+        {p.status === "rejected" && lastNote ? <span>“{lastNote}”</span> : null}
+        <button type="button" className={TOGGLE} aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+          {open ? "Hide details" : "Details"}
+        </button>
+      </p>
+      {open ? (
+        <div className="mt-3 space-y-4 border-t border-border/70 pt-3" data-testid="past-details">
+          <p className="text-sm text-muted">
+            {heading.question} · {authorWords(p)} · created {p.createdAt.slice(0, 16).replace("T", " ")} · {consequential ? "consequential" : "ordinary"} change · {STATUS_WORDS[p.status]} · id {p.id}
+            {p.supersededBy ? ` · replaced by ${p.supersededBy}` : ""}
+            {p.status === "applied" && p.commit ? ` · applied ${p.commit.approvedAt?.slice(0, 16).replace("T", " ")} · ${p.commit.affectedIds.length} record${p.commit.affectedIds.length === 1 ? "" : "s"} affected` : ""}
+          </p>
+          {p.review.length > 0 ? <p className="text-sm text-muted">Decisions: {p.review.map((r) => `${r.status} (${r.by}${r.note ? `: ${r.note}` : ""})`).join(" → ")}</p> : null}
+          <FullWording w={w} />
+          <Diff changes={p.preview.changes} />
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -234,7 +288,7 @@ export function ProposalCard({ p, actions, busy, focused = false }: { p: Mutatio
         </p>
       ) : null}
 
-      <FirstLayer w={shown} />
+      <FirstLayer p={p} w={shown} resolved={p.resolvedBasis} />
 
       <div className="mt-4">
         <button type="button" className={TOGGLE} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((x) => !x)} data-testid="details-toggle">
@@ -324,7 +378,7 @@ export function ProposalCard({ p, actions, busy, focused = false }: { p: Mutatio
               <input type="text" className="mt-1 block w-full max-w-md" value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
             </label>
           ) : null}
-          {message ? (
+          {message && message.trim() !== lastNote.trim() && !lastNote.includes(message.trim()) ? (
             <p className="text-sm text-warn" role="alert">
               {message}
             </p>

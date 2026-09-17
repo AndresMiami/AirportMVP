@@ -294,8 +294,23 @@ before approval; failed -> "Nothing was written." + explicit retry;
 consequential -> named up front + "Yes, apply this consequential
 change"; Reject is never renamed; no timers, no prechecked confirmation,
 no approve-all. Never simplify the card by merging review and approval
-or by hiding a recovery outcome. Next: Map — one coherent product over
-the existing capability, not more AI work.
+or by hiding a recovery outcome. REVIEW IS FROZEN (6D.1): /proposals
+lights no primary tab (excluded from the Library catch-all); generic
+wording says change, never "added" ("Change applied"); the recovery
+conflict line never says nothing was written (the stored model is
+neither state); Explore-origin pattern and comparison are worded in
+product language on the first layer from the already-resolved basis
+content only ("Total debt was $4,000 on 7 recorded dates …"; "7
+repeated times were compared with 1 other recorded time …"), the raw
+kernel lines under Details; "You chose to investigate this explanation
+in Explore." only when provenance (pattern + cross_context basis)
+proves it; a single addHypothesis reads "Create this working
+hypothesis." with status / confidence / disconfirming state under
+Details; zero basis reads "No supporting record was cited for this
+proposal." with no disclaimer; past decisions are compact rows with
+Details and no actions; a failed write states its reason once. Next:
+Map — one coherent product over the existing capability, not more AI
+work.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

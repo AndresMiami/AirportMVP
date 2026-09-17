@@ -145,7 +145,8 @@ describe("Review (6D: presentation simplified, approval semantics unchanged)", (
   it("page: Review first, the focused proposal first, no empty inbox sections, past decisions and the composer collapsed; recovery gating and kernel revalidation intact", () => {
     const page = read("src/app/proposals/page.tsx");
     expect(page).toMatch(/<h1[^>]*>Review<\/h1>/);
-    expect(page).toContain("Check what would change before anything is added to your notebook.");
+    expect(page).toContain("Check what would change before anything changes in your notebook.");
+    expect(page).not.toMatch(/is added to your notebook/);
     expect(page).toContain("Other things waiting for you");
     expect(page).toMatch(/Past decisions \(\$\{past\.length\}\)/);
     expect(page).toContain('data-testid="advanced"');
@@ -181,6 +182,34 @@ describe("Review (6D: presentation simplified, approval semantics unchanged)", (
     const wording = read("src/features/review/wording.ts");
     expect(wording).not.toMatch(/label: "(ai_output|cross_context|pattern_ref|PatternRef|fingerprint|catalogue_prompt|user_statement)"/);
     expect(wording).not.toMatch(/@\/services|@\/model|from "react"/);
+  });
+});
+
+describe("Review 6D.1: last engine language off the first layer", () => {
+  it("Review lights no primary tab; generic states say change, not added; past decisions are compact rows; zero basis has no contradictory disclaimer; the failure note is never repeated", () => {
+    const nav = read("src/components/nav.tsx");
+    expect(nav).toMatch(/!p\.startsWith\("\/proposals"\)/);
+    const wording = read("src/features/review/wording.ts");
+    expect(wording).toContain('applied: "Change applied"');
+    expect(wording).not.toMatch(/Added to your notebook/);
+    expect(wording).toMatch(/case "conflict":\s*return `Your notebook no longer matches either the state before this change or the state this change expected to produce\. It needs a fresh look before any retry\./);
+    const page = read("src/app/proposals/page.tsx");
+    expect(page).toMatch(/past\.map\(\(p\) => \(\s*<PastDecisionRow key=\{p\.id\} p=\{p\} \/>/);
+    expect(page).not.toMatch(/past\.map\(\(p\) => \(\s*<ProposalCard/);
+    const card = read("src/components/proposal-card.tsx");
+    const pastRow = card.slice(card.indexOf("export function PastDecisionRow"), card.indexOf("export function ProposalCard("));
+    expect(pastRow).not.toMatch(/actions\.|Approve|Reject|Edit\b|I&apos;ve reviewed/);
+    expect(pastRow).toMatch(/FullWording|Diff changes/);
+    expect(card).toMatch(/rows\.length === 0 \? \(\s*<p className="mt-0\.5 text-muted">\{NO_BASIS\}<\/p>/);
+    expect(card).toMatch(/<\/ul>\s*<p className="mt-1\.5 text-sm text-muted">\{BASIS_DISCLAIMER\}<\/p>\s*<\/>/); // disclaimer only with rows
+    expect(card).toMatch(/message && message\.trim\(\) !== lastNote\.trim\(\)/);
+    expect(card).toContain("firstLayerChanges(p, w)");
+    expect(card).toContain("firstLayerWhy(p.basis, w)");
+    expect(card).toContain("basisRows(w.basis, resolved)");
+    // the full kernel wording is still under Details
+    expect(card).toContain("Why it was proposed, in full");
+    expect(card).toContain("What will change, in full");
+    expect(card).toContain("Records cited, as the kernel words them");
   });
 });
 

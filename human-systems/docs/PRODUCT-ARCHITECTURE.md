@@ -984,7 +984,49 @@ capture surface corrects this when it replaces that screen.
    one-step approve, explicit second confirmation); failed ("Nothing was
    written.", retry only, then applied); edit -> supersede; startup
    recovery line; unreadable ledger; no horizontal overflow on mobile.
-   Next: Map — after the Review screenshots are reviewed.
+   STEP 6D.1 DONE — FINAL REVIEW POLISH FROM THE SCREENSHOT AUDIT
+   (presentation only; kernel untouched; layout, two-stage flow,
+   state actions, second confirmation, stale, retry, recovery gating,
+   Details, diff and composer preserved). (1) Review is not Library:
+   /proposals is excluded from the Library catch-all, so no primary tab
+   is active there. (2) Generic wording means CHANGE: the lede is "Check
+   what would change before anything changes in your notebook. Nothing
+   changes until you decide." and the generic applied state is "Change
+   applied" (hypothesis wording unchanged). (3) The recovery CONFLICT
+   line no longer says nothing was written — "Your notebook no longer
+   matches either the state before this change or the state this change
+   expected to produce. It needs a fresh look before any retry." — while
+   commit_never_landed still may. (4) Explore-origin basis is worded in
+   product language on the first layer from the ALREADY-RESOLVED content
+   only (src/features/review/wording.ts basisRows(lines, resolvedBasis):
+   the pattern from its current occurrence times and the comparison's
+   variable name and unit — "Total debt was $4,000 on 7 recorded dates
+   between …"; the comparison from its counts — "7 repeated times were
+   compared with 1 other recorded time. 1 condition differed across the
+   repeated times; 0 were recorded the same every time; 22 conditions
+   are still unresolved." — no recomputation, no ranking, no cause; an
+   unresolved line keeps the kernel's sentence); the raw kernel pattern
+   and comparison lines stay under Details ("Records cited, as the
+   kernel words them"). (5) The Explore rationale reads "You chose to
+   investigate this explanation in Explore." only when PROVENANCE proves
+   it (pattern + cross_context basis, never wording); the complete
+   rationale stays under Details. (6) A single addHypothesis reads
+   "Create this working hypothesis." + subject on the first layer;
+   status, confidence and the disconfirming-condition state stay under
+   Details ("What will change, in full"); canonical defaults untouched.
+   (7) Zero basis reads "No supporting record was cited for this
+   proposal." and the basis disclaimer renders only with at least one
+   row. (8) Past decisions are compact rows (outcome, the decision,
+   calendar date, a rejection note, Details with the full bookkeeping,
+   decision trail, kernel wording, cited records and mechanical diff;
+   no actions) — never a second review card. (9) A failed write shows
+   "Nothing was written." and the reason once; an action-level message
+   equal to the persisted note is not repeated, new retry errors still
+   surface. Pinned in tests/features/review-wording.test.ts and
+   tests/architecture/shell.test.ts; Chromium desktop + mobile
+   re-walked every flow with the new checks. REVIEW IS FROZEN at this
+   commit unless a real usability test exposes a concrete problem.
+   Next: Map.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real
