@@ -1083,10 +1083,36 @@ capture surface corrects this when it replaces that screen.
    relationship / Connect on diagram / the table, a new unclassified
    connection -> notice -> filter with loops unchanged, a feedback pattern
    selected and its Details intact, the orphan warning visible above the
-   map, no page overflow with the map panning inside its own box. The
-   screen-by-screen redesign ends here; next is a whole-product pass
-   (navigation continuity, language consistency, empty states, mobile
-   flow) — not 5E/5F, not Library.
+   map, no page overflow with the map panning inside its own box.
+   STEP 6E.1 DONE — FINAL MAP USABILITY POLISH (presentation only; graph,
+   relationship model, loop detection, editor, mutation paths and the
+   feedback-pattern presentation unchanged). The full technical legend
+   left the primary surface: NetworkDiagram gained `showLegend`
+   (default true) and an exported `NetworkLegend`; /map renders the
+   diagram with the legend off and keeps one short reading hint ("Blue
+   and amber arrows show the recorded direction of connections. Muted
+   connections are not being used in feedback patterns.") plus, on
+   narrow screens only, "Swipe sideways to explore the map."; the
+   complete legend now renders under About this map, so nothing is
+   lost. Explicit cross-section actions bring their result into view
+   through refs and a requestAnimationFrame scrollIntoView (a
+   just-opened section exists first): Show on map selects the same loop
+   and scrolls to the map; Edit connection opens the same editor and
+   scrolls to Edit map; Review connections opens Edit map with the same
+   unclassified filter and scrolls there; Connect on diagram starts the
+   same connect mode and scrolls to the map. Passive state changes
+   (node click, connection click, loop Details) never scroll; selection
+   semantics are unchanged. Pinned in tests/architecture/shell.test.ts
+   and tests/features/map-wording.test.ts; Chromium desktop + mobile
+   verified no full legend on the map, the full legend under About, the
+   swipe hint on mobile only, each of the four actions landing its
+   target in the viewport with the same state, no page overflow and the
+   map still panning inside its own box. MAP IS FROZEN at this commit.
+   The screen-by-screen redesign ends here; next is a whole-product
+   usability pass across Home, History, Explore, Review and Map (wording
+   mismatches, navigation dead ends, repeated concepts, empty-state
+   inconsistencies, mobile continuity) — not 5E/5F, not Library, not
+   another subsystem.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real

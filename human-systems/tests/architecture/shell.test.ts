@@ -260,6 +260,27 @@ describe("Map (6E: presentation simplified, relationship and loop semantics unch
     expect(editor).toMatch(/strength: 0\.5,\s*lag: \{ value: 0, unit: "months" \},\s*confidence: 0\.5,/);
     expect(page).toContain("BACKLOG (recorded, not this step): defaultRelationshipDraft()");
   });
+  it("6E.1: the full legend leaves the map surface for About; explicit cross-section actions bring their result into view, passive changes never do", () => {
+    const diagram = read("src/components/network-diagram.tsx");
+    expect(diagram).toContain("export function NetworkLegend(");
+    expect(diagram).toMatch(/showLegend = true,/);
+    expect(diagram).toContain("{showLegend ? <NetworkLegend selectedEdge={selectedEdgeId !== null} connectMode={connectMode} /> : null}");
+    const page = read("src/app/feedback-map/page.tsx");
+    expect(page).toContain("showLegend={false}");
+    expect(page).toContain('data-testid="full-legend"');
+    expect(page).toMatch(/data-testid="about-details"[\s\S]*<NetworkLegend /);
+    expect(page).toContain("MAP_SWIPE_HINT");
+    // the four explicit actions scroll; node/edge clicks and loop Details do not
+    expect(page).toMatch(/const openEditor = \(id: string\) => \{[\s\S]*?bringIntoView\(editRef\);\s*\};/);
+    expect(page).toMatch(/const startConnect = \(\) => \{[\s\S]*?bringIntoView\(mapRef\);\s*\};/);
+    expect(page).toMatch(/setUnclassifiedOnly\(true\);\s*setEditOpen\(true\);\s*bringIntoView\(editRef\);/);
+    expect(page).toMatch(/selectLoop\(l\.id\);\s*bringIntoView\(mapRef\);/);
+    expect(page).toMatch(/const handleNodeClick = \(id: string\) => \{(?:(?!bringIntoView)[\s\S])*?\n  \};/);
+    expect(page).toMatch(/const handleEdgeClick = \(id: string\) => \{(?:(?!bringIntoView)[\s\S])*?\n  \};/);
+    expect(page).toMatch(/requestAnimationFrame\(\(\) => ref\.current\?\.scrollIntoView/);
+    // selection semantics unchanged
+    expect(page).toContain("highlightFor(evaluated, { loopId: selectedLoop, nodeId: selectedNode, edgeId: editing?.id ?? selectedEdge })");
+  });
 });
 
 describe("Library and routes", () => {

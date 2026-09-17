@@ -21,7 +21,9 @@
  *   Edit map (collapsed)    -> New relationship, Connect on diagram, the
  *                              unclassified filter, the editor, the full
  *                              relationships table, enable/disable
- *   About this map          -> the five counts and the full legend
+ *   About this map          -> the five counts and the FULL legend (the
+ *                              map itself carries one reading hint; on a
+ *                              narrow screen also the swipe hint)
  *
  * Nothing about relationships, loop detection, dynamics eligibility,
  * direction, strength, lag, confidence or enabled state changes here.
@@ -32,15 +34,15 @@
  * AI must not rely on those defaults, and a later epistemic cleanup
  * decides whether "not assessed" belongs in these canonical fields.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatLag, horizonOfLag } from "@/calculations/lag";
 import { LoopList } from "@/components/loop-list";
 import { useModel, type ModelMutation } from "@/components/model-provider";
-import { NetworkDiagram } from "@/components/network-diagram";
+import { NetworkDiagram, NetworkLegend } from "@/components/network-diagram";
 import { JudgmentBanner, RELATIONSHIP_KIND_META, RelationshipEditor } from "@/components/relationship-editor";
 import { ConfidenceBadge, Loading, SourceBadge } from "@/components/ui";
 import { connectionsOf, highlightFor } from "@/features/map/selection";
-import { KIND_LABELS, KIND_MEANINGS, MAP_EPISTEMIC, MAP_READING_HINT, STRENGTH_NOTE, connectionSentence, connectionTitle, connectionUseNote, loopChainSentence, mapCounts, orphanNotice, patternLabel, unclassifiedNotice } from "@/features/map/wording";
+import { KIND_LABELS, KIND_MEANINGS, MAP_EPISTEMIC, MAP_READING_HINT, MAP_SWIPE_HINT, STRENGTH_NOTE, connectionSentence, connectionTitle, connectionUseNote, loopChainSentence, mapCounts, orphanNotice, patternLabel, unclassifiedNotice } from "@/features/map/wording";
 import * as mutations from "@/services/mutations";
 
 type EditorState = { kind: "closed" } | { kind: "create"; sourceId?: string; targetId?: string } | { kind: "edit"; id: string };
@@ -79,6 +81,12 @@ export default function FeedbackMapPage() {
   /** Which control made the last commit, so lastError is shown next to it. */
   const [errorOwner, setErrorOwner] = useState<string | null>(null);
   const narrow = useNarrow();
+  const mapRef = useRef<HTMLElement>(null);
+  const editRef = useRef<HTMLElement>(null);
+  /** Only an EXPLICIT cross-section action brings its result into view (6E.1); passive state changes never scroll. The frame wait lets a just-opened section exist first. */
+  const bringIntoView = (ref: React.RefObject<HTMLElement | null>) => {
+    requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  };
 
   const commit = useCallback(
     (owner: string, mutation: ModelMutation): boolean => {
@@ -109,6 +117,7 @@ export default function FeedbackMapPage() {
     clearError();
     setEditor({ kind: "edit", id });
     setEditOpen(true);
+    bringIntoView(editRef);
   };
   const startCreate = (sourceId?: string, targetId?: string) => {
     clearError();
@@ -124,6 +133,7 @@ export default function FeedbackMapPage() {
     setSelectedNode(null);
     setSelectedLoop(null);
     setSelectedEdge(null);
+    bringIntoView(mapRef);
   };
   const cancelConnect = () => setConnect({ active: false, sourceId: null });
 
@@ -177,6 +187,7 @@ export default function FeedbackMapPage() {
               onClick={() => {
                 setUnclassifiedOnly(true);
                 setEditOpen(true);
+                bringIntoView(editRef);
               }}
             >
               Review connections →
@@ -211,7 +222,7 @@ export default function FeedbackMapPage() {
         ) : null}
       </header>
 
-      <section className="rounded-xl border border-border/70 bg-surface p-3 md:p-4" data-testid="map">
+      <section ref={mapRef} className="scroll-mt-16 rounded-xl border border-border/70 bg-surface p-3 md:p-4" data-testid="map">
         {connect.active ? (
           <p className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-desired" role="status">
             <span>{connect.sourceId ? `Source: ${nameOf(connect.sourceId)}. Now click the target variable (click the source again to unpick it).` : "Connect mode: click the source variable on the diagram."}</span>
@@ -230,10 +241,14 @@ export default function FeedbackMapPage() {
           connectMode={connect.active}
           showIsolatedNodes={connect.active}
           showLagLabels={!narrow}
+          showLegend={false}
           onNodeClick={handleNodeClick}
           onEdgeClick={connect.active ? undefined : handleEdgeClick}
         />
-        <p className="mt-2 text-sm text-muted">{connect.active ? "Every variable is shown while connecting, including those without connections yet." : `${MAP_READING_HINT} Tap a variable or a connection to read about it.`}</p>
+        <p className="mt-2 text-sm text-muted" data-testid="reading-hint">
+          {connect.active ? "Every variable is shown while connecting, including those without connections yet." : `${MAP_READING_HINT} Tap a variable or a connection to read about it.`}
+          {narrow ? ` ${MAP_SWIPE_HINT}` : ""}
+        </p>
       </section>
 
       <div className="mx-auto mt-8 max-w-2xl space-y-10">
@@ -340,7 +355,15 @@ export default function FeedbackMapPage() {
                     </button>
                     <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                       {!active ? (
-                        <button type="button" className={TOGGLE} onClick={() => selectLoop(l.id)}>
+                        <button
+                          type="button"
+                          className={TOGGLE}
+                          onClick={() => {
+                            selectLoop(l.id);
+                            bringIntoView(mapRef);
+                          }}
+                          data-testid="show-on-map"
+                        >
                           Show on map
                         </button>
                       ) : (
@@ -364,7 +387,7 @@ export default function FeedbackMapPage() {
           )}
         </section>
 
-        <section data-testid="edit-map">
+        <section ref={editRef} className="scroll-mt-16" data-testid="edit-map">
           <button type="button" className={TOGGLE} aria-expanded={editOpen} onClick={() => setEditOpen((x) => !x)} data-testid="edit-map-toggle">
             {editOpen ? "Hide map editing" : "Edit map"}
           </button>
@@ -503,7 +526,10 @@ export default function FeedbackMapPage() {
                 <li>Feedback patterns detected: {counts.loops}</li>
               </ul>
               <p>Only a causal hypothesis or an opted-in definitional dependency can take part in dynamics. Feedback patterns are detected from the enabled connections in dynamics, never stored, so editing a connection changes them. Reinforcing = an even number of negative connections (A9). Pressure = mean connection strength × mean normalised gap of the pattern&apos;s variables (A10): a diagnostic index of how actively a pattern is reproducing the current state, not a rate. A pattern&apos;s status is the status of its hypothesis; &quot;accepted&quot; is a working reading, not established fact. {STRENGTH_NOTE}</p>
-              <p>The full legend sits under the map: solid blue = positive (same direction); dashed amber = negative (opposite direction); thin dotted grey = enabled but not in dynamics (unclassified, association, constraint, or definitional not opted in); lighter dotted = disabled; the small label on a connection is its lag (none when immediate); a dashed circle is a calculated variable.</p>
+              <div data-testid="full-legend">
+                <p>The complete legend:</p>
+                <NetworkLegend selectedEdge={editing !== null || selectedEdge !== null} connectMode={connect.active} />
+              </div>
             </div>
           ) : null}
         </section>

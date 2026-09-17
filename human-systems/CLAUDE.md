@@ -332,8 +332,15 @@ compact line, orphaned connections stay a visible warning. BACKLOG:
 defaultRelationshipDraft still initialises strength/confidence 0.5 —
 AI must not rely on it; a later epistemic cleanup decides "not
 assessed". Never change a relationship or loop semantic to simplify
-the map. The screen-by-screen redesign ends here; next is a
-whole-product pass, not 5E/5F, not Library.
+the map. MAP IS FROZEN (6E.1): the diagram's full legend renders only
+under About this map (`showLegend={false}` on /map, exported
+`NetworkLegend`), the map keeps one reading hint plus a swipe hint on
+narrow screens, and only the four explicit cross-section actions (Show
+on map, Edit connection, Review connections, Connect on diagram) scroll
+their result into view — passive state changes never do. The
+screen-by-screen redesign ends here; next is a whole-product usability
+pass across Home, History, Explore, Review and Map — not 5E/5F, not
+Library, not another subsystem.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

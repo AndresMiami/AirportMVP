@@ -86,5 +86,6 @@ export function mapCounts(e: { allRelationships: readonly unknown[]; relationshi
 }
 
 export const MAP_EPISTEMIC = "Connections are recorded relationships and working hypotheses. The map does not prove that one thing causes another.";
-export const MAP_READING_HINT = "Solid and dashed arrows show the recorded direction of a connection. Muted connections are not being used in feedback patterns.";
+export const MAP_READING_HINT = "Blue and amber arrows show the recorded direction of connections. Muted connections are not being used in feedback patterns.";
+export const MAP_SWIPE_HINT = "Swipe sideways to explore the map.";
 export const STRENGTH_NOTE = "Strength is a judgment the person entered (0 to 1), not an estimated effect. Nothing here measures one.";

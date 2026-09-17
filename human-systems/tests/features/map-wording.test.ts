@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { evaluateSystem } from "@/model/evaluate";
-import { KIND_LABELS, KIND_MEANINGS, connectionSentence, connectionTitle, connectionUseNote, loopChainSentence, mapCounts, orphanNotice, patternLabel, unclassifiedNotice } from "@/features/map/wording";
+import { KIND_LABELS, KIND_MEANINGS, MAP_READING_HINT, MAP_SWIPE_HINT, connectionSentence, connectionTitle, connectionUseNote, loopChainSentence, mapCounts, orphanNotice, patternLabel, unclassifiedNotice } from "@/features/map/wording";
 import { connectionsOf, highlightFor } from "@/features/map/selection";
 import * as M from "@/services/mutations";
 import { RelationshipKindSchema } from "@/types";
@@ -54,6 +54,11 @@ describe("wording over the stored enum and direction", () => {
     expect(connectionUseNote({ enabled: false, participatesInDynamics: true, kind: "causal_hypothesis" })).toMatch(/Switched off/);
     expect(connectionUseNote({ enabled: true, participatesInDynamics: false, kind: "unclassified" })).toMatch(/Not classified yet/);
     expect(connectionUseNote({ enabled: true, participatesInDynamics: false, kind: "association" })).toBe("Association: not used in feedback patterns.");
+  });
+  it("the primary surface keeps one short reading hint and a swipe hint for narrow screens; neither names a cause", () => {
+    expect(MAP_READING_HINT).toBe("Blue and amber arrows show the recorded direction of connections. Muted connections are not being used in feedback patterns.");
+    expect(MAP_SWIPE_HINT).toBe("Swipe sideways to explore the map.");
+    expect(`${MAP_READING_HINT} ${MAP_SWIPE_HINT}`).not.toMatch(/\bcauses\b|dynamics|definitional/);
   });
   it("notices count exactly and vanish at zero", () => {
     expect(unclassifiedNotice(0)).toBeNull();
