@@ -359,6 +359,34 @@ accessible names on repeated controls. The simplified product is
 considered finished enough to use; the next step is a product decision
 (real AI integration or an intentionally designed Library), not the
 roadmap by default.
+FIRST REAL AI SLICE (Step 7A, done): the ONLY server code is
+netlify/functions/ai-task.ts (a Netlify Function on the app's own site,
+/api/ai-task); the provider key exists only in that site's Functions
+environment (ANTHROPIC_API_KEY) — never in src/, the build, a
+NEXT_PUBLIC variable or the export (pinned). The browser selects the
+real provider only when the build flag NEXT_PUBLIC_AI_PROVIDER=remote is
+set; tests and unset builds use the deterministic mock, so nothing in
+CI can make a paid call. RemoteAiTaskProvider implements the SAME
+AiTaskProvider seam as the mock: it posts exactly providerPayload(ctx)
++ contextHash (src/ai/remote-contract.ts, alias-free and shared with the
+function), and validateAiResponse decides in the browser; invalid
+output is a whole failure. Enabled tasks: interpret_free_text (Home
+"Reflect on this"), suggest_explanations_for_pattern (Explore "Help me
+think", inline; "Review as hypothesis" is the unchanged 5D bridge),
+suggest_questions_to_reduce_uncertainty (informational). Calls happen
+only on a tap, never on load, typing or navigation; the first external
+call in a browser shows the boundary card ("AI reflection sends this
+note and the relevant notebook context to the AI provider." + what is
+shared + "Review what is shared →"); failures are one line ("Reflection
+couldn't be completed. Try again.") with a safe category under Details;
+one attempt per tap, no retry loop, model and ledger untouched. The
+function frames the envelope from the request, logs one line (task,
+outcome, ms) and never the content, and answers not_configured without
+a key so the static product keeps working. Do not add AI-created
+proposals for other kinds, do not widen the proposal whitelist, and do
+not make the provider write anything: candidates reach the model only
+through Review. Deployment facts still Andres's: the two Netlify
+variables, the site's function time limit, a provider spend limit.
 PROPOSAL / APPROVAL KERNEL (src/kernel, Step 1 core, no UI yet): every
 future write by an AI, a feature or a person outside the existing forms
 is a `MutationProposal` over REGISTERED ordinary mutation kinds;

@@ -7,3 +7,6 @@ export * from "./response";
 export * from "./task-provider";
 export * from "./task-mock";
 export * from "./proposal-bridge";
+export * from "./remote-contract";
+export * from "./task-remote";
+export * from "./task-select";

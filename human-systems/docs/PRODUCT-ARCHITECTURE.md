@@ -1180,10 +1180,95 @@ capture surface corrects this when it replaces that screen.
    tsc, eslint, 642 tests, the static build, and six Chromium harnesses
    (two full desktop + mobile journeys, Home shell, History, Explore,
    Review, Map) all green.
+   STEP 7A DONE (5F.1) — FIRST REAL AI SLICE. Deployment audit first:
+   the app is a static export on its OWN Netlify site (human-systems/
+   netlify.toml, base directory human-systems), so the smallest server
+   boundary it natively supports is a Netlify Function on that same site;
+   nothing else was inferred or introduced. TRANSPORT: ONE function,
+   netlify/functions/ai-task.ts, served at /api/ai-task beside the export;
+   it is the only place the provider key exists (site env
+   ANTHROPIC_API_KEY, Functions scope; never in the build, never in the
+   bundle; a source pin scans src/ and the export for the SDK, the key
+   name and key prefixes). The static product is untouched: an
+   unconfigured site answers not_configured and the app keeps its
+   offline demo. PROVIDER SEAM UNCHANGED: buildAiContext,
+   providerPayload, contextHash, AiTaskProvider, validateAiResponse and
+   toProposalSet are byte-for-byte the same contract; RemoteAiTaskProvider
+   (src/ai/task-remote.ts) implements the same seam as the mock, posts
+   EXACTLY { version, payload: providerPayload(ctx), contextHash } (the
+   wire contract in src/ai/remote-contract.ts is alias-free so the server
+   bundle shares it), and runs validateAiResponse against ITS payload and
+   hash on whatever returns: invalid output is a whole, visible failure,
+   nothing coerced. The function recomputes the hash (src/ai/hash.ts,
+   extracted from context.ts), sends the payload VERBATIM as the user
+   message under a domain-neutral task constitution, asks the provider
+   (Anthropic SDK, claude-opus-5 by default, adaptive thinking at low
+   effort, a fixed per-task JSON output schema) for items only, and
+   FRAMES the envelope (version, task, contextHash) from the request; the
+   browser trusts none of it. Enabled tasks: interpret_free_text (Home),
+   suggest_explanations_for_pattern (Explore), and
+   suggest_questions_to_reduce_uncertainty (informational); extraction,
+   summary and observation proposals stay off the wire. Nothing new can
+   write: candidates still go validated candidate → Review as hypothesis
+   → MutationProposal(addHypothesis, proposedBy person) → Review. PROVIDER
+   SELECTION is explicit and build-time: NEXT_PUBLIC_AI_PROVIDER=remote
+   (a non-secret build flag, the only environment value the bundle
+   reads) selects the service; anything else, tests included, selects
+   the deterministic mock, so no test or unconfigured build can make a
+   paid call. HOME: "Reflect on this" loses its Demo badge when the
+   service is configured; the caption reads "Nothing is saved to your
+   notebook. What is shared" (the manifest in plain words, with a link to
+   the exact payload for the SAME note via /ai?source=home-draft, the
+   note never in a URL); before the FIRST external call in a browser a
+   boundary card says "AI reflection sends this note and the relevant
+   notebook context to the AI provider." with what leaves, "Review what
+   is shared →", Send and continue / Not now (acknowledgement stored per
+   browser under human-systems.ai-consent.v1); the answer is headed
+   "Reflection", worded conversationally, bound to the contextHash it
+   answered (a changed note, date or model hides it, nothing reruns);
+   failure is one line, "Reflection couldn't be completed. Try again.",
+   with the safe category behind Details. EXPLORE: "Help me think about
+   this pattern" is now a tap that answers INLINE (candidates as
+   "Possibilities to consider" with the state in words, "Rests on …" in
+   human labels, "Would be weakened by", "Other readings", questions
+   worth answering) and "Review as hypothesis" is the unchanged 5D bridge
+   (toProposalSet + suggestionState + ProposalService.create), then
+   /proposals?focus=id. CALLS ARE TAP-INITIATED ONLY (pinned: no effect
+   body runs the provider; the Chromium harness counted zero posts on
+   load, typing and navigation, one per tap). FAILURES: not_configured,
+   bad_request, unsupported_task, too_large, rate_limited, timeout,
+   unreachable, service_error, provider_error, refused,
+   output_truncated, invalid_output, each a fixed safe sentence; one
+   attempt per tap (maxRetries 0 in the SDK, no loop in the adapter);
+   canonical model and ledger untouched on every failure. CONTROLS:
+   200 KB request bound, 400 items, 1500 output tokens, 25 s provider
+   wait (HSL_AI_TIMEOUT_MS), 40 s browser wait, a best-effort per-address
+   limiter (20 per 10 min per instance), same-origin + client-header gate
+   (a cross-origin page cannot send the header without a preflight the
+   function never grants), HSL_AI_DISABLED kill switch, and one log line
+   per call (task, outcome, duration; never the note, the context or the
+   answer). Whitespace heartbeat keeps the response alive while the
+   provider works. Verified from the final tree: tsc, eslint, 680 tests
+   in 64 files, the static build in both modes (the export scanned for
+   secrets), the function bundled with esbuild the way Netlify bundles
+   it, and Chromium desktop + mobile: the mock journey unchanged and the
+   remote build against a fake service (boundary once, bound results,
+   both failure states, Explore → Review as hypothesis → approve →
+   hypothesis with confidence null). DEPLOYMENT DECISIONS STILL OPEN
+   (Andres): set ANTHROPIC_API_KEY (Functions scope) and
+   NEXT_PUBLIC_AI_PROVIDER=remote (Builds scope) on the Netlify site;
+   confirm the site's synchronous function time limit (Netlify's default
+   is short; the heartbeat streams, but the platform limit is a plan
+   fact this repo cannot verify); set a spend limit in the provider
+   console (the per-address limiter is best effort); decide whether
+   sensitive items may ever be included from Home (today only the
+   diagnostics screen can include them, per call).
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real
-   call.
+   call. FIRST SLICE SHIPPED as Step 7A (record above): reflection and
+   pattern suggestions through a same-origin Netlify Function; the rest
+   (structured capture, voice, chat) remains.
 8. Persistent-condition hypothesis kind and prediction resolution.
 9. 3d income refinement on the domain-owned collection.
 

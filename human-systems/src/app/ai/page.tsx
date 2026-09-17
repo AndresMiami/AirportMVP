@@ -24,6 +24,8 @@ import { AI_TASKS, TASK_POLICIES, buildAiContext, hashedContent, providerPayload
 import { suggestionState, toProposalSet, type AiProposalCandidate, type SuggestionState } from "@/ai/proposal-bridge";
 import type { AiOutputItem, AiResponse } from "@/ai/response";
 import { MockAiTaskProvider } from "@/ai/task-mock";
+import { CONFIGURED_PROVIDER_KIND } from "@/ai/task-select";
+import { readDraft } from "@/features/home/draft";
 import { decodePatternRef, encodePatternRef, type PatternRef } from "@/discovery";
 import type { MutationProposal } from "@/kernel";
 import { MockAiProvider } from "@/ai/mock-provider";
@@ -44,7 +46,7 @@ const TASK_WORDS: Record<AiTask, string> = {
 
 const ADAPTER_ID = "task-mock";
 
-function ContextPanel({ pattern, initialTask }: { pattern: PatternRef | null; initialTask: AiTask | null }) {
+function ContextPanel({ pattern, initialTask, initialText }: { pattern: PatternRef | null; initialTask: AiTask | null; initialText: string | null }) {
   const { model, evaluated, proposals, proposalRecovery } = useModel();
   const router = useRouter();
   const [task, setTask] = useState<AiTask>(initialTask ?? (pattern ? "suggest_explanations_for_pattern" : "interpret_free_text"));
@@ -52,7 +54,7 @@ function ContextPanel({ pattern, initialTask }: { pattern: PatternRef | null; in
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [subjectId, setSubjectId] = useState<string>("");
-  const [userText, setUserText] = useState("My hours dropped from 40 to 15 in March.");
+  const [userText, setUserText] = useState(initialText ?? "My hours dropped from 40 to 15 in March.");
   const [includeSensitive, setIncludeSensitive] = useState(false);
   // "values as of" is part of the context's content, so it is chosen explicitly (date-only = end of that day)
   const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10));
@@ -150,6 +152,9 @@ function ContextPanel({ pattern, initialTask }: { pattern: PatternRef | null; in
             Include items the domain marks sensitive (explicit, per call)
           </label>
         </div>
+        <p className="mt-2 text-xs text-muted" data-testid="configured-provider">
+          Configured provider: {CONFIGURED_PROVIDER_KIND === "remote" ? "the reflection service (a same-origin function holding the provider key; Home and Explore send this exact payload on your tap)" : "the deterministic demo (no network; set NEXT_PUBLIC_AI_PROVIDER=remote at build to use the reflection service)"}.
+        </p>
         <p className="mt-2 text-xs text-muted">
           Allowed item kinds for this task: {policy.kinds.join(", ")}. Scope: {policy.scope === "subject" ? "the chosen subject plus the system" : policy.scope === "pattern" ? "the pattern's deterministic Explore scope" : "the selected subjects plus the system"}.
           {needsPattern && !pattern ? " This task takes a pattern from Explore (open a repeated record there and choose “Ask about this pattern”)." : ""}
@@ -361,8 +366,10 @@ function MockItem({ it, candidate, existing, canPropose, busy, onReview }: { it:
 }
 
 function AiInner() {
-  const { evaluated } = useModel();
+  const { model, evaluated } = useModel();
   const params = useSearchParams();
+  // ?source=home-draft: the SAME note Home holds in this browser, never carried in the URL
+  const initialText = useMemo(() => (params.get("source") === "home-draft" && model ? readDraft(model.id) : null), [params, model]);
   const pattern = useMemo(() => decodePatternRef(new URLSearchParams(params.toString())), [params]);
   const taskParam = params.get("task");
   const initialTask = taskParam && (AI_TASKS as readonly string[]).includes(taskParam) ? (taskParam as AiTask) : null;
@@ -394,7 +401,7 @@ function AiInner() {
         </p>
       ) : null}
       <PageHeader title="AI" lede="AI interprets; evidence constrains; the model calculates; the human approves. Below: exactly what a task would send to an AI provider, and the legacy mock analysis, now read-only." />
-      <ContextPanel pattern={pattern} initialTask={initialTask} />
+      <ContextPanel pattern={pattern} initialTask={initialTask} initialText={initialText} />
 
       <details className="mt-6">
         <summary className="cursor-pointer text-sm text-muted">Legacy analysis (read-only, superseded contract)</summary>

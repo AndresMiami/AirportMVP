@@ -29,8 +29,15 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useState } from "react";
+import { providerPayload, type AiContext } from "@/ai/context";
+import { suggestionState, toProposalSet, type AiProposalCandidate, type SuggestionState } from "@/ai/proposal-bridge";
+import { ADAPTER_IDS, CONFIGURED_PROVIDER_KIND, createTaskProvider } from "@/ai/task-select";
+import { AiDisclosure, AiFailure } from "@/components/ai-boundary";
 import { useModel } from "@/components/model-provider";
 import { Loading, Note } from "@/components/ui";
+import { readConsent, writeConsent } from "@/features/ai/consent";
+import { DISCLOSURE_PATTERN, THINKING_FAILED, citedLabels, needsDisclosure, providerBadge, sharedLines, stateWords } from "@/features/ai/wording";
+import { exploreContext, visibleThinking, type ExploreThinking } from "@/features/explore/thinking";
 import { CAUSATION_DISCLAIMER, INVESTIGATE_TEXT, INVESTIGATE_UNAVAILABLE_TEXT, contextSubjectsFor, crossContext, dayMonthYear, decodePatternRef, encodePatternRef, formatValue, linkedHypotheses, monthYear, type CrossContext, type PatternRef } from "@/discovery";
 import { buildExploreProposal, createdFromPattern, mergeRelated, reconcileDraft, type ExploreDraft } from "@/features/explore/proposal";
 import { EXPLORE_CAVEAT, NO_CONTRASTS_YET, exploreSections, proposalStatusLine, type ExploreRow } from "@/features/explore/wording";
@@ -45,6 +52,7 @@ const TOGGLE = "text-sm text-muted hover:text-foreground hover:underline";
 const ACTION = "text-[15px] font-medium text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline";
 const PRIMARY = "rounded-full bg-accent px-4 py-2 text-[15px] font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed";
 const GROUP_THRESHOLD = 3;
+const KIND = CONFIGURED_PROVIDER_KIND;
 
 interface Draft extends ExploreDraft {
   locus: Locus;
@@ -405,15 +413,169 @@ function Explanations({ r, model, domain }: { r: CrossContext; model: SystemMode
         </p>
       ) : null}
 
-      <p className="text-sm">
-        <Link href={`/ai?task=suggest_explanations_for_pattern&${encodePatternRef(r.pattern)}`} className="inline-flex items-center gap-2 text-muted hover:underline" data-testid="help-me-think">
-          Help me think about this pattern
-          <span className="rounded-full border border-border px-1.5 py-0.5 text-xs">Demo</span>
-        </Link>
-      </p>
+      <HelpMeThink r={r} model={model} ledger={ledger} ready={investigateReady} />
       <p id={`${ids}-investigate`} className="text-sm text-muted">
         {investigateReady ? INVESTIGATE_TEXT : proposalRecovery.status === "error" ? `${INVESTIGATE_UNAVAILABLE_TEXT} ${proposalRecovery.message}` : INVESTIGATE_UNAVAILABLE_TEXT}
       </p>
+    </div>
+  );
+}
+
+/**
+ * "Help me think about this pattern" (Step 7A): the configured task
+ * provider answers suggest_explanations_for_pattern over the exact
+ * PatternRef shown, only on the person's tap and never before the boundary
+ * has been shown once in this browser. Candidates stay possibilities with
+ * their basis in words; "Review as hypothesis" is the 5D bridge unchanged:
+ * ONE addHypothesis proposal the person submits and decides on in Review.
+ * The model is byte-unchanged until approval there.
+ */
+function HelpMeThink({ r, model, ledger, ready }: { r: CrossContext; model: SystemModel; ledger: MutationProposal[] | null; ready: boolean }) {
+  const router = useRouter();
+  const { proposals } = useModel();
+  const [thinking, setThinking] = useState<ExploreThinking | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [disclosing, setDisclosing] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    // the boundary acknowledgement is a per-browser convenience, read once
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAcknowledged(readConsent());
+  }, []);
+  const current = useMemo(() => exploreContext(model, r.pattern), [model, r.pattern]);
+  const shown = visibleThinking(thinking, current);
+  const payloadHref = `/ai?task=suggest_explanations_for_pattern&${encodePatternRef(r.pattern)}`;
+
+  const run = async (ctx: AiContext) => {
+    setBusy(true);
+    try {
+      const result = await createTaskProvider(KIND).run(providerPayload(ctx), ctx.contextHash);
+      setThinking({ forHash: ctx.contextHash, result });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const help = async () => {
+    if (!("ctx" in current) || busy) return;
+    if (needsDisclosure(KIND, acknowledged)) {
+      setDisclosing(true);
+      return;
+    }
+    await run(current.ctx);
+  };
+  const confirm = async () => {
+    writeConsent();
+    setAcknowledged(true);
+    setDisclosing(false);
+    if ("ctx" in current) await run(current.ctx);
+  };
+  const bridge = shown && shown.ok && "ctx" in current ? toProposalSet(current.ctx, shown.response, ADAPTER_IDS[KIND]) : null;
+  const items = "ctx" in current ? current.ctx.items : [];
+  /** The person submits; the AI output is recorded as origin only. Never a model write. */
+  const reviewAsHypothesis = async (candidate: AiProposalCandidate) => {
+    if (!proposals || !ready) return;
+    const existing = suggestionState(ledger ?? [], candidate.identity);
+    if (existing.state === "open") {
+      router.push(`/proposals?focus=${encodeURIComponent(existing.proposal.id)}`);
+      return;
+    }
+    if (existing.state !== "none") return;
+    setSubmitting(candidate.identity.outputItemId);
+    setProblem(null);
+    try {
+      const created = await proposals.create({ modelId: model.id, request: candidate.request, proposedBy: { kind: "person" }, rationale: candidate.rationale, basis: candidate.basis });
+      router.push(`/proposals?focus=${encodeURIComponent(created.id)}`);
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(null);
+    }
+  };
+  const badge = providerBadge(KIND);
+
+  return (
+    <div className="mt-2">
+      <p className="text-sm">
+        <button type="button" className="inline-flex items-center gap-2 text-muted hover:underline disabled:opacity-60" disabled={busy || "error" in current} onClick={() => void help()} data-testid="help-me-think">
+          {busy ? "Thinking…" : "Help me think about this pattern"}
+          {badge ? <span className="rounded-full border border-border px-1.5 py-0.5 text-xs">{badge}</span> : null}
+        </button>
+      </p>
+      {"error" in current ? <p className="mt-1 text-sm text-muted">{current.error}</p> : null}
+      {disclosing && "ctx" in current ? <AiDisclosure sentence={DISCLOSURE_PATTERN} lines={sharedLines(current.ctx.manifest)} payloadHref={payloadHref} busy={busy} onConfirm={() => void confirm()} onCancel={() => setDisclosing(false)} /> : null}
+      {shown ? (
+        shown.ok ? (
+          <section className="mt-3 rounded-xl border border-border/70 bg-surface px-5 py-4" data-testid="thinking">
+            <p className="text-sm text-muted">{KIND === "mock" ? "Demo response" : "Possibilities to consider"}</p>
+            {bridge && !bridge.ok ? <Note tone="warn">These possibilities cannot be reviewed as a proposal: {bridge.error}</Note> : null}
+            <div className="mt-2 space-y-4 text-[15px] leading-relaxed">
+              {shown.response.items.map((it) => {
+                if (it.kind === "candidate_explanation") {
+                  const candidate = bridge && bridge.ok ? bridge.set.candidates.find((c) => c.identity.outputItemId === it.id) : undefined;
+                  const existing: SuggestionState = candidate ? suggestionState(ledger ?? [], candidate.identity) : { state: "none" };
+                  const rests = citedLabels([it.forPattern, ...it.restsOn], items);
+                  return (
+                    <div key={it.id} data-thinking-kind="possibility">
+                      <p>{it.text}</p>
+                      <p className="mt-1 text-sm text-muted">{stateWords(it.state)}</p>
+                      {rests.length ? <p className="mt-1 text-sm text-muted">Rests on {rests.join("; ")}.</p> : null}
+                      {it.weakenedBy.length ? <p className="mt-1 text-sm text-muted">Would be weakened by: {it.weakenedBy.join(" · ")}</p> : null}
+                      {it.alternatives.length ? <p className="mt-1 text-sm text-muted">Other readings: {it.alternatives.join(" · ")}</p> : null}
+                      {candidate ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2" data-suggestion={candidate.identity.outputItemId}>
+                          {existing.state === "applied" ? (
+                            <span className="text-sm text-muted">
+                              Already added as a working explanation ·{" "}
+                              <Link href={`/proposals?focus=${encodeURIComponent(existing.proposal.id)}`} className="underline">
+                                see the decision
+                              </Link>
+                            </span>
+                          ) : existing.state === "rejected" ? (
+                            <span className="text-sm text-muted">
+                              Rejected earlier ·{" "}
+                              <Link href={`/proposals?focus=${encodeURIComponent(existing.proposal.id)}`} className="underline">
+                                see it
+                              </Link>
+                            </span>
+                          ) : (
+                            <button type="button" className={ACTION} disabled={!ready || submitting !== null} title={ready ? undefined : INVESTIGATE_UNAVAILABLE_TEXT} onClick={() => void reviewAsHypothesis(candidate)}>
+                              {existing.state === "open" ? "Review proposal" : "Review as hypothesis"}
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                }
+                if (it.kind === "question") {
+                  return (
+                    <p key={it.id} data-thinking-kind="question">
+                      <span className="block text-sm text-muted">Question worth answering</span>
+                      {it.text}
+                      <span className="mt-1 block text-sm text-muted">{it.whyItMatters}</span>
+                    </p>
+                  );
+                }
+                return null;
+              })}
+              {shown.response.items.length === 0 ? <p className="text-muted">{KIND === "mock" ? "The demo has nothing to say about this pattern." : "Nothing came back for this pattern."}</p> : null}
+            </div>
+            {problem ? (
+              <p className="mt-2 text-sm text-warn" role="alert">
+                {problem}
+              </p>
+            ) : null}
+            <p className="mt-3 text-sm text-muted">Reviewing a possibility creates a proposal you decide on in Review; nothing is added until you approve it there.</p>
+            <Link href={payloadHref} className="mt-1 inline-block text-sm text-muted underline">
+              {KIND === "mock" ? "See exactly what a real assistant would receive" : "See exactly what was sent"}
+            </Link>
+          </section>
+        ) : (
+          <AiFailure line={THINKING_FAILED} detail={shown.error} />
+        )
+      ) : null}
     </div>
   );
 }

@@ -33,8 +33,11 @@ hypotheses record what would weaken them; migration v2→v3 keeps a backup
 and creates no claim. Schema v2 added editable relationships with lags,
 hard/soft constraints, Observations, Hypotheses with a review status, a
 blank-system workflow and versioned localStorage with migrations. No
-authentication, no cloud, no real AI provider (a deterministic mock
-exercises the review contract).
+authentication, no cloud. The AI provider is optional: by default a
+deterministic mock exercises the review contract; a site built with
+`NEXT_PUBLIC_AI_PROVIDER=remote` sends Home reflections and Explore
+suggestions through one same-origin Netlify Function that holds the key
+(see docs/DEPLOY-NETLIFY.md).
 
 ## Run
 

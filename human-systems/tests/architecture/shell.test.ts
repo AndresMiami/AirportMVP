@@ -23,7 +23,8 @@ describe("Home", () => {
     const home = read("src/app/page.tsx");
     expect(home).toMatch(/What are you thinking about\?/);
     expect(home).toMatch(/Write what&apos;s on your mind\. You don&apos;t need to organize it first\./);
-    expect(home).toMatch(/human-systems\.home-draft\.v1/);
+    expect(read("src/features/home/draft.ts")).toMatch(/human-systems\.home-draft\.v1/); // 7A: the draft key moved into its own module; Home still reads and writes it
+    expect(home).toMatch(/readDraft\(model\.id\)/);
     expect(home).not.toMatch(/@\/services\/mutations|\bapply\(|replaceModel|\.save\(|proposals\.create/);
     expect(home).toMatch(/recurrenceOverview\(model/);
     expect(home).toMatch(/openProposalCount\(ledger\)/);
