@@ -1,0 +1,27 @@
+{
+  "id": "example-bank-export",
+  "name": "Example bank export",
+  "url": "https://example.com/statements/2026-08",
+  "version": "2026-08-31",
+  "retrievedAt": "2026-09-01T09:00:00.000Z",
+  "items": [
+    {
+      "key": "reserves-2026-08",
+      "variableKey": "liquid_reserves",
+      "period": { "text": "31 August 2026", "start": "2026-08-31" },
+      "value": 1450,
+      "sourceType": "measured",
+      "quote": "Available balance on 31 Aug 2026: $1,450.00",
+      "locator": "page 1, closing balance"
+    },
+    {
+      "key": "reserves-2026-07",
+      "variableKey": "liquid_reserves",
+      "period": { "text": "31 July 2026", "start": "2026-07-31" },
+      "value": 620,
+      "sourceType": "measured",
+      "quote": "Available balance on 31 Jul 2026: $620.00",
+      "locator": "page 1, opening balance"
+    }
+  ]
+}

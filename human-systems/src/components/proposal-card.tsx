@@ -42,6 +42,8 @@ function authorWords(p: MutationProposal): string {
       return `Proposed by an AI adapter (${p.proposedBy.adapterId})`;
     case "system_feature":
       return `Proposed by the feature “${p.proposedBy.featureId}”`;
+    case "agent":
+      return `Collected by the research agent from source ${p.proposedBy.sourceId} for a thesis you keep; the record carries the source's own provenance, not the agent's`;
   }
 }
 
@@ -75,6 +77,11 @@ function FirstLayer({ p, w, resolved }: { p: MutationProposal; w: ProposalWordin
       <div data-testid="why">
         <Label>Why you&apos;re seeing this</Label>
         <p className="mt-0.5">{firstLayerWhy(p.basis, w)}</p>
+        {p.proposedBy.kind === "agent" ? (
+          <p className="mt-1 text-sm text-muted" data-testid="collector-line">
+            {authorWords(p)}.
+          </p>
+        ) : null}
         {explorePatternHref(p.basis) ? (
           <Link href={explorePatternHref(p.basis) as string} className="mt-1 inline-block text-sm text-accent hover:underline" data-testid="back-to-pattern">
             Open the pattern in Explore →

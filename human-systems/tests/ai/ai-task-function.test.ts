@@ -84,6 +84,14 @@ describe("gates", () => {
     expect(await read(await handleAiTask(request({ ...body, payload: { ...body.payload, items: [...body.payload.items, { ref: {}, id: "x", kind: "user_text", subjectId: null, payload: { text: "x".repeat(REMOTE_LIMITS.maxRequestBytes) } }] } }), d))).toEqual({ status: 413, body: { ok: false, category: "too_large" } });
     expect(d.calls).toHaveLength(0);
   });
+  it("HSL_AI_RATE_PER_10MIN configures the default limiter, whose state survives across requests (review finding)", async () => {
+    const { body } = envelope();
+    const d = deps({ env: { HSL_AI_RATE_PER_10MIN: "1" } });
+    d.limiter = undefined; // the module's own limiter, built from the environment
+    expect((await read(await handleAiTask(request(body), d))).body.ok).toBe(true);
+    expect(await read(await handleAiTask(request(body), d))).toEqual({ status: 429, body: { ok: false, category: "rate_limited" } });
+    expect(d.calls).toHaveLength(1);
+  });
   it("rate limit per client address, best effort", async () => {
     const { body } = envelope();
     const d = deps({ limiter: new RateLimiter(2) });

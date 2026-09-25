@@ -9,7 +9,11 @@
  *     and its state is always directly_stated (= the source says it; NOT
  *     that it is true);
  *   - Interpretations and CandidateExplanations may never claim
- *     directly_stated; their text may not assert cause, proof or odds;
+ *     directly_stated; EVERY prose field the contract renders (text,
+ *     caveat, weakenedBy, alternatives, question text and whyItMatters,
+ *     summary headings and text) may not assert cause, proof or odds.
+ *     Phrase filtering is a limited safeguard: it catches wording, never
+ *     whether a cited record actually supports the claim;
  *   - output kinds are fixed per task;
  *   - NO numeric epistemics anywhere: no confidence, probability, odds,
  *     strength, lag or information-gain fields; the epistemic states are
@@ -165,8 +169,10 @@ export function validateAiResponse(raw: unknown, payload: AiProviderPayload, con
           const bad = exists(ref, "restsOn", it.id);
           if (bad) return { ok: false, error: bad };
         }
-        const claim = forbiddenClaim(it.text);
-        if (claim) return { ok: false, error: `${it.id}: an interpretation may not claim "${claim}"` };
+        for (const t of [it.text, it.caveat]) {
+          const claim = forbiddenClaim(t);
+          if (claim) return { ok: false, error: `${it.id}: an interpretation may not claim "${claim}"` };
+        }
         break;
       }
       case "candidate_explanation": {
@@ -187,6 +193,10 @@ export function validateAiResponse(raw: unknown, payload: AiProviderPayload, con
           const bad = exists(ref, "target", it.id);
           if (bad) return { ok: false, error: bad };
         }
+        for (const t of [it.text, it.whyItMatters]) {
+          const claim = forbiddenClaim(t);
+          if (claim) return { ok: false, error: `${it.id}: a question may not claim "${claim}"` };
+        }
         break;
       }
       case "summary": {
@@ -195,8 +205,10 @@ export function validateAiResponse(raw: unknown, payload: AiProviderPayload, con
             const bad = exists(ref, "cite", it.id);
             if (bad) return { ok: false, error: bad };
           }
-          const claim = forbiddenClaim(s.text);
-          if (claim) return { ok: false, error: `${it.id}: a summary may not claim "${claim}"` };
+          for (const t of [s.heading, s.text]) {
+            const claim = forbiddenClaim(t);
+            if (claim) return { ok: false, error: `${it.id}: a summary may not claim "${claim}"` };
+          }
         }
         break;
       }

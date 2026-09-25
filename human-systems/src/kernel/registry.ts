@@ -133,7 +133,7 @@ export const REGISTRY: { [K in MutationKind]: RegistryEntry<K> } = {
     apply: (m, a) => M.recordValue(m, a.variableId, a.input),
     names: (a) => [{ collection: "variables", id: a.variableId }],
     expectedOutputs: (a, changes) => Object.fromEntries(entryIdsOf(changes, "variables", a.variableId, "values").map((id, i) => [`valueEntry${i}`, id])),
-    describe: (a, _c, before) => [{ verb: "record", noun: `value of ${nameOf(before, a.variableId)}`, summary: `Record ${a.input.value === null ? "an unknown value" : `${a.input.value} ${before.variables.find((v) => v.id === a.variableId)?.unit ?? ""}`.trim()} for ${q(nameOf(before, a.variableId))}.`, details: [`Applies ${a.input.valid ? a.input.valid.text || a.input.valid.start || "as stated" : `from its recording (${a.input.recordedAt})`}; source ${a.input.sourceType.replace("_", " ")}, confidence ${Math.round(a.input.confidence * 100)}%.`, "Earlier values stay in the history."] }],
+    describe: (a, _c, before) => [{ verb: "record", noun: `value of ${nameOf(before, a.variableId)}`, summary: `Record ${a.input.value === null ? "an unknown value" : `${a.input.value} ${before.variables.find((v) => v.id === a.variableId)?.unit ?? ""}`.trim()} for ${q(nameOf(before, a.variableId))}.`, details: [`Applies ${a.input.valid ? a.input.valid.text || a.input.valid.start || "as stated" : `from its recording (${a.input.recordedAt})`}; source ${a.input.sourceType.replace("_", " ")}, confidence ${a.input.confidence === null ? "not assessed" : `${Math.round(a.input.confidence * 100)}%`}.`, "Earlier values stay in the history."] }],
   },
   recordTarget: {
     shape: (a) => requireKeys(a, ["variableId", "input"]),

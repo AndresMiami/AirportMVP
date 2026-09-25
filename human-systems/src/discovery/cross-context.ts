@@ -400,8 +400,11 @@ export function crossContext(model: SystemModel, pattern: PatternRef, options: C
   const allReadings = [...occurrences, ...contrasts].flatMap((s) => s.context);
   if (allReadings.some((c) => c.basis === "varied_within_extent")) caveats.push({ code: "varied_within_extent", text: "Within an approximate or stated occurrence period, a condition was recorded at more than one value. No single value can be assigned to that occurrence; that is variation during the period, not conflicting records for the same time." });
   if (allReadings.some((c) => c.basis === "ambiguous")) caveats.push({ code: "ambiguous_context", text: "Two records claim different values for the same time; that time cannot be read until one is corrected or retracted." });
+  // The guard checks the ENGINE's wording only: the person's variable names
+  // and units are masked first (a variable may be called "Improved cash flow").
+  const ownWords = model.variables.flatMap((v) => [v.name, v.unit]);
   for (const s of statements) {
-    const bad = containsForbiddenPhrase(s);
+    const bad = containsForbiddenPhrase(s, { ignoring: ownWords });
     if (bad) throw new Error(`cross-context statement contains forbidden phrase "${bad}": ${s}`);
   }
 

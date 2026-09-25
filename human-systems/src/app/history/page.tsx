@@ -96,9 +96,7 @@ function Details({ item, lens }: { item: DescribedVariable; lens: HistoryLens })
                 <td>
                   <SourceBadge sourceType={r.sourceType} />
                 </td>
-                <td>
-                  <ConfidenceBadge confidence={r.confidence} />
-                </td>
+                <td>{r.confidence === null ? <span className="text-xs text-muted">not assessed</span> : <ConfidenceBadge confidence={r.confidence} />}</td>
                 <td>{r.validBasis === "recorded" ? "known from its recording forward" : "as stated"}</td>
                 <td className="tabular-nums">{dayMonthYear(r.recordedAt)}</td>
               </tr>

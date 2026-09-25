@@ -72,7 +72,21 @@ function basisText(b: ResolvedBasis): BasisLine {
       return c ? { ref: b.ref, text: `Question that prompted the draft: “${String(c.question)}”`, resolved: true } : { ref: b.ref, text: `Question that prompted the draft is no longer in the catalogue (${b.ref.promptId}); it read: “${b.ref.question}”`, resolved: false };
     case "ai_output":
       return { ref: b.ref, text: `AI wording that prompted this proposal: “${b.ref.text}” (${b.ref.state ?? "unstated"}; adapter ${b.ref.adapterId}). ${AI_OUTPUT_NOT_EVIDENCE}`, resolved: true };
+    case "source_item": {
+      // the words follow the CURRENT content, so a changed item reads differently on the stale card
+      if (!c) return { ref: b.ref, text: `Source item ${b.ref.itemKey} is no longer in the current version of ${b.ref.sourceId}; as reviewed it read: ${b.ref.summary}`, resolved: false };
+      return { ref: b.ref, text: `Source: ${sourceItemSummary(c, b.ref.version) ?? b.ref.summary}`, resolved: true };
+    }
   }
+}
+
+/** Plain words for a resolved source item: name, version, period and the exact quote. */
+export function sourceItemSummary(c: Record<string, unknown>, version: string): string | null {
+  const item = c.item as Record<string, unknown> | undefined;
+  if (!item || typeof c.name !== "string") return null;
+  const period = item.period as { text?: unknown } | undefined;
+  const value = item.value === null ? "unknown" : String(item.value);
+  return `${c.name} (version ${version}), ${typeof period?.text === "string" ? period.text : "period not stated"}: “${String(item.quote)}” → ${value}`;
 }
 
 /** Plain words for a resolved Explore comparison. Counts and classifications

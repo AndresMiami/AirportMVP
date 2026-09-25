@@ -17,7 +17,7 @@
 import { ModelService, RevisionConflictError } from "@/services/model-service";
 import type { SystemModel } from "@/types";
 import { applyBatch, dryRun, materialize, ProposalError } from "./dry-run";
-import { resolveBasis, reviewFingerprint } from "./fingerprint";
+import { resolveBasis, reviewFingerprint, type BasisSources } from "./fingerprint";
 import type { ProposalRepository } from "./proposal-repository";
 import type { Clock } from "./registry";
 import { revisionOf } from "./revision";
@@ -48,6 +48,8 @@ export class ProposalService {
     private readonly models: ModelService,
     private readonly clock: Clock = { now: () => new Date().toISOString() },
     private readonly newId: () => string = () => `prop_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    /** The source store source_item bases re-resolve against (Step 7B). */
+    private readonly sources?: BasisSources,
   ) {}
 
   private async storedModel(modelId: string): Promise<SystemModel> {
@@ -65,7 +67,7 @@ export class ProposalService {
     const model = await this.storedModel(input.modelId);
     const materialized = materialize(input.request, model, this.clock);
     const preview = dryRun(materialized, model);
-    const resolvedBasis = resolveBasis(model, input.basis ?? []);
+    const resolvedBasis = resolveBasis(model, input.basis ?? [], this.sources);
     const revision = revisionOf(model) as string;
     const proposal: MutationProposal = {
       id: this.newId(),
@@ -103,12 +105,16 @@ export class ProposalService {
     if (!REVIEWABLE.has(p.status)) return p;
     const model = await this.storedModel(p.modelId);
     const current = revisionOf(model) as string;
-    if (current === p.lastValidatedRevision) return p;
+    // A basis that lives OUTSIDE the model (an imported source) can change
+    // without moving the model revision, so it is always re-resolved.
+    const external = p.basis.some((b) => b.kind === "source_item");
+    if (current === p.lastValidatedRevision && !external) return p;
     const preview = dryRun(p.materialized, model);
-    const resolvedBasis = resolveBasis(model, p.basis);
+    const resolvedBasis = resolveBasis(model, p.basis, this.sources);
     const fp = reviewFingerprint(p.materialized, preview, resolvedBasis);
     let next: MutationProposal;
     if (fp === p.reviewFingerprint) {
+      if (current === p.lastValidatedRevision) return p; // the external check found nothing changed
       next = this.record({ ...p, lastValidatedRevision: current, preview, resolvedBasis }, p.status, "kernel", "revalidated: the model changed elsewhere; what you reviewed is unaffected");
     } else {
       next = this.record({ ...p, previousPreview: p.preview, previousResolvedBasis: p.resolvedBasis, preview, resolvedBasis, reviewFingerprint: fp, consequenceClass: preview.consequenceClass, lastValidatedRevision: current }, "stale", "kernel", preview.ok ? "the model changed in a way that alters what you reviewed; a fresh review is needed" : `the proposal can no longer be applied: ${preview.errors.map((e) => e.message).join("; ")}`);
@@ -140,7 +146,7 @@ export class ProposalService {
     const model = await this.storedModel(p.modelId);
     const current = revisionOf(model) as string;
     const preview = dryRun(p.materialized, model);
-    const resolvedBasis = resolveBasis(model, p.basis);
+    const resolvedBasis = resolveBasis(model, p.basis, this.sources);
     const fp = reviewFingerprint(p.materialized, preview, resolvedBasis);
     const base = { ...p, commit: null, lastValidatedRevision: current, preview, resolvedBasis };
     const next =

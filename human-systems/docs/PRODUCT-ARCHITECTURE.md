@@ -1263,6 +1263,76 @@ capture surface corrects this when it replaces that screen.
    console (the per-address limiter is best effort); decide whether
    sensitive items may ever be included from Home (today only the
    diagnostics screen can include them, per call).
+   STEP 7A.1 DONE — REVIEW FIXES (Astra's code review of cb4881d,
+   2026-09-17; all four reproduced, each fixed behind a test that fails on
+   the old code): (1) SENSITIVITY CLOSES: a derived variable that reads a
+   sensitive variable is sensitive, and so is one that reads THAT one, to a
+   fixed point over the domain's definitions; observations and events
+   withheld for their links are sensitive for everything that cites them,
+   so a hypothesis supported by a withheld observation is withheld too
+   (tests/ai/context-sensitivity-chains). (2) EVERY DISPLAYED FIELD IS
+   CHECKED for forbidden claims: an interpretation's caveat, a question's
+   text and whyItMatters, a summary's heading (tests/ai/claim-fields);
+   phrase filtering is recorded as a limited safeguard that catches
+   wording, never whether a cited record supports the claim. (3) THE
+   ENGINE'S LANGUAGE GUARD polices only its own words: variable names and
+   units are masked before the check, so a variable named "Improved cash
+   flow" no longer throws in Explore (tests/discovery/name-guard). (4)
+   HSL_AI_RATE_PER_10MIN is read: the function's shared limiter is built
+   from it on first use and keeps its state across requests. Alignment
+   notes from the same review, recorded not changed: the person's own
+   editing forms still write through apply/save (the Review path covers
+   proposals; folding the forms in is future work), and the 5D bridge
+   carries only the AI's statement into a proposal by design — weakenedBy
+   stays prose and the person writes predictions and kill criteria;
+   carrying weakenedBy across as proposed disconfirming conditions is a
+   candidate next step. Recurrence still means exact equality of a
+   recorded numeric value; threshold and lateness patterns need explicit,
+   visible domain conventions before the method travels to them.
+   STEP 7B DONE — RESEARCH AGENT, FIRST INCREMENT (one thesis, one
+   source file): captured evidence → proposal → human review → approved
+   record → updated comparison. WHERE IT STARTS: a THESIS is an existing
+   hypothesis read as what it watches — its predictions and kill criteria
+   that name a variable (src/agents/thesis.ts; kill criteria already carry
+   stable ids, predictions gained an optional `id` and otherwise a
+   content-derived one, so an edited prediction is a different target).
+   Nothing new was invented for the thesis: the person makes one on the
+   Hypotheses page. A SOURCE SNAPSHOT (src/agents/source.ts) is one
+   retrieval of a source: id, name, url, the source's own version marker,
+   retrievedAt, and items that each carry the notebook variable KEY, the
+   period as the source states it, the value, the source's ORIGINAL
+   provenance (never ai_inferred) and the exact quote. Snapshots live in a
+   store separate from the model (localStorage, key
+   human-systems.sources.v1), append-only per source; the same version
+   with different content is refused. THE COLLECTOR (src/agents/capture.ts,
+   agent.ts) is deterministic — no LLM in this increment — and can propose
+   ONE thing: recordValue (AGENT_MUTATION_KINDS, pinned), one proposal per
+   matching item, confidence null, the source's provenance on the record,
+   the exact quote/period/version on the evidence
+   (EvidenceSchema.source/period/quote, optional, no migration), the
+   agent named only as the proposal author (ProposalAuthor "agent").
+   Nothing reaches the model except through Review. KERNEL: a new basis
+   kind `source_item` re-resolves against the source store's CURRENT
+   version (ProposalService takes the store as an optional fifth
+   argument; revalidate re-resolves external bases even when the model
+   revision has not moved), so a materially changed item stales the
+   pending review and blocks approval, an item gone from the current
+   version reads as a missing basis, and the same item unchanged in a
+   newer version changes nothing. REPEATED RETRIEVAL manufactures nothing:
+   the same source+item+content is skipped as already proposed (any
+   pending or applied proposal) or already recorded (an active entry with
+   that source, locator, quote and period). VALUE CONFIDENCE MAY BE NULL
+   (ValueEntry.confidence nullable; RecordValueInput accepts null; displays
+   say "not assessed"; history resolution already reads null as 0 for
+   propagation, the A13 reading). UI: Library → Research: choose the
+   thesis, import the JSON snapshot (an example is served at
+   /research/example-source.json), Collect evidence → proposals → Review;
+   sources on file listed by version. Verified: 704 tests, tsc, eslint,
+   build. NOT IN THIS INCREMENT (recorded): scheduling/heartbeat; LLM
+   extraction from unstructured sources (the snapshot contract is the seam
+   it plugs into); corrections of approved evidence (correctValue exists;
+   the collector never proposes it); prediction/kill-criterion readings
+   that use the new record beyond the existing kill reading and History.
 6. User formulas: AST, parser, validator, interpreter, `proposeFormula`.
 7. Context builder and production AI (READ tools, chat surface, voice);
    provider, privacy, cost and transport decided here, before any real
