@@ -39,6 +39,8 @@ function makeElement(tag) {
     id: null,
     appendChild(child) { el.children.push(child); return child; },
     insertAdjacentHTML() {},
+    setAttribute(name, value) { el[name] = String(value); },
+    getAttribute(name) { return el[name]; },
     addEventListener(evt, fn) { (el.listeners[evt] = el.listeners[evt] || []).push(fn); },
     remove() { el.removed = true; },
     querySelector() { return null; },

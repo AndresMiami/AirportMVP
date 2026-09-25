@@ -66,6 +66,17 @@
         
         <!-- Main Booking Container -->
         <div class="booking-container" id="bookingContainer">
+            <!-- Account. Sign out lives at the bottom of the traveler sheet
+                 (moved there 2026-09-11 so the card's actions could sit at its
+                 bottom), which left no way to reach it without being mid-
+                 booking on Vehicle. This is the door: one fixed place, in the
+                 card, that opens the sheet from any stage. Out of the flow, so
+                 it costs the card no height. -->
+            <button type="button" class="account-btn" id="accountBtn" hidden
+                    onclick="PassengerModal.getInstance().open()">
+                <span class="account-initial" id="accountInitial" aria-hidden="true"></span>
+            </button>
+
             <!-- Progress Bar -->
             <div class="progress-bar">
                 <div class="progress-step active" data-step="where">
@@ -430,6 +441,11 @@
                     currentActiveBooking = activeBooking || null;
 
                     addAuthPill(true);
+                    // Decoration, inside the gate's try/catch. An exception
+                    // here would be caught below and shown as "we can't verify
+                    // your sign-in" — a cosmetic button must never cost a
+                    // passenger their session.
+                    try { showAccountButton(); } catch (_) {}
                     overlay.remove();
                     return true;
                 } catch (e) {
@@ -698,6 +714,23 @@
             try { sessionStorage.removeItem('lm_pending_envelope'); } catch (_) {}
             await window.supabaseClient.auth.signOut();
             window.location.href = '/login.html';
+        }
+
+        // The card's account door. Named for the person, not the action: it
+        // opens the traveler sheet, where Sign out (and Terms/Privacy) live.
+        // Falls back to the email's first letter, then a neutral glyph — a
+        // profile with no name must still produce a usable control.
+        function showAccountButton() {
+            const btn = document.getElementById('accountBtn');
+            if (!btn) return;
+            const name = (currentProfile?.name || '').trim();
+            const email = (currentProfile?.email || currentSession?.user?.email || '').trim();
+            const label = name || email;
+            const initial = (label.match(/[A-Za-z0-9]/) || ['\u00B7'])[0].toUpperCase();
+            const mark = document.getElementById('accountInitial');
+            if (mark) mark.textContent = initial;
+            btn.setAttribute('aria-label', label ? `Account \u2014 ${label}` : 'Account');
+            btn.hidden = false;
         }
 
         // Small pill bottom-right: Sign in (guests) / Sign out (members)

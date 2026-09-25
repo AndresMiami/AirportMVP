@@ -1767,6 +1767,59 @@ select:focus-visible {
     .booking-container.active #whenPanel .panel-content { padding-top: var(--space-sm); }
 }
 
+/* ACCOUNT DOOR (2026-09-24). Sign out moved into the traveler sheet when the
+   pills stepped aside, which left it reachable only from Vehicle. This button
+   sits in the card's top-right and opens that sheet from any stage.
+
+   Absolutely positioned on purpose: the card's whole point is that every stage
+   fits the screen, so the door must cost zero height. The progress bar gains a
+   matching right inset so the third step never slides under it. */
+.booking-container { position: relative; }
+
+.account-btn {
+    position: absolute;
+    /* The header band is 31px tall including its rule. A 32px circle crossed
+       it; 26px centres inside the content and leaves the divider alone. */
+    top: 2px;
+    right: var(--card-pad-x);
+    z-index: 3;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color var(--transition-base), color var(--transition-base);
+}
+.account-btn[hidden] { display: none; }
+/* A 44x44 touch target without a 44px visual: the hit area overhangs the
+   circle, so the card keeps its proportions and the thumb still finds it. */
+.account-btn::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+}
+.account-btn:hover { border-color: var(--primary); color: var(--primary); }
+.account-btn:active { transform: scale(0.94); }
+
+/* Keep the steps clear of the door: the button plus one gutter. */
+.booking-container:has(.account-btn:not([hidden])) .progress-bar {
+    padding-right: calc(var(--card-pad-x) + 34px);
+}
+
 /* the pills step aside while the booking is open: Terms, Privacy and Sign
    out live at the bottom of the traveler sheet; the landing screen keeps
    them. The install button too: it is shown with an inline display (hence
