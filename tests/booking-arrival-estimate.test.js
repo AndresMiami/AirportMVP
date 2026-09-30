@@ -102,7 +102,18 @@ function loadAppClass() {
 }
 
 const App = loadAppClass();
-const miamiHM = (d) => new Date(d).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' });
+// Miami HH:MM for fixtures. `hour12: false` is NOT safe here: Node 20's ICU
+// renders midnight as "24:08" where Node 22 gives "00:08", so a fixture built
+// that way passes locally and fails on the pinned CI runtime. Normalised the
+// same way js/pending-edit-model.js miamiParts already does (`% 24`), which is
+// why that production path is unaffected by the quirk.
+const miamiHM = (d) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(d));
+  const get = (t) => Number(parts.find((p) => p.type === t).value);
+  return `${String(get('hour') % 24).padStart(2, '0')}:${String(get('minute')).padStart(2, '0')}`;
+};
 
 // A When panel with a real route and, optionally, a chosen pickup instant.
 function makeApp({ mode = 'dropoff', duration = 38, distance = 12.4, realData = true, pickupISO = null } = {}) {
