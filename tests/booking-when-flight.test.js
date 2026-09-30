@@ -231,13 +231,27 @@ function makeApp(mode, basis = 'arrival', { y = 2026, m = 9, d = 20, hour = 2, m
   app.els.flightError.hidden = true;
   app.pendingEdit = null;
   app._editRoute = null;
-  for (const stub of ['showTimeWarning', 'hideTimeWarning', 'invalidateQuote', 'updateTimeNote', 'updateVehiclePrices', 'updateBookButton', 'updateBookAvailability', 'updateSummary', 'updateProgressSteps', 'updateVehicleMap', 'updateVehiclePrices']) app[stub] = () => {};
+  // updateRouteDisplay joins this list for the same reason updateTimeNote is
+  // on it: this suite drives the pickup logic, not the When panel's rendering.
+  // The arrival estimate has its own suite (booking-arrival-estimate).
+  for (const stub of ['showTimeWarning', 'hideTimeWarning', 'invalidateQuote', 'updateTimeNote', 'updateRouteDisplay', 'updateVehiclePrices', 'updateBookButton', 'updateBookAvailability', 'updateSummary', 'updateProgressSteps', 'updateVehicleMap', 'updateVehiclePrices']) app[stub] = () => {};
   app.quoteFlowActive = () => true;
   app.canContinue = () => true;
   return app;
 }
 const iso = (d) => (d ? new Date(d).toISOString() : null);
-const miamiHM = (d) => new Date(d).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' });
+// `hour12: false` renders midnight as "24:08" on Node 20's ICU and "00:08" on
+// Node 22, so a midnight fixture written against it passes locally and fails on
+// the pinned CI runtime. Normalised like js/pending-edit-model.js miamiParts.
+// No current fixture here crosses midnight, so this changes no assertion today
+// — it stops the next one from being written into a trap.
+const miamiHM = (d) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(d));
+  const get = (t) => Number(parts.find((p) => p.type === t).value);
+  return `${String(get('hour') % 24).padStart(2, '0')}:${String(get('minute')).padStart(2, '0')}`;
+};
 
 check('flight numbers normalize to "AA 123" style; anything else is not a flight', () => {
   const app = makeApp('pickup');
