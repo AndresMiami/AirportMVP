@@ -79,6 +79,20 @@ const CANCELLATION_TYPES = ['ride_cancelled', 'ride_cancelled_admin'];
 // bounded only by the trigger's explicit six-hour not_after leash.
 const RELEASE_TYPES = ['ride_released'];
 
+// Flight-fact events (migration 021), produced by the outbox trigger on
+// flight_observations INSERTs — the observation row is the notification
+// source, exactly as the release history row is. One type per BAND, so
+// the (booking, type, recipient) ledger identity lets each band notify
+// exactly once per booking without any ledger change. They only TELL
+// the driver: the booking's pickup_datetime never moves (decision D3),
+// so every message says the booked pickup still stands. Outside
+// CHAIN_TYPES (no readiness suppression or chain collapse) and outside
+// CANCELLATION_TYPES; their own relevance gate lives in lib/dispatch.js.
+const FLIGHT_TYPES = [
+  'flight_delay_30', 'flight_delay_60', 'flight_delay_120',
+  'flight_cancelled', 'flight_diverted'
+];
+
 const MAX_ATTEMPTS_PER_CHANNEL = 3;
 const CLAIM_EXPIRY_MS = 3 * 60 * 1000;
 const TELEGRAM_TIMEOUT_MS = 5000;
@@ -115,6 +129,50 @@ function fmtWhenET(iso) {
   return d.toLocaleDateString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric', timeZone: MIAMI_TZ
   }) + ' at ' + fmtTimeET(iso);
+}
+
+function miamiDay(iso) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: MIAMI_TZ });
+}
+
+// A landing that falls on a different Miami day than the booked pickup
+// carries its date: "now lands 12:40 AM" alone would read as tonight.
+function fmtLandingET(landingIso, pickupIso) {
+  return miamiDay(landingIso) === miamiDay(pickupIso)
+    ? fmtTimeET(landingIso)
+    : fmtWhenET(landingIso);
+}
+
+// The ONE sentence a flight event says, shared by Telegram and Web Push so
+// the two channels can never disagree. Facts come from the observation
+// row that produced the event (`obs`, the dispatch enrichment) — never
+// from a recomputation. "Checked" and "still shows" are deliberate: the
+// sensor samples, it does not watch continuously (driver.html's own copy
+// rule), and the booked pickup is NOT moved by this feature (D3).
+// Returns null when the facts needed for the sentence are missing, which
+// the dispatcher turns into a terminal no_template suppress — a flight
+// alert with a blank time would be worse than none.
+function flightLine(eventType, b, obs) {
+  if (!obs || typeof obs.flight_number !== 'string' || !obs.flight_number ||
+      !obs.observed_at || !b || !b.pickup_datetime) return null;
+  const flight = obs.flight_number;
+  const tail = `Ride ${tripCode(b)} pickup still shows ${fmtTimeET(b.pickup_datetime)}.`;
+  const checked = `Checked ${fmtTimeET(obs.observed_at)}.`;
+  switch (eventType) {
+    case 'flight_delay_30':
+    case 'flight_delay_60':
+    case 'flight_delay_120': {
+      if (!obs.estimated_arrival || !Number.isInteger(obs.delay_minutes)) return null;
+      const lands = fmtLandingET(obs.estimated_arrival, b.pickup_datetime);
+      return `${flight} now lands ${lands}, ${obs.delay_minutes} min late. ${tail} ${checked}`;
+    }
+    case 'flight_cancelled':
+      return `${flight} was cancelled. ${tail} Confirm plans with the passenger. ${checked}`;
+    case 'flight_diverted':
+      return `${flight} was diverted. ${tail} Confirm plans with the passenger before driving. ${checked}`;
+    default:
+      return null;
+  }
 }
 
 function siteUrl() {
@@ -191,6 +249,16 @@ function renderEvent(eventType, b, extra) {
         ? '\n⚠️ Payment was already marked collected by the releasing driver — reconcile before pickup.'
         : '';
       return `${urgent ? '🚨 URGENT — ' : '🔄 '}Ride ${code} RELEASED by ${extra.driver_name_at_release} (${releaseReasonLabel}).\n${releasedRoute}\nPickup ${releasedWhen}.${paidWarning}\nThe request is back in the driver feed.`;
+    }
+    case 'flight_delay_30':
+    case 'flight_delay_60':
+    case 'flight_delay_120':
+    case 'flight_cancelled':
+    case 'flight_diverted': {
+      // Without the observation enrichment there is nothing true to say:
+      // null -> terminal no_template suppress, never a blind send.
+      const line = flightLine(eventType, b, extra);
+      return line ? `✈️ ${line} Open LinkMia Driver: ${app}` : null;
     }
     default:
       return null;
@@ -314,6 +382,15 @@ function readinessTopic(b) {
   return 'rdy-' + String(b.id || '').replace(/-/g, '').slice(0, 24);
 }
 
+// Flight alerts get their OWN per-booking topic/tag: a newer band
+// replaces an undelivered or displayed older band ("60 min late" gives
+// way to "120 min late"), but a flight alert never displaces a pending
+// readiness reminder — the reminders still apply, because the booked
+// pickup does not move (D3). Same 28-char shape as readinessTopic.
+function flightTopic(b) {
+  return 'flt-' + String(b.id || '').replace(/-/g, '').slice(0, 24);
+}
+
 // Minimal payload: trip code + generic action line ONLY — never passenger
 // name, phone, address, or notes. The authenticated app fetches details.
 // ride_cancelled deliberately OMITS rideId: the cancelled ride is gone
@@ -322,8 +399,19 @@ function readinessTopic(b) {
 // to a card that no longer exists. It reuses the per-booking readiness
 // tag/topic so a queued stale readiness reminder is REPLACED by the stop
 // notice at the push service and in the notification tray.
-function pushPayloadFor(eventType, b) {
+function pushPayloadFor(eventType, b, extra) {
   const code = tripCode(b);
+  if (FLIGHT_TYPES.includes(eventType)) {
+    // The dispatcher suppresses a flight event before routing when its
+    // observation is missing, so `extra` is always present here; the
+    // generic fallback is defense in depth so this builder can never
+    // return null to sendWebPush. Flight number and times are the
+    // driver's OWN ride facts — still no passenger name, phone, address
+    // or notes. rideId deep-links: the ride is live and on My Rides.
+    const body = flightLine(eventType, b, extra) ||
+      `Ride ${code} — flight update. Open to check.`;
+    return { type: 'ride', rideId: b.id, title: 'LinkMia Driver · Flight', body, tag: flightTopic(b) };
+  }
   if (eventType === 'ride_cancelled') {
     return {
       type: 'ride',
@@ -541,6 +629,7 @@ module.exports = {
   CHAIN_TYPES,
   CANCELLATION_TYPES,
   RELEASE_TYPES,
+  FLIGHT_TYPES,
   MAX_ATTEMPTS_PER_CHANNEL,
   CLAIM_EXPIRY_MS,
   ASK_DEADLINE_MIN,
@@ -561,6 +650,8 @@ module.exports = {
   vapidConfigValid,
   pushConfigured,
   readinessTopic,
+  flightTopic,
+  flightLine,
   pushPayloadFor,
   sendWebPush,
   selectSubscription,

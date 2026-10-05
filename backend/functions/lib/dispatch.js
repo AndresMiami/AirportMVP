@@ -20,6 +20,7 @@
 // their write ordering.
 
 const notify = require('./notify');
+const flightFacts = require('./flight-facts');
 
 // Dispatch refetches ONE row and may render cancellation templates, which
 // read the stamped shadow-fee audit (migration 013) — the notification
@@ -29,7 +30,8 @@ const DISPATCH_FIELDS = 'id, trip_id, status, pickup_datetime, pickup_location, 
   'dropoff_location, customer_name, assigned_driver, driver_ready_at, ' +
   'driver_ready_by, driver_ready_source, at_risk_at, accepted_at' +
   ', price, cancelled_at, cancelled_from_status, ' +
-  'cancel_fee_percent, cancel_fee_policy_amount, cancel_fee_collected, cancel_waiver_reason';
+  'cancel_fee_percent, cancel_fee_policy_amount, cancel_fee_collected, cancel_waiver_reason' +
+  ', flight_number';
 
 // The driver a driver-role event targets. Cancellation events answer to
 // the STORED driver-at-cancellation (recipient_key, stamped by the
@@ -109,6 +111,21 @@ async function dispatchOne(db, ev, nowMs, opts) {
     await suppress('not_cancelled');
     return;
   }
+  // Flight events (migration 021) speak to the driver who is CURRENTLY
+  // committed to a ride that is still happening. Without this gate a
+  // flight alert would still reach a driver who released the ride, or
+  // arrive for a ride that was cancelled or already finished — the
+  // ledger's not_after leash alone cannot know either.
+  if (notify.FLIGHT_TYPES.includes(ev.event_type)) {
+    if (!['confirmed', 'on_the_way', 'arrived'].includes(b.status)) {
+      await suppress('ride_inactive');
+      return;
+    }
+    if (ev.recipient_key !== b.assigned_driver) {
+      await suppress('reassigned');
+      return;
+    }
+  }
 
   // Absolute escalation deadline (driver ask events): a reminder whose
   // deadline has passed is stale on EVERY channel — suppress it with
@@ -152,6 +169,38 @@ async function dispatchOne(db, ev, nowMs, opts) {
       return;
     }
     extra = release;
+  }
+
+  // Flight enrichment (migration 021): a flight event renders from the
+  // newest flight_observations row in ITS band — the row whose INSERT
+  // produced it, or a fresher one in the same band. Same placement and
+  // failure discipline as the release read above: a failed read dbFails
+  // with the event still pending (the watchdog retries); a missing row
+  // suppresses with zero provider calls; an observation describing a
+  // different flight than the ride now carries is stale news.
+  if (notify.FLIGHT_TYPES.includes(ev.event_type)) {
+    const { data: observed, error: observedError } = await db
+      .from('flight_observations')
+      .select('*')
+      .eq('booking_id', ev.booking_id)
+      .eq('band', flightFacts.bandForEventType(ev.event_type))
+      .order('observed_at', { ascending: false })
+      .limit(1);
+    if (observedError) {
+      dbFail('flight enrichment', observedError);
+      return;
+    }
+    const obs = observed && observed[0];
+    if (!obs) {
+      await suppress('observation_missing');
+      return;
+    }
+    if (flightFacts.normalizeFlightNumber(obs.flight_number) !==
+        flightFacts.normalizeFlightNumber(b.flight_number)) {
+      await suppress('flight_changed');
+      return;
+    }
+    extra = obs;
   }
 
   // Channel routing. Admin events are Telegram-only, always. Driver
@@ -213,7 +262,7 @@ async function dispatchOne(db, ev, nowMs, opts) {
   }
 
   if (route.channel === 'webpush') {
-    await executeWebPush(db, ev, b, route.sub, nowMs, summary, dbFail, suppress, maxAttempts);
+    await executeWebPush(db, ev, b, route.sub, nowMs, summary, dbFail, suppress, maxAttempts, extra);
   } else {
     await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts, extra);
   }
@@ -224,12 +273,13 @@ async function dispatchOne(db, ev, nowMs, opts) {
 // provider-call cap because a fallback send is a SECOND call in one
 // dispatch. PRIVATE: only dispatchOne may invoke it, preserving the
 // gate-then-claim ordering.
-// `extra` (optional) is per-event enrichment threaded from dispatchOne
-// (today: the booking_releases row for RELEASE_TYPES). The webpush
-// fallback call site passes undefined — release events are admin-role
-// and never route webpush, so the fallback never carries one; a missing
-// extra on a release event renders null -> terminal no_template
-// suppress, never a wrong or blind send.
+// `extra` (optional) is per-event enrichment threaded from dispatchOne:
+// the booking_releases row for RELEASE_TYPES, the flight_observations
+// row for FLIGHT_TYPES. Flight events are driver-role and route webpush
+// first, so the webpush fallback call site threads the SAME extra into
+// this executor (release events are admin-role and never reach it). A
+// missing extra renders null -> terminal no_template suppress, never a
+// wrong or blind send.
 async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts, extra) {
   const nowIso = new Date(nowMs).toISOString();
   if (!process.env.TELEGRAM_BOT_TOKEN) return; // config gap: leave for next cycle
@@ -345,7 +395,7 @@ async function executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxA
 // ends the cycle) with no further provider call — the next cycle
 // recovers from stored truth via the routing precedence. PRIVATE: only
 // dispatchOne may invoke it.
-async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress, maxAttempts) {
+async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress, maxAttempts, extra) {
   const nowIso = new Date(nowMs).toISOString();
 
   // GLOBAL CAP FIRST — before any delivery row exists (see executeTelegram).
@@ -379,8 +429,11 @@ async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress, 
     ? pickupMs - deadlineMin * 60e3
     : (ev.not_after ? Date.parse(ev.not_after) : nowMs + 900e3);
   const ttl = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
-  const topic = notify.readinessTopic(b);
-  const payload = notify.pushPayloadFor(ev.event_type, b);
+  // Flight alerts replace each other, never a pending readiness reminder.
+  const topic = notify.FLIGHT_TYPES.includes(ev.event_type)
+    ? notify.flightTopic(b)
+    : notify.readinessTopic(b);
+  const payload = notify.pushPayloadFor(ev.event_type, b, extra);
 
   summary.attempts++;
   const result = await notify.sendWebPush(sub, payload, { ttl, topic });
@@ -469,7 +522,9 @@ async function executeWebPush(db, ev, b, sub, nowMs, summary, dbFail, suppress, 
     console.error(`❌ Web Push VAPID configuration rejected (${result.error}) — check VAPID_* env; falling back to Telegram`);
   }
   // (3) claim and send the Telegram fallback (its own cap self-check).
-  await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts);
+  // The same enrichment travels with it: a flight fallback must say the
+  // same sentence the push would have.
+  await executeTelegram(db, ev, b, nowMs, summary, dbFail, suppress, maxAttempts, extra);
 }
 
 // Only the orchestrating entry point is public. The channel executors
