@@ -309,6 +309,9 @@ The browser-key rollout requires project/API quota caps + quota alerts for Maps
 JavaScript and Directions (quota is project-wide, not per key), a project
 billing budget, and the Production Builds value BEFORE merge. Missing it keeps
 the old published deploy online but freezes every subsequent production build.
+Flight sensor (migration 021): `FLIGHT_SENSOR_TOKEN` (secret, 32+ chars; unset
+= both sensor endpoints 503), `FLIGHT_SENSOR_DRIVER_ALLOWLIST` (driver UUIDs
+or `*`; unset = NOBODY), `FLIGHT_SENSOR_DISABLED` (kill switch).
 
 ## Workflow
 
@@ -925,6 +928,42 @@ the old published deploy online but freezes every subsequent production build.
   cleanup)") pass only because the dead code remains and must never be
   read as live-card proof. Delete the lane and retire those pins together
   in their OWN cleanup PR.
+- FLIGHT FACTS FAST PATH (plan steps 1-3; decisions D1/D2/D3, Andres
+  2026-10-05; runbook + sensor contract: docs/FLIGHT-FACTS-RUNBOOK.md).
+  An EXTERNAL sensor (Muse now, AeroAPI later — same seam) reads
+  `GET /api/flight-watchlist` and writes `POST /api/flight-facts` with ONE
+  revocable token; it never holds a database key (D1). Watchlist = arrivals
+  (booking_mode 'pickup') that are confirmed/on_the_way/arrived with a
+  driver in the allowlist, 6h back to 72h ahead, six flight fields only,
+  no person. Facts are validated strictly, the SERVER derives the band
+  (on_time / delay_30 / delay_60 / delay_120 / cancelled / diverted /
+  landed — code and migration CHECK share one designator pattern), the
+  observation is matched to the booking AS IT STANDS (409 + refresh
+  otherwise) and the allowlist is enforced at WRITE time. Migration 021:
+  append-only `flight_observations` (service_role SELECT+INSERT only;
+  bookings NOT altered) whose AFTER INSERT trigger writes one driver event
+  `flight_<band>` per news band per booking (the ledger identity makes
+  each band notify once). The endpoint then gives that event one bounded
+  dispatch pass (release/cancel discipline); the UNTOUCHED watchdog
+  delivers anything missed (D2). TELL ONLY (D3): pickup_datetime never
+  moves, so readiness reminders and the T-180 window stay on the booked
+  pickup and every alert says "pickup still shows <time>". Dispatcher:
+  flight events have their own relevance gate (confirmed/on_the_way/
+  arrived AND recipient == assigned driver — without it a released
+  driver would still be told), enrichment from the newest observation in
+  the band (suppress observation_missing / flight_changed), their own push
+  topic `flt-…` (never displaces a readiness reminder), and the SAME
+  sentence on push and on the Telegram fallback. ROLLOUT ORDER: deploy
+  code BEFORE running 021 (an unrenderable event is suppressed for good
+  and spends that band). ROLLBACK must retire pending flight events
+  BEFORE dropping the table — a leftover event's failed enrichment read
+  would stop every watchdog cycle's sends. OPEN for Andres: D4 who else
+  is told, D5 landing/recovery, D6 driver-card display (step 5), D7
+  retention, D8 data license + Privacy page (Andres's own real rides are
+  in the trial: keep the token set only for the smoke test until D8),
+  D9 sensor health alert, D10 departures. Dangling placeholder, untouched:
+  netlify.toml routes `/api/track-flight` (and api-config.js lists it) to a
+  function that has never existed in git history.
 - Approved, NOT yet built: invitation-only driver onboarding — emailed
   invite / password-set flow replacing admin-set passwords. Record only;
   implement post-RLS.

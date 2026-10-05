@@ -47,6 +47,18 @@
   to = "/.netlify/functions/track-flight"
   status = 200
 
+# Flight sensor seam (migration 021, decision D1): server-to-server only,
+# token-protected inside each function; no browser ever calls these.
+[[redirects]]
+  from = "/api/flight-watchlist"
+  to = "/.netlify/functions/flight-watchlist"
+  status = 200
+
+[[redirects]]
+  from = "/api/flight-facts"
+  to = "/.netlify/functions/flight-facts"
+  status = 200
+
 [[redirects]]
   from = "/api/booking-status"
   to = "/.netlify/functions/booking-status"
