@@ -1,9 +1,9 @@
-# Curated places + intake fixes — plan v3
+# Curated places + intake fixes — plan v4
 
 Branch: `feature/curated-places-intake` · Status: **PLAN ONLY — no code until
 Andres approves** · Author: Claude · v1 2026-10-26 (dbc6243) · v2 (2f5557b)
-applies Codex review relay seq:0253 #1–#9 · v3 adopts Andres's eight-step
-order (Twilio SMS; hotel ↔ port and other endpoints in scope).
+applies Codex review relay seq:0253 #1–#9 · v3 (d90f4c5) eight-step order ·
+v4 returns to port ↔ airport only, SMS last/provider undecided (relay seq:0260).
 
 ## Why (field evidence, 2026-10-26)
 
@@ -36,17 +36,22 @@ PortMiami → MIA), booked in-app by an older couple during onboarding:
 - **Ranking is Google's alone** (`autocomplete.js:210` renders predictions in
   order; loading/result/error share one container `:181`–`:218`).
 
-## Order of operations (simple → complex) — v3
+## Order of operations (simple → complex) — v4
 
-Ruling (Andres, Claude chat, 2026-10-26, latest — supersedes the v2 scope
-ruling): **Twilio is the SMS provider**, and LinkMia will support
-**hotel ↔ port, port ↔ airport and other pickup/drop-off locations**.
-This explicitly **reverses CLAUDE.md decision 8** ("never SMS") for
-transactional, opt-in booking/trip status messages; CLAUDE.md's decisions
-log gets that update in step 7's commit.
+**How decisions reach this plan:** Andres sets strategy with Codex; Codex
+posts decisions to the relay (`~/Projects/linkmia-relay`, `status:
+decision`); Claude plans, builds, and may challenge; the converged result is
+recorded here. This file is the current record.
+
+**Current scope** (Andres via Codex, relay seq:0260, supersedes v3): "port
+to airport only for now, SMS last and provider undecided … no code changes
+yet." Hotel ↔ port and other non-airport endpoints are **not current work**
+(parked below with the findings already made). Decision 8 ("never SMS")
+stands until step 7's own plan is decided.
 
 Each step is a small commit on `feature/curated-places-intake`. No PR or
-merge before Andres reviews the diff in chat.
+merge before Andres reviews the diff in chat. **Code starts only when a
+relay decision says so** (0260: not yet).
 
 | Step | What | DB change | Pricing change |
 |---|---|---|---|
@@ -55,14 +60,14 @@ merge before Andres reviews the diff in chat.
 | **3** | Curated-first search + verified place name to booking and driver (§1C–§1E) | none | none |
 | 4 | Airline cards after the airport → terminal in passenger + driver summaries | likely migration 022 | none |
 | 5 | Driver card map, A/B pins above Accept | none | none |
-| 6 | Cruise Port path (line → terminal cards) + **non-airport endpoints** (hotel ↔ port, other) | **yes — see step 6** | **must be decided — see step 6** |
-| 7 | Opt-in Twilio SMS for booking + trip-status events, dedup, return-booking link | yes (consent + ledger channel) | none |
-| 8 | End-to-end test: Terminal V → MIA, airline, passenger count, driver map, opted-in messages; full suite | — | — |
+| 6 | Cruise Port path (line → terminal cards), **port ↔ airport only** | none | none |
+| 7 | SMS status messages — provider undecided, own plan, last | yes | none |
+| 8 | End-to-end test: Terminal V → MIA, airline, passenger count, driver map; full suite | — | — |
 
-Non-goals for every step: voice/conversational booking, any payment
-collection or fare custody, invented rates. Steps 1–3 are specified in
-detail below (they were "Phase 1" in v1/v2); steps 4–8 get their own short
-plan before code.
+Steps 1–3 have a Codex GO (seq:0260). Non-goals for every step:
+voice/conversational booking, any payment collection or fare custody, any
+pricing-logic change. Steps 1–3 are specified in detail below (they were
+"Phase 1" in v1/v2); steps 4–8 get their own short plan before code.
 
 ---
 
@@ -264,11 +269,13 @@ still display. Release still waits on the Google-terms gate (1E).
 - **Step 5 — Driver card map.** Small Maps JS map with A/B pins above
   Accept, via the existing direct loader and browser key (driver scope added
   to its referrer restrictions), loaded lazily per card to bound map cost.
-- **Step 6 — Cruise Port + non-airport endpoints.** Card flow: Cruise Port →
-  cruise line → terminal (choice when a line has several). Port ↔ airport
-  works with today's engine (the terminal is the address end). **Hotel ↔ port
-  and other non-airport routes are a contract change, not a UI change** —
-  what the code shows today:
+- **Step 6 — Cruise Port (port ↔ airport only).** Card flow: Cruise Port →
+  cruise line → terminal (choice when a line has several) → direction +
+  airport. Works with today's engine: the terminal is the address end.
+  LM-EFFA = Cruise Port → Virgin → Terminal V → to MIA.
+- **Parked — hotel ↔ port and other non-airport endpoints** (not current
+  work; recorded so the finding isn't lost). They are a contract change, not
+  a UI change — what the code shows today:
   * The engine prices per-mile tiers **plus an airport fee**
     (`lib/ride-rate-card.js:56`–`:99`). A route with no airport must decide
     whether that fee applies — dropping or keeping it is a pricing decision,
@@ -280,18 +287,17 @@ still display. Release still waits on the Google-terms gate (1E).
     a new quote mode, a token contract version, and a migration (writer RPCs
     + CHECK), run by Andres via runbook.
   * Flat popular-route rates are airport-pair keyed (`ride-rate-card.js:120`).
-  Step 6 therefore starts with a **feasibility memo** (relayed to Codex) that
-  answers: which existing rate applies to a non-airport route, what the
-  contract/migration change is, and how it stays inside enforcement. If any
-  answer would invent a rate, stop and ask Andres.
-- **Step 7 — Opt-in Twilio SMS.** Booking confirmed (pickup, drop-off,
+  If this is picked up later, it starts with a **feasibility memo**: which
+  existing rate applies to a non-airport route, what the contract/migration
+  change is, and how it stays inside enforcement. Nothing invents a rate.
+- **Step 7 — SMS (provider undecided; notes if SMS is chosen).** Booking confirmed (pickup, drop-off,
   time, what's next); driver on the way (ETA window); arrived; on route / at
   destination; complete + return-booking link. Through the existing
   outbox/ledger + `lib/dispatch.js` (ledger identity = no duplicate sends).
   Needs: an explicit, recorded opt-in (unchecked by default, never a booking
   gate), a consent column + an `sms` ledger channel (migration), STOP/HELP
-  handling, transactional-only copy, and Twilio secrets in Netlify env.
-  **Andres's to-dos (Claude can't do these):** create the Twilio account,
+  handling, transactional-only copy, and provider secrets in Netlify env.
+  **Andres's to-dos (Claude can't do these):** choose and set up the provider account,
   register for A2P 10DLC (carrier approval can take weeks; nothing sends to
   real US phones before it), and update the Privacy page for SMS. The
   "on the way — ETA window" message depends on the two-ETA work; until that
