@@ -886,6 +886,9 @@
         .edit-route-reason { font-size: 13px; color: #C7C7CC; min-height: 16px; }
         .edit-route-back { background: transparent; border: none; color: #8E8E93; text-decoration: underline; font-family: inherit; padding: 8px 0; cursor: pointer; }
     </style>
+    <!-- Curated cruise terminals: registry validation + matcher shared with
+         the Netlify functions (global CuratedPlaces, read by autocomplete.js). -->
+    <script src="./js/curated-places.js?v=1"></script>
     <script src="./js/pending-edit-model.js?v=2"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->

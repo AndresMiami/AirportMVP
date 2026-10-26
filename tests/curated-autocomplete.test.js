@@ -1,0 +1,492 @@
+// Curated cruise terminals — the address dropdown.
+//
+// Run: node tests/curated-autocomplete.test.js
+//
+// Runs the REAL autocomplete.js (ES module, loaded into a vm context like
+// tests/google-policy-readiness.test.js) with the real js/curated-places.js
+// and Google prediction shapes captured live on 2026-10-26 for the LM-EFFA
+// queries. The rules under test: curated rows render immediately from the
+// text alone and sit ABOVE Google's rows; a slow, empty or failed Google
+// answer never erases them; clicks/Enter resolve against ONE visible list;
+// selecting a terminal carries the registry place ID and LinkMia's label,
+// while the selection events keep exactly today's shapes.
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const assert = require('assert');
+
+const repoRoot = path.resolve(__dirname, '..');
+const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8');
+
+const TERMINAL_V_ID = 'ChIJO1Q7bLK12YgRyjFe2sYTfNc';
+const TERMINAL_V_LABEL = 'PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132';
+const REGISTRY_URL = '/data/curated-places.json?v=1';
+
+// Google Places Autocomplete, via the Railway proxy, 2026-10-26.
+const GOOGLE_VIRGIN = [   // input "Virgin": no Virgin Voyages result at all
+  { place_id: 'ChIJTf9nSq-12YgR1Syw-fraj8o', description: 'Virginia Key, Florida, USA', structured_formatting: { main_text: 'Virginia Key', secondary_text: 'Florida, USA' } },
+  { place_id: 'ChIJAwREDPW52YgR2qG-XNhMqnM', description: 'Virginia Gardens, FL, USA', structured_formatting: { main_text: 'Virginia Gardens', secondary_text: 'FL, USA' } },
+  { place_id: 'ChIJzbK8vXDWTIgRlaZGt0lBTsA', description: 'Virginia, USA', structured_formatting: { main_text: 'Virginia', secondary_text: 'USA' } }
+];
+const GOOGLE_VIRGIN_VOYAGE = [   // input "Virgin voyage": brand result, Plantation office, then Terminal V
+  { place_id: 'ChIJh8T1SwC12YgRCr9Mz-5L6MA', description: 'Virgin Voyages, Miami, FL, USA', structured_formatting: { main_text: 'Virgin Voyages', secondary_text: 'Miami, FL, USA' } },
+  { place_id: 'ChIJZb6cGlIH2YgRhX7nd38X8lQ', description: 'Virgin Voyages, South Pine Island Road, Plantation, FL, USA', structured_formatting: { main_text: 'Virgin Voyages', secondary_text: 'South Pine Island Road, Plantation, FL, USA' } },
+  { place_id: TERMINAL_V_ID, description: 'Terminal V - Virgin Voyages., North Cruise Boulevard, Miami, FL, USA', structured_formatting: { main_text: 'Terminal V - Virgin Voyages.', secondary_text: 'North Cruise Boulevard, Miami, FL, USA' } }
+];
+
+function registryRaw(overrides = {}) {
+  return {
+    version: 1,
+    port: { name: 'PortMiami', keywords: ['portmiami', 'port miami', 'cruise port'] },
+    companies: [
+      { key: 'virgin', name: 'Virgin Voyages', keywords: ['virgin', 'virgin voyages', 'virgin voyage'] },
+      { key: 'royal-caribbean', name: 'Royal Caribbean', keywords: ['royal'] },
+      { key: 'celebrity', name: 'Celebrity Cruises', keywords: ['celebrity'] }
+    ],
+    terminals: [
+      { id: 'pom-terminal-v', name: 'PortMiami Terminal V', address: '718 N Cruise Blvd, Miami, FL 33132',
+        placeId: TERMINAL_V_ID, companies: ['virgin'], keywords: ['terminal v'], source: 'test', verifiedAt: '2026-10-26' },
+      { id: 'pom-terminal-a', name: 'PortMiami Terminal A', address: '1 Terminal A Way, Miami, FL 33132',
+        placeId: 'ChIJfixtureTerminalA000', companies: ['royal-caribbean', 'celebrity'], keywords: ['terminal a'], source: 'test', verifiedAt: '2026-10-26' }
+    ],
+    ...overrides
+  };
+}
+
+function classList() {
+  const values = new Set();
+  return {
+    add: (...items) => items.forEach((item) => values.add(item)),
+    remove: (...items) => items.forEach((item) => values.delete(item)),
+    toggle: (item, force) => {
+      if (force === true) values.add(item);
+      else if (force === false) values.delete(item);
+      else if (values.has(item)) values.delete(item);
+      else values.add(item);
+      return values.has(item);
+    },
+    contains: (item) => values.has(item)
+  };
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+const addressError = { classList: classList() };
+const documentStub = {
+  getElementById: (id) => (id === 'addressError' ? addressError : null),
+  createElement: (tag) => {
+    let text = '';
+    return {
+      tagName: String(tag || 'div').toUpperCase(),
+      className: '',
+      childNodes: [],
+      appendChild(child) { this.childNodes.push(child); return child; },
+      remove() { this.removed = true; },
+      set textContent(value) { text = String(value); },
+      get textContent() { return text; },
+      get innerHTML() { return escapeHtml(text); }
+    };
+  },
+  createTextNode: (value) => ({ text: String(value) })
+};
+
+const ctx = {
+  console: { log() {}, warn() {}, error() {} },
+  debug: new Proxy({}, { get: () => () => {} }),
+  document: documentStub,
+  window: {},
+  crypto: { randomUUID: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
+  CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
+  AbortController, URL, URLSearchParams, Uint8Array, Set, Array, Math, Date, String, Number, JSON, Object, Promise,
+  setTimeout, clearTimeout,
+  fetch: undefined
+};
+ctx.globalThis = ctx;
+vm.createContext(ctx);
+vm.runInContext(read('js/curated-places.js'), ctx, { filename: 'curated-places.js' });
+vm.runInContext(
+  read('autocomplete.js').replace(/^export class /m, 'class ') + '\n;globalThis.__Autocomplete = CustomAutocomplete;',
+  ctx,
+  { filename: 'autocomplete.js' }
+);
+
+// A container whose querySelectorAll('.suggestion-item') reflects what was
+// rendered, so keyboard navigation and highlighting run for real.
+function makeContainer() {
+  const container = {
+    innerHTML: '',
+    classList: classList(),
+    querySelectorAll(selector) {
+      if (selector !== '.suggestion-item') return [];
+      const matches = container.innerHTML.match(/class="suggestion-item[^"]*" data-index="(\d+)"/g) || [];
+      container.items = matches.map((m) => ({
+        classList: classList(),
+        dataset: { index: /data-index="(\d+)"/.exec(m)[1] },
+        addEventListener() {}
+      }));
+      return container.items;
+    }
+  };
+  return container;
+}
+
+// { registry: 'ready' | 'pending' | 'invalid' | 'fail' } controls the
+// registry fetch; `release()` resolves a pending one.
+function makeAutocomplete({ registry = 'ready' } = {}) {
+  const registryFetches = [];
+  let release = null;
+  ctx.fetch = async (url, options) => {
+    registryFetches.push({ url, options });
+    if (registry === 'fail') throw new Error('offline');
+    if (registry === 'invalid') return { ok: true, json: async () => ({ version: 'nope' }) };
+    const payload = { ok: true, json: async () => registryRaw() };
+    if (registry === 'pending') return new Promise((resolve) => { release = () => resolve(payload); });
+    return payload;
+  };
+  const attributionClasses = classList();
+  const selectedAttribution = { classList: attributionClasses, querySelector: () => null, appendChild() {} };
+  const dispatched = [];
+  const input = {
+    value: '',
+    classList: classList(),
+    closest: () => ({ querySelector: () => selectedAttribution }),
+    dispatchEvent: (event) => dispatched.push(event),
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+  };
+  const container = makeContainer();
+  addressError.classList.remove('visible');
+  const instance = new ctx.__Autocomplete(input, container, null);
+  const detailsCalls = [];
+  instance.fetchWithTimeout = async (url) => {
+    detailsCalls.push(url);
+    throw new Error('no provider in this test');   // each check overrides as needed
+  };
+  return {
+    instance, input, container, selectedAttribution, dispatched, detailsCalls, registryFetches,
+    release: () => release && release(),
+    ready: () => instance.curatedLoad || Promise.resolve()
+  };
+}
+
+function rows(container) {
+  const out = [];
+  const re = /<div class="suggestion-item([^"]*)" data-index="(\d+)"(?: data-terminal="([^"]*)")?>[\s\S]*?<div class="suggestion-main">([^<]*)<\/div>/g;
+  let m;
+  while ((m = re.exec(container.innerHTML)) !== null) {
+    out.push({ curated: m[1].includes('--curated'), index: Number(m[2]), terminal: m[3] || null, main: m[4] });
+  }
+  return out;
+}
+const logos = (container) => (container.innerHTML.match(/class="google-maps-attribution"/g) || []).length;
+// Objects built inside the vm context carry that realm's prototypes, which
+// deepStrictEqual rejects; compare plain copies (key order included).
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const typed = (instance, input, value) => { input.value = value; instance.handleInput({ target: input }); };
+
+let passed = 0;
+const results = [];
+async function check(name, fn) {
+  try {
+    await fn();
+    passed++;
+    results.push(`  ✓ ${name}`);
+  } catch (error) {
+    results.push(`  ✗ ${name}\n      ${error.message}`);
+    results.forEach((line) => console.log(line));
+    console.log(`\nFAILED at: ${name}`);
+    process.exit(1);
+  }
+}
+
+(async () => {
+  console.log('\nCurated cruise terminals — the address dropdown\n');
+
+  await check('the registry is fetched once at construction, at the exact precached URL, and the dropdown stays closed', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    assert.deepStrictEqual(t.registryFetches.map((f) => f.url), [REGISTRY_URL]);
+    assert.ok(t.instance.curatedRegistry, 'registry validated and kept');
+    assert.strictEqual(t.container.innerHTML, '');
+    assert.strictEqual(t.container.classList.contains('visible'), false);
+  });
+
+  await check('typing "Virgin" renders Terminal V IMMEDIATELY — before any Google request, with no Google logo', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    const list = rows(t.container);
+    assert.deepStrictEqual(list, [{ curated: true, index: 0, terminal: 'pom-terminal-v', main: 'Virgin Voyages — PortMiami Terminal V' }]);
+    assert.ok(t.container.innerHTML.includes('718 N Cruise Blvd, Miami, FL 33132'));
+    assert.ok(t.container.innerHTML.includes('<div class="suggestion-icon">🚢</div>'));
+    assert.strictEqual(logos(t.container), 0);
+    assert.ok(!t.container.innerHTML.includes('Loading'), 'no Google request has started yet');
+    assert.strictEqual(t.container.classList.contains('visible'), true);
+    assert.strictEqual(t.detailsCalls.length, 0);
+    assert.strictEqual(t.instance.debounceTimer !== null, true, 'Google is still requested, after the debounce');
+    clearTimeout(t.instance.debounceTimer);
+  });
+
+  await check('Google loading, then Google results, slot in BELOW Terminal V with re-numbered rows and one logo after them', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.showLoading();
+    assert.strictEqual(rows(t.container)[0].terminal, 'pom-terminal-v', 'curated row survives the loading state');
+    assert.ok(t.container.innerHTML.includes('Loading...'));
+    assert.ok(t.container.innerHTML.indexOf('pom-terminal-v') < t.container.innerHTML.indexOf('Loading...'));
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    const list = rows(t.container);
+    assert.deepStrictEqual(list.map((r) => [r.index, r.curated, r.main]), [
+      [0, true, 'Virgin Voyages — PortMiami Terminal V'],
+      [1, false, 'Virginia Key'],
+      [2, false, 'Virginia Gardens'],
+      [3, false, 'Virginia']
+    ]);
+    assert.strictEqual(logos(t.container), 1);
+    assert.ok(t.container.innerHTML.lastIndexOf('Virginia') < t.container.innerHTML.indexOf('google-maps-attribution'));
+    assert.strictEqual(t.instance.predictions.length, 3);
+    assert.ok(!t.container.innerHTML.includes('Loading...'));
+  });
+
+  await check('"Virgin voyage": the brand result and the Plantation office sit below Terminal V, and Google\'s own Terminal V row is not shown twice', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin voyage');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN_VOYAGE);
+    const list = rows(t.container);
+    assert.strictEqual(list[0].terminal, 'pom-terminal-v');
+    assert.deepStrictEqual(list.slice(1).map((r) => r.main), ['Virgin Voyages', 'Virgin Voyages']);
+    assert.strictEqual(t.instance.predictions.length, 2, 'Google\'s duplicate of Terminal V dropped');
+    assert.ok(!t.container.innerHTML.includes('Terminal V - Virgin Voyages.'));
+    assert.strictEqual(t.instance.visibleItems()[2].prediction.place_id, 'ChIJZb6cGlIH2YgRhX7nd38X8lQ', 'indices stay aligned after the dedupe');
+  });
+
+  await check('a failed Google request keeps the curated rows, shows a quiet line, and does NOT flag the address as an error', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.showError();
+    assert.strictEqual(rows(t.container)[0].terminal, 'pom-terminal-v');
+    assert.ok(t.container.innerHTML.includes('More results unavailable right now'));
+    assert.ok(!t.container.innerHTML.includes('Error loading suggestions'));
+    assert.strictEqual(t.input.classList.contains('error'), false);
+    assert.strictEqual(addressError.classList.contains('visible'), false);
+    assert.strictEqual(logos(t.container), 0);
+    // Without curated rows the failure reads exactly as today.
+    typed(t.instance, t.input, 'Plantation');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.showError();
+    assert.ok(t.container.innerHTML.includes('Error loading suggestions'));
+    assert.strictEqual(rows(t.container).length, 0);
+    assert.strictEqual(t.input.classList.contains('error'), true);
+    assert.strictEqual(addressError.classList.contains('visible'), true);
+  });
+
+  await check('an empty Google answer leaves the curated rows without "No results found"; with nothing curated it reads as today', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions([]);
+    assert.strictEqual(rows(t.container).length, 1);
+    assert.ok(!t.container.innerHTML.includes('No results found'));
+    typed(t.instance, t.input, 'Plantation');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions([]);
+    assert.strictEqual(t.container.innerHTML, '<div class="no-results">No results found</div>');
+  });
+
+  await check('a stale Google response cannot replace the curated-first list for newer text', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    let releaseOld;
+    t.instance.fetchWithTimeout = async (url) => {
+      if (url.includes('input=Old')) {
+        return new Promise((resolve) => { releaseOld = () => resolve({ ok: true, json: async () => ({ predictions: [{ place_id: 'old', description: 'OLD' }] }) }); });
+      }
+      return { ok: true, json: async () => ({ predictions: GOOGLE_VIRGIN }) };
+    };
+    t.input.value = 'Old';
+    t.instance.requestSequence = 1;
+    const old = t.instance.fetchSuggestions('Old', 1);
+    t.input.value = 'Virgin';
+    t.instance.requestSequence = 2;
+    await t.instance.fetchSuggestions('Virgin', 2);
+    releaseOld();
+    await old;
+    const list = rows(t.container);
+    assert.strictEqual(list[0].terminal, 'pom-terminal-v');
+    assert.ok(t.container.innerHTML.includes('Virginia Key'));
+    assert.ok(!t.container.innerHTML.includes('OLD'));
+  });
+
+  await check('keyboard: ArrowDown walks the curated row then Google\'s; Enter selects by that same index', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    const key = (k) => t.instance.handleKeydown({ key: k, preventDefault() {} });
+    key('ArrowDown');
+    assert.strictEqual(t.instance.selectedIndex, 0);
+    assert.strictEqual(t.container.items[0].classList.contains('highlighted'), true);
+    key('ArrowDown');
+    assert.strictEqual(t.instance.selectedIndex, 1);
+    assert.strictEqual(t.container.items[0].classList.contains('highlighted'), false);
+    assert.strictEqual(t.container.items[1].classList.contains('highlighted'), true);
+    key('Enter');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(t.detailsCalls.length, 1);
+    assert.ok(t.detailsCalls[0].includes(`place_id=${GOOGLE_VIRGIN[0].place_id}`), 'row 1 is Google\'s first prediction, not the terminal');
+    key('ArrowUp'); key('ArrowUp'); key('ArrowUp');
+    assert.strictEqual(t.instance.selectedIndex, -1);
+  });
+
+  await check('selecting the curated row: Details runs for the registry place ID, the input shows LinkMia\'s label, attribution shows, events keep today\'s shapes', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    t.instance.fetchWithTimeout = async (url) => {
+      t.detailsCalls.push(url);
+      return { ok: true, json: async () => ({
+        result: { formatted_address: '718 N Cruise Blvd, Miami, FL 33132, USA', geometry: { location: { lat: 25.7800848, lng: -80.179946 } } },
+        attributions: []
+      }) };
+    };
+    await t.instance.selectSuggestion(0);
+    assert.strictEqual(t.detailsCalls.length, 1);
+    assert.ok(t.detailsCalls[0].includes(`place_id=${TERMINAL_V_ID}`));
+    assert.strictEqual(t.input.value, TERMINAL_V_LABEL, 'LinkMia\'s unambiguous label, not Google\'s formatted address');
+    assert.deepStrictEqual(plain(t.instance.selectedPlace), { place_id: TERMINAL_V_ID, description: TERMINAL_V_LABEL });
+    assert.strictEqual(t.instance.isValidated, true);
+    assert.strictEqual(t.selectedAttribution.classList.contains('visible'), true);
+    assert.deepStrictEqual(t.dispatched.map((e) => e.type), ['place-selected', 'place-coordinates']);
+    assert.deepStrictEqual(plain(t.dispatched[0].detail), { placeId: TERMINAL_V_ID, description: TERMINAL_V_LABEL });
+    assert.deepStrictEqual(plain(t.dispatched[1].detail), { lat: 25.7800848, lng: -80.179946, address: TERMINAL_V_LABEL });
+    assert.strictEqual(t.instance.rawQuery, 'Virgin');
+    assert.strictEqual(t.container.innerHTML, '', 'the list closes after a selection');
+  });
+
+  await check('a Details failure on a curated row falls back to LinkMia\'s label with null coordinates — never a bare city label', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions([]);
+    await t.instance.selectSuggestion(0);   // fetchWithTimeout throws
+    assert.strictEqual(t.input.value, TERMINAL_V_LABEL);
+    assert.deepStrictEqual(plain(t.instance.selectedPlace), { place_id: TERMINAL_V_ID, description: TERMINAL_V_LABEL });
+    assert.deepStrictEqual(plain(t.dispatched[1].detail), { lat: null, lng: null, address: TERMINAL_V_LABEL });
+  });
+
+  await check('selecting a Google row below the curated rows resolves the right prediction', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin voyage');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN_VOYAGE);
+    t.instance.fetchWithTimeout = async (url) => {
+      t.detailsCalls.push(url);
+      return { ok: true, json: async () => ({
+        result: { formatted_address: 'South Pine Island Rd, Plantation, FL 33324, USA', geometry: { location: { lat: 26.1, lng: -80.2 } } },
+        attributions: []
+      }) };
+    };
+    await t.instance.selectSuggestion(2);
+    assert.ok(t.detailsCalls[0].includes('place_id=ChIJZb6cGlIH2YgRhX7nd38X8lQ'));
+    assert.strictEqual(t.input.value, 'South Pine Island Rd, Plantation, FL 33324, USA');
+    assert.strictEqual(t.instance.selectedPlace.place_id, 'ChIJZb6cGlIH2YgRhX7nd38X8lQ');
+  });
+
+  await check('a registry that arrives late re-renders the current text; one dismissed by Escape stays closed', async () => {
+    const t = makeAutocomplete({ registry: 'pending' });
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.showLoading();
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    assert.strictEqual(rows(t.container).filter((r) => r.curated).length, 0, 'nothing curated before the registry');
+    t.release();
+    await t.ready();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const list = rows(t.container);
+    assert.strictEqual(list[0].terminal, 'pom-terminal-v', 'Terminal V inserted on arrival');
+    assert.deepStrictEqual(list.slice(1).map((r) => r.index), [1, 2, 3], 'Google rows re-numbered');
+    assert.strictEqual(logos(t.container), 1);
+
+    const u = makeAutocomplete({ registry: 'pending' });
+    typed(u.instance, u.input, 'Virgin');
+    u.instance.handleKeydown({ key: 'Escape', preventDefault() {} });
+    assert.strictEqual(u.container.innerHTML, '');
+    u.release();
+    await u.ready();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(u.container.innerHTML, '', 'a dismissed dropdown is not reopened by the registry');
+    assert.strictEqual(u.container.classList.contains('visible'), false);
+    typed(u.instance, u.input, 'Virgin v');
+    clearTimeout(u.instance.debounceTimer);
+    assert.strictEqual(rows(u.container)[0].terminal, 'pom-terminal-v', 'the next keystroke shows it again');
+  });
+
+  await check('registry text is never interpreted as HTML', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    const raw = registryRaw();
+    raw.terminals[0].name = 'PortMiami <Terminal> V';
+    t.instance.curatedRegistry = ctx.CuratedPlaces.validateRegistry(raw).registry;
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    assert.ok(t.container.innerHTML.includes('&lt;Terminal&gt;'));
+    assert.ok(!t.container.innerHTML.includes('<Terminal>'));
+  });
+
+  await check('an invalid registry, or a failed fetch, leaves the dropdown exactly as today (and the fetch is retried at most once)', async () => {
+    for (const mode of ['invalid', 'fail']) {
+      const t = makeAutocomplete({ registry: mode });
+      await t.ready();
+      assert.strictEqual(t.instance.curatedRegistry, null);
+      typed(t.instance, t.input, 'Virgin');
+      clearTimeout(t.instance.debounceTimer);
+      assert.strictEqual(t.container.innerHTML, '', 'nothing rendered before Google answers, as today');
+      await t.ready();
+      typed(t.instance, t.input, 'Virgin v');
+      clearTimeout(t.instance.debounceTimer);
+      await t.ready();
+      typed(t.instance, t.input, 'Virgin vo');
+      clearTimeout(t.instance.debounceTimer);
+      await t.ready();
+      assert.strictEqual(t.registryFetches.length, mode === 'invalid' ? 1 : 2, `${mode}: one load at boot plus at most one retry`);
+      t.instance.renderSuggestions(GOOGLE_VIRGIN);
+      assert.strictEqual(rows(t.container).filter((r) => r.curated).length, 0);
+      assert.strictEqual(logos(t.container), 1);
+    }
+  });
+
+  await check('repo pins: indexMVP loads js/curated-places.js?v=1 before the pending-edit model; the SW precaches both exact URLs', () => {
+    const idx = read('indexMVP.html');
+    const sw = read('service-worker.js');
+    const script = idx.indexOf('<script src="./js/curated-places.js?v=1"></script>');
+    assert.ok(script >= 0, 'classic script tag present');
+    assert.ok(script < idx.indexOf('<script src="./js/pending-edit-model.js'), 'loaded before the other js/ modules');
+    const listStart = sw.indexOf('const STATIC_CACHE_URLS = [');
+    const list = sw.slice(listStart, sw.indexOf('];', listStart));
+    assert.ok(list.includes(`'/js/curated-places.js?v=1'`));
+    assert.ok(list.includes(`'${REGISTRY_URL}'`));
+    assert.ok(read('autocomplete.js').includes(`const CURATED_REGISTRY_URL = '${REGISTRY_URL}';`), 'autocomplete requests the precached literal');
+  });
+
+  results.forEach((line) => console.log(line));
+  console.log(`\n${passed} checks passed\n`);
+})();

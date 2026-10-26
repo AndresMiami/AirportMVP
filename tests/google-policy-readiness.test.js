@@ -220,6 +220,32 @@ async function check(name, fn) {
     );
   });
 
+  await check('curated rows (LinkMia content) carry no Google attribution; Google rows still do, exactly once, after them', () => {
+    vm.runInContext(read('js/curated-places.js'), ctx, { filename: 'curated-places.js' });
+    const { instance, input, container } = makeAutocomplete();
+    instance.curatedRegistry = ctx.CuratedPlaces.validateRegistry({
+      version: 1,
+      port: { name: 'PortMiami', keywords: ['portmiami'] },
+      companies: [{ key: 'virgin', name: 'Virgin Voyages', keywords: ['virgin'] }],
+      terminals: [{
+        id: 'pom-terminal-v', name: 'PortMiami Terminal V', address: '718 N Cruise Blvd, Miami, FL 33132',
+        placeId: 'ChIJO1Q7bLK12YgRyjFe2sYTfNc', companies: ['virgin'], keywords: ['terminal v'],
+        source: 'test', verifiedAt: '2026-10-26'
+      }]
+    }).registry;
+    input.value = 'Virgin';
+    instance.renderSuggestions([]);
+    assert.strictEqual((container.innerHTML.match(/class="suggestion-item/g) || []).length, 1);
+    assert.strictEqual((container.innerHTML.match(/class="google-maps-attribution"/g) || []).length, 0,
+      'no Google content on screen, so no Google logo');
+    instance.renderSuggestions([{ place_id: 'pid', description: 'Virginia Key, Florida, USA' }]);
+    assert.strictEqual((container.innerHTML.match(/class="google-maps-attribution"/g) || []).length, 1);
+    assert.ok(container.innerHTML.indexOf('suggestion-item--curated') < container.innerHTML.indexOf('Virginia Key'),
+      'the LinkMia row renders first');
+    assert.ok(container.innerHTML.lastIndexOf('Virginia Key') < container.innerHTML.indexOf('google-maps-attribution'),
+      'the logo follows Google\'s rows');
+  });
+
   await check('a live selection shows attribution and manual editing clears it', () => {
     const { instance, selectedAttribution } = makeAutocomplete();
     instance.applySelection({
