@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-26",
+  "about": "LinkMia's own list of PortMiami cruise terminals. The address search shows matching terminals ABOVE Google's suggestions (js/curated-places.js), and the server writes the terminal's unambiguous label on verified bookings (backend/functions/lib/curated-places.js). One record per PHYSICAL terminal; a terminal lists every company that sails from it. A record WITHOUT verifiedAt is a DRAFT: never shown, never stored. Verified means Andres confirmed the company->terminal assignment AND the placeId resolves to that terminal. placeId is a Google place ID (storable); name/address text is LinkMia's own, never Google content.",
+  "port": {
+    "name": "PortMiami",
+    "keywords": ["portmiami", "port miami", "port of miami", "miami cruise port", "cruise port", "cruise terminal"]
+  },
+  "companies": [
+    { "key": "virgin", "name": "Virgin Voyages", "keywords": ["virgin", "virgin voyages", "virgin voyage"] },
+    { "key": "carnival", "name": "Carnival Cruise Line", "keywords": ["carnival"] },
+    { "key": "royal-caribbean", "name": "Royal Caribbean", "keywords": ["royal", "royal caribbean", "rccl"] },
+    { "key": "norwegian", "name": "Norwegian Cruise Line", "keywords": ["norwegian", "ncl"] },
+    { "key": "celebrity", "name": "Celebrity Cruises", "keywords": ["celebrity"] },
+    { "key": "msc", "name": "MSC Cruises", "keywords": ["msc"] },
+    { "key": "disney", "name": "Disney Cruise Line", "keywords": ["disney", "dcl"] }
+  ],
+  "terminals": [
+    {
+      "id": "pom-terminal-v",
+      "name": "PortMiami Terminal V",
+      "address": "718 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJO1Q7bLK12YgRyjFe2sYTfNc",
+      "companies": ["virgin"],
+      "keywords": ["terminal v"],
+      "source": "Assignment: Andres, LM-EFFA brief 2026-10-26 (Virgin Voyages, Terminal V, 718 N Cruise Blvd). Place ID: Google Places autocomplete 'Terminal V - Virgin Voyages., North Cruise Boulevard' via the Railway proxy, 2026-10-26; Place Details returned '718 N Cruise Blvd, Miami, FL 33132, USA' (25.7800848, -80.179946). Canonical-echo check through /api/quote-ride is part of the Deploy Preview smoke matrix.",
+      "verifiedAt": "2026-10-26"
+    },
+    {
+      "id": "pom-terminal-a",
+      "name": "PortMiami Terminal A",
+      "address": null,
+      "placeId": null,
+      "companies": ["royal-caribbean"],
+      "keywords": ["terminal a"],
+      "source": "DRAFT from public PortMiami terminal assignments; Celebrity may share this terminal — confirm with Andres, then resolve the place ID.",
+      "verifiedAt": null
+    },
+    {
+      "id": "pom-terminal-b",
+      "name": "PortMiami Terminal B",
+      "address": null,
+      "placeId": null,
+      "companies": ["norwegian"],
+      "keywords": ["terminal b"],
+      "source": "DRAFT from public PortMiami terminal assignments — confirm with Andres, then resolve the place ID.",
+      "verifiedAt": null
+    },
+    {
+      "id": "pom-terminal-d",
+      "name": "PortMiami Terminal D",
+      "address": null,
+      "placeId": null,
+      "companies": ["carnival"],
+      "keywords": ["terminal d"],
+      "source": "DRAFT from public PortMiami terminal assignments — confirm with Andres, then resolve the place ID.",
+      "verifiedAt": null
+    },
+    {
+      "id": "pom-terminal-e",
+      "name": "PortMiami Terminal E",
+      "address": null,
+      "placeId": null,
+      "companies": ["carnival"],
+      "keywords": ["terminal e"],
+      "source": "DRAFT from public PortMiami terminal assignments — confirm with Andres, then resolve the place ID.",
+      "verifiedAt": null
+    },
+    {
+      "id": "pom-terminal-f",
+      "name": "PortMiami Terminal F",
+      "address": null,
+      "placeId": null,
+      "companies": ["carnival"],
+      "keywords": ["terminal f"],
+      "source": "DRAFT from public PortMiami terminal assignments — confirm with Andres, then resolve the place ID.",
+      "verifiedAt": null
+    },
+    {
+      "id": "pom-terminal-aa",
+      "name": "PortMiami Terminal AA",
+      "address": null,
+      "placeId": null,
+      "companies": ["msc"],
+      "keywords": ["terminal aa", "msc terminal"],
+      "source": "DRAFT from public PortMiami terminal assignments — confirm with Andres, then resolve the place ID.",
+      "verifiedAt": null
+    }
+  ]
+}
