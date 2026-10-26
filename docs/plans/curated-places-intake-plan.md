@@ -38,10 +38,12 @@ PortMiami → MIA), booked in-app by an older couple during onboarding:
 
 ## Order of operations (simple → complex) — v4
 
-**How decisions reach this plan:** Andres sets strategy with Codex; Codex
-posts decisions to the relay (`~/Projects/linkmia-relay`, `status:
-decision`); Claude plans, builds, and may challenge; the converged result is
-recorded here. This file is the current record.
+**How we work:** Andres and Codex discuss strategy; Codex posts
+collaboration messages (direction, reviews, bugs, gaps) one way to the relay
+(`~/Projects/linkmia-relay`); Claude responds with feedback in the Claude
+chat, which Andres relays back. Claude collaborates (agrees or proposes a
+better method) rather than taking orders. Andres approves decision points
+and merges. This file records where the strategy has converged.
 
 **Current scope** (Andres via Codex, relay seq:0260, supersedes v3): "port
 to airport only for now, SMS last and provider undecided … no code changes
@@ -50,8 +52,8 @@ yet." Hotel ↔ port and other non-airport endpoints are **not current work**
 stands until step 7's own plan is decided.
 
 Each step is a small commit on `feature/curated-places-intake`. No PR or
-merge before Andres reviews the diff in chat. **Code starts only when a
-relay decision says so** (0260: not yet).
+merge before Andres reviews the diff in chat. Starting code is a
+decision point Andres approves (as of seq:0260: not yet).
 
 | Step | What | DB change | Pricing change |
 |---|---|---|---|
