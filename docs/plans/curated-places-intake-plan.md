@@ -1,8 +1,9 @@
-# Curated places + intake fixes — plan v2
+# Curated places + intake fixes — plan v3
 
 Branch: `feature/curated-places-intake` · Status: **PLAN ONLY — no code until
-Andres approves** · Author: Claude · v1 2026-10-26 (dbc6243) · v2 2026-10-26
-applies Codex review relay seq:0253 #1–#9 and Andres's scope ruling on #10.
+Andres approves** · Author: Claude · v1 2026-10-26 (dbc6243) · v2 (2f5557b)
+applies Codex review relay seq:0253 #1–#9 · v3 adopts Andres's eight-step
+order (Twilio SMS; hotel ↔ port and other endpoints in scope).
 
 ## Why (field evidence, 2026-10-26)
 
@@ -35,25 +36,33 @@ PortMiami → MIA), booked in-app by an older couple during onboarding:
 - **Ranking is Google's alone** (`autocomplete.js:210` renders predictions in
   order; loading/result/error share one container `:181`–`:218`).
 
-## Order of operations (simple → complex)
+## Order of operations (simple → complex) — v3
 
-Ruling (Andres, this chat, 2026-10-26 — controls over any other chat's
-summary): Phase 1 as planned; Cruise Port = **port ↔ airport only for now**;
-**SMS last, provider not decided**. Each phase is reviewed as a diff in chat
-before any PR; the table is sequencing, not permission to open PRs.
+Ruling (Andres, Claude chat, 2026-10-26, latest — supersedes the v2 scope
+ruling): **Twilio is the SMS provider**, and LinkMia will support
+**hotel ↔ port, port ↔ airport and other pickup/drop-off locations**.
+This explicitly **reverses CLAUDE.md decision 8** ("never SMS") for
+transactional, opt-in booking/trip status messages; CLAUDE.md's decisions
+log gets that update in step 7's commit.
 
-| Phase | What | DB change | Pricing change |
+Each step is a small commit on `feature/curated-places-intake`. No PR or
+merge before Andres reviews the diff in chat.
+
+| Step | What | DB change | Pricing change |
 |---|---|---|---|
-| **1** | Passenger count step · curated places list · curated-first search · verified place name carried to booking + driver | none | none |
-| 2 | "Cruise Port" trip type (port ↔ airport only) | none | none |
-| 3 | Airline → terminal on airport trips | decide then (likely migration 022) | none |
-| 4 | Driver card route map (A/B pins) | none | none |
-| 5 | SMS status messages — reopens recorded decision 8 ("never SMS"); provider, consent and carrier registration decided in its own plan | yes | none |
+| **1** | Passenger count is a deliberate choice, shown prominently (§1A) | none | none |
+| **2** | Curated places list: terminals, cruise lines, airports, airlines (§1B) | none | none |
+| **3** | Curated-first search + verified place name to booking and driver (§1C–§1E) | none | none |
+| 4 | Airline cards after the airport → terminal in passenger + driver summaries | likely migration 022 | none |
+| 5 | Driver card map, A/B pins above Accept | none | none |
+| 6 | Cruise Port path (line → terminal cards) + **non-airport endpoints** (hotel ↔ port, other) | **yes — see step 6** | **must be decided — see step 6** |
+| 7 | Opt-in Twilio SMS for booking + trip-status events, dedup, return-booking link | yes (consent + ledger channel) | none |
+| 8 | End-to-end test: Terminal V → MIA, airline, passenger count, driver map, opted-in messages; full suite | — | — |
 
-Non-goals for every phase: voice/conversational booking, any payment
-collection or fare custody, any pricing-logic change. Hotel ↔ port and other
-non-airport endpoints are **out** until a separate pricing/feasibility
-decision (the engine prices airport ↔ address only).
+Non-goals for every step: voice/conversational booking, any payment
+collection or fare custody, invented rates. Steps 1–3 are specified in
+detail below (they were "Phase 1" in v1/v2); steps 4–8 get their own short
+plan before code.
 
 ---
 
@@ -124,9 +133,16 @@ decision (the engine prices airport ↔ address only).
 - **Place IDs:** each one is run through the existing quote resolver
   (`lib/place-identity.js`); the stored ID is the **canonical** one it
   returns, and the physical terminal/entrance is checked, not just a 200.
-  All curated IDs join the rollout smoke matrix. A refresh procedure is
-  documented; a retired/replaced ID simply stops matching (the booking falls
-  back to today's label behavior), never blocks a booking.
+  All curated IDs join the rollout smoke matrix, and a refresh procedure is
+  documented. Two different failure cases (seq:0257 #1):
+  * **Replaced ID** (the resolver returns a new canonical id): the quote
+    succeeds, the curated label no longer matches, and the booking gets
+    today's label behavior until the registry is refreshed.
+  * **Retired / unresolvable ID** (`places_not_found`,
+    `lib/place-identity.js:143`, `:152`): there is no verified quote, so the
+    booking is refused exactly as today — the form stays filled and the
+    passenger picks another live result. Never route by the curated label
+    alone or bypass quote verification.
 - **Google boundary:** the file holds place IDs plus **our own** name/address
   text; no Google coordinates or Google-returned content.
 
@@ -218,7 +234,8 @@ decision (the engine prices airport ↔ address only).
   → curated label on the right endpoint; mismatched token, no token,
   verify_failed, non-curated id → unchanged behavior; unchanged-route edit →
   stored labels byte for byte; route-change edit → curated label; invalid
-  registry → today's behavior.
+  registry → today's behavior; replaced curated id → quote succeeds with
+  today's label; unresolvable curated id → refused, form kept, no booking.
 - **Passengers**: missing / null / 0 / negative / fractional / malformed /
   13 → 400 with message; 1..12 integers pass; a stale-page payload of 1
   passes (documented); changing the count after quoting re-quotes; vehicles
@@ -237,25 +254,51 @@ still display. Release still waits on the Google-terms gate (1E).
 
 ---
 
-## Phases 2–5 (outline only — each gets its own short plan before code)
+## Steps 4–8 (outline only — each gets its own short plan before code)
 
-- **Phase 2 — Cruise Port button (port ↔ airport only).** Third big button
-  next to "Going to Airport" / "Arriving at Airport": cruise-line cards →
-  terminal card (choice when a line has several) → direction + airport.
-  Under the hood it is the existing airport mode with a curated place as the
-  address end, so pricing is untouched. LM-EFFA = Cruise Port → Virgin →
-  Terminal V → to MIA. Hotel ↔ port needs its own pricing decision first.
-- **Phase 3 — Airline → terminal.** After the airport, airline cards resolve
-  terminal/concourse for the passenger summary and the driver. Storage
-  decided then (likely migration 022 + writer RPC update, run by Andres via
-  runbook), possibly tied to the existing flight fields.
-- **Phase 4 — Driver card map.** Small Maps JS map with A/B pins above
+- **Step 4 — Airline → terminal.** After the airport, airline cards (from
+  the registry's `airlines`) resolve terminal/concourse for the passenger
+  summary and the driver. Storage decided in its plan (likely migration 022
+  adding columns + the writer RPC update, run by Andres via runbook),
+  possibly tied to the existing flight fields.
+- **Step 5 — Driver card map.** Small Maps JS map with A/B pins above
   Accept, via the existing direct loader and browser key (driver scope added
   to its referrer restrictions), loaded lazily per card to bound map cost.
-  Can proceed independently after Phase 1.
-- **Phase 5 — SMS.** Reverses decision 8 and needs Andres's explicit
-  reversal; provider not decided; opt-in consent column + ledger channel
-  migration, carrier registration (weeks), transactional-only copy. Last.
+- **Step 6 — Cruise Port + non-airport endpoints.** Card flow: Cruise Port →
+  cruise line → terminal (choice when a line has several). Port ↔ airport
+  works with today's engine (the terminal is the address end). **Hotel ↔ port
+  and other non-airport routes are a contract change, not a UI change** —
+  what the code shows today:
+  * The engine prices per-mile tiers **plus an airport fee**
+    (`lib/ride-rate-card.js:56`–`:99`). A route with no airport must decide
+    whether that fee applies — dropping or keeping it is a pricing decision,
+    so "existing rules unchanged" needs Andres to say which.
+  * `airportCode` is a committed intent fact in the signed quote token, and
+    migration 017's CHECK requires verified rows to carry
+    `airport_code IN ('MIA','FLL','PBI')`
+    (`017_quote_enforcement_foundation.sql:257`). A non-airport booking needs
+    a new quote mode, a token contract version, and a migration (writer RPCs
+    + CHECK), run by Andres via runbook.
+  * Flat popular-route rates are airport-pair keyed (`ride-rate-card.js:120`).
+  Step 6 therefore starts with a **feasibility memo** (relayed to Codex) that
+  answers: which existing rate applies to a non-airport route, what the
+  contract/migration change is, and how it stays inside enforcement. If any
+  answer would invent a rate, stop and ask Andres.
+- **Step 7 — Opt-in Twilio SMS.** Booking confirmed (pickup, drop-off,
+  time, what's next); driver on the way (ETA window); arrived; on route / at
+  destination; complete + return-booking link. Through the existing
+  outbox/ledger + `lib/dispatch.js` (ledger identity = no duplicate sends).
+  Needs: an explicit, recorded opt-in (unchecked by default, never a booking
+  gate), a consent column + an `sms` ledger channel (migration), STOP/HELP
+  handling, transactional-only copy, and Twilio secrets in Netlify env.
+  **Andres's to-dos (Claude can't do these):** create the Twilio account,
+  register for A2P 10DLC (carrier approval can take weeks; nothing sends to
+  real US phones before it), and update the Privacy page for SMS. The
+  "on the way — ETA window" message depends on the two-ETA work; until that
+  lands it says "on the way" without an ETA.
+- **Step 8 — End-to-end.** LM-EFFA re-run on a Deploy Preview: Terminal V
+  → MIA, airline → terminal, party of 2, driver map, opted-in messages
+  (test number only), then every existing test.
 
 ## Open questions for Andres (before Phase 1 code)
 
