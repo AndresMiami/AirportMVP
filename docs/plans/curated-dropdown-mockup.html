@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curated dropdown mockup</title>
+<style>
+  :root{--bg:#1C1C1E;--panel:#2C2C2E;--text:#FFFFFF;--muted:#8E8E93;--brand:linear-gradient(135deg,#FF9933,#FF5733)}
+  body{margin:0;background:#0f0f10;color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 16px}
+  h1{font-size:18px;margin:0 0 4px}
+  p.note{color:var(--muted);margin:0 0 20px;font-size:13px}
+  .row{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+  .phone{width:375px;background:var(--bg);border-radius:28px;padding:48px 16px 24px;box-shadow:0 0 0 8px #000,0 20px 60px rgba(0,0,0,.6)}
+  .phone h2{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px}
+  .field{background:var(--panel);border-radius:12px;padding:14px 16px;color:var(--text);font-size:16px;display:flex;justify-content:space-between}
+  .field .caret{color:#FF9933}
+  .dd{margin-top:4px;background:#fff;border:1px solid #E5E5E7;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);max-height:300px;overflow:auto;color:#1C1C1E}
+  .sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8E8E93;padding:8px 16px 4px}
+  .cur{display:flex;gap:12px;align-items:center;padding:8px 12px 8px 0;border-bottom:1px solid #F2F2F7;position:relative;min-height:64px;box-sizing:border-box}
+  .cur::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:2px;background:var(--brand)}
+  .cur .img{width:48px;height:48px;border-radius:8px;margin-left:12px;flex:none;background:#444 center/cover;display:flex;align-items:center;justify-content:center}
+  .cur .img.photo{background-image:linear-gradient(160deg,#2a5b8c,#9fc3e8 60%,#f3f3f3)}
+  .cur .img.icon{background:#CC0000;color:#fff;font-size:24px}
+  .cur .img.icon.blue{background:#1E64B4}
+  .cur .t{flex:1;min-width:0}
+  .cur .name{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px}
+  .badge{font-size:10px;font-weight:700;color:#fff;background:#CC0000;border-radius:999px;padding:2px 7px;letter-spacing:.03em}
+  .badge.blue{background:#1E64B4}
+  .cur .sub{font-size:12px;color:#8E8E93;margin-top:1px}
+  .cur .addr{font-size:12px;color:#636366;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .g{display:flex;gap:16px;align-items:center;padding:14px 16px;border-bottom:1px solid #F2F2F7}
+  .g .pin{color:#FF9500}
+  .g .m{font-weight:500;font-size:14px}
+  .g .s{font-size:12px;color:#8E8E93;margin-top:2px}
+  .g.hl{background:#F2F2F7}
+  .state{padding:12px 16px;font-size:12px;color:#8E8E93;font-style:italic}
+  .logo{padding:8px 16px;text-align:right;font-size:11px;color:#8E8E93}
+  .logo b{color:#5f6368;font-style:normal;font-weight:600}
+  .cap{color:var(--muted);font-size:12px;margin-top:12px}
+</style>
+</head>
+<body>
+<h1>Rich address dropdown — mockup (first PR)</h1>
+<p class="note">375px phone width · page dark #1C1C1E · dropdown panel stays light (current) · orange stripe + brand badge mark LinkMia rows · Google rows unchanged</p>
+
+<div class="row">
+
+  <div class="phone">
+    <h2>1 · Typing "Virgin" — normal</h2>
+    <div class="field"><span>Virgin<span style="opacity:.5">|</span></span><span class="caret">✕</span></div>
+    <div class="dd">
+      <div class="sec">LinkMia places</div>
+      <div class="cur">
+        <div class="img photo" aria-hidden="true"></div>
+        <div class="t">
+          <div class="name">PortMiami Terminal V <span class="badge">Virgin</span></div>
+          <div class="sub">PortMiami · Terminal V</div>
+          <div class="addr">718 N Cruise Blvd, Miami, FL 33132</div>
+        </div>
+      </div>
+      <div class="sec">More results</div>
+      <div class="g"><span class="pin">📍</span><div><div class="m">Virgin Voyages</div><div class="s">South Pine Island Road, Plantation, FL</div></div></div>
+      <div class="g"><span class="pin">📍</span><div><div class="m">Virginia Key</div><div class="s">Miami, FL, USA</div></div></div>
+      <div class="g"><span class="pin">📍</span><div><div class="m">Virginia Gardens</div><div class="s">FL, USA</div></div></div>
+      <div class="logo">powered by <b>Google</b> <span style="font-size:10px">(official logo asset)</span></div>
+    </div>
+    <p class="cap">Terminal V is first, with a photo, a red Virgin badge and the street address. The Plantation office is below, in Google's plain style.</p>
+  </div>
+
+  <div class="phone">
+    <h2>2 · Google slow / failed · missing photo · keyboard</h2>
+    <div class="field"><span>virgin voy<span style="opacity:.5">|</span></span><span class="caret">✕</span></div>
+    <div class="dd">
+      <div class="sec">LinkMia places</div>
+      <div class="cur" style="background:#F2F2F7">
+        <div class="img icon" aria-hidden="true">🚢</div>
+        <div class="t">
+          <div class="name">PortMiami Terminal V <span class="badge">Virgin</span></div>
+          <div class="sub">PortMiami · Terminal V</div>
+          <div class="addr">718 N Cruise Blvd, Miami, FL 33132</div>
+        </div>
+      </div>
+      <div class="sec">More results</div>
+      <div class="state">Searching…</div>
+    </div>
+    <p class="cap">No photo yet → ship icon on the badge color. The row is keyboard-highlighted (ArrowDown). Google is still loading; if it fails, this line becomes "More results unavailable right now" and the LinkMia row stays.</p>
+    <div class="dd" style="margin-top:16px">
+      <div class="sec">LinkMia places</div>
+      <div class="cur">
+        <div class="img icon blue" aria-hidden="true">✈️</div>
+        <div class="t">
+          <div class="name">Miami International Airport <span class="badge blue">MIA</span></div>
+          <div class="sub">Airport · all terminals</div>
+          <div class="addr">2100 NW 42nd Ave, Miami, FL 33142</div>
+        </div>
+      </div>
+      <div class="sec">More results</div>
+      <div class="state">More results unavailable right now</div>
+    </div>
+    <p class="cap">Airport entry (goes through the existing airport flow, not the address slot) with Google failed.</p>
+  </div>
+
+</div>
+</body>
+</html>
