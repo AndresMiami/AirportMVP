@@ -421,6 +421,39 @@ async function check(name, fn) {
     assert.strictEqual(h.calls.quotes.length, 1, 'no second call after adoption');
   });
 
+  await check('curated terminal (plan v7 §4): a SUPERSEDED canonical id drops LinkMia\'s label to the quote\'s formatted address; an equal echo or a non-curated place keeps it', async () => {
+    const TERMINAL_LABEL = 'PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132';
+    const GOOGLE_LABEL = '718 N Cruise Blvd, Miami, FL 33132, USA';
+    const curatedFactory = (deps) => createPendingEditCard({ ...deps, isCuratedTerminal: (id) => id === 'ChIJ_terminal_v' });
+    const pick = (h) => {
+      h.ui.routeChange.click();
+      h.app._er.cbs.onDone({ mode: 'pickup', airport: 'MIA',
+        address: { label: TERMINAL_LABEL, placeId: 'ChIJ_terminal_v', coordinates: null, attributions: [] } });
+    };
+    const superseded = () => { const b = quoteResponse({ placeId: 'ChIJ_superseded' }); b.quote.intent.formattedAddress = GOOGLE_LABEL; return b; };
+
+    const h = harness({ factory: curatedFactory, script: [{ status: 200, body: superseded() }] });
+    pick(h);
+    await h.flush();
+    assert.strictEqual(h.calls.quotes.length, 1);
+    assert.strictEqual(h.card._draft().route.canonicalPlaceId, 'ChIJ_superseded', 'identity adopted as before');
+    assert.strictEqual(h.card._draft().route.dropoffLabel, GOOGLE_LABEL, 'the terminal name is never claimed for an id it does not match');
+    assert.strictEqual(h.card._draft().route.pickupLabel, 'MIA', 'the airport side is untouched');
+
+    const equal = () => { const b = quoteResponse({ placeId: 'ChIJ_terminal_v' }); b.quote.intent.formattedAddress = GOOGLE_LABEL; return b; };
+    const e = harness({ factory: curatedFactory, script: [{ status: 200, body: equal() }] });
+    pick(e);
+    await e.flush();
+    assert.strictEqual(e.card._draft().route.canonicalPlaceId, 'ChIJ_terminal_v');
+    assert.strictEqual(e.card._draft().route.dropoffLabel, TERMINAL_LABEL, 'an echo equal to the registry id keeps LinkMia\'s label');
+
+    const n = harness({ script: [{ status: 200, body: superseded() }] });   // no isCuratedTerminal: nothing is curated
+    pick(n);
+    await n.flush();
+    assert.strictEqual(n.card._draft().route.canonicalPlaceId, 'ChIJ_superseded');
+    assert.strictEqual(n.card._draft().route.dropoffLabel, TERMINAL_LABEL, 'a non-curated place keeps whatever label it had, exactly as before');
+  });
+
   await check('the Where screen is NOT a quote surface: nothing is bought while it is open', async () => {
     const h = harness();
     h.ui.dateInput.value = '2026-12-24'; h.ui.timeInput.value = '19:15';

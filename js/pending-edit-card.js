@@ -117,6 +117,9 @@
       getSession,        // async () => { access_token, user } | null
       app,               // the AirportBookingApp instance (narrow surface, see below)
       accountIdentity,   // () => { name, phone, email, ambassador: bool }
+      // (placeId) => bool: is this a VERIFIED curated terminal? Decides
+      // whether a superseded canonical id drops LinkMia's label (plan v7 §4).
+      isCuratedTerminal = () => false,
       now = () => Date.now(),
       setTimeout: setT = (fn, ms) => setTimeout(fn, ms),
       clearTimeout: clearT = (id) => clearTimeout(id),
@@ -344,11 +347,24 @@
           // not know which of its fields carries the canonical identity.
           const adopted = a.adoptCanonicalPlaceId(draft.route, quote.intent);
           if (adopted) {
+            // A curated terminal whose identity the echo superseded: LinkMia's
+            // label can no longer be claimed for the canonical place, so the
+            // address side falls back to the quote's formatted address. The
+            // previous identity is read through the adapter's quote
+            // projection and the change through routeIdentity — the route
+            // itself stays opaque to the card. A non-curated address keeps
+            // its label exactly as before.
+            const previous = a.toQuoteIntent(draft.route);
+            const superseded = a.routeIdentity(adopted) !== a.routeIdentity(draft.route);
+            const relabeled = (superseded && previous && isCuratedTerminal(previous.placeId) &&
+                typeof model.replaceAddressLabel === 'function')
+              ? model.replaceAddressLabel(adopted, quote.intent.formattedAddress)
+              : adopted;
             const snapA = model.adapterFor(snapshot.route.kind);
-            if (snapA && snapA.routeIdentity(snapshot.route) === a.routeIdentity(adopted)) {
+            if (snapA && snapA.routeIdentity(snapshot.route) === a.routeIdentity(relabeled)) {
               draft.route = model.deepClone(snapshot.route);
             } else {
-              draft.route = adopted;
+              draft.route = relabeled;
             }
           }
         }

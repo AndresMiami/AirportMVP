@@ -693,6 +693,69 @@ check('the request posts intent to /api/quote-ride with the session bearer token
   });
 });
 
+// ============ curated terminals (plan v7 §4) ============
+const CuratedPlaces = require(path.join(repoRoot, 'js/curated-places.js'));
+const TERMINAL_V = { id: 'ChIJO1Q7bLK12YgRyjFe2sYTfNc', label: 'PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132' };
+const GOOGLE_TERMINAL_V = '718 N Cruise Blvd, Miami, FL 33132, USA';
+const CURATED_REGISTRY = CuratedPlaces.validateRegistry({
+  version: 1, port: { name: 'PortMiami', keywords: ['portmiami'] },
+  companies: [{ key: 'virgin', name: 'Virgin Voyages', keywords: ['virgin'] }],
+  terminals: [{ id: 'pom-terminal-v', name: 'PortMiami Terminal V', address: '718 N Cruise Blvd, Miami, FL 33132',
+    placeId: TERMINAL_V.id, companies: ['virgin'], keywords: ['terminal v'], source: 'test', verifiedAt: '2026-10-26' }]
+}).registry;
+function curatedQuote(canonicalId, formattedAddress) {
+  const q = quoteWithTtl(15);
+  q.quote.intent.placeId = canonicalId;
+  q.quote.intent.formattedAddress = formattedAddress;
+  return q;
+}
+// The page after a curated row was selected: the registry id in
+// state.locations, LinkMia's label in the input and the address tuple.
+function selectCurated(app, ctx) {
+  ctx.window.CuratedPlaces = CuratedPlaces;
+  app.state.locations.placeId = TERMINAL_V.id;
+  app.state.locations.address = { address: TERMINAL_V.label, coordinates: { lat: 25.78, lng: -80.18 } };
+  app.autocomplete = { isValidated: true, curatedRegistry: CURATED_REGISTRY,
+    selectedPlace: { place_id: TERMINAL_V.id, description: TERMINAL_V.label } };
+  app.els.addressInput = { value: TERMINAL_V.label };
+}
+
+check('curated terminal: a SUPERSEDED canonical id drops LinkMia\'s label to Google\'s formatted address; the submitted id stays', async () => {
+  const f = okFetch(curatedQuote('ChIJ_superseded_terminal_v', GOOGLE_TERMINAL_V));
+  const { app, ctx } = makeContext({ enabled: true, fetchImpl: f });
+  selectCurated(app, ctx);
+  await app.requestServerQuote();
+  assert.strictEqual(app.state.quote.status, 'ready');
+  assert.strictEqual(app.state.locations.address.address, GOOGLE_TERMINAL_V, 'the label no longer claims a terminal for an id it does not match');
+  assert.strictEqual(app.els.addressInput.value, GOOGLE_TERMINAL_V);
+  assert.strictEqual(app.autocomplete.selectedPlace.description, GOOGLE_TERMINAL_V);
+  assert.strictEqual(app.state.locations.placeId, TERMINAL_V.id, 'the SUBMITTED id stays — the quote key must keep matching');
+  assert.strictEqual(app.state.quote.data.intent.placeId, 'ChIJ_superseded_terminal_v', 'the canonical id is what the contract submits');
+  assert.ok(app.quoteIsFresh(), 'the held quote still matches the selection');
+});
+
+check('curated terminal: an echo EQUAL to the registry id keeps LinkMia\'s label; a non-curated address never changes label', async () => {
+  const same = okFetch(curatedQuote(TERMINAL_V.id, GOOGLE_TERMINAL_V));
+  const a = makeContext({ enabled: true, fetchImpl: same });
+  selectCurated(a.app, a.ctx);
+  await a.app.requestServerQuote();
+  assert.strictEqual(a.app.state.quote.status, 'ready');
+  assert.strictEqual(a.app.state.locations.address.address, TERMINAL_V.label);
+  assert.strictEqual(a.app.els.addressInput.value, TERMINAL_V.label);
+
+  // The default fixture: ChIJ_place_abc selected, ChIJ_CANONICAL_xyz echoed —
+  // a Google place, so Google's own label is kept exactly as today.
+  const other = okFetch(quoteWithTtl(15));
+  const b = makeContext({ enabled: true, fetchImpl: other });
+  b.ctx.window.CuratedPlaces = CuratedPlaces;
+  b.app.autocomplete = { isValidated: true, curatedRegistry: CURATED_REGISTRY };
+  b.app.els.addressInput = { value: '1 Brickell Ave' };
+  await b.app.requestServerQuote();
+  assert.strictEqual(b.app.state.quote.status, 'ready');
+  assert.strictEqual(b.app.state.locations.address.address, '1 Brickell Ave');
+  assert.strictEqual(b.app.els.addressInput.value, '1 Brickell Ave');
+});
+
 // ============ display ============
 check('displayed carousel prices are the SERVER cents, converted to dollars', async () => {
   const f = okFetch(quoteWithTtl(15));

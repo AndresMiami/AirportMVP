@@ -3134,6 +3134,7 @@
                     q.status = 'ready';
                     q.data = quote;
                     q.error = null;
+                    this.reconcileCuratedLabel(quote.intent);
                     this.applyServerPrices();
                     this.armQuoteExpiry();
                     this.shadowComparePricing();
@@ -3145,6 +3146,42 @@
                     q.error = { message: 'Could not reach the pricing service', retryable: true };
                     this.renderQuoteState();
                 }
+            }
+
+            // Curated cruise terminals (plan v7 §4). A curated row carried a
+            // registry place ID and LinkMia's own label. If the quote's
+            // canonical echo names a DIFFERENT id, that label can no longer be
+            // claimed for it: the address falls back to Google's formatted
+            // address for the canonical place. Identity is untouched —
+            // captureServerQuoteContract already submits the canonical id, and
+            // state.locations.placeId must keep the SUBMITTED id or the quote
+            // key would never match again. A non-curated address keeps its
+            // label exactly as today.
+            isCuratedTerminal(placeId) {
+                const core = window.CuratedPlaces;
+                const registry = this.autocomplete?.curatedRegistry;
+                return !!(core && registry && typeof placeId === 'string' &&
+                    core.findVerifiedByPlaceId(registry, placeId));
+            }
+
+            reconcileCuratedLabel(intent) {
+                const selected = this.state.locations.placeId;
+                const canonical = intent && typeof intent.placeId === 'string' ? intent.placeId : null;
+                if (!selected || !canonical || canonical === selected) return false;
+                if (!this.isCuratedTerminal(selected)) return false;
+                const fallback = typeof intent.formattedAddress === 'string' ? intent.formattedAddress.trim() : '';
+                const current = this.state.locations.address;
+                if (!fallback || !current || current.address === fallback) return false;
+                this.state.locations.address = { ...current, address: fallback };
+                if (this.els?.addressInput) this.els.addressInput.value = fallback;
+                if (this.autocomplete?.selectedPlace) {
+                    this.autocomplete.selectedPlace = {
+                        place_id: this.autocomplete.selectedPlace.place_id,
+                        description: fallback
+                    };
+                }
+                if (typeof this.updateSummary === 'function') this.updateSummary();
+                return true;
             }
 
             scheduleQuote() {
@@ -3853,6 +3890,7 @@
                         return session || null;
                     },
                     app: this,
+                    isCuratedTerminal: (placeId) => this.isCuratedTerminal(placeId),
                     accountIdentity: () => ({
                         name: currentProfile?.name || '',
                         phone: currentProfile?.phone || '',

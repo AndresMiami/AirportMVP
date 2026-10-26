@@ -238,6 +238,25 @@
     }
   };
 
+  // Replace the ADDRESS-side label of a canonical route. A curated terminal
+  // whose place id Google superseded can no longer carry LinkMia's label,
+  // so the card falls back to the quote's formatted address for the
+  // canonical place. Pure: returns a deep clone, or the input itself when
+  // there is nothing to do. Labels stay outside identity, so this never
+  // changes routeIdentity. Not an adapter operation: the legacy kind has no
+  // address side to relabel.
+  function replaceAddressLabel(route, label) {
+    if (!route || route.kind !== 'airport_transfer_v1') return route;
+    if (route.bookingMode !== 'pickup' && route.bookingMode !== 'dropoff') return route;
+    const text = normText(label);
+    if (!text) return route;
+    const field = route.bookingMode === 'pickup' ? 'dropoffLabel' : 'pickupLabel';
+    if (route[field] === text) return route;
+    const next = deepClone(route);
+    next[field] = text;
+    return next;
+  }
+
   const ADAPTER_OPS = Object.freeze([
     'projectRoute', 'fromRouteDraft', 'adoptCanonicalPlaceId',
     'toQuoteIntent', 'routeIdentity', 'routeIsComplete'
@@ -462,6 +481,7 @@
     ROUTE_ADAPTERS,
     ADAPTER_OPS,
     adapterFor,
+    replaceAddressLabel,
     createSnapshot,
     createDraft,
     compareDraft,
