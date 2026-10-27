@@ -21,6 +21,23 @@ fixed and #4's wording aligned in the two commits after `7c754f7`. Full
 suite green. Draft PR #120 open for review and preview (Codex seq:0266: GO
 for controlled browser acceptance); no merge.
 
+**Acceptance record (2026-10-27, head `fc64fce`, preview
+deploy-preview-120, signed in as Andres, no booking submitted):**
+desktop (Claude, app browser) and phone (Andres) both pass — every
+supported company query puts its terminal(s) first, instantly and after
+Google's rows render ("Virgin"/"Virgin voya"/"Virgin voyage" → Terminal V;
+Carnival → D/E/F; Royal/RCCL → A; Norwegian/NCL → B; Celebrity → G; MSC →
+AA; Disney/DCL → F; "Terminal F" names both lines); Google's duplicate of a
+curated place is removed; click and keyboard selection carry the terminal
+label, place ID and live coordinates into the booking in BOTH directions
+(headers "PortMiami Terminal V → MIA" and "MIA → PortMiami Terminal V…");
+hotel and "Virginia" queries show Google rows only; Escape dismisses; the
+panel keeps its height and scrolls. Preview pricing errors by decision
+(preview env), so saved-booking and driver-card verification wait for a
+controlled destination or production. Known, pre-existing: keystrokes
+within ~150 ms of the field's first focus precede the lazily loaded module.
+Open: Google terms gate, Terminal D street number, Andres's merge decision.
+
 ## Context
 
 On 2026-10-26 the first real private client booked LM-EFFA (PortMiami → MIA).
