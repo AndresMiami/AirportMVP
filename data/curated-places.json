@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-27",
+  "about": "LinkMia's own list of PortMiami cruise terminals. The address search shows matching terminals ABOVE Google's suggestions (js/curated-places.js), and the server writes the terminal's unambiguous label on verified bookings (backend/functions/lib/curated-places.js). One record per PHYSICAL terminal; a terminal lists every company that sails from it. A record WITHOUT verifiedAt is a DRAFT: never shown, never stored. Verified means Andres confirmed the company->terminal assignment and the placeId resolves to that terminal. Names, addresses and assignments are LinkMia's own text, sourced from PortMiami's official pages (miamidade.gov/portmiami: 'Cruise Terminals' and 'Directions to PortMiami', read 2026-10-27) and from Andres's first-hand knowledge; placeId is a Google place ID kept as an identifier only. No Google-returned text, coordinates or other Google content is stored here.",
+  "port": {
+    "name": "PortMiami",
+    "keywords": ["portmiami", "port miami", "port of miami", "miami cruise port", "cruise port", "cruise terminal"]
+  },
+  "companies": [
+    { "key": "virgin", "name": "Virgin Voyages", "keywords": ["virgin", "virgin voyages", "virgin voyage", "virgin cruises"] },
+    { "key": "carnival", "name": "Carnival Cruise Line", "keywords": ["carnival", "carnival cruises", "carnival cruise lines", "ccl"] },
+    { "key": "royal-caribbean", "name": "Royal Caribbean", "keywords": ["royal", "royal caribbean", "royal caribbean international", "royal caribbean cruises", "rccl", "rci", "rcl"] },
+    { "key": "norwegian", "name": "Norwegian Cruise Line", "keywords": ["norwegian", "norwegian cruises", "norwegian cruise lines", "ncl"] },
+    { "key": "celebrity", "name": "Celebrity Cruises", "keywords": ["celebrity"] },
+    { "key": "msc", "name": "MSC Cruises", "keywords": ["msc"] },
+    { "key": "disney", "name": "Disney Cruise Line", "keywords": ["disney", "disney cruises", "disney cruise lines", "dcl"] }
+  ],
+  "terminals": [
+    {
+      "id": "pom-terminal-v",
+      "name": "PortMiami Terminal V",
+      "address": "718 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJO1Q7bLK12YgRyjFe2sYTfNc",
+      "companies": ["virgin"],
+      "keywords": ["terminal v"],
+      "source": "Assignment: PortMiami Cruise Terminals page (Virgin Voyages' Terminal V) and Andres, LM-EFFA brief 2026-10-26. Address: Andres's brief 2026-10-26 (718 N Cruise Blvd); PortMiami's Directions page prints 'Cruise Terminal V: 718 W. Cruise Blvd.'; shown that difference, Andres re-confirmed 718 N Cruise Blvd on 2026-10-27 (stored address stands). Place ID: Google place ID kept as an identifier only, resolved 2026-10-26; canonical-echo check through /api/quote-ride is part of the Deploy Preview smoke matrix.",
+      "verifiedAt": "2026-10-26"
+    },
+    {
+      "id": "pom-terminal-a",
+      "name": "PortMiami Terminal A",
+      "address": "2000 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJnYdgPM612YgR21Ck32yqar4",
+      "companies": ["royal-caribbean"],
+      "keywords": ["terminal a"],
+      "source": "Assignment: PortMiami Cruise Terminals page (Royal Caribbean International's Terminal A); confirmed by Andres 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal A: 2000 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    },
+    {
+      "id": "pom-terminal-b",
+      "name": "PortMiami Terminal B",
+      "address": "1761 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJSVdoWD-02YgREIHkOZv2qt4",
+      "companies": ["norwegian"],
+      "keywords": ["terminal b"],
+      "source": "Assignment: PortMiami Cruise Terminals page (Norwegian Cruise Line's Terminal B); confirmed by Andres 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal B: 1761 N. Cruise Blvd.'), read 2026-10-27 — replaces an earlier address range. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    },
+    {
+      "id": "pom-terminal-d",
+      "name": "PortMiami Terminal D",
+      "address": "1435 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJfyrEZD602YgRiuY0TqLEQIM",
+      "companies": ["carnival"],
+      "keywords": ["terminal d"],
+      "source": "Assignment: PortMiami Cruise Terminals page (Carnival Cruise Line's Terminals D, E and F); confirmed by Andres 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal D: 1435 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    },
+    {
+      "id": "pom-terminal-e",
+      "name": "PortMiami Terminal E",
+      "address": "1265 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJeTajB4m12YgRPKuko2C06_o",
+      "companies": ["carnival"],
+      "keywords": ["terminal e"],
+      "source": "Assignment: PortMiami Cruise Terminals page (Carnival Cruise Line's Terminals D, E and F); confirmed by Andres 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal E: 1265 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    },
+    {
+      "id": "pom-terminal-f",
+      "name": "PortMiami Terminal F",
+      "address": "1103 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJi-HC0n212YgR27EH49EZEws",
+      "companies": ["carnival", "disney"],
+      "keywords": ["terminal f"],
+      "source": "Assignment: Carnival per PortMiami Cruise Terminals page (Terminals D, E and F); Disney per Andres 2026-10-27; shown that PortMiami's page names Carnival only at F, Andres re-confirmed Disney at Terminal F on 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal F: 1103 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    },
+    {
+      "id": "pom-terminal-g",
+      "name": "PortMiami Terminal G",
+      "address": "909 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJ9ypKzz202YgRPkzwgZm4tSg",
+      "companies": ["celebrity"],
+      "keywords": ["terminal g"],
+      "source": "Assignment: Celebrity per Andres 2026-10-27. NOTE: PortMiami's Cruise Terminals page describes Terminal G as Royal Caribbean International's future terminal (construction from summer 2025, expected to open in 2027) and does not name Celebrity; shown that wording, Andres re-confirmed Celebrity at Terminal G on 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal G: 909 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    },
+    {
+      "id": "pom-terminal-aa",
+      "name": "PortMiami Terminal AA",
+      "address": "2200 N Cruise Blvd, Miami, FL 33132",
+      "placeId": "ChIJcfuyj0q12YgRUEE8DKXTf-Y",
+      "companies": ["msc"],
+      "keywords": ["terminal aa", "msc terminal"],
+      "source": "Assignment: PortMiami Cruise Terminals page (MSC Cruises' Terminal AA, opened 2025); confirmed by Andres 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal AA: 2200 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "verifiedAt": "2026-10-27"
+    }
+  ]
+}

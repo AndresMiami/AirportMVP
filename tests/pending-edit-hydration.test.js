@@ -1045,6 +1045,22 @@ async function check(name, fn) {
     assert.strictEqual(a.adoptCanonicalPlaceId(DTO.route, null), DTO.route, 'no echo, no change');
   });
 
+  await check('replaceAddressLabel swaps the ADDRESS-side label only, never identity; other kinds and blank labels are untouched', async () => {
+    const next = MODEL.replaceAddressLabel(DTO.route, '4441 Collins Ave, Miami Beach, FL 33140, USA');
+    assert.strictEqual(next.dropoffLabel, '4441 Collins Ave, Miami Beach, FL 33140, USA', 'pickup mode: the address is the dropoff');
+    assert.strictEqual(next.pickupLabel, 'MIA');
+    assert.strictEqual(next.canonicalPlaceId, 'place-1');
+    assert.strictEqual(DTO.route.dropoffLabel, '4441 Collins Ave', 'the input is not mutated');
+    const a = MODEL.adapterFor('airport_transfer_v1');
+    assert.strictEqual(a.routeIdentity(next), a.routeIdentity(DTO.route), 'labels stay outside identity');
+    const dropoffMode = { ...DTO.route, bookingMode: 'dropoff' };
+    assert.strictEqual(MODEL.replaceAddressLabel(dropoffMode, 'X').pickupLabel, 'X', 'dropoff mode: the address is the pickup');
+    assert.strictEqual(MODEL.replaceAddressLabel(DTO.route, '   '), DTO.route, 'blank label: unchanged');
+    assert.strictEqual(MODEL.replaceAddressLabel(DTO.route, '4441 Collins Ave'), DTO.route, 'same label: unchanged');
+    const legacy = { kind: 'legacy_unclassified_v1', bookingMode: 'pickup', pickupLabel: 'A', dropoffLabel: 'B' };
+    assert.strictEqual(MODEL.replaceAddressLabel(legacy, 'X'), legacy, 'legacy kind: unchanged');
+  });
+
   await check('toQuoteIntent yields exactly the three route fields the quote request is built from', async () => {
     const intent = MODEL.adapterFor('airport_transfer_v1').toQuoteIntent(DTO.route);
     assert.deepStrictEqual(intent, { mode: 'pickup', airportCode: 'MIA', placeId: 'place-1' });

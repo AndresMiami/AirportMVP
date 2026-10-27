@@ -18,6 +18,7 @@ const {
   sharedOutcomeResponse, unknownOutcomeResponse
 } = require('./lib/booking-writer');
 const { isValidPlaceId } = require('./lib/place-identity');
+const { projectCuratedLabel } = require('./lib/curated-places');
 const { resolveRateCard } = require('./lib/rate-card-resolver');
 const {
   VEHICLE_KEYS: CONTRACT_KEYS, WRITER_CEILINGS,
@@ -683,6 +684,45 @@ exports.handler = async (event) => {
     if (edit.booker.name !== null) {
       pEdit.booker_name = edit.booker.name;
       if (edit.booker.phone !== null) pEdit.booker_phone = edit.booker.phone;
+    }
+
+    // ============================================
+    // CURATED CRUISE TERMINALS (plan v7 §4) — VERIFIED edits whose canonical
+    // place id is a verified terminal (an in-memory check first, so every
+    // other edit costs no extra read). ONE service-key read decides the
+    // label and nothing else:
+    //   * identity equal — the row's (booking_mode, airport_code,
+    //     canonical_place_id) under canonical authority match the token's —
+    //     an unchanged route: the client's (round-tripped stored) labels
+    //     pass through untouched;
+    //   * identity differs — a route change, or a legacy row's first
+    //     verified edit — the registry label replaces the client's text on
+    //     the address side of p_edit;
+    //   * missing / foreign / non-pending / version-moved row, or a read
+    //     error — no projection. The RPC still runs unchanged and answers
+    //     with its own 404/403/409/receipt: this adds no refusal shape and
+    //     never intercepts an exact-byte retry. A commit between this read
+    //     and the RPC fails the RPC's CAS, and the projected label is
+    //     discarded with it.
+    // ============================================
+    const curated = verdict === 'verified' ? projectCuratedLabel(canonicalPlaceId, pEdit.booking_mode) : null;
+    if (curated) {
+      const { data: current, error: readError } = await db
+        .from('bookings')
+        .select('customer_id, status, assigned_driver, details_version, booking_mode, airport_code, canonical_place_id, route_authority')
+        .eq('id', edit.bookingId)
+        .maybeSingle();
+      if (readError) {
+        console.error('curated-label pre-read failed:', readError.code || 'db_error');
+      } else if (current && current.customer_id === auth.customerId &&
+          current.status === 'pending' && !current.assigned_driver &&
+          current.details_version === edit.expectedVersion) {
+        const identityEqual = current.route_authority === 'canonical' &&
+          current.booking_mode === pEdit.booking_mode &&
+          current.airport_code === airportCode &&
+          current.canonical_place_id === canonicalPlaceId;
+        if (!identityEqual) pEdit[curated.column] = curated.label;
+      }
     }
 
     const { data: result, error: rpcError } = await db.rpc('accept_quote_edit', {

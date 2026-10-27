@@ -205,7 +205,7 @@ async function check(name, fn) {
   await check('SOURCE: the model is loaded and both cache rungs moved', async () => {
     assert.match(indexMvp, /<script src="\.\/js\/pending-edit-model\.js/);
     const sw = read('service-worker.js');
-    assert.ok(sw.includes("'/js/pending-edit-model.js?v=2'"));
+    assert.ok(sw.includes("'/js/pending-edit-model.js?v=3'"));
     assert.match(sw, /CACHE_NAME = 'linkmia-v1\.3\.\d+'/);
     assert.match(sw, /RUNTIME_CACHE = 'linkmia-runtime-v\d+'/);   // the pair itself: pending-edit-hydration's ladder check
   });

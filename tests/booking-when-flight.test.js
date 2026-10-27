@@ -653,7 +653,7 @@ check('wiring pins: the request uses the helper, hydration carries the flight, t
   assert.ok(bookingPage.includes('const flightFields = this.flightFieldsForSubmit(submitState, bookingData.passenger?.notes);'));
   assert.ok(bookingPage.includes('notes: flightFields.notes,') && bookingPage.includes('flightNumber: flightFields.flightNumber,'));
   assert.ok(!bookingPage.includes('flightNumber: bookingData.passenger?.notes?.referenceCode'));
-  assert.ok(bookingPage.includes("pending-edit-model.js?v=2"), 'the page asks for the model version that exports miamiParts');
+  assert.ok(bookingPage.includes("pending-edit-model.js?v=3"), 'the page asks for the model version that exports miamiParts');
   assert.ok(typeof MODEL.miamiParts === 'function' && typeof MODEL.resolveMiamiWallClock === 'function', 'one shared Miami clock');
   const card = fs.readFileSync(path.join(repoRoot, 'js/pending-edit-card.js'), 'utf8');
   assert.match(card, /hasFlight: !!\(snapshot && snapshot\.hasFlight\)/, 'the card tells the editor a flight exists');

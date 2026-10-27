@@ -8,9 +8,34 @@
  * - Live results only (Google prediction content is never cached or reused)
  * - Keyboard navigation support
  * - Custom styling and validation
+ * - LinkMia's curated cruise terminals rendered ABOVE Google's predictions
+ *   (js/curated-places.js + data/curated-places.json; see renderDropdown)
  * 
  * CSS styles are in maps-autocomplete.css
  */
+
+// LinkMia's own cruise terminals (data/curated-places.json) are requested
+// with this EXACT URL; service-worker.js precaches the same literal.
+const CURATED_REGISTRY_URL = '/data/curated-places.json?v=1';
+
+// Presentation only: plain initials, not cruise-line logo artwork. Terminal
+// assignments, addresses and selection identity still come from the registry.
+const CURATED_BRANDS = Object.freeze({
+    virgin: { name: 'Virgin Voyages', short: 'Virgin Voyages', initials: 'VV' },
+    carnival: { name: 'Carnival', short: 'Carnival', initials: 'C' },
+    'royal-caribbean': { name: 'Royal Caribbean', short: 'Royal Caribbean', initials: 'RC' },
+    norwegian: { name: 'Norwegian', short: 'Norwegian', initials: 'NCL' },
+    celebrity: { name: 'Celebrity', short: 'Celebrity', initials: 'CC' },
+    msc: { name: 'MSC Cruises', short: 'MSC Cruises', initials: 'MSC' },
+    disney: { name: 'Disney Cruise Line', short: 'Disney', initials: 'D' }
+});
+
+// Google's unmodified official logo, rendered after Google's rows only.
+const GOOGLE_ATTRIBUTION_HTML =
+    '<div class="google-maps-attribution">' +
+        '<img src="/images/google-maps-attribution-dark-gray.svg" ' +
+             'alt="Google Maps" width="98" height="18">' +
+    '</div>';
 
 export class CustomAutocomplete {
     constructor(inputId, suggestionsId, onSelect) {
@@ -46,6 +71,16 @@ export class CustomAutocomplete {
         // address. Page memory only: nothing reads or transmits it yet.
         this.rawQuery = null;
         this.isValidated = false;
+        // Curated cruise terminals: the validated registry (null until the
+        // JSON loads), the rows for the CURRENT text, the Google section's
+        // state ('idle' | 'loading' | 'results' | 'error'), and whether
+        // Escape/blur dismissed the dropdown since the last keystroke.
+        this.curatedRegistry = null;
+        this.curatedRows = [];
+        this.curatedLoad = null;
+        this.curatedLoadAttempts = 0;
+        this.googleState = 'idle';
+        this.curatedSuppressed = false;
         this.selectedAttribution = this.input.closest?.('.input-wrapper')
             ?.querySelector?.('.selected-place-attribution') || null;
         
@@ -61,6 +96,9 @@ export class CustomAutocomplete {
         this.input.addEventListener('input', (e) => this.handleInput(e));
         this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
         this.input.addEventListener('blur', () => this.handleBlur());
+        // Fetch the curated registry at boot so the first keystroke already
+        // has it; a failure leaves the dropdown exactly as today.
+        this.loadCuratedRegistry();
     }
 
     // Fetch with timeout for slow networks
@@ -169,6 +207,23 @@ export class CustomAutocomplete {
             this.clearSuggestions();
             return;
         }
+
+        // Curated terminals render NOW, from the text alone — Google's
+        // predictions arrive later and slot in below. A keystroke also
+        // lifts the Escape/blur suppression for a registry that is still
+        // loading.
+        this.curatedSuppressed = false;
+        this.loadCuratedRegistry();
+        // New text, new list: nothing is highlighted until the passenger
+        // moves again, and the list starts at the top — a scroll position
+        // left over from the previous query must not hide the first rows.
+        this.selectedIndex = -1;
+        this.highlightItem();
+        if (this.suggestionsContainer) this.suggestionsContainer.scrollTop = 0;
+        if (this.matchCurated(value).length > 0 || this.curatedList().length > 0) {
+            const state = this.googleState || 'idle';
+            this.renderDropdown(state === 'results' ? this.predictions : [], state);
+        }
         
         // Increased debounce to 500ms for cost optimization
         this.debounceTimer = setTimeout(() => {
@@ -216,11 +271,203 @@ export class CustomAutocomplete {
     }
 
     renderSuggestions(suggestions) {
-        if (!suggestions || suggestions.length === 0) {
-            this.suggestionsContainer.innerHTML = '<div class="no-results">No results found</div>';
-            this.showSuggestions();
+        this.renderDropdown(suggestions, 'results');
+    }
+
+    // ---- Curated cruise terminals (LinkMia's own list, above Google) ----
+    //
+    // The registry (data/curated-places.json) is validated and matched by the
+    // shared js/curated-places.js module, loaded as a classic script before
+    // this one (global CuratedPlaces). Until it has loaded — or if it never
+    // does — every path below degrades to exactly today's dropdown.
+
+    curatedList() {
+        return Array.isArray(this.curatedRows) ? this.curatedRows : [];
+    }
+
+    matchCurated(query) {
+        const core = typeof globalThis !== 'undefined' ? globalThis.CuratedPlaces : undefined;
+        if (!core || !this.curatedRegistry) return [];
+        return core.matchCurated(query, this.curatedRegistry);
+    }
+
+    // ONE ordered list for clicks, Enter and data-index: curated rows first,
+    // then Google's predictions.
+    visibleItems() {
+        const predictions = Array.isArray(this.predictions) ? this.predictions : [];
+        return [
+            ...this.curatedList().map((row) => ({ source: 'curated', row })),
+            ...predictions.map((prediction) => ({ source: 'google', prediction }))
+        ];
+    }
+
+    // Stable identity of a visible item, so a keyboard highlight can be
+    // re-found after the list re-renders (Codex seq:0264 #2).
+    itemIdentity(item) {
+        if (!item) return null;
+        if (item.source === 'curated') return `curated:${item.row.terminalId}`;
+        const prediction = item.prediction || {};
+        return `google:${prediction.place_id || prediction.description || ''}`;
+    }
+
+    highlightedIdentity() {
+        const index = this.selectedIndex;
+        if (!Number.isInteger(index) || index < 0) return null;
+        return this.itemIdentity(this.visibleItems()[index]);
+    }
+
+    loadCuratedRegistry() {
+        if (this.curatedRegistry || this.curatedLoad) return;
+        const core = typeof globalThis !== 'undefined' ? globalThis.CuratedPlaces : undefined;
+        if (!core || typeof fetch !== 'function') return;
+        if ((this.curatedLoadAttempts || 0) >= 2) return;
+        this.curatedLoadAttempts = (this.curatedLoadAttempts || 0) + 1;
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = setTimeout(() => { if (controller) controller.abort(); }, 8000);
+        this.curatedLoad = fetch(CURATED_REGISTRY_URL, controller ? { signal: controller.signal } : {})
+            .then((response) => (response.ok ? response.json() : null))
+            .then((raw) => {
+                // A non-OK response is transient: the one retry stays
+                // available. An INVALID file is a deploy mistake that a
+                // second fetch cannot fix — give up for this page load.
+                if (raw === null) return;
+                const validation = core.validateRegistry(raw);
+                if (!validation.ok) {
+                    this.curatedLoadAttempts = 2;
+                    console.warn('Curated places registry invalid — curated suggestions off');
+                    return;
+                }
+                this.curatedRegistry = validation.registry;
+                this.refreshCurated();
+            })
+            .catch(() => {
+                // Registry unavailable: the dropdown stays exactly as today.
+            })
+            .then(() => {
+                clearTimeout(timer);
+                this.curatedLoad = null;
+            });
+    }
+
+    // The registry arrived after the passenger started typing: re-render the
+    // current text with the same Google state — unless Escape/blur dismissed
+    // the dropdown since the last keystroke.
+    refreshCurated() {
+        if (!this.input || this.curatedSuppressed) return;
+        const value = (this.input.value || '').trim();
+        if (value.length < 3) return;
+        const state = this.googleState || 'idle';
+        if (state === 'idle' && this.matchCurated(value).length === 0) return;
+        this.renderDropdown(state === 'results' ? this.predictions : [], state);
+    }
+
+    curatedPresentation(row) {
+        const registry = this.curatedRegistry;
+        const terminal = registry.byPlaceId[row.placeId];
+        const keys = row.companyKey ? [row.companyKey] : terminal.companies;
+        const brands = keys.map((key) => {
+            if (Object.prototype.hasOwnProperty.call(CURATED_BRANDS, key)) return CURATED_BRANDS[key];
+            const name = registry.companyByKey[key].name;
+            return {
+                name,
+                short: name,
+                initials: name.trim().split(/\s+/).slice(0, 3).map((word) => word.charAt(0)).join('').toUpperCase().slice(0, 3)
+            };
+        });
+        const shared = keys.length > 1;
+        return {
+            // Only an explicitly listed key can become a CSS class.
+            theme: !shared && Object.prototype.hasOwnProperty.call(CURATED_BRANDS, keys[0]) ? keys[0] : 'shared',
+            name: brands.map((brand) => shared ? brand.short : brand.name).join(' · '),
+            initials: brands.map((brand) => brand.initials).join('/'),
+            port: registry.port.name,
+            terminal: terminal.name.startsWith(registry.port.name + ' ')
+                ? terminal.name.slice(registry.port.name.length + 1)
+                : terminal.name
+        };
+    }
+
+    // THE one renderer. `state` describes the Google section: 'idle' (no
+    // request yet), 'loading', 'results' or 'error'. Curated rows come from
+    // the CURRENT input text, synchronously, so they never wait for Google
+    // and a slow, empty or failed Google answer never erases them. Google's
+    // logo travels with Google's rows only: a curated-only list shows no
+    // Google content and therefore no Google attribution.
+    renderDropdown(google, state) {
+        // A keyboard highlight survives background updates of the SAME text
+        // (Google loading / results / error, a late registry): remember it
+        // by item identity, re-find it in the new list, drop it only when
+        // that item is gone. A new query resets it in handleInput.
+        const keep = this.highlightedIdentity();
+        const rows = this.matchCurated(this.input ? this.input.value : '');
+        this.curatedRows = rows;
+        this.googleState = state;
+        // Curated rows ARE valid choices: a Google failure that flagged the
+        // field before they existed (a registry arriving late) must not keep
+        // marking an available destination invalid (Codex seq:0266 #1).
+        // Display only — validation state and any selection stay untouched.
+        if (rows.length > 0) this.clearAddressErrorDisplay();
+        // Google's list stays intact beneath ours: a terminal may appear
+        // again further down in Google's own words, and the preferred row is
+        // still first (Google terms gate; Codex recommendation 2026-10-27).
+        const predictions = Array.isArray(google) ? google : [];
+        this.predictions = predictions;
+        this.selectedIndex = keep === null
+            ? -1
+            : this.visibleItems().findIndex((item) => this.itemIdentity(item) === keep);
+
+        // A small caption says which rows are LinkMia's own; Google's rows
+        // keep Google's look and attribution. Not a row: never focusable,
+        // never counted by the keyboard.
+        const curatedLabel = rows.length > 0
+            ? '<div class="suggestion-group-label">LinkMia terminals</div>'
+            : '';
+        const curatedHtml = curatedLabel + rows.map((row, index) => {
+            const display = this.curatedPresentation(row);
+            return `
+                <div class="suggestion-item suggestion-item--curated curated-brand--${display.theme}" data-index="${index}" data-terminal="${this.escapeHtml(row.terminalId)}">
+                    <div class="curated-initials" aria-hidden="true">${this.escapeHtml(display.initials)}</div>
+                    <div class="suggestion-text">
+                        <div class="suggestion-main">${this.escapeHtml(display.name)}</div>
+                        <div class="suggestion-secondary">${this.escapeHtml(display.port)}</div>
+                    </div>
+                    <span class="suggestion-terminal">${this.escapeHtml(display.terminal)}</span>
+                </div>
+            `;
+        }).join('');
+        const googleLabel = rows.length > 0 && predictions.length > 0
+            ? '<div class="suggestion-group-label suggestion-group-label--google">Google suggestions</div>'
+            : '';
+        const googleHtml = googleLabel + this.googleRowsHtml(predictions, rows.length);
+        const attribution = predictions.length > 0 ? GOOGLE_ATTRIBUTION_HTML : '';
+
+        let notice = '';
+        if (state === 'loading') {
+            notice = '<div class="loading-results">Loading...</div>';
+        } else if (state === 'error') {
+            notice = rows.length > 0
+                ? '<div class="no-results">More results unavailable right now</div>'
+                : '<div class="no-results">Error loading suggestions</div>';
+        } else if (state === 'results' && predictions.length === 0 && rows.length === 0) {
+            notice = '<div class="no-results">No results found</div>';
+        }
+
+        if (!curatedHtml && !googleHtml && !notice) {
+            this.selectedIndex = -1;
+            this.suggestionsContainer.innerHTML = '';
+            this.hideSuggestions();
             return;
         }
+        this.suggestionsContainer.innerHTML = curatedHtml + googleHtml + attribution + notice;
+        this.showSuggestions();
+        this.bindRowClicks();
+        if (this.selectedIndex >= 0) this.highlightItem();
+    }
+
+    // Google rows: one per prediction, numbered AFTER the curated rows so a
+    // click or Enter resolves against the same visible list.
+    googleRowsHtml(suggestions, offset) {
+        if (!suggestions || suggestions.length === 0) return '';
         
         const html = suggestions.map((suggestion, index) => {
             const prediction = suggestion;
@@ -238,7 +485,7 @@ export class CustomAutocomplete {
             }
             
             return `
-                <div class="suggestion-item" data-index="${index}">
+                <div class="suggestion-item" data-index="${offset + index}">
                     <div class="suggestion-icon">📍</div>
                     <div class="suggestion-text">
                         <div class="suggestion-main">${this.escapeHtml(mainText)}</div>
@@ -248,12 +495,10 @@ export class CustomAutocomplete {
             `;
         }).join('');
         
-        this.suggestionsContainer.innerHTML = html +
-            '<div class="google-maps-attribution">' +
-                '<img src="/images/google-maps-attribution-dark-gray.svg" ' +
-                     'alt="Google Maps" width="98" height="18">' +
-            '</div>';
-        this.showSuggestions();
+        return html;
+    }
+
+    bindRowClicks() {
         
         this.suggestionsContainer.querySelectorAll('.suggestion-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -264,11 +509,20 @@ export class CustomAutocomplete {
     }
 
     async selectSuggestion(index) {
-        const suggestion = this.predictions[index];
-        if (!suggestion) return;
+        const item = this.visibleItems()[index];
+        if (!item) return;
+        // Selection ends the prediction cycle: the queued debounce and any
+        // in-flight request are invalidated NOW, so a late response cannot
+        // reopen the list and a late failure cannot flag the chosen address
+        // (Codex seq:0264 #1). Same boundary as Escape/blur.
+        this.cancelPendingSuggestions();
+        // A curated terminal row carries LinkMia's own label and the registry
+        // place ID; a Google row carries the prediction.
+        const curated = item.source === 'curated' ? item.row : null;
+        const suggestion = curated ? null : item.prediction;
 
         const selectionSequence = ++this.selectionSequence;
-        const prediction = suggestion;
+        const placeId = curated ? curated.placeId : suggestion.place_id;
         // Snapshot the typed text SYNCHRONOUSLY: after the Details await,
         // applySelection will have replaced the input's value with Google's
         // address, and the original is unrecoverable. The snapshot is bound
@@ -292,7 +546,7 @@ export class CustomAutocomplete {
             // The Railway proxy owns the provider field mask. The browser may
             // identify the selected place but cannot expand Google content.
             const params = new URLSearchParams({
-                place_id: prediction.place_id,
+                place_id: placeId,
                 sessiontoken: this.sessionToken
             });
 
@@ -315,10 +569,14 @@ export class CustomAutocomplete {
             if (attributions === null) {
                 throw new Error('Attribution unrepresentable');
             }
+            // A curated terminal keeps LinkMia's own unambiguous label (the
+            // Details call supplied the coordinates and attributions); a
+            // Google prediction shows Google's formatted address as before.
+            const label = curated ? curated.label : data.result.formatted_address;
             const place = {
-                id: prediction.place_id,
-                formattedAddress: data.result.formatted_address,
-                displayName: { text: data.result.formatted_address },
+                id: placeId,
+                formattedAddress: label,
+                displayName: { text: label },
                 location: {
                     lat: data.result.geometry.location.lat,
                     lng: data.result.geometry.location.lng
@@ -335,10 +593,10 @@ export class CustomAutocomplete {
             // coordinates (the former 0,0 fallback silently routed to the
             // wrong continent). The authoritative quote service will resolve
             // the Place ID again before it can price an enabled booking.
-            const description = typeof prediction.description === 'string'
-                ? prediction.description.trim()
-                : '';
-            if (!description || typeof prediction.place_id !== 'string') {
+            const description = curated
+                ? curated.label
+                : (typeof suggestion.description === 'string' ? suggestion.description.trim() : '');
+            if (!description || typeof placeId !== 'string') {
                 console.error('Place details unavailable');
                 this.showError();
                 return;
@@ -346,7 +604,7 @@ export class CustomAutocomplete {
             console.error('Place details unavailable; using selected prediction');
             this.rawQuery = rawQueryAtSelection;
             this.applySelection({
-                id: prediction.place_id,
+                id: placeId,
                 formattedAddress: description,
                 displayName: { text: description },
                 location: { lat: null, lng: null },
@@ -514,6 +772,8 @@ export class CustomAutocomplete {
             this.debounceTimer = null;
         }
         ++this.requestSequence;
+        // A registry that finishes loading now must not reopen the list.
+        this.curatedSuppressed = true;
     }
 
     highlightItem() {
@@ -538,6 +798,8 @@ export class CustomAutocomplete {
 
     clearSuggestions() {
         this.predictions = [];
+        this.curatedRows = [];
+        this.googleState = 'idle';
         this.selectedIndex = -1;
         this.suggestionsContainer.innerHTML = '';
         this.hideSuggestions();
@@ -552,8 +814,7 @@ export class CustomAutocomplete {
     }
 
     showLoading() {
-        this.suggestionsContainer.innerHTML = '<div class="loading-results">Loading...</div>';
-        this.showSuggestions();
+        this.renderDropdown([], 'loading');
     }
     
     // Kill any in-flight selection and drop the published raw-query
@@ -580,11 +841,20 @@ export class CustomAutocomplete {
         }
     }
 
+    // The field's error styling and the "select a valid address" notice —
+    // never isValidated or selectedPlace (clearValidation owns those).
+    clearAddressErrorDisplay() {
+        this.input.classList.remove('error');
+        if (document.getElementById('addressError')) {
+            document.getElementById('addressError').classList.remove('visible');
+        }
+    }
+
     showError() {
-        this.predictions = [];
-        this.selectedIndex = -1;
-        this.suggestionsContainer.innerHTML = '<div class="no-results">Error loading suggestions</div>';
-        this.showSuggestions();
+        this.renderDropdown([], 'error');
+        // With curated rows on screen the passenger still has valid choices;
+        // only an EMPTY list is an address error.
+        if (this.curatedList().length > 0) return;
         if (document.getElementById('addressError')) {
             document.getElementById('addressError').classList.add('visible');
         }

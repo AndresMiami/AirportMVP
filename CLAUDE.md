@@ -271,6 +271,81 @@ captures nothing.
   (`host_commission`), LinkMia net = 25% − ambassador (`linkmia_commission`,
   generated column).
 
+## Curated cruise terminals (plan v7 — `docs/plans/curated-places-intake-plan.md`)
+
+Field finding LM-EFFA (2026-10-26): Google's own predictions for "Virgin"
+contain NO cruise terminal, and the brand result's Place Details address is
+a bare "Miami, FL 33132, USA" — which is what the booking stored and the
+driver navigated to. LinkMia therefore keeps its OWN list of PortMiami
+cruise terminals, `data/curated-places.json`: ONE record per PHYSICAL
+terminal (name, LinkMia's own address text, Google place ID, the companies
+sailing from it, keywords, provenance, `verifiedAt`). A record without
+`verifiedAt` is an inert DRAFT — never shown, never stored. Verified =
+Andres confirmed the company→terminal assignment and the place ID resolves
+to that terminal. The file stores place IDs plus OUR text only — no Google
+coordinates or content. RELEASE SCOPE (Andres, 2026-10-27, Codex relay
+0279): a VERIFIED TERMINAL SUBSET — every listed terminal is verified; the
+list does not promise every terminal a company uses. Terminals C
+(multi-line) and J are documented follow-ups, never inferred. Google
+terms: `docs/google-places-terms-checklist.md` holds the evidence record
+(documented rules vs verified behaviour vs interpretation; the reviewer's
+finding per question is the release gate); the session-token fallback for
+curated selections is a review packet
+(`docs/plans/session-token-fallback-packet.md`), not applied.
+- `js/curated-places.js` (one UMD module for browser AND functions) validates
+  the registry and matches queries: every query token must prefix-match a
+  DISTINCT candidate token, direction matters — "virgin"/"virgin voya"
+  match, "virginia" never does; a company query lists every one of its
+  terminals; a shared terminal appears once naming every company; no cap.
+  TERMINAL LETTER (Codex relay 0272 #1): a word of at most two characters
+  right before or after the word "terminal" (or an unfinished prefix of
+  it) is the terminal letter and matches ONLY the start of a terminal's
+  own letter(s) — "terminal a" → A then AA, "terminal aa" → AA, "terminal
+  c" / "norwegian terminal c" → nothing while no verified C exists (the
+  letter never reaches "cruise" or "disney"); longer neighbours ("terminal
+  carnival", "msc terminal") and letters elsewhere ("norwegian c") keep
+  prefix completion. The validator requires every record's letter after
+  "terminal" in its name/keywords, bounds it to two characters and keeps
+  it unique (one record per physical terminal). Company keywords carry
+  the ways passengers write a line — full name, plural, initials ("royal
+  caribbean international", "rci", "rcl", "carnival cruises", "ccl",
+  "ncl", "dcl", …) — not fuzzy matching.
+- `autocomplete.js` renders curated rows ABOVE Google's, synchronously on
+  the keystroke; Google's loading/empty/error
+  states live below and never erase them; one ordered list for
+  click/Enter; Google's list stays intact beneath ours (a terminal may
+  appear again in Google's own words) and LinkMia's rows carry a small
+  caption; the Google logo renders only with Google rows; selection
+  cancels pending predictions; a keyboard highlight survives Google's
+  updates by identity.
+- Compact dropdown design (Andres, 2026-10-27): colored plain-initials
+  tiles (VV, C, RC, NCL, CC, MSC, D), short company name, PortMiami subtitle,
+  and terminal badge; neutral C/D for a generic shared Terminal F query.
+  Separate “LinkMia terminals” / “Google suggestions” captions in mixed
+  lists, same responsive panel bounds, Google rows/attribution unchanged.
+  No official logo artwork. Local review harness:
+  `docs/plans/curated-dropdown-mockup.html` (real component, fake provider).
+- Labels: the stored address-side label is terminal-centric and ASCII —
+  `PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132` (the company is
+  shown in the row, never stored: the server knows only the place ID).
+  SERVER-AUTHORITATIVE: create-booking / update-pending-booking
+  (`lib/curated-places.js` `projectCuratedLabel`) write it ONLY when the
+  quote token classified `verified` and the canonical place ID is a
+  verified terminal; edits add ONE pre-read (owner + pending + expected
+  version) and project only when route identity changed — the RPC's
+  404/403/409/receipt shapes are untouched. Client text is never upgraded.
+- Quote reception (create `reconcileQuoteLabel`; edit card via
+  `model.replaceAddressLabel`): when the canonical echo supersedes the id a
+  selection or hydrated booking carried, the label falls back to the quote's
+  `formattedAddress`, curated or not — decided from the quote alone, no
+  registry dependence (Codex seq:0264 #3). The submitted id stays in
+  `state.locations.placeId` (quote key); the contract submits the canonical id.
+- Release gates (plan §5): Deploy Preview acceptance of Terminal V → MIA;
+  Google Places/Autocomplete terms read before release against
+  `docs/google-places-terms-checklist.md` (the mixed curated/Google list is
+  a technical boundary, not a policy clearance). Photos/official logo artwork
+  remain deferred; the compact initials treatment was separately approved.
+
 ## Conventions
 
 - Dark theme tokens: bg `#1C1C1E`, panels `#2C2C2E`, brand gradient
@@ -323,6 +398,26 @@ or `*`; unset = NOBODY), `FLIGHT_SENSOR_DISABLED` (kill switch).
   `@supabase/supabase-js` via require.cache, run the real handlers, assert
   payloads/filters. Same pattern works ad hoc in session scratchpads.
 - Verify inline-script syntax by extracting `<script>` blocks → `node --check`.
+- Review loop (agreed 2026-10-27, Codex relay seq:0265): Codex posts
+  numbered findings/direction ONE WAY into `~/Projects/linkmia-relay/`
+  (immutable `NNNN-codex-*.md` + README index); Claude answers Andres in
+  chat and Andres relays. Per finding: "fixed in <commit>", "disagree
+  because <evidence>", or "needs Andres's decision". Every review packet
+  names the approved plan path/version (kept IN the repo), branch + exact
+  SHA, PR + Netlify preview link (immutable deploy permalink for browser
+  evidence), tests actually run, and what is NOT verified. Stages: plan →
+  Codex review → Andres approves scope → focused commits + local checks →
+  initial code review → with Andres's explicit authorization, push + DRAFT
+  PR (draft ≠ merge approval) → Codex reviews the exact PR commit and its
+  preview, Andres tests on his phone → fixes in the same PR with regression
+  coverage → passing CI + preview build + browser acceptance + final review
+  → Andres's merge decision. Preview isolation (database / notification
+  destinations) is verified before test bookings; a different site URL is
+  not an isolated database.
+- CI (`.github/workflows/tests.yml`): every `tests/*.test.js` must exit 0
+  AND print `ALL n CHECKS PASS` (printed only after the checks) under
+  America/New_York, UTC and Asia/Tokyo on Node 20; the suite-count floor
+  rises with every added suite, never lowers.
 
 ## Decisions log (do not relitigate casually)
 
@@ -981,6 +1076,10 @@ or `*`; unset = NOBODY), `FLIGHT_SENSOR_DISABLED` (kill switch).
   is its natural future home). SMS was REJECTED (Aug 2026) — closed-page
   notifications are PWA Web Push per the roadmap above; in-app chat
   stays parked.
-- Collaboration pattern: Andres relays between Claude and a second AI
-  reviewer (Codex); diagnostics and plans get reviewed before
-  implementation is authorized. Respect that gate.
+- Collaboration pattern: Andres decides and approves; Claude owns
+  implementation, tests and PR preparation within the authorized scope;
+  Codex reviews plans, code and previews independently through the relay
+  (see Workflow); Muse contributes strategy without touching code.
+  Disagreements are settled with evidence and Andres's decision.
+  Diagnostics and plans are reviewed before implementation is authorized —
+  respect that gate.

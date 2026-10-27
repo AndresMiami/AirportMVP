@@ -31,6 +31,7 @@ const {
   sharedOutcomeResponse, unknownOutcomeResponse
 } = require('./lib/booking-writer');
 const { isValidPlaceId } = require('./lib/place-identity');
+const { projectCuratedLabel } = require('./lib/curated-places');
 
 // Legacy 'assigned' is a nonterminal status and occupies an active slot
 // (migration 017); the fast pre-check must agree with the database index.
@@ -487,6 +488,16 @@ exports.handler = async (event, context) => {
     }
 
     // ============================================
+    // CURATED CRUISE TERMINALS (plan v7 §4). A VERIFIED token binds the
+    // canonical place id; when that id is a verified terminal, the stored
+    // address-side label is LinkMia's unambiguous terminal label, never the
+    // client's text. Every other verdict stores the client's text as before.
+    // ============================================
+    const curated = verdict === 'verified' ? projectCuratedLabel(canonicalPlaceId, bookingMode) : null;
+    const storedPickup = curated && curated.column === 'pickup_location' ? curated.label : pickupLocation;
+    const storedDropoff = curated && curated.column === 'dropoff_location' ? curated.label : dropoffLocation;
+
+    // ============================================
     // FAST PRE-CHECK — bare legacy requests only. A request carrying an
     // operationId or a token goes straight to the RPC, which arbitrates
     // receipt -> exact-token retry -> active slot atomically: a lost
@@ -576,8 +587,8 @@ exports.handler = async (event, context) => {
       customer_email: text(booking.email, 254),
       booker_name: isBookerDifferent ? text(booking.bookerName, 120) : null,
       booker_phone: isBookerDifferent ? text(booking.bookerPhone, 40) : null,
-      pickup_location: pickupLocation,
-      dropoff_location: dropoffLocation,
+      pickup_location: storedPickup,
+      dropoff_location: storedDropoff,
       pickup_datetime: new Date(pickupMs).toISOString(),
       passengers,
       bags,

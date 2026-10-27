@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'">
+<title>LinkMia compact dropdown — local review</title>
+<link rel="stylesheet" href="../../css/style.css">
+<link rel="stylesheet" href="../../css/maps-autocomplete.css">
+<style>
+body{display:block;min-height:100vh;padding:24px 12px;background:#181819;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+main{max-width:760px;margin:auto}h1{font-size:20px;margin-bottom:8px}
+.note{font-size:13px;color:#b9b9bd;line-height:1.5;margin:12px 0}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.controls button,.controls select{color:white;background:#333336;border:1px solid #626268;border-radius:8px;padding:8px 10px;font:inherit;font-size:13px}
+#sample{width:390px;max-width:100%;min-height:500px;padding:20px 16px;background:#272727;border-radius:22px;box-sizing:border-box}
+.sample-header{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:30px;font-size:13px;color:#bbb}
+.sample-header strong{color:#ff9820;font-size:20px}
+#addressLabel{color:#bbb;display:block;font-size:14px;margin-bottom:12px}
+.input-wrapper{position:relative}
+#address{width:100%;height:58px;padding:12px 14px;border:2px solid #ff9820;border-radius:12px;outline:none;background:#352f27;color:white;font:inherit;font-size:17px;box-sizing:border-box}
+/* Same existing responsive height cap as the booking page. Actual rows,
+   CSS and module are imported; width control changes only the surround. */
+#autocompleteDropdown{max-height:min(300px,40dvh)}
+#selection{margin-top:325px;color:#bbb;font-size:12px;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<main>
+<h1>Compact cruise-terminal dropdown</h1>
+<p class="note">Local design review using the real autocomplete component and registry. Provider rows below are illustrative fixtures. No live Google calls, sign-in, pricing, or booking submission.</p>
+<div class="controls" id="companies" aria-label="Company examples"></div>
+<div class="controls">
+<label>Card width <select id="width"><option>390</option><option>320</option><option>480</option><option>700</option></select></label>
+<label>Provider <select id="provider"><option value="results">Example results</option><option value="empty">No results</option><option value="error">Unavailable</option><option value="slow">Slow (2 seconds)</option></select></label>
+</div>
+<section id="sample">
+<div class="sample-header"><strong>LinkMia</strong><span>Going to airport</span></div>
+<label id="addressLabel" for="address">Where should we pick you up?</label>
+<div class="input-wrapper">
+<input id="address" autocomplete="off" value="Virgin">
+<div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
+<div class="selected-place-attribution"></div>
+</div>
+<p id="selection" aria-live="polite">Select a terminal to inspect its full identity.</p>
+</section>
+</main>
+<script src="../../js/curated-places.js"></script>
+<script type="module">
+import { CustomAutocomplete } from '../../autocomplete.js';
+globalThis.debug = new Proxy({}, { get: () => () => {} });
+const input = document.getElementById('address');
+const panel = document.getElementById('autocompleteDropdown');
+const provider = document.getElementById('provider');
+const selection = document.getElementById('selection');
+const component = new CustomAutocomplete(input, panel);
+const fixture = (name, secondary, id) => ({place_id:id,description:name+', '+secondary,structured_formatting:{main_text:name,secondary_text:secondary}});
+// Provider calls are replaced, and CSP blocks cross-origin requests as a
+// second boundary. Details use the existing label fallback: this page
+// cannot verify real coordinates or the live booking flow.
+component.fetchWithTimeout = async (url) => {
+  if (url.includes('/details?')) throw new Error('Details disabled in local design review');
+  const mode = provider.value;
+  if (mode === 'slow') await new Promise((resolve) => setTimeout(resolve, 2000));
+  if (mode === 'error') throw new Error('Example provider failure');
+  const query = new URL(url).searchParams.get('input');
+  const predictions = mode === 'empty' ? [] : /^vir/i.test(query)
+    ? [fixture('Virginia Key','Florida, USA','example-key'),fixture('Virginia Gardens','FL, USA','example-gardens')]
+    : [fixture(query+' — example provider result','Miami, FL, USA','example-1'),fixture('Example address','Miami, FL, USA','example-2'),fixture('Example office','Florida, USA','example-3')];
+  return {ok:true,json:async()=>({predictions})};
+};
+function search(query) {
+  input.value=query;
+  input.dispatchEvent(new Event('input',{bubbles:true}));
+  input.focus();
+}
+// Review controls sit outside the input. Let its existing blur-dismissal
+// finish before reopening a new example; this is harness behavior only.
+let exampleTimer;
+function chooseExample(query) {
+  clearTimeout(exampleTimer);
+  exampleTimer = setTimeout(() => search(query), 220);
+}
+for (const query of ['Virgin','Carnival','Royal','Norwegian','Celebrity','MSC','Disney','Terminal F','Virginia']) {
+  const button=document.createElement('button');
+  button.textContent=query;
+  button.addEventListener('click',()=>chooseExample(query));
+  document.getElementById('companies').appendChild(button);
+}
+document.getElementById('width').addEventListener('change',(event)=>{
+  document.getElementById('sample').style.width=event.target.value+'px';
+  chooseExample(input.value);
+});
+provider.addEventListener('change',()=>chooseExample(input.value));
+input.addEventListener('place-selected',(event)=>{
+  selection.textContent='Selected: '+event.detail.description+' · Place ID: '+event.detail.placeId;
+});
+await component.curatedLoad;
+search('Virgin');
+</script>
+</body>
+</html>

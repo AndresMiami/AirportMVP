@@ -56,7 +56,10 @@
 //   v1.3.48 / runtime-v25  Account door in the booking card — one fixed way into the traveler sheet,
 //                           where Sign out lives (shipped 2026-09-30, PR #115)
 //   v1.3.49 / runtime-v26  The When arrival estimate counts from the chosen pickup, in Miami time, and re-renders
-//                           when the pickup changes (the PR #109 deferral) — THIS tree
+//                           when the pickup changes (the PR #109 deferral) (shipped 2026-09-30, PR #118)
+//   v1.3.50 / runtime-v27  Curated cruise terminals above Google in the address search — Terminal V first;
+//                           js/curated-places.js + data/curated-places.json precached (plan v7);
+//                           compact cruise-line initials, company names and terminal badges — THIS tree
 // RULE (plan v8.6 §3D, simplified 2026-09-10): cache names only ever move
 // FORWARD and both caches move together. Any release OR rollback takes the
 // NEXT UNUSED pair — one above the constants below — chosen when it is
@@ -64,11 +67,11 @@
 // of time anywhere; tests/pending-edit-hydration derives the only check
 // (no number above the current pair in the repo, history line present,
 // forward-only versus main, both caches together).
-const CACHE_NAME = 'linkmia-v1.3.49';
+const CACHE_NAME = 'linkmia-v1.3.50';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v26';
+const RUNTIME_CACHE = 'linkmia-runtime-v27';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
@@ -87,8 +90,12 @@ const STATIC_CACHE_URLS = [
   // below call caches.match(request) WITHOUT ignoreSearch, so the precache
   // key must be the EXACT requested URL, query included -- an unversioned
   // entry is stored but can never serve the page's actual request.
-  '/js/pending-edit-model.js?v=2',
-  '/js/pending-edit-card.js?v=1',
+  '/js/pending-edit-model.js?v=3',
+  '/js/pending-edit-card.js?v=2',
+  // Curated cruise terminals: the classic script indexMVP loads and the
+  // registry autocomplete.js fetches (CURATED_REGISTRY_URL) — exact URLs.
+  '/js/curated-places.js?v=1',
+  '/data/curated-places.json?v=1',
   '/pricing.js',
   '/supabase.js',
   '/vehicle-carousel-standalone.html',

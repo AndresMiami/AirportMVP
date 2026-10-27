@@ -886,10 +886,13 @@
         .edit-route-reason { font-size: 13px; color: #C7C7CC; min-height: 16px; }
         .edit-route-back { background: transparent; border: none; color: #8E8E93; text-decoration: underline; font-family: inherit; padding: 8px 0; cursor: pointer; }
     </style>
-    <script src="./js/pending-edit-model.js?v=2"></script>
+    <!-- Curated cruise terminals: registry validation + matcher shared with
+         the Netlify functions (global CuratedPlaces, read by autocomplete.js). -->
+    <script src="./js/curated-places.js?v=1"></script>
+    <script src="./js/pending-edit-model.js?v=3"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
-    <script src="./js/pending-edit-card.js?v=1"></script>
+    <script src="./js/pending-edit-card.js?v=2"></script>
     <script src="./js/passenger-modal.js?v=6"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=2"></script>
@@ -3131,6 +3134,7 @@
                     q.status = 'ready';
                     q.data = quote;
                     q.error = null;
+                    this.reconcileQuoteLabel(quote.intent);
                     this.applyServerPrices();
                     this.armQuoteExpiry();
                     this.shadowComparePricing();
@@ -3142,6 +3146,36 @@
                     q.error = { message: 'Could not reach the pricing service', retryable: true };
                     this.renderQuoteState();
                 }
+            }
+
+            // Quote-label reconciliation (plan v7 §4, Codex seq:0264 #3). The
+            // selection's label described the id the passenger chose — a
+            // curated terminal name, or Google's Details address for that id.
+            // If the quote's canonical echo names a DIFFERENT id, that label
+            // can no longer be claimed for it: the address falls back to the
+            // quote's formatted address, Google's own label for the canonical
+            // place. Decided from the quote alone — no registry lookup — so it
+            // holds whatever the curated registry's loading state. Identity is
+            // untouched: captureServerQuoteContract already submits the
+            // canonical id, and state.locations.placeId must keep the
+            // SUBMITTED id or the quote key would never match again.
+            reconcileQuoteLabel(intent) {
+                const selected = this.state.locations.placeId;
+                const canonical = intent && typeof intent.placeId === 'string' ? intent.placeId : null;
+                if (!selected || !canonical || canonical === selected) return false;
+                const fallback = typeof intent.formattedAddress === 'string' ? intent.formattedAddress.trim() : '';
+                const current = this.state.locations.address;
+                if (!fallback || !current || current.address === fallback) return false;
+                this.state.locations.address = { ...current, address: fallback };
+                if (this.els?.addressInput) this.els.addressInput.value = fallback;
+                if (this.autocomplete?.selectedPlace) {
+                    this.autocomplete.selectedPlace = {
+                        place_id: this.autocomplete.selectedPlace.place_id,
+                        description: fallback
+                    };
+                }
+                if (typeof this.updateSummary === 'function') this.updateSummary();
+                return true;
             }
 
             scheduleQuote() {

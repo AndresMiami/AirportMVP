@@ -344,11 +344,23 @@
           // not know which of its fields carries the canonical identity.
           const adopted = a.adoptCanonicalPlaceId(draft.route, quote.intent);
           if (adopted) {
+            // The echo superseded the draft's identity: the old address label
+            // described the OLD id (a curated terminal name, or Google's
+            // address for a replaced id) and is never carried onto an id it
+            // was not issued for. The quote's formatted address is Google's
+            // own label for the canonical place. Decided from the quote
+            // alone, so a hydrated booking is covered whatever the curated
+            // registry's loading state (Codex seq:0264 #3). The change is
+            // read through routeIdentity — the route stays opaque here.
+            const superseded = a.routeIdentity(adopted) !== a.routeIdentity(draft.route);
+            const relabeled = superseded
+              ? model.replaceAddressLabel(adopted, quote.intent.formattedAddress)
+              : adopted;
             const snapA = model.adapterFor(snapshot.route.kind);
-            if (snapA && snapA.routeIdentity(snapshot.route) === a.routeIdentity(adopted)) {
+            if (snapA && snapA.routeIdentity(snapshot.route) === a.routeIdentity(relabeled)) {
               draft.route = model.deepClone(snapshot.route);
             } else {
-              draft.route = adopted;
+              draft.route = relabeled;
             }
           }
         }
