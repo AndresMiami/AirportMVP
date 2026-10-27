@@ -283,7 +283,12 @@ sailing from it, keywords, provenance, `verifiedAt`). A record without
 `verifiedAt` is an inert DRAFT — never shown, never stored. Verified =
 Andres confirmed the company→terminal assignment and the place ID resolves
 to that terminal. The file stores place IDs plus OUR text only — no Google
-coordinates or content. RELEASE SCOPE (Andres, 2026-10-27, Codex relay
+coordinates or content. RELEASED 2026-10-27 (PR #120, merge `affcacf`,
+Netlify production deploy `6ae11052`): production dropdown acceptance in
+both directions and the controlled booking LM-SR92 (Terminal V → MIA,
+server-projected label on the saved row and the driver card, accepted and
+cancelled by Andres) are recorded in the plan's release record. RELEASE
+SCOPE (Andres, 2026-10-27, Codex relay
 0279): a VERIFIED TERMINAL SUBSET — every listed terminal is verified; the
 list does not promise every terminal a company uses. Terminals C
 (multi-line) and J are documented follow-ups, never inferred. Google
