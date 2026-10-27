@@ -292,9 +292,11 @@ coordinates or content.
 - `autocomplete.js` renders curated rows ABOVE Google's, synchronously on
   the keystroke (same row design, 🚢 icon); Google's loading/empty/error
   states live below and never erase them; one ordered list for
-  click/Enter; Google duplicates of a curated place_id are dropped; the
-  Google logo renders only with Google rows; selection cancels pending
-  predictions; a keyboard highlight survives Google's updates by identity.
+  click/Enter; Google's list stays intact beneath ours (a terminal may
+  appear again in Google's own words) and LinkMia's rows carry a small
+  caption; the Google logo renders only with Google rows; selection
+  cancels pending predictions; a keyboard highlight survives Google's
+  updates by identity.
 - Labels: the stored address-side label is terminal-centric and ASCII —
   `PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132` (the company is
   shown in the row, never stored: the server knows only the place ID).
@@ -311,9 +313,9 @@ coordinates or content.
   registry dependence (Codex seq:0264 #3). The submitted id stays in
   `state.locations.placeId` (quote key); the contract submits the canonical id.
 - Release gates (plan §5): Deploy Preview acceptance of Terminal V → MIA;
-  Google Places/Autocomplete terms read before release (the mixed
-  curated/Google list and place_id dedup are a technical boundary, not a
-  policy clearance). Photos/rich cards are the NEXT stage, same registry.
+  Google Places/Autocomplete terms read before release against
+  `docs/google-places-terms-checklist.md` (the mixed curated/Google list is
+  a technical boundary, not a policy clearance). Photos/rich cards are the NEXT stage, same registry.
 
 ## Conventions
 

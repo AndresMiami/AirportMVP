@@ -100,11 +100,17 @@ terminals: [{ id:"pom-terminal-v", name:"PortMiami Terminal V",
   skip them), so drafts can sit in the file safely.
 - Coverage — PR complete only when every row is verified (Andres confirms
   the assignment; Claude resolves the place ID and records `source`).
-  **Verified by Andres 2026-10-27:** A → Royal Caribbean, B → Norwegian
-  (Google's address range kept), D/E/F → Carnival, F also → Disney (Google's
-  separate "Disney Cruise Terminal" record is the same building, merged),
-  G → Celebrity (the Celebrity-named record, 925 N Cruise Blvd), AA → MSC.
-  Open: Terminal D's street number (Google has none; Andres may supply it).
+  **Verified by Andres 2026-10-27:** A → Royal Caribbean, B → Norwegian,
+  D/E/F → Carnival, F also → Disney, G → Celebrity, AA → MSC. **Re-sourced
+  2026-10-27 (Codex recommendation):** assignments and addresses now come
+  from PortMiami's official pages (miamidade.gov/portmiami "Cruise
+  Terminals" and "Directions to PortMiami") — A 2000, B 1761, D 1435,
+  E 1265, F 1103, G 909, AA 2200 N Cruise Blvd — and no Google-returned
+  text or coordinates remain in the file; place IDs stay as identifiers.
+  Terminal V keeps Andres's 718 N Cruise Blvd (PortMiami prints "718 W.
+  Cruise Blvd."). To re-confirm with Andres: PortMiami lists Terminal G as
+  Royal Caribbean's future terminal (opening 2027), not Celebrity, and
+  names only Carnival at Terminal F (Disney unlisted).
 - Browser: `/data/curated-places.json?v=1` (precached, versioned). Functions:
   static `require` (esbuild inlines JSON). Server copy decides labels;
   invalid registry → feature off.
@@ -133,8 +139,13 @@ or name prefix 2 · mixed company+terminal wording 1; ties by registry order
 - One unified item list (curated first) so `selectedIndex`,
   `highlightItem`, Enter/Escape and `requestSequence` guards work unchanged;
   stale Google responses dropped as today.
-- Google rows with the same `place_id` as a curated row are dropped
-  (reversible — see gate). Google logo only when Google rows exist.
+- Google's list stays intact beneath ours (Codex recommendation
+  2026-10-27, accepted by Andres; replaces an earlier duplicate omission): a
+  terminal may appear again further down in Google's own words; ours is
+  still first. Google logo only when Google rows exist. Ours are marked:
+  🚢 instead of 📍, plus a small caption "LinkMia · PortMiami cruise
+  terminals" above the LinkMia rows (same panel size and row padding; the
+  caption is not a row and is never counted by the keyboard).
 - Registry loads once at boot, at most one retry for a transient failure;
   an invalid file is final for the page load; either way today's dropdown.
 - Selecting any row cancels the queued debounce and invalidates an in-flight
@@ -201,8 +212,8 @@ or name prefix 2 · mixed company+terminal wording 1; ties by registry order
 - **Open gate (not a clearance):** Andres or counsel reads Google's current
   Places/Autocomplete policies before release, against
   `docs/google-places-terms-checklist.md` (behaviours A–H, questions 1–8,
-  decision record); if dedup is a problem, curated rows sit above an
-  undeduplicated Google list.
+  decision record). Google's list is left intact and LinkMia's rows are
+  captioned already.
 
 ## Files
 New: `data/curated-places.json`, `js/curated-places.js`,
@@ -264,9 +275,13 @@ passenger code.
 
 ## Decisions for Andres (recommendation first)
 1. Terminal assignments — **settled 2026-10-27**: every draft confirmed;
-   B keeps Google's address range; G uses the Celebrity record (925 N
-   Cruise Blvd); Disney merged into F. Still open: Terminal D's street
-   number (Andres may supply it).
+   Disney merged into F; addresses since re-sourced from PortMiami's
+   official pages (Terminal D's number found there: 1435). Two
+   re-confirmations: Terminal V's street (Andres: 718 N Cruise Blvd;
+   PortMiami: 718 W. Cruise Blvd.) and the official page's wording that
+   Terminal G is Royal Caribbean's future terminal and that only Carnival
+   uses F — do Celebrity → G and Disney → F stand as Andres's first-hand
+   assignments?
 2. 🚢 icon on curated rows (minimal distinction from Google rows) — shipped
    as the default; say if you'd rather keep 📍.
 3. Company not stored on the booking (only the terminal name/address) — OK?

@@ -27,11 +27,11 @@ What this PR adds (facts, with code references at `524e15e`):
 | A | LinkMia's own list of PortMiami cruise terminals: our own name and address text plus a Google **place ID** per terminal. No Google coordinates, no Google-returned text, no Google photos stored. | `data/curated-places.json` |
 | B | In the address field's dropdown, matching terminal rows render **above** Google's Autocomplete predictions, in the same panel. Our rows use a ship icon and our own text; Google's rows are unchanged (pin, Google's text). | `autocomplete.js` `renderDropdown` |
 | C | The Google Maps logo (Google's unmodified asset) renders whenever Google predictions are shown, after them; it is **not** rendered when only our rows are shown. | `autocomplete.js` `GOOGLE_ATTRIBUTION_HTML` |
-| D | A Google prediction whose `place_id` equals a terminal we already show is **omitted** from the Google rows (no duplicate). | `autocomplete.js` `dedupeGoogle` |
+| D | Google's predictions are shown **intact** beneath our rows — a terminal may appear again in Google's own words; nothing of Google's is omitted or reordered. Our rows carry a small caption, "LinkMia · PortMiami cruise terminals". (An earlier duplicate omission was removed on 2026-10-27.) | `autocomplete.js` `renderDropdown` |
 | E | Selecting our row calls Google Place Details for that place ID (live, in the same Autocomplete session token), uses the returned coordinates, and displays every third-party attribution Details returns — but shows **our** label in the field instead of Google's formatted address. | `autocomplete.js` `selectSuggestion` / `applySelection` |
 | F | The booking stores our label text for the address side (e.g. `PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132`) and the Google place ID (`canonical_place_id`, existing column). | `backend/functions/lib/curated-places.js`, `create-booking.js`, `update-pending-booking.js` |
 | G | If Google's price-quote response names a different canonical place ID, the field falls back to Google's formatted address for that place (existing behaviour for Google-selected places). | `indexMVP.html` `reconcileQuoteLabel`, `js/pending-edit-card.js` |
-| H | **Provenance in the registry file:** each terminal's `source` field quotes the Google Autocomplete description and Place Details address string that were used to confirm the record (e.g. "Details returned '718 N Cruise Blvd, Miami, FL 33132, USA'"). The `address` field was typed from that confirmation. | `data/curated-places.json` `source` |
+| H | **Provenance in the registry file:** names, addresses and assignments are sourced from PortMiami's official pages (miamidade.gov/portmiami "Cruise Terminals" and "Directions to PortMiami", read 2026-10-27) and Andres's first-hand knowledge; each `source` cites those. No Google-returned text, coordinates or other Google content is stored; only the Google place ID is kept, as an identifier. (Before 2026-10-27 the provenance notes quoted Google's returned address strings and coordinates; those were removed on Codex's recommendation.) | `data/curated-places.json` `source` |
 
 Not changed by this PR: Google content already stored by the existing booking
 flow for ordinary (non-curated) addresses, coordinates captured at selection,
@@ -54,10 +54,10 @@ recorded in CLAUDE.md — those stay on their own track.
    sit below the fold. Fallback if No: pin the logo visibly (sticky) whenever
    Google rows exist.
 
-3. **Omitting a duplicate prediction (D).** May we leave out one of Google's
-   predictions because we show the same place (same place ID) as our own row?
-   Fallback if No: show it (one-line change: drop `dedupeGoogle`); our row
-   would then appear above Google's identical one.
+3. **Intact list with a LinkMia caption (D).** Confirm that leaving Google's
+   predictions intact and captioning our rows as LinkMia's raises no issue.
+   (The earlier design omitted Google's duplicate of a place we show; that
+   was removed before release, so nothing of Google's is filtered.)
 
 4. **Our label on a Google-identified place (E, F).** May we display and
    store our own name/address text for a place that we identify by a Google
@@ -70,16 +70,12 @@ recorded in CLAUDE.md — those stay on their own track.
    within the Service Specific Terms' place-ID provision (this was already
    relied on by migration 017; the PR adds the registry file).
 
-6. **Registry provenance text (H) — the item most likely to need a change.**
-   The `source` strings quote Google's returned address text as evidence and
-   the `address` values were confirmed against Place Details. Does keeping
-   those Google-returned strings in a committed file count as storing/caching
-   Google Maps Content beyond what the terms permit? Fallback if Yes/Needs
-   change: (a) re-source every address from a non-Google public record (the
-   PortMiami terminal directory, the companies' own pier pages, or Andres's
-   first-hand knowledge) and cite that instead; (b) drop the quoted Google
-   strings from `source`, keeping only "confirmed by Andres <date>" and the
-   place ID. The place IDs themselves stay (question 5).
+6. **Registry provenance text (H).** Confirm that a committed file holding
+   our own name/address text sourced from PortMiami's official pages and
+   Andres's knowledge, plus Google place IDs as identifiers only, raises no
+   storage/caching issue. (The earlier draft quoted Google's returned address
+   strings and coordinates in `source`; those were removed on 2026-10-27
+   before release, so nothing Google-returned is stored in the registry.)
 
 7. **Session tokens (E).** Our row's selection ends the Autocomplete session
    with a Place Details call, as a Google prediction's would. Confirm nothing
