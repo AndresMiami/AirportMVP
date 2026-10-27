@@ -369,6 +369,11 @@ export class CustomAutocomplete {
         const rows = this.matchCurated(this.input ? this.input.value : '');
         this.curatedRows = rows;
         this.googleState = state;
+        // Curated rows ARE valid choices: a Google failure that flagged the
+        // field before they existed (a registry arriving late) must not keep
+        // marking an available destination invalid (Codex seq:0266 #1).
+        // Display only — validation state and any selection stay untouched.
+        if (rows.length > 0) this.clearAddressErrorDisplay();
         const predictions = this.dedupeGoogle(Array.isArray(google) ? google : [], rows);
         this.predictions = predictions;
         this.selectedIndex = keep === null
@@ -781,6 +786,15 @@ export class CustomAutocomplete {
         this.setSelectedAttributionVisible(false);
         this.renderThirdPartyAttributions([]);
         this.input.classList.remove('validated');
+        this.input.classList.remove('error');
+        if (document.getElementById('addressError')) {
+            document.getElementById('addressError').classList.remove('visible');
+        }
+    }
+
+    // The field's error styling and the "select a valid address" notice —
+    // never isValidated or selectedPlace (clearValidation owns those).
+    clearAddressErrorDisplay() {
         this.input.classList.remove('error');
         if (document.getElementById('addressError')) {
             document.getElementById('addressError').classList.remove('visible');

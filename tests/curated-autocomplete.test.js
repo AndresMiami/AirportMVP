@@ -614,6 +614,25 @@ async function check(name, fn) {
     assert.strictEqual(t.container.items[0].classList.contains('highlighted'), false);
   });
 
+  await check('#0266-1 a Google failure before the registry arrived flagged the field; the late registry\'s valid choices clear that flag (validation and selection untouched)', async () => {
+    const t = makeAutocomplete({ registry: 'pending' });
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.showLoading();
+    t.instance.showError();
+    assert.strictEqual(t.input.classList.contains('error'), true, 'no choices yet: today\'s error state');
+    assert.strictEqual(addressError.classList.contains('visible'), true);
+    t.release();
+    await t.ready();
+    await tick();
+    assert.strictEqual(rows(t.container)[0].terminal, 'pom-terminal-v', 'Terminal V arrived');
+    assert.ok(t.container.innerHTML.includes('More results unavailable right now'));
+    assert.strictEqual(t.input.classList.contains('error'), false, 'an available destination is not marked invalid');
+    assert.strictEqual(addressError.classList.contains('visible'), false);
+    assert.strictEqual(t.instance.isValidated, false, 'nothing was selected');
+    assert.strictEqual(t.instance.selectedPlace, null);
+  });
+
   await check('repo pins: indexMVP loads js/curated-places.js?v=1 before the pending-edit model; the SW precaches both exact URLs', () => {
     const idx = read('indexMVP.html');
     const sw = read('service-worker.js');

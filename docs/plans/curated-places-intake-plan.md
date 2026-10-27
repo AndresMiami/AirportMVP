@@ -18,7 +18,8 @@ commit 5 verified them on Andres's confirmations (2026-10-27); docs
 preview building from it (secrets-scan exemption `715a102`). Codex review
 seq:0264 (2026-10-27): findings #1–#3
 fixed and #4's wording aligned in the two commits after `7c754f7`. Full
-suite green. Nothing pushed, no PR.
+suite green. Draft PR #120 open for review and preview (Codex seq:0266: GO
+for controlled browser acceptance); no merge.
 
 ## Context
 
@@ -243,9 +244,10 @@ passenger code.
   companies. Passenger stays 1; price unchanged.
 
 ## Decisions for Andres (recommendation first)
-1. Terminal assignments: confirm each draft (A, B, D/E/F, G, AA, Disney),
-   Terminal B's street number, Terminal D's street number, Terminal G's
-   entrance (925 vs 1103 N Cruise Blvd), and whether Disney merges into F.
+1. Terminal assignments — **settled 2026-10-27**: every draft confirmed;
+   B keeps Google's address range; G uses the Celebrity record (925 N
+   Cruise Blvd); Disney merged into F. Still open: Terminal D's street
+   number (Andres may supply it).
 2. 🚢 icon on curated rows (minimal distinction from Google rows) — shipped
    as the default; say if you'd rather keep 📍.
 3. Company not stored on the booking (only the terminal name/address) — OK?
