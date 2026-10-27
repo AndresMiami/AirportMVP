@@ -37,8 +37,9 @@ projection, written only on a verified quote whose canonical ID is a
 verified terminal), drop-off Miami International; the pending offer reached
 Andres's driver app with that label; Andres accepted the offer on his driver
 app to see the full card and then cancelled LM-SR92 himself (status
-`cancelled`, details_version 1, label intact); no other booking exists.
-Observations, no defects: the first query right after focusing the box can
+`cancelled`, details_version 1, label intact); only one booking was created
+for this controlled test. Pre-existing observations and follow-ups; no
+dropdown defects found: the first query right after focusing the box can
 show no Google rows for a moment while the module loads lazily (known); the
 payment selector shows a placeholder card label while the panel says no
 payment method is saved (legacy UI; no charge path); the status payload
