@@ -203,9 +203,11 @@ export class CustomAutocomplete {
         this.curatedSuppressed = false;
         this.loadCuratedRegistry();
         // New text, new list: nothing is highlighted until the passenger
-        // moves again.
+        // moves again, and the list starts at the top — a scroll position
+        // left over from the previous query must not hide the first rows.
         this.selectedIndex = -1;
         this.highlightItem();
+        if (this.suggestionsContainer) this.suggestionsContainer.scrollTop = 0;
         if (this.matchCurated(value).length > 0 || this.curatedList().length > 0) {
             const state = this.googleState || 'idle';
             this.renderDropdown(state === 'results' ? this.predictions : [], state);
