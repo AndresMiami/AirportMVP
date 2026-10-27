@@ -23,7 +23,7 @@
       "placeId": "ChIJO1Q7bLK12YgRyjFe2sYTfNc",
       "companies": ["virgin"],
       "keywords": ["terminal v"],
-      "source": "Assignment: PortMiami Cruise Terminals page (Virgin Voyages' Terminal V) and Andres, LM-EFFA brief 2026-10-26. Address: Andres's brief 2026-10-26 (718 N Cruise Blvd); PortMiami's Directions page prints 'Cruise Terminal V: 718 W. Cruise Blvd.' — Andres to say which drivers use. Place ID: Google place ID kept as an identifier only, resolved 2026-10-26; canonical-echo check through /api/quote-ride is part of the Deploy Preview smoke matrix.",
+      "source": "Assignment: PortMiami Cruise Terminals page (Virgin Voyages' Terminal V) and Andres, LM-EFFA brief 2026-10-26. Address: Andres's brief 2026-10-26 (718 N Cruise Blvd); PortMiami's Directions page prints 'Cruise Terminal V: 718 W. Cruise Blvd.'; shown that difference, Andres re-confirmed 718 N Cruise Blvd on 2026-10-27 (stored address stands). Place ID: Google place ID kept as an identifier only, resolved 2026-10-26; canonical-echo check through /api/quote-ride is part of the Deploy Preview smoke matrix.",
       "verifiedAt": "2026-10-26"
     },
     {
@@ -73,7 +73,7 @@
       "placeId": "ChIJi-HC0n212YgR27EH49EZEws",
       "companies": ["carnival", "disney"],
       "keywords": ["terminal f"],
-      "source": "Assignment: Carnival per PortMiami Cruise Terminals page (Terminals D, E and F); Disney per Andres 2026-10-27 (PortMiami's page names Carnival only at F — Andres to re-confirm Disney). Address: PortMiami Directions page ('Cruise Terminal F: 1103 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "source": "Assignment: Carnival per PortMiami Cruise Terminals page (Terminals D, E and F); Disney per Andres 2026-10-27; shown that PortMiami's page names Carnival only at F, Andres re-confirmed Disney at Terminal F on 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal F: 1103 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
       "verifiedAt": "2026-10-27"
     },
     {
@@ -83,7 +83,7 @@
       "placeId": "ChIJ9ypKzz202YgRPkzwgZm4tSg",
       "companies": ["celebrity"],
       "keywords": ["terminal g"],
-      "source": "Assignment: Celebrity per Andres 2026-10-27. NOTE: PortMiami's Cruise Terminals page describes Terminal G as Royal Caribbean International's future terminal (construction from summer 2025, expected to open in 2027) and does not name Celebrity — Andres to re-confirm which company sails from the existing Terminal G. Address: PortMiami Directions page ('Cruise Terminal G: 909 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
+      "source": "Assignment: Celebrity per Andres 2026-10-27. NOTE: PortMiami's Cruise Terminals page describes Terminal G as Royal Caribbean International's future terminal (construction from summer 2025, expected to open in 2027) and does not name Celebrity; shown that wording, Andres re-confirmed Celebrity at Terminal G on 2026-10-27. Address: PortMiami Directions page ('Cruise Terminal G: 909 N. Cruise Blvd.'), read 2026-10-27. Place ID: Google place ID kept as an identifier only, resolved 2026-10-27.",
       "verifiedAt": "2026-10-27"
     },
     {

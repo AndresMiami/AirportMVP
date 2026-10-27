@@ -25,7 +25,9 @@ for controlled browser acceptance); no merge. Compact design (Andres,
 2026-10-27; Codex relay 0268 implementation + 0269 corrections after
 Claude's findings 1–7) committed as `433ee09` and pushed to the same draft
 PR under Andres's authorization; the preview rebuilt from it (Netlify
-deploy `6ae074ff72fc4b11298eeab2`). Still no merge.
+deploy `6ae074ff72fc4b11298eeab2`). Andres re-confirmed the three
+terminal-source questions on 2026-10-27 (all stand as stored). Still no
+merge.
 
 **Acceptance record (2026-10-27, head `fc64fce`, preview
 deploy-preview-120, signed in as Andres, no booking submitted):**
@@ -62,9 +64,11 @@ jobs pass (Actions run 40484457875) and the Netlify Deploy Preview check
 passes. Phone: Andres reports the compact rows look right on his phone (no
 further detail recorded). Not verified by either pass: saved booking and
 driver card (preview pricing env unset by decision — wait for a controlled
-destination or production), Google terms gate (checklist Q1–Q8), the three
-terminal-source reconfirmations (Terminal V street, Celebrity → G,
-Disney → F), Codex's re-review of `433ee09`, and Andres's merge decision.
+destination or production), Google terms gate (checklist Q1–Q8), Codex's
+re-review of `433ee09`, and Andres's merge decision. The three
+terminal-source questions (Terminal V street, Celebrity → G, Disney → F)
+were answered by Andres later on 2026-10-27: all stand as stored
+(Decision 1 below).
 
 ## Context
 
@@ -136,9 +140,11 @@ terminals: [{ id:"pom-terminal-v", name:"PortMiami Terminal V",
   E 1265, F 1103, G 909, AA 2200 N Cruise Blvd — and no Google-returned
   text or coordinates remain in the file; place IDs stay as identifiers.
   Terminal V keeps Andres's 718 N Cruise Blvd (PortMiami prints "718 W.
-  Cruise Blvd."). To re-confirm with Andres: PortMiami lists Terminal G as
-  Royal Caribbean's future terminal (opening 2027), not Celebrity, and
-  names only Carnival at Terminal F (Disney unlisted).
+  Cruise Blvd."). PortMiami lists Terminal G as Royal Caribbean's future
+  terminal (opening 2027), not Celebrity, and names only Carnival at
+  Terminal F (Disney unlisted). **Re-confirmed by Andres 2026-10-27, shown
+  those differences:** all three stand as stored (V at 718 N, Celebrity →
+  G, Disney → F); only the three `source` notes changed to record it.
 - Browser: `/data/curated-places.json?v=1` (precached, versioned). Functions:
   static `require` (esbuild inlines JSON). Server copy decides labels;
   invalid registry → feature off.
@@ -309,11 +315,13 @@ passenger code.
 1. Terminal assignments — **settled 2026-10-27**: every draft confirmed;
    Disney merged into F; addresses since re-sourced from PortMiami's
    official pages (Terminal D's number found there: 1435). Two
-   re-confirmations: Terminal V's street (Andres: 718 N Cruise Blvd;
-   PortMiami: 718 W. Cruise Blvd.) and the official page's wording that
-   Terminal G is Royal Caribbean's future terminal and that only Carnival
-   uses F — do Celebrity → G and Disney → F stand as Andres's first-hand
-   assignments?
+   re-confirmations were put to Andres: Terminal V's street (Andres: 718 N
+   Cruise Blvd; PortMiami: 718 W. Cruise Blvd.) and the official page's
+   wording that Terminal G is Royal Caribbean's future terminal and that
+   only Carnival uses F. **Answered by Andres 2026-10-27: all three stand
+   as stored** (V at 718 N Cruise Blvd, Celebrity → G, Disney → F) — his
+   first-hand assignments; the registry's three `source` notes record the
+   confirmation and no other data changed.
 2. Initials tiles — **settled by Andres 2026-10-27**: match the compact
    colored VV example for every company; no generic ship icons or official
    logo artwork. Codex implements this specific change, Claude reviews it.
