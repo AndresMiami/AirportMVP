@@ -18,6 +18,18 @@
 // with this EXACT URL; service-worker.js precaches the same literal.
 const CURATED_REGISTRY_URL = '/data/curated-places.json?v=1';
 
+// Presentation only: plain initials, not cruise-line logo artwork. Terminal
+// assignments, addresses and selection identity still come from the registry.
+const CURATED_BRANDS = Object.freeze({
+    virgin: { name: 'Virgin Voyages', short: 'Virgin Voyages', initials: 'VV' },
+    carnival: { name: 'Carnival', short: 'Carnival', initials: 'C' },
+    'royal-caribbean': { name: 'Royal Caribbean', short: 'Royal Caribbean', initials: 'RC' },
+    norwegian: { name: 'Norwegian', short: 'Norwegian', initials: 'NCL' },
+    celebrity: { name: 'Celebrity', short: 'Celebrity', initials: 'CC' },
+    msc: { name: 'MSC Cruises', short: 'MSC Cruises', initials: 'MSC' },
+    disney: { name: 'Disney Cruise Line', short: 'Disney', initials: 'D' }
+});
+
 // Google's unmodified official logo, rendered after Google's rows only.
 const GOOGLE_ATTRIBUTION_HTML =
     '<div class="google-maps-attribution">' +
@@ -349,6 +361,32 @@ export class CustomAutocomplete {
         this.renderDropdown(state === 'results' ? this.predictions : [], state);
     }
 
+    curatedPresentation(row) {
+        const registry = this.curatedRegistry;
+        const terminal = registry.byPlaceId[row.placeId];
+        const keys = row.companyKey ? [row.companyKey] : terminal.companies;
+        const brands = keys.map((key) => {
+            if (Object.prototype.hasOwnProperty.call(CURATED_BRANDS, key)) return CURATED_BRANDS[key];
+            const name = registry.companyByKey[key].name;
+            return {
+                name,
+                short: name,
+                initials: name.trim().split(/\s+/).slice(0, 3).map((word) => word.charAt(0)).join('').toUpperCase().slice(0, 3)
+            };
+        });
+        const shared = keys.length > 1;
+        return {
+            // Only an explicitly listed key can become a CSS class.
+            theme: !shared && Object.prototype.hasOwnProperty.call(CURATED_BRANDS, keys[0]) ? keys[0] : 'shared',
+            name: brands.map((brand) => shared ? brand.short : brand.name).join(' · '),
+            initials: brands.map((brand) => brand.initials).join('/'),
+            port: registry.port.name,
+            terminal: terminal.name.startsWith(registry.port.name + ' ')
+                ? terminal.name.slice(registry.port.name.length + 1)
+                : terminal.name
+        };
+    }
+
     // THE one renderer. `state` describes the Google section: 'idle' (no
     // request yet), 'loading', 'results' or 'error'. Curated rows come from
     // the CURRENT input text, synchronously, so they never wait for Google
@@ -382,18 +420,25 @@ export class CustomAutocomplete {
         // keep Google's look and attribution. Not a row: never focusable,
         // never counted by the keyboard.
         const curatedLabel = rows.length > 0
-            ? '<div class="suggestion-group-label">LinkMia · PortMiami cruise terminals</div>'
+            ? '<div class="suggestion-group-label">LinkMia terminals</div>'
             : '';
-        const curatedHtml = curatedLabel + rows.map((row, index) => `
-                <div class="suggestion-item suggestion-item--curated" data-index="${index}" data-terminal="${this.escapeHtml(row.terminalId)}">
-                    <div class="suggestion-icon">🚢</div>
+        const curatedHtml = curatedLabel + rows.map((row, index) => {
+            const display = this.curatedPresentation(row);
+            return `
+                <div class="suggestion-item suggestion-item--curated curated-brand--${display.theme}" data-index="${index}" data-terminal="${this.escapeHtml(row.terminalId)}">
+                    <div class="curated-initials" aria-hidden="true">${this.escapeHtml(display.initials)}</div>
                     <div class="suggestion-text">
-                        <div class="suggestion-main">${this.escapeHtml(row.title)}</div>
-                        <div class="suggestion-secondary">${this.escapeHtml(row.subtitle)}</div>
+                        <div class="suggestion-main">${this.escapeHtml(display.name)}</div>
+                        <div class="suggestion-secondary">${this.escapeHtml(display.port)}</div>
                     </div>
+                    <span class="suggestion-terminal">${this.escapeHtml(display.terminal)}</span>
                 </div>
-            `).join('');
-        const googleHtml = this.googleRowsHtml(predictions, rows.length);
+            `;
+        }).join('');
+        const googleLabel = rows.length > 0 && predictions.length > 0
+            ? '<div class="suggestion-group-label suggestion-group-label--google">Google suggestions</div>'
+            : '';
+        const googleHtml = googleLabel + this.googleRowsHtml(predictions, rows.length);
         const attribution = predictions.length > 0 ? GOOGLE_ATTRIBUTION_HTML : '';
 
         let notice = '';

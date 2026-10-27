@@ -290,13 +290,20 @@ coordinates or content.
   match, "virginia" never does; a company query lists every one of its
   terminals; a shared terminal appears once naming every company; no cap.
 - `autocomplete.js` renders curated rows ABOVE Google's, synchronously on
-  the keystroke (same row design, 🚢 icon); Google's loading/empty/error
+  the keystroke; Google's loading/empty/error
   states live below and never erase them; one ordered list for
   click/Enter; Google's list stays intact beneath ours (a terminal may
   appear again in Google's own words) and LinkMia's rows carry a small
   caption; the Google logo renders only with Google rows; selection
   cancels pending predictions; a keyboard highlight survives Google's
   updates by identity.
+- Compact dropdown design (Andres, 2026-10-27): colored plain-initials
+  tiles (VV, C, RC, NCL, CC, MSC, D), short company name, PortMiami subtitle,
+  and terminal badge; neutral C/D for a generic shared Terminal F query.
+  Separate “LinkMia terminals” / “Google suggestions” captions in mixed
+  lists, same responsive panel bounds, Google rows/attribution unchanged.
+  No official logo artwork. Local review harness:
+  `docs/plans/curated-dropdown-mockup.html` (real component, fake provider).
 - Labels: the stored address-side label is terminal-centric and ASCII —
   `PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132` (the company is
   shown in the row, never stored: the server knows only the place ID).
@@ -315,7 +322,8 @@ coordinates or content.
 - Release gates (plan §5): Deploy Preview acceptance of Terminal V → MIA;
   Google Places/Autocomplete terms read before release against
   `docs/google-places-terms-checklist.md` (the mixed curated/Google list is
-  a technical boundary, not a policy clearance). Photos/rich cards are the NEXT stage, same registry.
+  a technical boundary, not a policy clearance). Photos/official logo artwork
+  remain deferred; the compact initials treatment was separately approved.
 
 ## Conventions
 

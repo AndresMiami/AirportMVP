@@ -51,7 +51,7 @@ Settled: the app gets its own small **verified list of cruise terminals**,
 inserted above Google's suggestions; selecting one carries the **correct
 place ID and an unambiguous terminal name** into booking and driver
 screens; a company with several terminals shows every terminal (no
-guessing); current row design stays; passenger default stays 1; pricing
+guessing); compact initials treatment approved below; passenger default stays 1; pricing
 unchanged. **Terminal V is the first development milestone; the PR is not
 complete until all seven supported companies (Virgin, Carnival, Royal
 Caribbean, Norwegian, Celebrity, MSC, Disney) have verified terminal
@@ -142,10 +142,13 @@ or name prefix 2 · mixed company+terminal wording 1; ties by registry order
 - Google's list stays intact beneath ours (Codex recommendation
   2026-10-27, accepted by Andres; replaces an earlier duplicate omission): a
   terminal may appear again further down in Google's own words; ours is
-  still first. Google logo only when Google rows exist. Ours are marked:
-  🚢 instead of 📍, plus a small caption "LinkMia · PortMiami cruise
-  terminals" above the LinkMia rows (same panel size and row padding; the
-  caption is not a row and is never counted by the keyboard).
+  still first. Google logo only when Google rows exist. Andres's subsequent
+  compact design approval (2026-10-27): plain colored initials, short company
+  name, PortMiami subtitle and a terminal badge; “LinkMia terminals” above
+  ours and “Google suggestions” above Google's rows in a mixed list. The
+  responsive panel bounds and Google row styling stay the same; curated
+  rows use compact padding and can grow for longer names. Captions never
+  count as selectable rows. Full selection labels and IDs stay unchanged.
 - Registry loads once at boot, at most one retry for a transient failure;
   an invalid file is final for the page load; either way today's dropdown.
 - Selecting any row cancels the queued debounce and invalidates an in-flight
@@ -201,7 +204,8 @@ or name prefix 2 · mixed company+terminal wording 1; ties by registry order
 - `trip.html`, `driver.html`, doorbell read `pickup_location` — untouched.
 
 ### 5. Release
-- `service-worker.js`: pair moved to v1.3.50 / runtime-v27 with its
+- `service-worker.js`: this unreleased PR uses v1.3.50 / runtime-v27 for
+  the registry and compact presentation together, with one shared
   history line; `/js/curated-places.js?v=1` and
   `/data/curated-places.json?v=1` precached at the exact requested URLs;
   the model and card moved to `?v=3` / `?v=2` (both changed in this PR) so
@@ -282,9 +286,61 @@ passenger code.
    Terminal G is Royal Caribbean's future terminal and that only Carnival
    uses F — do Celebrity → G and Disney → F stand as Andres's first-hand
    assignments?
-2. 🚢 icon on curated rows (minimal distinction from Google rows) — shipped
-   as the default; say if you'd rather keep 📍.
+2. Initials tiles — **settled by Andres 2026-10-27**: match the compact
+   colored VV example for every company; no generic ship icons or official
+   logo artwork. Codex implements this specific change, Claude reviews it.
 3. Company not stored on the booking (only the terminal name/address) — OK?
 4. Who reads Google's Places terms for the release gate.
 
-Next stage (own PR, reuses this registry): photos, badges, section headers.
+Next stage (own PR, reuses this registry): photos/official logo artwork only
+after its separate approval. Compact initials, terminal badges and section
+captions are covered by Andres's later design decision above.
+
+### Compact-design review scope (2026-10-27)
+
+Codex's local, uncommitted presentation change is based on `d57053a`.
+Andres explicitly reversed the roles for this change only: Codex implements,
+Claude independently reviews. This does not change the standing workflow.
+The seven company styles use VV, C, RC, NCL, CC, MSC and D; a generic
+Terminal F query stays one neutral C/D row naming Carnival and Disney.
+The matcher, registry data, quote handling, server labels and pricing are
+unchanged. Claude is the independent reviewer for this change; commit,
+push, preview deployment and merge still require Andres's authorization.
+
+`docs/plans/curated-dropdown-mockup.html` imports the real component, CSS
+and registry, with illustrative provider responses and external calls
+blocked. It checks local layout/interaction, not live Google results,
+phone keyboard behavior, saved bookings or the driver screen. The earlier
+phone/preview acceptance applies to the earlier design, so this visual
+change still needs its own preview/phone acceptance before release.
+
+Initial local verification by Codex (before Claude's 0268 review): seven
+relevant Node v24.22.1 suites passed
+(243 checks): curated-autocomplete (24), curated-places-registry (39),
+curated-label-server (18), google-policy-readiness (32),
+autocomplete-raw-capture (19), autocomplete-session (11), and
+pending-edit-hydration (100). Real-component browser harness: seven
+company styles and the shared F row inspected; long names and Terminal AA
+fit the 320px card; Virgin mixed list inspected at 390px; Carnival D/E/F
+fit at 320px, with the rest scrolling under the same height cap;
+ArrowDown twice + Enter selected Terminal E with the full registry
+address and place ID. These use fake provider responses / Details fallback,
+not a live provider or saved-booking check. Node 20 CI was not rerun here.
+
+After Claude's review of 0268, Codex corrected the LinkMia spelling, replaced
+the newer property-check API with the existing compatible idiom, moved shared
+short names into the presentation table, and derived neutral fallback initials
+from registry company names. The presentation test now reads the registry's
+terminal assignments rather than duplicating them. The same unreleased PR
+keeps its already-assigned cache pair; the extra uncommitted bump was withdrawn.
+The release checklist now describes the initials, colors, source captions and
+sticky Google footer; its policy/branding decisions remain open.
+
+Correction validation: the same seven local suites passed, now 245 checks
+(curated-autocomplete: 26; the other six counts above unchanged). A test
+removes Object.hasOwn from an isolated VM realm and exercises the real typing
+handler and both result sections. Temporarily restoring the two newer-API
+calls in memory makes this test fail, confirming it detects the regression.
+No file was changed for that negative control. These checks ran on Node
+v24.22.1; they do not replace a real older-phone pass or Node 20 CI. Claude's
+reported 46/46 result covered the earlier packet, not these corrections.

@@ -45,14 +45,85 @@
 
 /* Caption above LinkMia's own rows (curated cruise terminals), so a passenger
    can tell them from Google's suggestions below. Not a row: never focusable,
-   never counted by the keyboard. Same panel size and row padding. */
+   never counted by the keyboard. Panel width and responsive cap stay intact. */
 .suggestion-group-label {
-    padding: var(--space-sm) var(--space-md) 2px;
-    font-size: var(--font-xs);
-    font-weight: var(--font-semibold);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8E8E93;
+    padding: 6px 13px;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    background: #FFF8EF;
+    color: #84623D;
+}
+
+.suggestion-group-label--google {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    border-top: 1px solid #DEDFE2;
+    background: #F6F7F8;
+    color: #656970;
+}
+
+/* Our own initials treatment, not official logo assets. Shared terminals
+   use a neutral tile; a company-specific search uses that company's color. */
+.suggestion-item--curated {
+    --cruise-color: #48515C;
+    --cruise-accent: #48515C;
+    --cruise-soft: #F2F4F6;
+    min-height: 54px;
+    box-sizing: border-box;
+    gap: 10px;
+    padding: 8px 13px;
+}
+.curated-brand--virgin { --cruise-color: #C80027; --cruise-accent: #C80027; --cruise-soft: #FFF1F3; }
+.curated-brand--carnival { --cruise-color: #00529B; --cruise-accent: #D71938; --cruise-soft: #EDF5FF; }
+.curated-brand--royal-caribbean { --cruise-color: #003B71; --cruise-accent: #EAB52B; --cruise-soft: #F0F4FA; }
+.curated-brand--norwegian { --cruise-color: #006B9B; --cruise-accent: #2B9DC4; --cruise-soft: #EEF8FC; }
+.curated-brand--celebrity { --cruise-color: #15325B; --cruise-accent: #8FA0B6; --cruise-soft: #F0F3F8; }
+.curated-brand--msc { --cruise-color: #091D3E; --cruise-accent: #B69A61; --cruise-soft: #F1F3F7; }
+.curated-brand--disney { --cruise-color: #153C72; --cruise-accent: #C62637; --cruise-soft: #EFF4FC; }
+.suggestion-item--curated:hover,
+.suggestion-item--curated.highlighted { background: var(--cruise-soft); }
+
+.curated-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 30px;
+    height: 30px;
+    box-sizing: border-box;
+    border-bottom: 3px solid var(--cruise-accent);
+    border-radius: 9px;
+    background: var(--cruise-color);
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+}
+.curated-brand--norwegian .curated-initials,
+.curated-brand--msc .curated-initials,
+.curated-brand--shared .curated-initials { font-size: 11px; }
+.suggestion-item--curated .suggestion-text { min-width: 0; }
+.suggestion-item--curated .suggestion-main {
+    font-size: 14px;
+    line-height: 18px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.suggestion-item--curated .suggestion-secondary {
+    font-size: 12px;
+    line-height: 16px;
+    color: #74716C;
+}
+.suggestion-terminal {
+    flex: 0 0 auto;
+    padding: 5px 7px;
+    border-radius: 5px;
+    background: var(--cruise-soft);
+    color: var(--cruise-color);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
 }
 
 .suggestion-icon {

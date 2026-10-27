@@ -58,7 +58,8 @@
 //   v1.3.49 / runtime-v26  The When arrival estimate counts from the chosen pickup, in Miami time, and re-renders
 //                           when the pickup changes (the PR #109 deferral) (shipped 2026-09-30, PR #118)
 //   v1.3.50 / runtime-v27  Curated cruise terminals above Google in the address search — Terminal V first;
-//                           js/curated-places.js + data/curated-places.json precached (plan v7) — THIS tree
+//                           js/curated-places.js + data/curated-places.json precached (plan v7);
+//                           compact cruise-line initials, company names and terminal badges — THIS tree
 // RULE (plan v8.6 §3D, simplified 2026-09-10): cache names only ever move
 // FORWARD and both caches move together. Any release OR rollback takes the
 // NEXT UNUSED pair — one above the constants below — chosen when it is

@@ -20,14 +20,16 @@ Documents to read (current versions, read on the day of review):
   https://developers.google.com/maps/documentation/places/web-service/autocomplete
   (session tokens; what the service may be used for)
 
-What this PR adds (facts, with code references at `524e15e`):
+What this PR adds (current working tree based on `d57053a`, including the
+compact-design corrections after Codex relay 0268). Record the final reviewed
+commit and preview in the decision record before release:
 
 | # | Behaviour | Where |
 |---|---|---|
 | A | LinkMia's own list of PortMiami cruise terminals: our own name and address text plus a Google **place ID** per terminal. No Google coordinates, no Google-returned text, no Google photos stored. | `data/curated-places.json` |
-| B | In the address field's dropdown, matching terminal rows render **above** Google's Autocomplete predictions, in the same panel. Our rows use a ship icon and our own text; Google's rows are unchanged (pin, Google's text). | `autocomplete.js` `renderDropdown` |
-| C | The Google Maps logo (Google's unmodified asset) renders whenever Google predictions are shown, after them; it is **not** rendered when only our rows are shown. | `autocomplete.js` `GOOGLE_ATTRIBUTION_HTML` |
-| D | Google's predictions are shown **intact** beneath our rows — a terminal may appear again in Google's own words; nothing of Google's is omitted or reordered. Our rows carry a small caption, "LinkMia · PortMiami cruise terminals". (An earlier duplicate omission was removed on 2026-10-27.) | `autocomplete.js` `renderDropdown` |
+| B | In the address field's dropdown, matching terminal rows render **above** Google's Autocomplete predictions, in the same panel. Our rows show a colored plain-initials tile, company name, "PortMiami" subtitle and terminal badge. The street address appears after selection, not in these compact rows. Google's rows are unchanged (pin, Google's text). | `autocomplete.js` `curatedPresentation` / `renderDropdown`; `css/maps-autocomplete.css` |
+| C | The Google Maps logo (Google's unmodified asset) renders whenever Google predictions are shown, in a sticky footer after them; it is **not** rendered when only our rows are shown. | `autocomplete.js` `GOOGLE_ATTRIBUTION_HTML`; `css/maps-autocomplete.css` `.google-maps-attribution` |
+| D | Google's predictions are shown **intact** beneath our rows — a terminal may appear again in Google's own words; nothing of Google's is omitted or reordered. Our rows carry the caption "LinkMia terminals". A mixed list also shows our own "Google suggestions" caption above Google's rows; Google-only results have neither caption. (An earlier duplicate omission was removed on 2026-10-27.) | `autocomplete.js` `renderDropdown` |
 | E | Selecting our row calls Google Place Details for that place ID (live, in the same Autocomplete session token), uses the returned coordinates, and displays every third-party attribution Details returns — but shows **our** label in the field instead of Google's formatted address. | `autocomplete.js` `selectSuggestion` / `applySelection` |
 | F | The booking stores our label text for the address side (e.g. `PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132`) and the Google place ID (`canonical_place_id`, existing column). | `backend/functions/lib/curated-places.js`, `create-booking.js`, `update-pending-booking.js` |
 | G | If Google's price-quote response names a different canonical place ID, the field falls back to Google's formatted address for that place (existing behaviour for Google-selected places). | `indexMVP.html` `reconcileQuoteLabel`, `js/pending-edit-card.js` |
@@ -50,12 +52,18 @@ recorded in CLAUDE.md — those stay on their own track.
 2. **Attribution placement (C).** Does rendering the Google Maps logo only
    when Google predictions are present, placed after Google's rows, satisfy
    the Autocomplete attribution requirement for a list shown without a
-   Google map? Note that with several rows the panel scrolls and the logo may
-   sit below the fold. Fallback if No: pin the logo visibly (sticky) whenever
-   Google rows exist.
+   Google map? The footer is already sticky while the panel scrolls; review
+   its visibility, spacing and size on the final preview. Fallback if No:
+   adjust the footer's placement/spacing to the requirement identified by
+   the reviewer before release.
 
-3. **Intact list with a LinkMia caption (D).** Confirm that leaving Google's
-   predictions intact and captioning our rows as LinkMia's raises no issue.
+3. **Intact list and both source captions (D).** Is leaving Google's
+   predictions intact, captioning ours "LinkMia terminals", and adding our
+   own text "Google suggestions" above Google's rows consistent with the
+   applicable attribution and Google brand guidelines? The latter caption
+   is authored by LinkMia, not supplied by Google. Fallback if that caption
+   needs change: remove or revise it as directed by the reviewer while
+   retaining Google's intact results and required official attribution.
    (The earlier design omitted Google's duplicate of a place we show; that
    was removed before release, so nothing of Google's is filtered.)
 
@@ -83,12 +91,23 @@ recorded in CLAUDE.md — those stay on their own track.
    a session this way. Fallback if No: call Details without the session token
    for curated rows (billing changes; behaviour does not).
 
-8. **Logos and brand names.** Our rows show the cruise companies' *names* in
-   plain text (no company logos). The later visual stage may add images;
-   that stage gets its own review. Nothing to decide for this PR unless the
-   reviewer sees a problem with the names.
+8. **Cruise-company names, initials and colors (B).** Our rows show company
+   names, plain initials (VV, C, RC, NCL, CC, MSC, D), and company-associated
+   color treatments, with a neutral C/D tile for shared Terminal F. These
+   tiles are LinkMia-authored artwork; no official company logo assets are
+   used. Does this exact treatment require changes or permission, including
+   for the colors or a possible implication of affiliation? This question
+   needs its own answer; absence of official logo artwork is not clearance.
+   If needed, the reviewer can specify a neutral text/initials treatment for
+   Andres to approve. Official logos/photos remain a separate future stage.
 
 ## Decision record
+
+Reviewed commit: ___ · Preview/deploy: ___
+
+Visual treatment to record explicitly: LinkMia-authored plain initials in
+cruise-line-like colors, not supplied/licensed logo assets. This describes
+provenance only; permission and branding conclusions remain for the reviewer.
 
 | Date | Reviewer | Documents/versions read | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Changes required |
 |---|---|---|---|---|---|---|---|---|---|---|---|

@@ -223,9 +223,12 @@ async function check(name, fn) {
     await t.ready();
     typed(t.instance, t.input, 'Virgin');
     const list = rows(t.container);
-    assert.deepStrictEqual(list, [{ curated: true, index: 0, terminal: 'pom-terminal-v', main: 'Virgin Voyages — PortMiami Terminal V' }]);
-    assert.ok(t.container.innerHTML.includes('718 N Cruise Blvd, Miami, FL 33132'));
-    assert.ok(t.container.innerHTML.includes('<div class="suggestion-icon">🚢</div>'));
+    assert.deepStrictEqual(list, [{ curated: true, index: 0, terminal: 'pom-terminal-v', main: 'Virgin Voyages' }]);
+    assert.ok(t.container.innerHTML.includes('<div class="curated-initials" aria-hidden="true">VV</div>'));
+    assert.ok(t.container.innerHTML.includes('<div class="suggestion-secondary">PortMiami</div>'));
+    assert.ok(t.container.innerHTML.includes('<span class="suggestion-terminal">Terminal V</span>'));
+    assert.ok(!t.container.innerHTML.includes('718 N Cruise Blvd'), 'the full address is not crowded into the suggestion');
+    assert.strictEqual(t.instance.curatedRows[0].label, TERMINAL_V_LABEL, 'the full address still travels with the selection');
     assert.strictEqual(logos(t.container), 0);
     assert.ok(!t.container.innerHTML.includes('Loading'), 'no Google request has started yet');
     assert.strictEqual(t.container.classList.contains('visible'), true);
@@ -246,7 +249,7 @@ async function check(name, fn) {
     t.instance.renderSuggestions(GOOGLE_VIRGIN);
     const list = rows(t.container);
     assert.deepStrictEqual(list.map((r) => [r.index, r.curated, r.main]), [
-      [0, true, 'Virgin Voyages — PortMiami Terminal V'],
+      [0, true, 'Virgin Voyages'],
       [1, false, 'Virginia Key'],
       [2, false, 'Virginia Gardens'],
       [3, false, 'Virginia']
@@ -271,7 +274,137 @@ async function check(name, fn) {
     const html = t.container.innerHTML;
     assert.ok(html.includes('suggestion-group-label'), 'LinkMia rows are captioned');
     assert.ok(html.indexOf('suggestion-group-label') < html.indexOf('suggestion-item--curated'), 'the caption sits above the LinkMia rows');
-    assert.ok(html.includes('LinkMia · PortMiami cruise terminals'));
+    assert.ok(html.includes('LinkMia terminals'));
+    assert.ok(html.indexOf('Google suggestions') > html.indexOf('suggestion-terminal'));
+    assert.ok(html.indexOf('Google suggestions') < html.indexOf('data-index="1"'));
+  });
+
+  await check('all seven company designs render their own initials and terminal choices; selecting each preserves its full identity', async () => {
+    // This suite checks presentation/selection. Terminal assignments belong
+    // to the registry and its coverage suite, so read the current mapping.
+    const registry = JSON.parse(read('data/curated-places.json'));
+    const cases = [
+      ['Virgin', 'virgin', 'Virgin Voyages', 'VV'],
+      ['Carnival', 'carnival', 'Carnival', 'C'],
+      ['Royal', 'royal-caribbean', 'Royal Caribbean', 'RC'],
+      ['NCL', 'norwegian', 'Norwegian', 'NCL'],
+      ['Celebrity', 'celebrity', 'Celebrity', 'CC'],
+      ['MSC', 'msc', 'MSC Cruises', 'MSC'],
+      ['Disney', 'disney', 'Disney Cruise Line', 'D']
+    ];
+    for (const [query, theme, name, initials] of cases) {
+      const terminals = registry.terminals.filter((terminal) => terminal.verifiedAt && terminal.companies.includes(theme));
+      assert.ok(terminals.length > 0, `${query} has a verified registry choice`);
+      const t = makeAutocomplete();
+      await t.ready();
+      t.instance.curatedRegistry = ctx.CuratedPlaces.validateRegistry(registry).registry;
+      typed(t.instance, t.input, query);
+      clearTimeout(t.instance.debounceTimer);
+      assert.deepStrictEqual(rows(t.container).map((r) => r.main), terminals.map(() => name), query);
+      assert.ok(t.container.innerHTML.includes(`curated-brand--${theme}`));
+      assert.ok(t.container.innerHTML.includes(`aria-hidden="true">${initials}</div>`));
+      assert.deepStrictEqual([...t.container.innerHTML.matchAll(/class="suggestion-terminal">([^<]+)/g)].map((m) => m[1]), terminals.map((terminal) => terminal.name.replace(registry.port.name + ' ', '')));
+      assert.deepStrictEqual(plain(t.instance.curatedRows.map((row) => row.placeId)), terminals.map((terminal) => terminal.placeId));
+      const choices = [...t.instance.curatedRows];
+      for (let i = 0; i < choices.length; i++) {
+        typed(t.instance, t.input, query);
+        clearTimeout(t.instance.debounceTimer);
+        await t.instance.selectSuggestion(i);
+        assert.strictEqual(t.instance.selectedPlace.place_id, choices[i].placeId);
+        assert.strictEqual(t.input.value, choices[i].label);
+      }
+    }
+  });
+
+  await check('without Object.hasOwn, typing still renders curated rows and arms the Google search', async () => {
+    // A fresh realm avoids deleting the host Node process's built-in.
+    const originalObject = ctx.Object;
+    ctx.Object = vm.runInNewContext('Object');
+    delete ctx.Object.hasOwn;
+    let t;
+    try {
+      assert.strictEqual(typeof ctx.Object.hasOwn, 'undefined');
+      t = makeAutocomplete();
+      await t.ready();
+      typed(t.instance, t.input, 'Virgin');
+      assert.strictEqual(rows(t.container)[0].main, 'Virgin Voyages');
+      assert.ok(t.instance.debounceTimer, 'the missing built-in cannot prevent the Google debounce');
+      clearTimeout(t.instance.debounceTimer);
+      t.instance.renderSuggestions(GOOGLE_VIRGIN);
+      assert.strictEqual(rows(t.container).length, 4, 'both sections still render');
+    } finally {
+      if (t) clearTimeout(t.instance.debounceTimer);
+      ctx.Object = originalObject;
+    }
+  });
+
+  await check('a company without a presentation entry gets registry initials, at most three, with a neutral tile', async () => {
+    for (const [name, initials] of [['Ocean', 'O'], ['Ocean Blue', 'OB'], ['Ocean Blue Cruise Company', 'OBC'], ['ß Coast Cruises', 'SSC']]) {
+      const t = makeAutocomplete();
+      await t.ready();
+      const raw = registryRaw();
+      raw.companies[0] = { key: 'ocean-blue', name, keywords: ['ocean'] };
+      raw.terminals[0].companies = ['ocean-blue'];
+      t.instance.curatedRegistry = ctx.CuratedPlaces.validateRegistry(raw).registry;
+      typed(t.instance, t.input, 'ocean');
+      clearTimeout(t.instance.debounceTimer);
+      assert.strictEqual(rows(t.container)[0].main, name);
+      assert.ok(t.container.innerHTML.includes('curated-brand--shared'));
+      assert.ok(t.container.innerHTML.includes(`aria-hidden="true">${initials}</div>`));
+      assert.ok(!t.container.innerHTML.includes('>?</div>'));
+      await t.instance.selectSuggestion(0);
+      assert.strictEqual(t.instance.selectedPlace.place_id, TERMINAL_V_ID);
+      assert.strictEqual(t.input.value, TERMINAL_V_LABEL);
+    }
+  });
+
+  await check('Carnival keyboard selection skips both captions and keeps Terminal E identity', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    t.instance.curatedRegistry = ctx.CuratedPlaces.validateRegistry(JSON.parse(read('data/curated-places.json'))).registry;
+    typed(t.instance, t.input, 'Carnival');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    const expected = t.instance.curatedRows[1];
+    const key = (key) => t.instance.handleKeydown({ key, preventDefault() {} });
+    key('ArrowDown'); key('ArrowDown'); key('Enter');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(t.instance.selectedPlace.place_id, expected.placeId);
+    assert.strictEqual(t.input.value, expected.label);
+    assert.ok(t.input.value.startsWith('PortMiami Terminal E,'));
+  });
+
+  await check('Terminal F has one shared, neutrally colored row naming both companies', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    t.instance.curatedRegistry = ctx.CuratedPlaces.validateRegistry(JSON.parse(read('data/curated-places.json'))).registry;
+    typed(t.instance, t.input, 'Terminal F');
+    clearTimeout(t.instance.debounceTimer);
+    assert.deepStrictEqual(rows(t.container).map((r) => r.main), ['Carnival · Disney']);
+    assert.ok(t.container.innerHTML.includes('curated-brand--shared'));
+    assert.ok(t.container.innerHTML.includes('aria-hidden="true">C/D</div>'));
+    assert.ok(t.container.innerHTML.includes('class="suggestion-terminal">Terminal F</span>'));
+  });
+
+  await check('Google heading exists only with a mixed result list, never for loading, failure or Google-only search', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    for (const state of ['idle', 'loading', 'error', 'results']) {
+      t.instance.renderDropdown([], state);
+      assert.ok(!t.container.innerHTML.includes('Google suggestions'));
+      assert.strictEqual(logos(t.container), 0);
+    }
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    assert.strictEqual((t.container.innerHTML.match(/>Google suggestions</g) || []).length, 1);
+    assert.deepStrictEqual(plain(t.instance.predictions), GOOGLE_VIRGIN);
+    typed(t.instance, t.input, 'Virginia');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    assert.ok(!t.container.innerHTML.includes('suggestion-group-label'));
+    assert.strictEqual(logos(t.container), 1);
+    assert.deepStrictEqual(rows(t.container).map((r) => r.index), [0, 1, 2]);
   });
 
   await check('a failed Google request keeps the curated rows, shows a quiet line, and does NOT flag the address as an error', async () => {
