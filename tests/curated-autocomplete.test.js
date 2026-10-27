@@ -257,7 +257,7 @@ async function check(name, fn) {
     assert.ok(!t.container.innerHTML.includes('Loading...'));
   });
 
-  await check('"Virgin voyage": the brand result and the Plantation office sit below Terminal V, and Google\'s own Terminal V row is not shown twice', async () => {
+  await check('"Virgin voyage": the brand result and the Plantation office sit below Terminal V; Google\'s list stays intact, so Google\'s own Terminal V row remains further down', async () => {
     const t = makeAutocomplete();
     await t.ready();
     typed(t.instance, t.input, 'Virgin voyage');
@@ -265,10 +265,13 @@ async function check(name, fn) {
     t.instance.renderSuggestions(GOOGLE_VIRGIN_VOYAGE);
     const list = rows(t.container);
     assert.strictEqual(list[0].terminal, 'pom-terminal-v');
-    assert.deepStrictEqual(list.slice(1).map((r) => r.main), ['Virgin Voyages', 'Virgin Voyages']);
-    assert.strictEqual(t.instance.predictions.length, 2, 'Google\'s duplicate of Terminal V dropped');
-    assert.ok(!t.container.innerHTML.includes('Terminal V - Virgin Voyages.'));
-    assert.strictEqual(t.instance.visibleItems()[2].prediction.place_id, 'ChIJZb6cGlIH2YgRhX7nd38X8lQ', 'indices stay aligned after the dedupe');
+    assert.deepStrictEqual(list.slice(1).map((r) => r.main), ['Virgin Voyages', 'Virgin Voyages', 'Terminal V - Virgin Voyages.']);
+    assert.strictEqual(t.instance.predictions.length, 3, 'nothing of Google\'s is omitted');
+    assert.strictEqual(t.instance.visibleItems()[3].prediction.place_id, TERMINAL_V_ID, 'the same place, in Google\'s own words, stays selectable below');
+    const html = t.container.innerHTML;
+    assert.ok(html.includes('suggestion-group-label'), 'LinkMia rows are captioned');
+    assert.ok(html.indexOf('suggestion-group-label') < html.indexOf('suggestion-item--curated'), 'the caption sits above the LinkMia rows');
+    assert.ok(html.includes('LinkMia · PortMiami cruise terminals'));
   });
 
   await check('a failed Google request keeps the curated rows, shows a quiet line, and does NOT flag the address as an error', async () => {
@@ -305,6 +308,8 @@ async function check(name, fn) {
     clearTimeout(t.instance.debounceTimer);
     t.instance.renderSuggestions([]);
     assert.strictEqual(t.container.innerHTML, '<div class="no-results">No results found</div>');
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    assert.ok(!t.container.innerHTML.includes('suggestion-group-label'), 'no caption when no LinkMia row is shown');
   });
 
   await check('a stale Google response cannot replace the curated-first list for newer text', async () => {

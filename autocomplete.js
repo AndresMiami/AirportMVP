@@ -302,13 +302,6 @@ export class CustomAutocomplete {
         return this.itemIdentity(this.visibleItems()[index]);
     }
 
-    // A Google prediction for a place the curated list already shows would
-    // list the terminal twice; LinkMia's row stays.
-    dedupeGoogle(predictions, curatedRows) {
-        const curatedIds = new Set(curatedRows.map((row) => row.placeId));
-        return predictions.filter((prediction) => !curatedIds.has(prediction?.place_id));
-    }
-
     loadCuratedRegistry() {
         if (this.curatedRegistry || this.curatedLoad) return;
         const core = typeof globalThis !== 'undefined' ? globalThis.CuratedPlaces : undefined;
@@ -374,13 +367,22 @@ export class CustomAutocomplete {
         // marking an available destination invalid (Codex seq:0266 #1).
         // Display only — validation state and any selection stay untouched.
         if (rows.length > 0) this.clearAddressErrorDisplay();
-        const predictions = this.dedupeGoogle(Array.isArray(google) ? google : [], rows);
+        // Google's list stays intact beneath ours: a terminal may appear
+        // again further down in Google's own words, and the preferred row is
+        // still first (Google terms gate; Codex recommendation 2026-10-27).
+        const predictions = Array.isArray(google) ? google : [];
         this.predictions = predictions;
         this.selectedIndex = keep === null
             ? -1
             : this.visibleItems().findIndex((item) => this.itemIdentity(item) === keep);
 
-        const curatedHtml = rows.map((row, index) => `
+        // A small caption says which rows are LinkMia's own; Google's rows
+        // keep Google's look and attribution. Not a row: never focusable,
+        // never counted by the keyboard.
+        const curatedLabel = rows.length > 0
+            ? '<div class="suggestion-group-label">LinkMia · PortMiami cruise terminals</div>'
+            : '';
+        const curatedHtml = curatedLabel + rows.map((row, index) => `
                 <div class="suggestion-item suggestion-item--curated" data-index="${index}" data-terminal="${this.escapeHtml(row.terminalId)}">
                     <div class="suggestion-icon">🚢</div>
                     <div class="suggestion-text">

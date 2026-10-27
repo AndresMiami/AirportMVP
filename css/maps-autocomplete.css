@@ -43,6 +43,18 @@
 .suggestion-item:hover,
 .suggestion-item.highlighted { background: #F2F2F7; }
 
+/* Caption above LinkMia's own rows (curated cruise terminals), so a passenger
+   can tell them from Google's suggestions below. Not a row: never focusable,
+   never counted by the keyboard. Same panel size and row padding. */
+.suggestion-group-label {
+    padding: var(--space-sm) var(--space-md) 2px;
+    font-size: var(--font-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8E8E93;
+}
+
 .suggestion-icon {
     font-size: var(--font-base);
     color: #FF9500;
