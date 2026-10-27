@@ -283,7 +283,15 @@ sailing from it, keywords, provenance, `verifiedAt`). A record without
 `verifiedAt` is an inert DRAFT — never shown, never stored. Verified =
 Andres confirmed the company→terminal assignment and the place ID resolves
 to that terminal. The file stores place IDs plus OUR text only — no Google
-coordinates or content.
+coordinates or content. RELEASE SCOPE (Andres, 2026-10-27, Codex relay
+0279): a VERIFIED TERMINAL SUBSET — every listed terminal is verified; the
+list does not promise every terminal a company uses. Terminals C
+(multi-line) and J are documented follow-ups, never inferred. Google
+terms: `docs/google-places-terms-checklist.md` holds the evidence record
+(documented rules vs verified behaviour vs interpretation; the reviewer's
+finding per question is the release gate); the session-token fallback for
+curated selections is a review packet
+(`docs/plans/session-token-fallback-packet.md`), not applied.
 - `js/curated-places.js` (one UMD module for browser AND functions) validates
   the registry and matches queries: every query token must prefix-match a
   DISTINCT candidate token, direction matters — "virgin"/"virgin voya"

@@ -35,7 +35,14 @@ fixed in the commit that adds the "Search coverage round" section below
 2026-10-27 (third acceptance record below). Codex relay 0278 conveys
 Andres's sequence: release the dropdown first, test it live, fix edge cases
 in small reviewed changes, then continue the terminal-confirmation flow
-(`docs/plans/terminal-confirmation-plan.md`, separate). Still no merge.
+(`docs/plans/terminal-confirmation-plan.md`, separate). Relay 0279
+(2026-10-27) records Andres's release-scope decision (verified terminal
+subset; Terminal C a follow-up) and asks for two records, both written the
+same day: the Google terms EVIDENCE RECORD (documented rules vs verified
+behaviour vs interpretation, `docs/google-places-terms-checklist.md`) and
+the session-token fallback REVIEW PACKET
+(`docs/plans/session-token-fallback-packet.md`, not applied). Still no
+merge.
 
 **Acceptance record (2026-10-27, head `fc64fce`, preview
 deploy-preview-120, signed in as Andres, no booking submitted):**
@@ -114,13 +121,17 @@ which the driver card shows and driver navigation uses.
 Settled: the app gets its own small **verified list of cruise terminals**,
 inserted above Google's suggestions; selecting one carries the **correct
 place ID and an unambiguous terminal name** into booking and driver
-screens; a company with several terminals shows every terminal (no
-guessing); compact initials treatment approved below; passenger default stays 1; pricing
+screens; a company with several VERIFIED terminals shows every one of them
+(no guessing); compact initials treatment approved below; passenger default stays 1; pricing
 unchanged. **Terminal V is the first development milestone; the PR is not
 complete until all seven supported companies (Virgin, Carnival, Royal
 Caribbean, Norwegian, Celebrity, MSC, Disney) have verified terminal
-choices.** Airline → terminal, driver map, Cruise Port path, SMS, photos:
-all after this PR.
+choices.** **Release scope (Andres, 2026-10-27, Codex relay 0279): a
+VERIFIED TERMINAL SUBSET — every listed terminal is verified, but the list
+does not promise every terminal a company uses. Terminal C (PortMiami's
+multi-line terminal, 1741/1751 N Cruise Blvd) and Terminal J are documented
+follow-ups (see the Search coverage round, item 3), never inferred.** Airline
+→ terminal, driver map, Cruise Port path, SMS, photos: all after this PR.
 
 ## Root causes (verified in code)
 
@@ -474,9 +485,16 @@ ports) stay separate decisions for Andres.
 3. **Verified expansion vs inferred assignments — agreed.** Terminals C and
    J stay out until Andres confirms who sails from them today and the place
    IDs resolve; no assignment is taken from older reports or future plans.
-   OPEN FOR ANDRES: does Norwegian currently use Terminal C as a second
-   terminal? If yes, this plan's "every terminal of a company" rule wants a
-   verified C record under Norwegian; if no, nothing changes.
+   SUPERSEDED 2026-10-27 (Andres, relay 0279): the release scope is the
+   verified terminal subset, so Norwegian's possible use of Terminal C is
+   NOT a release decision. FOLLOW-UP (registry round 2, after this release):
+   establish Terminal C's current assignments from a verifiable source
+   (PortMiami's directory calls C multi-line; a July 2026 trade report names
+   Norwegian as a secondary user and Margaritaville at Sea from January
+   2027), resolve its place ID through the quote path, and only then write a
+   record with `source` and `verifiedAt`. Nothing is inferred and no C
+   record is manufactured; Andres is asked only for what a source cannot
+   settle. Terminal J (boutique/luxury lines) follows the same rule.
 4. **Count and port-risk precision — accepted.** PortMiami's cruise-lines
    directory has 26 entries; six overlap the registry (Disney is absent from
    that directory, which does not undo Andres's confirmation), so 20 are
