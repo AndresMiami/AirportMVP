@@ -7,8 +7,10 @@ seq:0262) · v6 narrowed to ranking first (Andres + Codex seq:0263) ·
 **v7 = v6 + Andres's GO-WITH-CHANGES** (all seven companies before
 complete; one record per physical terminal; safe edit pre-read).
 v6/v7 were drafted in the session's plan file and are recorded here for
-review. The current dropdown design is kept; photos are the next stage
-(the v5 mockup `curated-dropdown-mockup.html` describes that stage).
+review. The dropdown design was kept through v7; Andres's compact-design
+decision of 2026-10-27 (see "Compact-design review scope" below) supersedes
+that, and photos/official artwork remain the next stage
+(`curated-dropdown-mockup.html` is now the local review harness).
 
 **Status (2026-10-27):** commits 1–4 done (`0cdadb4` registry + matcher,
 `b3780c5` dropdown, `e9ae5f7` browser identity guard, `054e091` server
@@ -19,7 +21,11 @@ preview building from it (secrets-scan exemption `715a102`). Codex review
 seq:0264 (2026-10-27): findings #1–#3
 fixed and #4's wording aligned in the two commits after `7c754f7`. Full
 suite green. Draft PR #120 open for review and preview (Codex seq:0266: GO
-for controlled browser acceptance); no merge.
+for controlled browser acceptance); no merge. Compact design (Andres,
+2026-10-27; Codex relay 0268 implementation + 0269 corrections after
+Claude's findings 1–7) committed as `433ee09` and pushed to the same draft
+PR under Andres's authorization; the preview rebuilt from it (Netlify
+deploy `6ae074ff72fc4b11298eeab2`). Still no merge.
 
 **Acceptance record (2026-10-27, head `fc64fce`, preview
 deploy-preview-120, signed in as Andres, no booking submitted):**
@@ -37,6 +43,28 @@ panel keeps its height and scrolls. Preview pricing errors by decision
 controlled destination or production. Known, pre-existing: keystrokes
 within ~150 ms of the field's first focus precede the lazily loaded module.
 Open: Google terms gate, Terminal D street number, Andres's merge decision.
+
+**Acceptance record — compact design (2026-10-27, head `433ee09`, preview
+deploy-preview-120 / Netlify deploy `6ae074ff72fc4b11298eeab2`, signed in
+with Andres's account, no booking submitted):** desktop (Claude, app
+browser) and phone (Andres) both pass. Desktop: the preview serves the
+compact module and CSS, and the service worker installs `linkmia-v1.3.50`
+/ `linkmia-runtime-v27`; "Virgin" → one row under the "LinkMia terminals"
+caption (VV tile · Virgin Voyages · PortMiami · Terminal V); "Carnival" →
+three Carnival rows (Terminals D/E/F) above the "Google suggestions"
+caption, Google's rows and logo intact beneath; "Terminal F" → one neutral
+C/D row naming Carnival · Disney, Google's own rows intact beneath (its
+"Cruise Terminal F - Port of Miami" entry included); ArrowDown twice +
+Enter on the Carnival list selects Terminal E — the field shows
+`PortMiami Terminal E, 1265 N Cruise Blvd, Miami, FL 33132` with the
+Google Maps attribution. Node 20 CI for `433ee09`: all three time-zone
+jobs pass (Actions run 40484457875) and the Netlify Deploy Preview check
+passes. Phone: Andres reports the compact rows look right on his phone (no
+further detail recorded). Not verified by either pass: saved booking and
+driver card (preview pricing env unset by decision — wait for a controlled
+destination or production), Google terms gate (checklist Q1–Q8), the three
+terminal-source reconfirmations (Terminal V street, Celebrity → G,
+Disney → F), Codex's re-review of `433ee09`, and Andres's merge decision.
 
 ## Context
 
@@ -311,8 +339,9 @@ push, preview deployment and merge still require Andres's authorization.
 and registry, with illustrative provider responses and external calls
 blocked. It checks local layout/interaction, not live Google results,
 phone keyboard behavior, saved bookings or the driver screen. The earlier
-phone/preview acceptance applies to the earlier design, so this visual
-change still needs its own preview/phone acceptance before release.
+phone/preview acceptance applied to the earlier design; the compact design
+received its own desktop + phone preview acceptance at `433ee09` (see the
+second acceptance record at the top of this plan).
 
 Initial local verification by Codex (before Claude's 0268 review): seven
 relevant Node v24.22.1 suites passed
@@ -342,5 +371,7 @@ removes Object.hasOwn from an isolated VM realm and exercises the real typing
 handler and both result sections. Temporarily restoring the two newer-API
 calls in memory makes this test fail, confirming it detects the regression.
 No file was changed for that negative control. These checks ran on Node
-v24.22.1; they do not replace a real older-phone pass or Node 20 CI. Claude's
-reported 46/46 result covered the earlier packet, not these corrections.
+v24.22.1; they do not replace a real older-phone pass or Node 20 CI. Claude
+then re-ran all 46 suites on the corrected tree (diff SHA `2425efbc…`,
+unchanged across the run) before committing it as `433ee09` and pushing it
+to the draft PR under Andres's authorization.
