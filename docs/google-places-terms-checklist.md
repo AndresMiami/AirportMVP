@@ -155,7 +155,10 @@ Documents read on 2026-10-27, and how:
   = typing + selection + Place Details; omitted or reused token → each
   request billed separately); "Don't programmatically parse the formatted
   address".
-- Session Tokens (Legacy) page ("Last updated 2026-10-27"). Sections used:
+- Session Tokens (Legacy) page (read 2026-10-27; its last-updated line
+  read "2026-10-27" in Claude's fetch and "2026-10-23" in Codex's the same
+  day, relay 0280 — the read date and the document date are different
+  things). Sections used:
   session definition and end; a concluded token is no longer valid; without
   a token each request is billed separately (Autocomplete per-request SKU);
   no statement about a Place Details call for a place that was not one of
@@ -192,15 +195,27 @@ unscheduled decision.
 
 ## Decision record
 
-Reviewed commit: ___ · Preview/deploy: ___
+Reviewed commit: `4fc3a0c` (code identical to the browser-tested `c095d3b`;
+the four commits between are documentation) · Preview/deploy:
+deploy-preview-120, Netlify `6ae10bef4e91a919f74dc8dc` for `4fc3a0c`
+(browser acceptance ran on `6ae0e2a20fca5761311b5103` for `c095d3b`).
 
 Visual treatment to record explicitly: LinkMia-authored plain initials in
 cruise-line-like colors, not supplied/licensed logo assets. This describes
 provenance only; permission and branding conclusions remain for the reviewer.
 
+How this record was filled: Andres asked Codex to answer the open questions
+before the merge (Codex relay 0280, 2026-10-27, "you can answer the question
+before merging"); Codex gave a qualified ENGINEERING assessment on the
+evidence above and primary-source research, Claude recorded it here, and
+Andres's merge of PR #120 is his acceptance of the record. It is not a
+representation of Google's approval of this exact screen or of cruise-line
+trademark permission; those residual interpretations are written into the
+answers.
+
 | Date | Reviewer | Documents/versions read | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Changes required |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| | | | | | | | | | | | |
+| 2026-10-27 | Codex (engineering assessment, relay 0280) at Andres's instruction; Andres's own product decisions already recorded (verified-subset scope, compact design) | Maps Platform ToS (last modified 2026-08-26); Service Specific Terms (2026-10-15); Places API policies (2026-10-23); Place Autocomplete (Legacy) (2026-10-27); Session Tokens (Legacy) (see date note above); Google product-locator and store-locator architecture pages; Google Brand Resource Center "Use Google in plain text"; Partner Marketing Hub "Referring to Google APIs"; Google_Maps_Attribution_Assets.zip | **Yes** — acceptable engineering interpretation: groups visibly separated, Google's results intact, attribution tied to Google's rows; an internal booking selector with a terminal registry is not read as a directory service. Not Google's express approval of the exact panel. | **Yes** — the logo file is byte-identical to Google's official `GoogleMaps_Logo_DarkGray.svg` (5,275 bytes, SHA-256 62c52df68d8f450c860d5d65068fc96d63c2dfaec849b91ac64b3256a898936e); size, clear space, label and placement match the published requirements. | **Yes** — keep the "Google suggestions" caption: Google's brand guidance permits accurate plain-text references; "Google Maps suggestions" is optional wording precision, not a requirement. | **Yes** — our own text, no Google content stored or derived; provenance recorded. | **Yes** — documented place-ID exception. | **Yes** — no Google content in the registry. | **Yes for this release** — keep today's behaviour (one token, cleared after selection); no published rule found that it violates, none that expressly covers it; the prepared fallback becomes a small reviewed follow-up with billing checked against the real GCP report. | **Yes** — retain the approved design, recorded as LinkMia's own identifiers with no official assets and no claim of partnership; formal trademark permission has NOT been established and no legal clearance is claimed. | None before merge. Follow-ups: session-token fallback (own PR); Terminal C/J registry round 2; optional caption wording. |
 
 A "Needs change" on any question is a code or data change on this branch
 before merge, reviewed through the normal loop; a "No" with no acceptable

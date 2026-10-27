@@ -67,13 +67,16 @@ token untouched" (`tests/autocomplete-session.test.js:154-160`) stays valid.
 Documented: with a valid token, a session's prediction requests are bundled
 and only the Details request is charged; without a token, each request is
 billed separately (Autocomplete per-request SKU, plus the Details request).
-So, for a curated selection: today the prediction requests of that session
-are bundled into the Details call; after the change they are billed per
-request. The number of prediction requests per session is small (debounced
-keystrokes, usually three to six). At LinkMia's volume this is cents per
-booking; verify against the GCP billing report after any rollout, not
-against this estimate. Pricing rules, quotes and the passenger's price are
-untouched.
+So, for a curated selection: the EXPECTED behaviour is that today the
+prediction requests of that session are bundled into the Details call, and
+after the change they are billed per request. This is expected behaviour
+from the documentation, not a verified billing outcome: whether current
+curated sessions actually receive bundled billing has not been measured,
+and the number of prediction requests per session (debounced keystrokes)
+and the resulting cost per booking are unmeasured estimates, not a cost
+promise. Check the actual GCP billing report when the follow-up is
+implemented. Pricing rules, quotes and the passenger's price are untouched
+(Codex relay 0280 #4).
 
 ## 5. What this does not change
 
