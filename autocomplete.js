@@ -202,6 +202,10 @@ export class CustomAutocomplete {
         // loading.
         this.curatedSuppressed = false;
         this.loadCuratedRegistry();
+        // New text, new list: nothing is highlighted until the passenger
+        // moves again.
+        this.selectedIndex = -1;
+        this.highlightItem();
         if (this.matchCurated(value).length > 0 || this.curatedList().length > 0) {
             const state = this.googleState || 'idle';
             this.renderDropdown(state === 'results' ? this.predictions : [], state);
@@ -283,6 +287,21 @@ export class CustomAutocomplete {
         ];
     }
 
+    // Stable identity of a visible item, so a keyboard highlight can be
+    // re-found after the list re-renders (Codex seq:0264 #2).
+    itemIdentity(item) {
+        if (!item) return null;
+        if (item.source === 'curated') return `curated:${item.row.terminalId}`;
+        const prediction = item.prediction || {};
+        return `google:${prediction.place_id || prediction.description || ''}`;
+    }
+
+    highlightedIdentity() {
+        const index = this.selectedIndex;
+        if (!Number.isInteger(index) || index < 0) return null;
+        return this.itemIdentity(this.visibleItems()[index]);
+    }
+
     // A Google prediction for a place the curated list already shows would
     // list the terminal twice; LinkMia's row stays.
     dedupeGoogle(predictions, curatedRows) {
@@ -342,12 +361,19 @@ export class CustomAutocomplete {
     // logo travels with Google's rows only: a curated-only list shows no
     // Google content and therefore no Google attribution.
     renderDropdown(google, state) {
+        // A keyboard highlight survives background updates of the SAME text
+        // (Google loading / results / error, a late registry): remember it
+        // by item identity, re-find it in the new list, drop it only when
+        // that item is gone. A new query resets it in handleInput.
+        const keep = this.highlightedIdentity();
         const rows = this.matchCurated(this.input ? this.input.value : '');
         this.curatedRows = rows;
         this.googleState = state;
-        this.selectedIndex = -1;
         const predictions = this.dedupeGoogle(Array.isArray(google) ? google : [], rows);
         this.predictions = predictions;
+        this.selectedIndex = keep === null
+            ? -1
+            : this.visibleItems().findIndex((item) => this.itemIdentity(item) === keep);
 
         const curatedHtml = rows.map((row, index) => `
                 <div class="suggestion-item suggestion-item--curated" data-index="${index}" data-terminal="${this.escapeHtml(row.terminalId)}">
@@ -373,6 +399,7 @@ export class CustomAutocomplete {
         }
 
         if (!curatedHtml && !googleHtml && !notice) {
+            this.selectedIndex = -1;
             this.suggestionsContainer.innerHTML = '';
             this.hideSuggestions();
             return;
@@ -380,6 +407,7 @@ export class CustomAutocomplete {
         this.suggestionsContainer.innerHTML = curatedHtml + googleHtml + attribution + notice;
         this.showSuggestions();
         this.bindRowClicks();
+        if (this.selectedIndex >= 0) this.highlightItem();
     }
 
     // Google rows: one per prediction, numbered AFTER the curated rows so a
@@ -429,6 +457,11 @@ export class CustomAutocomplete {
     async selectSuggestion(index) {
         const item = this.visibleItems()[index];
         if (!item) return;
+        // Selection ends the prediction cycle: the queued debounce and any
+        // in-flight request are invalidated NOW, so a late response cannot
+        // reopen the list and a late failure cannot flag the chosen address
+        // (Codex seq:0264 #1). Same boundary as Escape/blur.
+        this.cancelPendingSuggestions();
         // A curated terminal row carries LinkMia's own label and the registry
         // place ID; a Google row carries the prediction.
         const curated = item.source === 'curated' ? item.row : null;

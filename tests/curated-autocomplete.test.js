@@ -474,6 +474,146 @@ async function check(name, fn) {
     }
   });
 
+  // ---- Codex seq:0264 #1 / #2: selection vs the live debounce, and the keyboard highlight ----
+
+  // Swap the vm's timers for a queue so the REAL 500 ms Google debounce can be
+  // left queued, fired, or proven cancelled.
+  function fakeTimers() {
+    const queue = [];
+    let nextId = 0;
+    const previous = { setTimeout: ctx.setTimeout, clearTimeout: ctx.clearTimeout };
+    ctx.setTimeout = (fn, ms) => { queue.push({ id: ++nextId, fn, ms }); return nextId; };
+    ctx.clearTimeout = (id) => { const i = queue.findIndex((t) => t.id === id); if (i >= 0) queue.splice(i, 1); };
+    return {
+      pending: (ms) => queue.filter((t) => t.ms === ms).length,
+      fire(ms) {
+        const due = queue.filter((t) => t.ms === ms);
+        due.forEach((t) => { queue.splice(queue.indexOf(t), 1); t.fn(); });
+        return due.length;
+      },
+      restore() { ctx.setTimeout = previous.setTimeout; ctx.clearTimeout = previous.clearTimeout; }
+    };
+  }
+  const detailsOk = () => ({ ok: true, json: async () => ({
+    result: { formatted_address: '718 N Cruise Blvd, Miami, FL 33132, USA', geometry: { location: { lat: 25.7800848, lng: -80.179946 } } },
+    attributions: []
+  }) });
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+  await check('#1 selecting a curated row before the debounce fires cancels the queued Google request: no late "Loading…", no late error', async () => {
+    const timers = fakeTimers();
+    try {
+      const t = makeAutocomplete();
+      await t.ready();
+      typed(t.instance, t.input, 'Virgin');
+      assert.strictEqual(timers.pending(500), 1, 'the Google debounce is queued');
+      t.instance.fetchWithTimeout = async (url) => { t.detailsCalls.push(url); return detailsOk(); };
+      t.instance.handleKeydown({ key: 'ArrowDown', preventDefault() {} });
+      await t.instance.selectSuggestion(t.instance.selectedIndex);
+      assert.strictEqual(t.input.value, TERMINAL_V_LABEL);
+      assert.strictEqual(timers.pending(500), 0, 'selection cleared the debounce');
+      assert.strictEqual(timers.fire(500), 0, 'nothing left to fire');
+      assert.strictEqual(t.detailsCalls.length, 1, 'only the Details call ran — no prediction request');
+      assert.ok(t.detailsCalls[0].includes('/details'));
+      assert.strictEqual(t.container.innerHTML, '');
+      assert.strictEqual(t.container.classList.contains('visible'), false);
+      assert.strictEqual(t.input.classList.contains('error'), false);
+      assert.strictEqual(t.instance.isValidated, true);
+    } finally { timers.restore(); }
+  });
+
+  await check('#1 selecting while a Google request is in flight: a late success cannot reopen the list, a late failure cannot flag the chosen address', async () => {
+    for (const outcome of ['success', 'failure']) {
+      const timers = fakeTimers();
+      try {
+        const t = makeAutocomplete();
+        await t.ready();
+        let release;
+        const inFlight = new Promise((resolve, reject) => {
+          release = () => (outcome === 'success'
+            ? resolve({ ok: true, json: async () => ({ predictions: GOOGLE_VIRGIN }) })
+            : reject(new Error('provider down')));
+        });
+        t.instance.fetchWithTimeout = async (url) => {
+          t.detailsCalls.push(url);
+          return url.includes('/autocomplete') ? inFlight : detailsOk();
+        };
+        typed(t.instance, t.input, 'Virgin');
+        assert.strictEqual(timers.fire(500), 1, 'the debounce fired: the Google request is in flight');
+        assert.ok(t.container.innerHTML.includes('Loading...'));
+        await t.instance.selectSuggestion(0);
+        assert.strictEqual(t.input.value, TERMINAL_V_LABEL);
+        release();
+        await tick();
+        assert.strictEqual(t.container.innerHTML, '', `${outcome}: the list stays closed`);
+        assert.strictEqual(t.container.classList.contains('visible'), false);
+        assert.strictEqual(t.input.classList.contains('error'), false, `${outcome}: no error on the chosen address`);
+        assert.strictEqual(addressError.classList.contains('visible'), false);
+        assert.strictEqual(t.instance.isValidated, true);
+        assert.strictEqual(t.input.value, TERMINAL_V_LABEL);
+      } finally { timers.restore(); }
+    }
+  });
+
+  await check('#2 a highlighted curated row keeps its highlight while Google loads, answers or fails; Enter still selects it', async () => {
+    const timers = fakeTimers();
+    try {
+      const t = makeAutocomplete();
+      await t.ready();
+      let release;
+      t.instance.fetchWithTimeout = async (url) => {
+        t.detailsCalls.push(url);
+        if (url.includes('/autocomplete')) {
+          return new Promise((resolve) => { release = () => resolve({ ok: true, json: async () => ({ predictions: GOOGLE_VIRGIN }) }); });
+        }
+        return detailsOk();
+      };
+      typed(t.instance, t.input, 'Virgin');
+      const key = (k) => t.instance.handleKeydown({ key: k, preventDefault() {} });
+      key('ArrowDown');
+      assert.strictEqual(t.instance.selectedIndex, 0);
+      timers.fire(500);
+      assert.ok(t.container.innerHTML.includes('Loading...'));
+      assert.strictEqual(t.instance.selectedIndex, 0, 'highlight survives the loading transition');
+      assert.strictEqual(t.container.items[0].classList.contains('highlighted'), true);
+      release();
+      await tick();
+      assert.ok(t.container.innerHTML.includes('Virginia Key'), 'Google rows arrived');
+      assert.strictEqual(t.instance.selectedIndex, 0, 'highlight survives the results');
+      assert.strictEqual(t.container.items[0].classList.contains('highlighted'), true);
+      assert.strictEqual(t.container.items[1].classList.contains('highlighted'), false);
+      t.instance.showError();
+      assert.strictEqual(t.instance.selectedIndex, 0, 'highlight survives a Google failure');
+      assert.strictEqual(t.container.items[0].classList.contains('highlighted'), true);
+      key('Enter');
+      await tick();
+      assert.ok(t.detailsCalls.some((u) => u.includes(`place_id=${TERMINAL_V_ID}`)), 'Enter selected the terminal');
+      assert.strictEqual(t.input.value, TERMINAL_V_LABEL);
+    } finally { timers.restore(); }
+  });
+
+  await check('#2 a highlighted Google row that the next answer drops loses the highlight; a new keystroke always starts unhighlighted', async () => {
+    const t = makeAutocomplete();
+    await t.ready();
+    typed(t.instance, t.input, 'Virgin');
+    clearTimeout(t.instance.debounceTimer);
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    const key = (k) => t.instance.handleKeydown({ key: k, preventDefault() {} });
+    key('ArrowDown'); key('ArrowDown');
+    assert.strictEqual(t.instance.selectedIndex, 1, 'Virginia Key highlighted');
+    t.instance.renderSuggestions(GOOGLE_VIRGIN.slice(1));   // Virginia Key gone
+    assert.strictEqual(t.instance.selectedIndex, -1);
+    assert.ok(!t.container.innerHTML.includes('highlighted'));
+    t.instance.renderSuggestions(GOOGLE_VIRGIN);
+    key('ArrowDown');
+    assert.strictEqual(t.instance.selectedIndex, 0);
+    typed(t.instance, t.input, 'Virgin v');
+    clearTimeout(t.instance.debounceTimer);
+    assert.strictEqual(t.instance.selectedIndex, -1, 'new text, no highlight');
+    assert.strictEqual(rows(t.container)[0].terminal, 'pom-terminal-v');
+    assert.strictEqual(t.container.items[0].classList.contains('highlighted'), false);
+  });
+
   await check('repo pins: indexMVP loads js/curated-places.js?v=1 before the pending-edit model; the SW precaches both exact URLs', () => {
     const idx = read('indexMVP.html');
     const sw = read('service-worker.js');
