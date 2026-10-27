@@ -1,7 +1,7 @@
 {
   "version": 1,
   "updatedAt": "2026-10-27",
-  "about": "LinkMia's own list of PortMiami cruise terminals. The address search shows matching terminals ABOVE Google's suggestions (js/curated-places.js), and the server writes the terminal's unambiguous label on verified bookings (backend/functions/lib/curated-places.js). One record per PHYSICAL terminal; a terminal lists every company that sails from it. A record WITHOUT verifiedAt is a DRAFT: never shown, never stored. Verified means Andres confirmed the company->terminal assignment AND the placeId resolves to that terminal. placeId is a Google place ID (storable); name/address text is LinkMia's own, never Google content. Candidate place IDs and addresses below were resolved through the Railway Places proxy on 2026-10-27 (Google-returned text is quoted in `source` only as provenance).",
+  "about": "LinkMia's own list of PortMiami cruise terminals. The address search shows matching terminals ABOVE Google's suggestions (js/curated-places.js), and the server writes the terminal's unambiguous label on verified bookings (backend/functions/lib/curated-places.js). One record per PHYSICAL terminal; a terminal lists every company that sails from it. A record WITHOUT verifiedAt is a DRAFT: never shown, never stored. Verified means Andres confirmed the company->terminal assignment AND the placeId resolves to that terminal. placeId is a Google place ID (storable); name/address text is LinkMia's own, never Google content. Place IDs and addresses were resolved through the Railway Places proxy on 2026-10-27 (Google-returned text is quoted in `source` only as provenance); assignments confirmed by Andres on 2026-10-27.",
   "port": {
     "name": "PortMiami",
     "keywords": ["portmiami", "port miami", "port of miami", "miami cruise port", "cruise port", "cruise terminal"]
@@ -33,8 +33,8 @@
       "placeId": "ChIJnYdgPM612YgR21Ck32yqar4",
       "companies": ["royal-caribbean"],
       "keywords": ["terminal a"],
-      "source": "DRAFT. Place ID: autocomplete 'Miami Cruise Terminal A, North Cruise Boulevard' (also Google's only result for 'Royal Caribbean cruise terminal Miami'); Details '2000 N Cruise Blvd, Miami, FL 33132, USA' (25.7725604, -80.1597828), 2026-10-27. Assignment to confirm with Andres.",
-      "verifiedAt": null
+      "source": "Assignment (Royal Caribbean) confirmed by Andres 2026-10-27. Place ID: autocomplete 'Miami Cruise Terminal A, North Cruise Boulevard' (also Google's only result for 'Royal Caribbean cruise terminal Miami'); Details '2000 N Cruise Blvd, Miami, FL 33132, USA' (25.7725604, -80.1597828), 2026-10-27.",
+      "verifiedAt": "2026-10-27"
     },
     {
       "id": "pom-terminal-b",
@@ -43,8 +43,8 @@
       "placeId": "ChIJSVdoWD-02YgREIHkOZv2qt4",
       "companies": ["norwegian"],
       "keywords": ["terminal b"],
-      "source": "DRAFT. Place ID: autocomplete 'Norwegian Cruise Line - Cruise Terminal B, North Cruise Boulevard'; Details '1922-2298 N Cruise Blvd, Miami, FL 33132, USA' (25.7735776, -80.1631949), 2026-10-27. Google gives an address RANGE: Andres to confirm the street number drivers use. Assignment to confirm with Andres.",
-      "verifiedAt": null
+      "source": "Assignment (Norwegian) confirmed by Andres 2026-10-27; the address RANGE Google returns is kept on Andres's decision. Place ID: autocomplete 'Norwegian Cruise Line - Cruise Terminal B, North Cruise Boulevard'; Details '1922-2298 N Cruise Blvd, Miami, FL 33132, USA' (25.7735776, -80.1631949), 2026-10-27.",
+      "verifiedAt": "2026-10-27"
     },
     {
       "id": "pom-terminal-d",
@@ -53,8 +53,8 @@
       "placeId": "ChIJfyrEZD602YgRiuY0TqLEQIM",
       "companies": ["carnival"],
       "keywords": ["terminal d"],
-      "source": "DRAFT. Place ID: autocomplete 'Terminal D, North Cruise Boulevard'; Details 'Terminal D, N Cruise Blvd, Miami, FL 33132, USA' (25.7767329, -80.1706936) - no street number from Google; Andres to supply it. Note: Google's 'Terminal J' record (1435 N Cruise Blvd) carries the SAME coordinates. Assignment (Carnival) to confirm with Andres.",
-      "verifiedAt": null
+      "source": "Assignment (Carnival) confirmed by Andres 2026-10-27. Place ID: autocomplete 'Terminal D, North Cruise Boulevard'; Details 'Terminal D, N Cruise Blvd, Miami, FL 33132, USA' (25.7767329, -80.1706936), 2026-10-27 - Google gives no street number; Andres may supply one (update `address` then). Google's 'Terminal J' record (1435 N Cruise Blvd) carries the same coordinates.",
+      "verifiedAt": "2026-10-27"
     },
     {
       "id": "pom-terminal-e",
@@ -63,18 +63,18 @@
       "placeId": "ChIJeTajB4m12YgRPKuko2C06_o",
       "companies": ["carnival"],
       "keywords": ["terminal e"],
-      "source": "DRAFT. Place ID: autocomplete 'Cruise Terminal E, West Cruise Boulevard'; Details '1265 W Cruise Blvd, Miami, FL 33132, USA' (25.7777121, -80.1737839), 2026-10-27. Assignment (Carnival) to confirm with Andres.",
-      "verifiedAt": null
+      "source": "Assignment (Carnival) confirmed by Andres 2026-10-27. Place ID: autocomplete 'Cruise Terminal E, West Cruise Boulevard'; Details '1265 W Cruise Blvd, Miami, FL 33132, USA' (25.7777121, -80.1737839), 2026-10-27.",
+      "verifiedAt": "2026-10-27"
     },
     {
       "id": "pom-terminal-f",
       "name": "PortMiami Terminal F",
       "address": "1104 Port Miami Tunl, Miami, FL 33132",
       "placeId": "ChIJi-HC0n212YgR27EH49EZEws",
-      "companies": ["carnival"],
-      "keywords": ["terminal f"],
-      "source": "DRAFT. Place ID: autocomplete 'Cruise Terminal F - Port of Miami, Port Miami Tunnel'; Details '1104 Port Miami Tunl, Miami, FL 33132, USA' (25.7787235, -80.1749738), 2026-10-27. Google's 'Disney Cruise Terminal' record has the SAME address and coordinates - probably one building: Andres decides whether Disney merges into this record. Assignment (Carnival) to confirm with Andres.",
-      "verifiedAt": null
+      "companies": ["carnival", "disney"],
+      "keywords": ["terminal f", "disney terminal"],
+      "source": "Assignment (Carnival AND Disney) confirmed by Andres 2026-10-27: Google's separate 'Disney Cruise Terminal' record (ChIJPRwBWz202YgR7Zch-1f3RyI, same address, 25.7787304, -80.17546) is this building, merged here on Andres's decision. Place ID: autocomplete 'Cruise Terminal F - Port of Miami, Port Miami Tunnel'; Details '1104 Port Miami Tunl, Miami, FL 33132, USA' (25.7787235, -80.1749738), 2026-10-27.",
+      "verifiedAt": "2026-10-27"
     },
     {
       "id": "pom-terminal-g",
@@ -83,8 +83,8 @@
       "placeId": "ChIJ9ypKzz202YgRPkzwgZm4tSg",
       "companies": ["celebrity"],
       "keywords": ["terminal g"],
-      "source": "DRAFT. Place ID: autocomplete 'Celebrity Cruise Terminal G, North Cruise Boulevard'; Details '925 N Cruise Blvd, Miami, FL 33132, USA' (25.7800304, -80.178621), 2026-10-27. Google also has a generic 'Cruise Terminal G - Port of Miami.' record at 1103 N Cruise Blvd (ChIJizXAexi02YgRXhQQJz18BZU, 25.7806676, -80.1790673): Andres to say which entrance drivers use. Assignment (Celebrity) to confirm with Andres.",
-      "verifiedAt": null
+      "source": "Assignment (Celebrity) confirmed by Andres 2026-10-27, using Google's Celebrity-named record on his decision. Place ID: autocomplete 'Celebrity Cruise Terminal G, North Cruise Boulevard'; Details '925 N Cruise Blvd, Miami, FL 33132, USA' (25.7800304, -80.178621), 2026-10-27. Google also has a generic 'Cruise Terminal G - Port of Miami.' record at 1103 N Cruise Blvd (ChIJizXAexi02YgRXhQQJz18BZU), not used.",
+      "verifiedAt": "2026-10-27"
     },
     {
       "id": "pom-terminal-aa",
@@ -93,18 +93,8 @@
       "placeId": "ChIJcfuyj0q12YgRUEE8DKXTf-Y",
       "companies": ["msc"],
       "keywords": ["terminal aa", "msc terminal"],
-      "source": "DRAFT. Place ID: autocomplete 'Cruise Terminal AA - PortMiami - MSC Cruise Line, North Cruise Boulevard'; Details '2200 N Cruise Blvd, Miami, FL 33132, USA' (25.771879, -80.1584102), 2026-10-27. Assignment (MSC) to confirm with Andres.",
-      "verifiedAt": null
-    },
-    {
-      "id": "pom-disney-terminal",
-      "name": "PortMiami Disney Cruise Terminal",
-      "address": "1104 Port Miami Tunl, Miami, FL 33132",
-      "placeId": "ChIJPRwBWz202YgR7Zch-1f3RyI",
-      "companies": ["disney"],
-      "keywords": ["disney terminal"],
-      "source": "DRAFT. Place ID: autocomplete 'Disney Cruise Terminal, Port Miami Tunnel'; Details '1104 Port Miami Tunl, Miami, FL 33132, USA' (25.7787304, -80.17546), 2026-10-27. Same address and coordinates as Terminal F: if it is the same building, merge into pom-terminal-f with companies [carnival, disney] and drop this record. Andres decides.",
-      "verifiedAt": null
+      "source": "Assignment (MSC) confirmed by Andres 2026-10-27. Place ID: autocomplete 'Cruise Terminal AA - PortMiami - MSC Cruise Line, North Cruise Boulevard'; Details '2200 N Cruise Blvd, Miami, FL 33132, USA' (25.771879, -80.1584102), 2026-10-27.",
+      "verifiedAt": "2026-10-27"
     }
   ]
 }

@@ -12,9 +12,10 @@
 // and the registry that feeds it.
 //
 // PR_COMPLETE: the PR is not complete until all seven supported companies
-// have verified terminal choices. Until the registry-completion commit flips
-// this to true the coverage section only REPORTS; afterwards it asserts.
-const PR_COMPLETE = false;
+// have verified terminal choices. The registry-completion commit (Andres's
+// confirmations, 2026-10-27) flipped this to true: the coverage section now
+// ASSERTS that every supported company has a verified terminal.
+const PR_COMPLETE = true;
 
 const assert = require('assert');
 const fs = require('fs');

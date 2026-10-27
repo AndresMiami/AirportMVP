@@ -12,9 +12,11 @@ review. The current dropdown design is kept; photos are the next stage
 
 **Status (2026-10-27):** commits 1–4 done (`0cdadb4` registry + matcher,
 `b3780c5` dropdown, `e9ae5f7` browser identity guard, `054e091` server
-projection); `0bdca4f` holds the six remaining terminals as inert drafts
-with resolved place IDs, awaiting Andres's verification (commit 5); docs
-(commit 6) follow. Codex review seq:0264 (2026-10-27): findings #1–#3
+projection); `0bdca4f` resolved the six remaining terminals as drafts and
+commit 5 verified them on Andres's confirmations (2026-10-27); docs
+(commit 6, `3a89465`) done. Draft PR #120 open with CI and the Netlify
+preview building from it (secrets-scan exemption `715a102`). Codex review
+seq:0264 (2026-10-27): findings #1–#3
 fixed and #4's wording aligned in the two commits after `7c754f7`. Full
 suite green. Nothing pushed, no PR.
 
@@ -80,9 +82,11 @@ terminals: [{ id:"pom-terminal-v", name:"PortMiami Terminal V",
   skip them), so drafts can sit in the file safely.
 - Coverage — PR complete only when every row is verified (Andres confirms
   the assignment; Claude resolves the place ID and records `source`).
-  Resolved 2026-10-27 (drafts): A → Royal Caribbean, B → Norwegian,
-  D/E/F → Carnival, G → Celebrity, AA → MSC, Disney Cruise Terminal (same
-  address/coordinates as F — possibly one building).
+  **Verified by Andres 2026-10-27:** A → Royal Caribbean, B → Norwegian
+  (Google's address range kept), D/E/F → Carnival, F also → Disney (Google's
+  separate "Disney Cruise Terminal" record is the same building, merged),
+  G → Celebrity (the Celebrity-named record, 925 N Cruise Blvd), AA → MSC.
+  Open: Terminal D's street number (Google has none; Andres may supply it).
 - Browser: `/data/curated-places.json?v=1` (precached, versioned). Functions:
   static `require` (esbuild inlines JSON). Server copy decides labels;
   invalid registry → feature off.
@@ -206,7 +210,8 @@ passenger code.
    concurrent-edit / retry tests ✔ `054e091`
 5. `feat(places)`: remaining six companies verified (`verifiedAt` set,
    place IDs resolved, `source` recorded) — drafts resolved in `0bdca4f`,
-   verification pending — **PR complete only after this**
+   verified on Andres's confirmations 2026-10-27 ✔ (coverage now asserted
+   by `PR_COMPLETE = true`)
 6. `docs`: CLAUDE.md section, acceptance record
 
 ## Verification
