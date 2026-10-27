@@ -23,6 +23,22 @@
 // "portmiami") yields the terminal row naming every company that sails from
 // it. A terminal is never listed twice; when two companies sharing a
 // terminal both match, the row names them all rather than guessing.
+//
+// TERMINAL LETTER (Codex relay 0272 #1): PortMiami names its terminals by
+// one or two letters (A–J, V, AA). A word of at most MAX_DESIGNATOR_LENGTH
+// characters standing right before or right after the word "terminal" (or
+// any unfinished prefix of it) is read as that letter and matches ONLY the
+// start of a terminal's own letter(s): "terminal a" -> A and AA, "terminal
+// aa" -> AA, "terminal c" -> nothing while no verified Terminal C exists
+// (Google's rows stand alone). It is never read as the start of another
+// word, so "c" cannot reach "cruise" and "d" cannot reach "disney" — the
+// defect was "terminal c" listing every terminal and "norwegian terminal c"
+// answering B. Longer words next to "terminal" keep ordinary prefix
+// completion ("terminal carnival", "msc terminal"), and letters elsewhere
+// do too ("norwegian c" is still Norwegian Cruise Line being typed). Every
+// terminal record names its letter(s) after the word "terminal" in its name
+// or keywords; the validator requires one, bounds its length and keeps it
+// unique across terminals.
 
 (function (root, factory) {
   const api = factory();
@@ -32,6 +48,11 @@
   'use strict';
 
   const MIN_QUERY_LENGTH = 3;
+  const TERMINAL_WORD = 'terminal';
+  // PortMiami's terminal letters are one or two characters (A–J, V, AA). A
+  // registry entry whose letter is longer fails validation rather than
+  // silently falling outside the terminal-letter rule.
+  const MAX_DESIGNATOR_LENGTH = 2;
   // create-booking / update-pending-booking bound stored labels to 500
   // characters (text(..., 500)); a label the server could never store must
   // never be offered.
@@ -82,6 +103,48 @@
     const seen = new Set();
     phrases.forEach((phrase) => tokensOf(phrase).forEach((token) => seen.add(token)));
     return [...seen];
+  }
+
+  // "terminal", or the start of it still being typed ("term").
+  function isTerminalWord(token) {
+    return token.length > 0 && TERMINAL_WORD.startsWith(token);
+  }
+
+  // The letter(s) a registry record gives its terminal: every token that
+  // directly follows the exact word "terminal" in the phrases ("PortMiami
+  // Terminal AA" -> "aa"; "msc terminal" contributes nothing).
+  function designatorsIn(phrases) {
+    const seen = new Set();
+    phrases.forEach((phrase) => {
+      const tokens = tokensOf(phrase);
+      tokens.forEach((token, index) => {
+        if (token === TERMINAL_WORD && index + 1 < tokens.length) seen.add(tokens[index + 1]);
+      });
+    });
+    return [...seen];
+  }
+
+  // Splits a normalized query into ordinary tokens and the terminal letters
+  // it spells out: a token of at most MAX_DESIGNATOR_LENGTH characters right
+  // before or right after a terminal word. The terminal word itself stays an
+  // ordinary token (it still has to prefix-match "terminal" in a candidate),
+  // and a longer neighbour is an ordinary word ("terminal carnival").
+  function parseQuery(normalizedQuery) {
+    const tokens = normalizedQuery ? String(normalizedQuery).split(' ') : [];
+    const letterAt = new Set();
+    tokens.forEach((token, index) => {
+      if (!isTerminalWord(token)) return;
+      [index - 1, index + 1].forEach((neighbour) => {
+        if (neighbour < 0 || neighbour >= tokens.length) return;
+        const word = tokens[neighbour];
+        if (isTerminalWord(word) || word.length > MAX_DESIGNATOR_LENGTH) return;
+        letterAt.add(neighbour);
+      });
+    });
+    return {
+      tokens: tokens.filter((token, index) => !letterAt.has(index)),
+      designators: tokens.filter((token, index) => letterAt.has(index))
+    };
   }
 
   // Every query token must prefix-match a DISTINCT candidate token. The
@@ -159,6 +222,7 @@
     const terminals = [];
     const terminalIds = new Set();
     const placeIds = new Set();
+    const designatorOwners = new Map();
     if (!Array.isArray(raw.terminals)) {
       fail('terminals must be an array');
     } else {
@@ -175,6 +239,16 @@
           return fail(`${where} companies must list distinct known company keys`);
         }
         if (!stringList(terminal.keywords, 40)) return fail(`${where} keywords invalid`);
+        // One record per PHYSICAL terminal, so its letter(s) are its own:
+        // required (the terminal-letter rule can only admit a record that
+        // names one), bounded, and never shared with another record.
+        const designators = designatorsIn([terminal.name, ...terminal.keywords]);
+        if (designators.length === 0) return fail(`${where} must name its terminal letter after the word "terminal" in its name or keywords`);
+        const longLetter = designators.find((letter) => letter.length > MAX_DESIGNATOR_LENGTH);
+        if (longLetter) return fail(`${where} terminal letter "${longLetter}" exceeds ${MAX_DESIGNATOR_LENGTH} characters`);
+        const takenLetter = designators.find((letter) => designatorOwners.has(letter));
+        if (takenLetter) return fail(`${where} terminal letter "${takenLetter}" already belongs to ${designatorOwners.get(takenLetter)}`);
+        designators.forEach((letter) => designatorOwners.set(letter, terminal.id));
         if (!trimmedString(terminal.source, 1000)) return fail(`${where} source is required`);
         const verifiedAt = terminal.verifiedAt == null ? null : terminal.verifiedAt;
         if (verifiedAt !== null && (typeof verifiedAt !== 'string' || !DATE_RE.test(verifiedAt))) {
@@ -205,6 +279,7 @@
           placeId,
           companies: terminal.companies.slice(),
           keywords: terminal.keywords.slice(),
+          designators,
           source: terminal.source,
           verifiedAt,
           verified
@@ -259,7 +334,14 @@
     if (!registry || !Array.isArray(registry.verified) || registry.verified.length === 0) return [];
     const normalizedQuery = normalize(query);
     if (normalizedQuery.length < MIN_QUERY_LENGTH) return [];
-    const queryTokens = normalizedQuery.split(' ');
+    const { tokens: queryTokens, designators } = parseQuery(normalizedQuery);
+    // A spelled-out terminal letter admits only the terminals whose own
+    // letter(s) start with it. With none admitted LinkMia offers nothing and
+    // Google's rows stand alone — never another terminal.
+    const eligible = registry.verified.filter((terminal) =>
+      designators.every((letter) => Array.isArray(terminal.designators)
+        && terminal.designators.some((own) => own.startsWith(letter))));
+    if (eligible.length === 0) return [];
     const rows = new Map();
     const position = (terminal) => registry.verified.indexOf(terminal);
 
@@ -284,7 +366,7 @@
     registry.companies.forEach((company) => {
       const score = bestPhraseScore(queryTokens, normalizedQuery, [company.name, ...company.keywords]);
       if (!score) return;
-      registry.verified
+      eligible
         .filter((terminal) => terminal.companies.includes(company.key))
         .forEach((terminal) => offer(terminal, company, 'company', score));
     });
@@ -292,14 +374,14 @@
     // 2. Terminal- or port-driven: "terminal a", "portmiami" -> the terminal
     //    row, naming its companies.
     const portPhrases = [registry.port.name, ...registry.port.keywords];
-    registry.verified.forEach((terminal) => {
+    eligible.forEach((terminal) => {
       const score = bestPhraseScore(queryTokens, normalizedQuery, [terminal.name, ...terminal.keywords, ...portPhrases]);
       if (score) offer(terminal, null, 'terminal', score);
     });
 
     // 3. Mixed wording ("virgin terminal", "carnival terminal d"): company
     //    words plus terminal words in one query, for terminals not yet matched.
-    registry.verified.forEach((terminal) => {
+    eligible.forEach((terminal) => {
       if (rows.has(terminal.id)) return;
       terminal.companies.forEach((key) => {
         const company = registry.companyByKey[key];
@@ -316,8 +398,10 @@
   return {
     MIN_QUERY_LENGTH,
     MAX_LABEL_LENGTH,
+    MAX_DESIGNATOR_LENGTH,
     normalize,
     tokensMatch,
+    parseQuery,
     validateRegistry,
     findVerifiedByPlaceId,
     terminalLabel,

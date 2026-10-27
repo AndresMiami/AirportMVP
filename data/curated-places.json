@@ -7,13 +7,13 @@
     "keywords": ["portmiami", "port miami", "port of miami", "miami cruise port", "cruise port", "cruise terminal"]
   },
   "companies": [
-    { "key": "virgin", "name": "Virgin Voyages", "keywords": ["virgin", "virgin voyages", "virgin voyage"] },
-    { "key": "carnival", "name": "Carnival Cruise Line", "keywords": ["carnival"] },
-    { "key": "royal-caribbean", "name": "Royal Caribbean", "keywords": ["royal", "royal caribbean", "rccl"] },
-    { "key": "norwegian", "name": "Norwegian Cruise Line", "keywords": ["norwegian", "ncl"] },
+    { "key": "virgin", "name": "Virgin Voyages", "keywords": ["virgin", "virgin voyages", "virgin voyage", "virgin cruises"] },
+    { "key": "carnival", "name": "Carnival Cruise Line", "keywords": ["carnival", "carnival cruises", "carnival cruise lines", "ccl"] },
+    { "key": "royal-caribbean", "name": "Royal Caribbean", "keywords": ["royal", "royal caribbean", "royal caribbean international", "royal caribbean cruises", "rccl", "rci", "rcl"] },
+    { "key": "norwegian", "name": "Norwegian Cruise Line", "keywords": ["norwegian", "norwegian cruises", "norwegian cruise lines", "ncl"] },
     { "key": "celebrity", "name": "Celebrity Cruises", "keywords": ["celebrity"] },
     { "key": "msc", "name": "MSC Cruises", "keywords": ["msc"] },
-    { "key": "disney", "name": "Disney Cruise Line", "keywords": ["disney", "dcl"] }
+    { "key": "disney", "name": "Disney Cruise Line", "keywords": ["disney", "disney cruises", "disney cruise lines", "dcl"] }
   ],
   "terminals": [
     {

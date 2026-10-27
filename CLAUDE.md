@@ -289,6 +289,19 @@ coordinates or content.
   DISTINCT candidate token, direction matters — "virgin"/"virgin voya"
   match, "virginia" never does; a company query lists every one of its
   terminals; a shared terminal appears once naming every company; no cap.
+  TERMINAL LETTER (Codex relay 0272 #1): a word of at most two characters
+  right before or after the word "terminal" (or an unfinished prefix of
+  it) is the terminal letter and matches ONLY the start of a terminal's
+  own letter(s) — "terminal a" → A then AA, "terminal aa" → AA, "terminal
+  c" / "norwegian terminal c" → nothing while no verified C exists (the
+  letter never reaches "cruise" or "disney"); longer neighbours ("terminal
+  carnival", "msc terminal") and letters elsewhere ("norwegian c") keep
+  prefix completion. The validator requires every record's letter after
+  "terminal" in its name/keywords, bounds it to two characters and keeps
+  it unique (one record per physical terminal). Company keywords carry
+  the ways passengers write a line — full name, plural, initials ("royal
+  caribbean international", "rci", "rcl", "carnival cruises", "ccl",
+  "ncl", "dcl", …) — not fuzzy matching.
 - `autocomplete.js` renders curated rows ABOVE Google's, synchronously on
   the keystroke; Google's loading/empty/error
   states live below and never erase them; one ordered list for

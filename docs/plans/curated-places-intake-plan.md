@@ -26,8 +26,12 @@ for controlled browser acceptance); no merge. Compact design (Andres,
 Claude's findings 1–7) committed as `433ee09` and pushed to the same draft
 PR under Andres's authorization; the preview rebuilt from it (Netlify
 deploy `6ae074ff72fc4b11298eeab2`). Andres re-confirmed the three
-terminal-source questions on 2026-10-27 (all stand as stored). Still no
-merge.
+terminal-source questions on 2026-10-27 (all stand as stored). Codex relay
+0272 (2026-10-27, review of Claude's search-coverage assessment) superseded
+0271's "no new code findings" with one P2 (explicit terminal letters
+promoted the wrong terminal) and one P3 (Royal Caribbean aliases); both are
+fixed in the commit that adds the "Search coverage round" section below.
+Still no merge.
 
 **Acceptance record (2026-10-27, head `fc64fce`, preview
 deploy-preview-120, signed in as Andres, no booking submitted):**
@@ -160,6 +164,17 @@ Terminal/port match ("terminal v", "portmiami", "cruise") → the terminal
 row showing its companies. Score: exact phrase 3 · company/terminal keyword
 or name prefix 2 · mixed company+terminal wording 1; ties by registry order
 (wording aligned with the code, Codex seq:0264 #4). Not fuzzy.
+**Terminal letter (Codex relay 0272 #1):** a word of at most two characters
+right before or right after the word "terminal" (or an unfinished prefix
+of it) is the terminal letter and matches only the start of a terminal's
+own letter(s) — "terminal a" → A then AA, "terminal aa" → AA, "terminal c"
+/ "c terminal" / "norwegian terminal c" → nothing while no verified
+Terminal C exists (Google's rows stand alone; a letter never reaches
+"cruise" or "disney"). Longer neighbours ("terminal carnival", "msc
+terminal") and letters elsewhere ("norwegian c" → B) keep prefix
+completion. Each record names its letter after the word "terminal" in its
+name or keywords; the validator requires it, bounds it to two characters
+and keeps it unique across records.
 
 ### 3. Dropdown — `autocomplete.js` (same look as today)
 - Curated rows reuse `.suggestion-item`: main = `Virgin Voyages — PortMiami
@@ -326,7 +341,10 @@ passenger code.
    colored VV example for every company; no generic ship icons or official
    logo artwork. Codex implements this specific change, Claude reviews it.
 3. Company not stored on the booking (only the terminal name/address) — OK?
-4. Who reads Google's Places terms for the release gate.
+4. Who reads Google's Places terms for the release gate — **settled by
+   Andres 2026-10-27: he reads `docs/google-places-terms-checklist.md`
+   (Q1–Q8) himself and answers in chat; the checklist's decision record is
+   filled from his answers with the reviewed commit and preview deploy.**
 
 Next stage (own PR, reuses this registry): photos/official logo artwork only
 after its separate approval. Compact initials, terminal badges and section
@@ -383,3 +401,64 @@ v24.22.1; they do not replace a real older-phone pass or Node 20 CI. Claude
 then re-ran all 46 suites on the corrected tree (diff SHA `2425efbc…`,
 unchanged across the run) before committing it as `433ee09` and pushing it
 to the draft PR under Andres's authorization.
+
+### Search coverage round (Codex relay 0272, 2026-10-27)
+
+Codex reviewed Claude's assessment of the registry against PortMiami's
+official pages and probed the real matcher, superseding relay 0271's "no
+new code findings" with one P2 and one P3, both to be fixed in this PR
+before merge; the wider scope questions (more companies, ship names, other
+ports) stay separate decisions for Andres.
+
+1. **P2 — explicit terminal letters (fixed here).** At `bc736c8` a lone
+   letter prefix-matched any word: "terminal c" listed every terminal ("c"
+   → "cruise"), "terminal d" added Disney's F ("d" → "disney"), "Norwegian
+   terminal c" answered B and "Royal Caribbean terminal c" answered A — a
+   destination-selection defect against this plan's no-guessing rule. The
+   matcher now carries the TERMINAL-LETTER rule recorded in §2: a word of at
+   most two characters right before or right after the word "terminal" (or
+   an unfinished prefix of it) is the terminal letter and matches only the
+   start of a terminal's own letter(s) — "terminal a" → A then AA, "terminal
+   aa" → AA, "terminal c" / "c terminal" / "norwegian c terminal" / "term
+   c" → nothing (Google's rows stand alone). Longer words next to
+   "terminal" and letters elsewhere keep ordinary prefix completion
+   ("terminal carnival", "msc terminal", "terminal msc", "norwegian c" → B,
+   "terminal dis" → F). The validator requires every record to name its
+   letter after the word "terminal" in its name or keywords, bounds it to
+   two characters and keeps it unique across records (one record per
+   physical terminal); the real registry yields exactly V, A, B, D, E, F,
+   G, AA. Executed in `tests/curated-places-registry.test.js` (fixture
+   rule, `parseQuery` pins, schema guards, and Codex's four queries plus the
+   reverse word order and the unfinished word on the real registry).
+   Negative control: the same suite run against the `bc736c8` module fails
+   at the first terminal-letter check. Deliberate residual: a two-letter
+   prefix of a company word next to "terminal" ("terminal ca") finds
+   nothing until a third letter is typed.
+2. **P3 — Royal Caribbean aliases (fixed here, data only).** Keywords added:
+   "royal caribbean international", "royal caribbean cruises", "rci",
+   "rcl". The probe showed the same gap class for plural forms and one more
+   initialism, so the same commit also adds "carnival cruises", "carnival
+   cruise lines", "ccl", "norwegian cruises", "norwegian cruise lines",
+   "disney cruises", "disney cruise lines" and "virgin cruises" — ways
+   passengers write already supported companies (Claude's addition beyond
+   Codex's three; Andres may strike any). Executed on the real registry. No
+   name, address, place ID, assignment or `verifiedAt` changed.
+3. **Verified expansion vs inferred assignments — agreed.** Terminals C and
+   J stay out until Andres confirms who sails from them today and the place
+   IDs resolve; no assignment is taken from older reports or future plans.
+   OPEN FOR ANDRES: does Norwegian currently use Terminal C as a second
+   terminal? If yes, this plan's "every terminal of a company" rule wants a
+   verified C record under Norwegian; if no, nothing changes.
+4. **Count and port-risk precision — accepted.** PortMiami's cruise-lines
+   directory has 26 entries; six overlap the registry (Disney is absent from
+   that directory, which does not undo Andres's confirmation), so 20 are
+   uncovered, not 19. The one wrong-port exposure is a company-only query
+   such as "Celebrity", whose row explicitly says PortMiami; "Celebrity Port
+   Everglades" finds no curated row.
+5. **Limits.** Node-only verification of the matcher on the real registry;
+   no new browser, phone or saved-booking pass for this head yet. The
+   service-worker pair stays v1.3.50 / runtime-v27: the PR is unreleased,
+   and the worker serves `.js`/`.json` network-first, so the preview picks
+   the changed module up without a bump. Still open before merge: the
+   Google terms/branding decision record (Andres reading Q1–Q8), Codex's
+   re-review of this head, Andres's merge decision.

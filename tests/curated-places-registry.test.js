@@ -186,6 +186,48 @@ async function check(name, fn) {
     assert.strictEqual(match('carnival terminal d')[0].companyKey, 'carnival');
   });
 
+  // ------------------------------------------------ the terminal letter
+  // Codex relay 0272 #1 (at bc736c8): "terminal c" listed every terminal
+  // because a lone "c" prefix-matched "cruise", "terminal d" added Disney's
+  // Terminal F through "disney", and "norwegian terminal c" answered B.
+
+  await check('a letter next to the word "terminal" is the terminal letter: "terminal c" and "c terminal" find nothing (no verified Terminal C)', () => {
+    for (const query of ['terminal c', 'c terminal', 'Terminal C', 'terminal ca', 'te c', 'term c', 'cruise terminal c']) {
+      assert.deepStrictEqual(match(query), [], query);
+    }
+  });
+
+  await check('a terminal letter beside a company name narrows to that letter, never to the company\'s other terminals', () => {
+    assert.deepStrictEqual(ids(match('celebrity terminal c')), [], '"celebrity terminal c": Celebrity sails from A here, not C');
+    assert.deepStrictEqual(ids(match('carnival terminal c')), [], '"carnival terminal c": Carnival has D/E/F, not C');
+    assert.deepStrictEqual(ids(match('carnival terminal e')), ['pom-terminal-e']);
+    assert.deepStrictEqual(ids(match('carnival e terminal')), ['pom-terminal-e']);
+    assert.deepStrictEqual(ids(match('terminal d')), ['pom-terminal-d']);
+    assert.deepStrictEqual(ids(match('d terminal')), ['pom-terminal-d']);
+    assert.deepStrictEqual(ids(match('a terminal')), ['pom-terminal-a']);
+  });
+
+  await check('letters elsewhere, and longer words next to "terminal", keep ordinary prefix completion', () => {
+    assert.deepStrictEqual(ids(match('celebrity c')), ['pom-terminal-a'], '"celebrity c" is Celebrity Cruises being typed');
+    assert.deepStrictEqual(ids(match('virgin v')), ['pom-terminal-v'], '"virgin v" is Virgin Voyages being typed');
+    assert.deepStrictEqual(ids(match('terminal carnival')), ['pom-terminal-d', 'pom-terminal-e', 'pom-terminal-f']);
+    assert.deepStrictEqual(ids(match('carnival terminal')), ['pom-terminal-d', 'pom-terminal-e', 'pom-terminal-f']);
+    assert.deepStrictEqual(ids(match('terminal')), ['pom-terminal-v', 'pom-terminal-a', 'pom-terminal-d', 'pom-terminal-e', 'pom-terminal-f'], 'the bare word still lists every terminal');
+  });
+
+  await check('parseQuery: the letter is a token of at most two characters beside a (possibly unfinished) terminal word', () => {
+    assert.strictEqual(core.MAX_DESIGNATOR_LENGTH, 2);
+    assert.deepStrictEqual(core.parseQuery('norwegian terminal c'), { tokens: ['norwegian', 'terminal'], designators: ['c'] });
+    assert.deepStrictEqual(core.parseQuery('c terminal'), { tokens: ['terminal'], designators: ['c'] });
+    assert.deepStrictEqual(core.parseQuery('terminal aa'), { tokens: ['terminal'], designators: ['aa'] });
+    assert.deepStrictEqual(core.parseQuery('te c'), { tokens: ['te'], designators: ['c'] });
+    assert.deepStrictEqual(core.parseQuery('msc terminal'), { tokens: ['msc', 'terminal'], designators: [] });
+    assert.deepStrictEqual(core.parseQuery('terminal carnival'), { tokens: ['terminal', 'carnival'], designators: [] });
+    assert.deepStrictEqual(core.parseQuery('terminal'), { tokens: ['terminal'], designators: [] });
+    assert.deepStrictEqual(core.parseQuery('celebrity c'), { tokens: ['celebrity', 'c'], designators: [] });
+    assert.deepStrictEqual(core.parseQuery(''), { tokens: [], designators: [] });
+  });
+
   await check('a draft (no verifiedAt) is inert: "norwegian", "ncl" and "terminal b" find nothing', () => {
     assert.deepStrictEqual(match('norwegian'), []);
     assert.deepStrictEqual(match('ncl'), []);
@@ -261,6 +303,14 @@ async function check(name, fn) {
     reject((raw) => { raw.version = 0; }, 'bad version');
   });
 
+  await check('schema: every terminal names its letter after the word "terminal"; letters are short and unique', () => {
+    reject((raw) => { raw.terminals[0].name = 'PortMiami Pier V'; raw.terminals[0].keywords = ['pier v']; }, 'no terminal letter');
+    reject((raw) => { raw.terminals[0].keywords = ['terminal v', 'terminal aaa']; }, 'a letter longer than two characters');
+    reject((raw) => { raw.terminals[2].keywords = ['terminal d', 'terminal v']; }, 'a letter already owned by another terminal');
+    const result = core.validateRegistry(fixtureRaw());
+    assert.deepStrictEqual(result.registry.terminals.map((terminal) => terminal.designators), [['v'], ['a'], ['d'], ['e'], ['f'], ['b']]);
+  });
+
   // ----------------------------------------------------- the real file
 
   await check('data/curated-places.json validates, on the browser side and the server side alike', () => {
@@ -301,6 +351,52 @@ async function check(name, fn) {
     const f = core.matchCurated('Terminal F', real);
     assert.deepStrictEqual(f.map((r) => r.title), ['PortMiami Terminal F — Carnival Cruise Line, Disney Cruise Line']);
     assert.deepStrictEqual(core.matchCurated('Virginia', real), []);
+  });
+
+  const realLetters = (query) => core.matchCurated(query, core.validateRegistry(realRaw).registry)
+    .map((row) => row.terminalId.replace('pom-terminal-', ''));
+
+  await check('real registry: an explicit terminal letter never promotes another terminal (Codex relay 0272 #1)', () => {
+    // Codex's four reproductions at bc736c8 answered V A B D E F G AA / D F / B / A.
+    assert.deepStrictEqual(realLetters('terminal c'), []);
+    assert.deepStrictEqual(realLetters('terminal d'), ['d']);
+    assert.deepStrictEqual(realLetters('Norwegian terminal c'), []);
+    assert.deepStrictEqual(realLetters('Royal Caribbean terminal c'), []);
+    // The same defect in the other word order and with an unfinished word.
+    assert.deepStrictEqual(realLetters('c terminal'), []);
+    assert.deepStrictEqual(realLetters('norwegian c terminal'), []);
+    assert.deepStrictEqual(realLetters('d terminal'), ['d']);
+    assert.deepStrictEqual(realLetters('term c'), []);
+    for (const query of ['terminal h', 'terminal j', 'terminal aaa']) assert.deepStrictEqual(realLetters(query), [], query);
+    // Accepted behaviour preserved.
+    assert.deepStrictEqual(realLetters('terminal a'), ['a', 'aa'], '"terminal a": the exact phrase first, then AA');
+    assert.deepStrictEqual(realLetters('a terminal'), ['a', 'aa']);
+    assert.deepStrictEqual(realLetters('terminal aa'), ['aa']);
+    assert.deepStrictEqual(realLetters('msc terminal'), ['aa']);
+    assert.deepStrictEqual(realLetters('terminal msc'), ['aa']);
+    assert.deepStrictEqual(realLetters('carnival terminal d'), ['d']);
+    assert.deepStrictEqual(realLetters('cruise terminal v'), ['v']);
+    assert.deepStrictEqual(realLetters('portmiami terminal v'), ['v']);
+    assert.deepStrictEqual(realLetters('norwegian c'), ['b'], 'a letter away from the word "terminal" is still a word being typed');
+    assert.deepStrictEqual(realLetters('disney c'), ['f']);
+    assert.deepStrictEqual(realLetters('terminal dis'), ['f']);
+    assert.deepStrictEqual(realLetters('cruise terminal'), ['v', 'a', 'b', 'd', 'e', 'f', 'g', 'aa']);
+    const real = core.validateRegistry(realRaw).registry;
+    assert.deepStrictEqual(real.verified.map((terminal) => terminal.designators.join('')), ['v', 'a', 'b', 'd', 'e', 'f', 'g', 'aa']);
+  });
+
+  await check('real registry: full names, plural forms and initials of the supported companies reach their terminals (Codex relay 0272 #2)', () => {
+    const real = core.validateRegistry(realRaw).registry;
+    for (const query of ['Royal Caribbean International', 'RCI', 'RCL', 'RCCL', 'royal caribbean cruises', 'royal caribbean cruise']) {
+      assert.deepStrictEqual(realLetters(query), ['a'], query);
+      assert.strictEqual(core.matchCurated(query, real)[0].companyKey, 'royal-caribbean', query);
+    }
+    for (const query of ['carnival cruises', 'carnival cruise lines', 'CCL']) assert.deepStrictEqual(realLetters(query), ['d', 'e', 'f'], query);
+    for (const query of ['norwegian cruises', 'norwegian cruise lines']) assert.deepStrictEqual(realLetters(query), ['b'], query);
+    for (const query of ['disney cruises', 'disney cruise lines']) assert.deepStrictEqual(realLetters(query), ['f'], query);
+    assert.deepStrictEqual(realLetters('virgin cruises'), ['v']);
+    assert.deepStrictEqual(realLetters('celebrity cruises'), ['g']);
+    assert.deepStrictEqual(realLetters('msc cruises'), ['aa']);
   });
 
   await check('server projection: verified terminal + booking mode -> the address-side column and the label', () => {
