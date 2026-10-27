@@ -199,8 +199,10 @@ or name prefix 2 · mixed company+terminal wording 1; ties by registry order
   Google logo; mixed → exactly one, after Google's rows.
 - `CLAUDE.md`: short "Curated cruise terminals" section (commit 6).
 - **Open gate (not a clearance):** Andres or counsel reads Google's current
-  Places/Autocomplete policies before release; if dedup is a problem,
-  curated rows sit above an undeduplicated Google list.
+  Places/Autocomplete policies before release, against
+  `docs/google-places-terms-checklist.md` (behaviours A–H, questions 1–8,
+  decision record); if dedup is a problem, curated rows sit above an
+  undeduplicated Google list.
 
 ## Files
 New: `data/curated-places.json`, `js/curated-places.js`,

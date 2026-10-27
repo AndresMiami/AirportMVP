@@ -1,0 +1,103 @@
+# Google Places terms — release-gate checklist for the curated terminals (PR #120)
+
+Purpose: a reviewer (Andres or counsel) reads Google's current terms once and
+answers the questions below against the exact behaviour this PR ships. This
+file describes the behaviour and names the clauses to read. It does **not**
+state what the terms allow — that is the reviewer's finding, recorded at the
+bottom. CLAUDE.md: "Do not infer policy answers."
+
+Documents to read (current versions, read on the day of review):
+- Google Maps Platform Terms of Service — https://cloud.google.com/maps-platform/terms
+  (in particular the "Restrictions Against Misusing the Services" section:
+  caching/storing, creating content from Google Maps Content, re-creating
+  Google products, and the attribution requirements)
+- Maps Platform Service Specific Terms — https://cloud.google.com/maps-platform/terms/maps-service-terms
+  (the Places section: what may be stored and for how long; place IDs)
+- Places API policies — https://developers.google.com/maps/documentation/places/web-service/policies
+  (attribution, "Powered by Google" / Google Maps logo rules for Autocomplete
+  outside a Google map, third-party attributions, prefetching/caching)
+- Places Autocomplete policies / usage requirements —
+  https://developers.google.com/maps/documentation/places/web-service/autocomplete
+  (session tokens; what the service may be used for)
+
+What this PR adds (facts, with code references at `524e15e`):
+
+| # | Behaviour | Where |
+|---|---|---|
+| A | LinkMia's own list of PortMiami cruise terminals: our own name and address text plus a Google **place ID** per terminal. No Google coordinates, no Google-returned text, no Google photos stored. | `data/curated-places.json` |
+| B | In the address field's dropdown, matching terminal rows render **above** Google's Autocomplete predictions, in the same panel. Our rows use a ship icon and our own text; Google's rows are unchanged (pin, Google's text). | `autocomplete.js` `renderDropdown` |
+| C | The Google Maps logo (Google's unmodified asset) renders whenever Google predictions are shown, after them; it is **not** rendered when only our rows are shown. | `autocomplete.js` `GOOGLE_ATTRIBUTION_HTML` |
+| D | A Google prediction whose `place_id` equals a terminal we already show is **omitted** from the Google rows (no duplicate). | `autocomplete.js` `dedupeGoogle` |
+| E | Selecting our row calls Google Place Details for that place ID (live, in the same Autocomplete session token), uses the returned coordinates, and displays every third-party attribution Details returns — but shows **our** label in the field instead of Google's formatted address. | `autocomplete.js` `selectSuggestion` / `applySelection` |
+| F | The booking stores our label text for the address side (e.g. `PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132`) and the Google place ID (`canonical_place_id`, existing column). | `backend/functions/lib/curated-places.js`, `create-booking.js`, `update-pending-booking.js` |
+| G | If Google's price-quote response names a different canonical place ID, the field falls back to Google's formatted address for that place (existing behaviour for Google-selected places). | `indexMVP.html` `reconcileQuoteLabel`, `js/pending-edit-card.js` |
+| H | **Provenance in the registry file:** each terminal's `source` field quotes the Google Autocomplete description and Place Details address string that were used to confirm the record (e.g. "Details returned '718 N Cruise Blvd, Miami, FL 33132, USA'"). The `address` field was typed from that confirmation. | `data/curated-places.json` `source` |
+
+Not changed by this PR: Google content already stored by the existing booking
+flow for ordinary (non-curated) addresses, coordinates captured at selection,
+the Railway proxy's no-cache handling, and the open "durable address" question
+recorded in CLAUDE.md — those stay on their own track.
+
+## Questions for the reviewer (answer each Yes / No / Needs change)
+
+1. **Mixed list (B).** Under the Terms' attribution and "no creating content
+   from Google Maps Content / no re-creating Google products" clauses, may our
+   own terminal rows appear in the same dropdown as Google's Autocomplete
+   predictions, above them, provided ours are visibly ours and Google's keep
+   Google's attribution? Fallback if No: render our rows in a separate list
+   element above the Google dropdown rather than inside it (small change).
+
+2. **Attribution placement (C).** Does rendering the Google Maps logo only
+   when Google predictions are present, placed after Google's rows, satisfy
+   the Autocomplete attribution requirement for a list shown without a
+   Google map? Note that with several rows the panel scrolls and the logo may
+   sit below the fold. Fallback if No: pin the logo visibly (sticky) whenever
+   Google rows exist.
+
+3. **Omitting a duplicate prediction (D).** May we leave out one of Google's
+   predictions because we show the same place (same place ID) as our own row?
+   Fallback if No: show it (one-line change: drop `dedupeGoogle`); our row
+   would then appear above Google's identical one.
+
+4. **Our label on a Google-identified place (E, F).** May we display and
+   store our own name/address text for a place that we identify by a Google
+   place ID, while still calling Place Details for that ID and displaying its
+   attributions? Fallback if No: store Google's formatted address as the label
+   and show our name only in the dropdown row.
+
+5. **Place ID storage (A, F).** Confirm that storing Google place IDs
+   indefinitely in our registry and in `bookings.canonical_place_id` is
+   within the Service Specific Terms' place-ID provision (this was already
+   relied on by migration 017; the PR adds the registry file).
+
+6. **Registry provenance text (H) — the item most likely to need a change.**
+   The `source` strings quote Google's returned address text as evidence and
+   the `address` values were confirmed against Place Details. Does keeping
+   those Google-returned strings in a committed file count as storing/caching
+   Google Maps Content beyond what the terms permit? Fallback if Yes/Needs
+   change: (a) re-source every address from a non-Google public record (the
+   PortMiami terminal directory, the companies' own pier pages, or Andres's
+   first-hand knowledge) and cite that instead; (b) drop the quoted Google
+   strings from `source`, keeping only "confirmed by Andres <date>" and the
+   place ID. The place IDs themselves stay (question 5).
+
+7. **Session tokens (E).** Our row's selection ends the Autocomplete session
+   with a Place Details call, as a Google prediction's would. Confirm nothing
+   in the Autocomplete usage requirements objects to a non-Google row closing
+   a session this way. Fallback if No: call Details without the session token
+   for curated rows (billing changes; behaviour does not).
+
+8. **Logos and brand names.** Our rows show the cruise companies' *names* in
+   plain text (no company logos). The later visual stage may add images;
+   that stage gets its own review. Nothing to decide for this PR unless the
+   reviewer sees a problem with the names.
+
+## Decision record
+
+| Date | Reviewer | Documents/versions read | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Changes required |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| | | | | | | | | | | | |
+
+A "Needs change" on any question is a code or data change on this branch
+before merge, reviewed through the normal loop; a "No" with no acceptable
+fallback blocks the release and goes back to Andres for a product decision.
