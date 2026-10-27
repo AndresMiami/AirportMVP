@@ -89,8 +89,8 @@ const STATIC_CACHE_URLS = [
   // below call caches.match(request) WITHOUT ignoreSearch, so the precache
   // key must be the EXACT requested URL, query included -- an unversioned
   // entry is stored but can never serve the page's actual request.
-  '/js/pending-edit-model.js?v=2',
-  '/js/pending-edit-card.js?v=1',
+  '/js/pending-edit-model.js?v=3',
+  '/js/pending-edit-card.js?v=2',
   // Curated cruise terminals: the classic script indexMVP loads and the
   // registry autocomplete.js fetches (CURATED_REGISTRY_URL) — exact URLs.
   '/js/curated-places.js?v=1',

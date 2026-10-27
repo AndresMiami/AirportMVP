@@ -889,10 +889,10 @@
     <!-- Curated cruise terminals: registry validation + matcher shared with
          the Netlify functions (global CuratedPlaces, read by autocomplete.js). -->
     <script src="./js/curated-places.js?v=1"></script>
-    <script src="./js/pending-edit-model.js?v=2"></script>
+    <script src="./js/pending-edit-model.js?v=3"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
-    <script src="./js/pending-edit-card.js?v=1"></script>
+    <script src="./js/pending-edit-card.js?v=2"></script>
     <script src="./js/passenger-modal.js?v=6"></script>
     <script src="./js/pickup-note-modal.js?v=1"></script>
     <script src="./js/promotion-modal.js?v=2"></script>
@@ -3134,7 +3134,7 @@
                     q.status = 'ready';
                     q.data = quote;
                     q.error = null;
-                    this.reconcileCuratedLabel(quote.intent);
+                    this.reconcileQuoteLabel(quote.intent);
                     this.applyServerPrices();
                     this.armQuoteExpiry();
                     this.shadowComparePricing();
@@ -3148,27 +3148,21 @@
                 }
             }
 
-            // Curated cruise terminals (plan v7 §4). A curated row carried a
-            // registry place ID and LinkMia's own label. If the quote's
-            // canonical echo names a DIFFERENT id, that label can no longer be
-            // claimed for it: the address falls back to Google's formatted
-            // address for the canonical place. Identity is untouched —
-            // captureServerQuoteContract already submits the canonical id, and
-            // state.locations.placeId must keep the SUBMITTED id or the quote
-            // key would never match again. A non-curated address keeps its
-            // label exactly as today.
-            isCuratedTerminal(placeId) {
-                const core = window.CuratedPlaces;
-                const registry = this.autocomplete?.curatedRegistry;
-                return !!(core && registry && typeof placeId === 'string' &&
-                    core.findVerifiedByPlaceId(registry, placeId));
-            }
-
-            reconcileCuratedLabel(intent) {
+            // Quote-label reconciliation (plan v7 §4, Codex seq:0264 #3). The
+            // selection's label described the id the passenger chose — a
+            // curated terminal name, or Google's Details address for that id.
+            // If the quote's canonical echo names a DIFFERENT id, that label
+            // can no longer be claimed for it: the address falls back to the
+            // quote's formatted address, Google's own label for the canonical
+            // place. Decided from the quote alone — no registry lookup — so it
+            // holds whatever the curated registry's loading state. Identity is
+            // untouched: captureServerQuoteContract already submits the
+            // canonical id, and state.locations.placeId must keep the
+            // SUBMITTED id or the quote key would never match again.
+            reconcileQuoteLabel(intent) {
                 const selected = this.state.locations.placeId;
                 const canonical = intent && typeof intent.placeId === 'string' ? intent.placeId : null;
                 if (!selected || !canonical || canonical === selected) return false;
-                if (!this.isCuratedTerminal(selected)) return false;
                 const fallback = typeof intent.formattedAddress === 'string' ? intent.formattedAddress.trim() : '';
                 const current = this.state.locations.address;
                 if (!fallback || !current || current.address === fallback) return false;
@@ -3890,7 +3884,6 @@
                         return session || null;
                     },
                     app: this,
-                    isCuratedTerminal: (placeId) => this.isCuratedTerminal(placeId),
                     accountIdentity: () => ({
                         name: currentProfile?.name || '',
                         phone: currentProfile?.phone || '',

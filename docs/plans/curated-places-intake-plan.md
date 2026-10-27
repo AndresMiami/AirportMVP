@@ -14,7 +14,9 @@ review. The current dropdown design is kept; photos are the next stage
 `b3780c5` dropdown, `e9ae5f7` browser identity guard, `054e091` server
 projection); `0bdca4f` holds the six remaining terminals as inert drafts
 with resolved place IDs, awaiting Andres's verification (commit 5); docs
-(commit 6) follow. Full suite 46/46. Nothing pushed, no PR.
+(commit 6) follow. Codex review seq:0264 (2026-10-27): findings #1–#3
+fixed and #4's wording aligned in the two commits after `7c754f7`. Full
+suite green. Nothing pushed, no PR.
 
 ## Context
 
@@ -93,8 +95,9 @@ terminal keyword/name — direction matters ("virgin", "virgin voya",
 "virgin voyage", "virgin voyages" match; "virginia" does not). Company
 match → one row per terminal of that company, showing the company.
 Terminal/port match ("terminal v", "portmiami", "cruise") → the terminal
-row showing its companies. Score exact 3 / keyword prefix 2 / name prefix
-1; ties by registry order. Not fuzzy.
+row showing its companies. Score: exact phrase 3 · company/terminal keyword
+or name prefix 2 · mixed company+terminal wording 1; ties by registry order
+(wording aligned with the code, Codex seq:0264 #4). Not fuzzy.
 
 ### 3. Dropdown — `autocomplete.js` (same look as today)
 - Curated rows reuse `.suggestion-item`: main = `Virgin Voyages — PortMiami
@@ -112,19 +115,30 @@ row showing its companies. Score exact 3 / keyword prefix 2 / name prefix
   (reversible — see gate). Google logo only when Google rows exist.
 - Registry loads once at boot, at most one retry for a transient failure;
   an invalid file is final for the page load; either way today's dropdown.
+- Selecting any row cancels the queued debounce and invalidates an in-flight
+  Google request (a late answer cannot reopen the list, a late failure
+  cannot flag the chosen address); a keyboard highlight survives Google's
+  loading / results / error updates of the same text by item identity and
+  resets on new text or when the item is gone (Codex seq:0264 #1, #2).
 
 ### 4. Identity — the selected terminal survives to booking and driver
 - Row carries the registry `placeId` + `label`. Selection runs the
   existing Details call for coordinates, renders every attribution, sets
   the input to `label`. Selection events and `selectedPlace` keep exactly
   today's shapes.
-- **Quote reception (create: `reconcileCuratedLabel` in indexMVP; edit: the
-  card after `adoptCanonicalPlaceId`, via `model.replaceAddressLabel` and
-  the host's `isCuratedTerminal`):** if the canonical echo ≠ the registry
-  id → the selection is no longer curated; the label falls back to the
-  quote's `formattedAddress`. The submitted id stays in
-  `state.locations.placeId` (the quote key must keep matching); the
-  contract already submits the canonical id.
+- **Quote reception (create: `reconcileQuoteLabel` in indexMVP; edit: the
+  card after `adoptCanonicalPlaceId`, via `model.replaceAddressLabel`):**
+  if the canonical echo ≠ the id the selection — or the hydrated booking —
+  carried, the address label falls back to the quote's `formattedAddress`,
+  Google's own label for the canonical place, **whether or not the old id
+  was a curated terminal**. Decided from the quote alone, with no registry
+  lookup, so hydrated edits are covered while the registry loads or after
+  it failed (Codex seq:0264 #3; v7 first said a non-curated address keeps
+  its label — in the replacement case the old label described the old id,
+  so it is replaced too). A label is never carried onto an id it was not
+  issued for. The submitted id stays in `state.locations.placeId` (the
+  quote key must keep matching); the contract already submits the
+  canonical id.
 - **Server (authoritative), `backend/functions/lib/curated-places.js`
   `projectCuratedLabel(canonicalPlaceId, bookingMode)`:**
   - **Create:** after `verdict === 'verified'`, when the canonical id is a
@@ -156,7 +170,9 @@ row showing its companies. Score exact 3 / keyword prefix 2 / name prefix
 ### 5. Release
 - `service-worker.js`: pair moved to v1.3.50 / runtime-v27 with its
   history line; `/js/curated-places.js?v=1` and
-  `/data/curated-places.json?v=1` precached at the exact requested URLs.
+  `/data/curated-places.json?v=1` precached at the exact requested URLs;
+  the model and card moved to `?v=3` / `?v=2` (both changed in this PR) so
+  page and modules travel together.
 - `tests/google-policy-readiness.test.js` pins: curated-only render → no
   Google logo; mixed → exactly one, after Google's rows.
 - `CLAUDE.md`: short "Curated cruise terminals" section (commit 6).
@@ -169,9 +185,9 @@ New: `data/curated-places.json`, `js/curated-places.js`,
 `backend/functions/lib/curated-places.js`,
 `tests/curated-places-registry.test.js`, `tests/curated-autocomplete.test.js`,
 `tests/curated-label-server.test.js`.
-Modified: `autocomplete.js`, `indexMVP.html` (script tag, quote-reception
-guard, card dependency), `js/pending-edit-model.js` (`replaceAddressLabel`),
-`js/pending-edit-card.js` (`isCuratedTerminal` dependency),
+Modified: `autocomplete.js`, `indexMVP.html` (script tags, quote-reception
+guard), `js/pending-edit-model.js` (`replaceAddressLabel`),
+`js/pending-edit-card.js` (relabel on identity replacement),
 `backend/functions/create-booking.js`, `backend/functions/update-pending-booking.js`,
 `service-worker.js`, `tests/google-policy-readiness.test.js`,
 `tests/pending-edit-card.test.js`, `tests/pending-edit-hydration.test.js`,

@@ -734,7 +734,7 @@ check('curated terminal: a SUPERSEDED canonical id drops LinkMia\'s label to Goo
   assert.ok(app.quoteIsFresh(), 'the held quote still matches the selection');
 });
 
-check('curated terminal: an echo EQUAL to the registry id keeps LinkMia\'s label; a non-curated address never changes label', async () => {
+check('curated terminal: an echo EQUAL to the registry id keeps LinkMia\'s label; a Google place with a superseded id takes the quote\'s formatted address too (no registry needed)', async () => {
   const same = okFetch(curatedQuote(TERMINAL_V.id, GOOGLE_TERMINAL_V));
   const a = makeContext({ enabled: true, fetchImpl: same });
   selectCurated(a.app, a.ctx);
@@ -744,16 +744,20 @@ check('curated terminal: an echo EQUAL to the registry id keeps LinkMia\'s label
   assert.strictEqual(a.app.els.addressInput.value, TERMINAL_V.label);
 
   // The default fixture: ChIJ_place_abc selected, ChIJ_CANONICAL_xyz echoed —
-  // a Google place, so Google's own label is kept exactly as today.
+  // a Google place whose id was replaced. Its Details label described the OLD
+  // id; the quote's formatted address is Google's label for the canonical
+  // place (Codex seq:0264 #3). No registry is consulted: none is loaded here.
   const other = okFetch(quoteWithTtl(15));
   const b = makeContext({ enabled: true, fetchImpl: other });
-  b.ctx.window.CuratedPlaces = CuratedPlaces;
-  b.app.autocomplete = { isValidated: true, curatedRegistry: CURATED_REGISTRY };
+  b.app.autocomplete = { isValidated: true, curatedRegistry: null, selectedPlace: { place_id: 'ChIJ_place_abc', description: '1 Brickell Ave' } };
   b.app.els.addressInput = { value: '1 Brickell Ave' };
   await b.app.requestServerQuote();
   assert.strictEqual(b.app.state.quote.status, 'ready');
-  assert.strictEqual(b.app.state.locations.address.address, '1 Brickell Ave');
-  assert.strictEqual(b.app.els.addressInput.value, '1 Brickell Ave');
+  assert.strictEqual(b.app.state.locations.address.address, '1 Brickell Ave, Miami, FL');
+  assert.strictEqual(b.app.els.addressInput.value, '1 Brickell Ave, Miami, FL');
+  assert.strictEqual(b.app.autocomplete.selectedPlace.description, '1 Brickell Ave, Miami, FL');
+  assert.strictEqual(b.app.state.locations.placeId, 'ChIJ_place_abc', 'the submitted id stays');
+  assert.ok(b.app.quoteIsFresh());
 });
 
 // ============ display ============
