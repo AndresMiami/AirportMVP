@@ -12,6 +12,44 @@ decision of 2026-10-27 (see "Compact-design review scope" below) supersedes
 that, and photos/official artwork remain the next stage
 (`curated-dropdown-mockup.html` is now the local review harness).
 
+**RELEASED 2026-10-27.** PR #120 merged on Andres's instruction (in his own
+words in Claude's chat, after Codex relay 0281's technical GO at `17c5e41`,
+CI run 40581624906): merge commit `affcacf` at 20:57 UTC; Netlify production
+deploy `6ae11052726bbef61d0eaeb5` of that commit published at 20:58 UTC;
+linkmia.com serves the new module and service-worker pair v1.3.50 /
+runtime-v27. **Release record (production, deploy `6ae11052`, desktop app
+browser signed in with Andres's account, real keystrokes):** dropdown
+acceptance in BOTH directions — "terminal c", "Norwegian terminal c",
+"Royal Caribbean terminal c" and "c terminal" show no LinkMia row with
+Google's rows intact beneath; "terminal d" → Carnival · Terminal D only;
+"terminal a" → A then AA; "terminal aa" → AA; "rci", "rcl", "royal caribbean
+international" → Terminal A; "carnival cruises" → D/E/F; "Virgin" → the V
+row under both captions with the Google logo; "Terminal F" → the shared
+Carnival · Disney row; "Virginia" and "Fontainebleau Miami Beach" → Google
+only; Arriving at Airport after MIA shows the same Virgin and Terminal F
+rows. **Controlled booking LM-SR92** (booking `7d79d9f3-…`): Terminal V
+picked by keyboard → MIA, Thursday 2026-10-29 15:00 America/New_York, one
+passenger, Tesla Model Y at the observe-mode server quote of $55 ($65 / $85
+for the other vehicles), booked from the pane; the trip sheet showed
+"Waiting for driver confirmation" with the pickup stored as
+`PortMiami Terminal V, 718 N Cruise Blvd, Miami, FL 33132` (the server's own
+projection, written only on a verified quote whose canonical ID is a
+verified terminal), drop-off Miami International; the pending offer reached
+Andres's driver app with that label; Andres accepted the offer on his driver
+app to see the full card and then cancelled LM-SR92 himself (status
+`cancelled`, details_version 1, label intact); no other booking exists.
+Observations, no defects: the first query right after focusing the box can
+show no Google rows for a moment while the module loads lazily (known); the
+payment selector shows a placeholder card label while the panel says no
+payment method is saved (legacy UI; no charge path); the status payload
+returned the driver phone `+1-555-000-0001` for Andres's driver row — a
+production-data check for Andres (the passenger WhatsApp button on a
+confirmed ride uses it). Follow-ups after this release: session-token
+fallback (`docs/plans/session-token-fallback-packet.md`), Terminal C/J
+registry round 2, the 0277 corrections to
+`docs/plans/terminal-confirmation-plan.md` (v1.4) before any confirmation
+code.
+
 **Status (2026-10-27):** commits 1–4 done (`0cdadb4` registry + matcher,
 `b3780c5` dropdown, `e9ae5f7` browser identity guard, `054e091` server
 projection); `0bdca4f` resolved the six remaining terminals as drafts and
