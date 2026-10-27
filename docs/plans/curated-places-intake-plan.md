@@ -30,8 +30,12 @@ terminal-source questions on 2026-10-27 (all stand as stored). Codex relay
 0272 (2026-10-27, review of Claude's search-coverage assessment) superseded
 0271's "no new code findings" with one P2 (explicit terminal letters
 promoted the wrong terminal) and one P3 (Royal Caribbean aliases); both are
-fixed in the commit that adds the "Search coverage round" section below.
-Still no merge.
+fixed in the commit that adds the "Search coverage round" section below
+(`c095d3b`; Codex relay 0274 closed both). Preview check of `c095d3b` done
+2026-10-27 (third acceptance record below). Codex relay 0278 conveys
+Andres's sequence: release the dropdown first, test it live, fix edge cases
+in small reviewed changes, then continue the terminal-confirmation flow
+(`docs/plans/terminal-confirmation-plan.md`, separate). Still no merge.
 
 **Acceptance record (2026-10-27, head `fc64fce`, preview
 deploy-preview-120, signed in as Andres, no booking submitted):**
@@ -73,6 +77,30 @@ re-review of `433ee09`, and Andres's merge decision. The three
 terminal-source questions (Terminal V street, Celebrity → G, Disney → F)
 were answered by Andres later on 2026-10-27: all stand as stored
 (Decision 1 below).
+
+**Acceptance record — terminal-letter rule and aliases (2026-10-27, head
+`c095d3b`, preview deploy-preview-120 / Netlify deploy
+`6ae0e2a20fca5761311b5103`, signed in with Andres's account, desktop app
+browser, real clicks and keystrokes in the address box, no booking
+submitted):** the preview serves the `c095d3b` module (`parseQuery`,
+`MAX_DESIGNATOR_LENGTH`) and the registry with the new keywords, service
+worker controlling, network-first. Codex's four queries: "terminal c" → no
+LinkMia row, Google's own five rows beneath (Orlando, Miami, Newark,
+Croisières, Grapevine); "terminal d" → one LinkMia row, Carnival · Terminal
+D (no Disney F), Google rows beneath; "Norwegian terminal c" → no LinkMia
+row, Google's Terminal B row; "Royal Caribbean terminal c" → no LinkMia
+row, Google rows. Reverse order "c terminal" → none. "terminal a" → A then
+AA; "terminal aa" → AA. Aliases: "royal caribbean international" and "rcl"
+→ Terminal A; "carnival cruises" → D/E/F. Unchanged: "Virgin" → V with the
+Google logo; "Terminal F" → the neutral C/D row naming Carnival · Disney;
+"Virginia" → none. Keyboard: "rci" + ArrowDown + Enter puts
+`PortMiami Terminal A, 2000 N Cruise Blvd, Miami, FL 33132` in the field
+with the Google Maps attribution and the list closed. Node 20 CI for
+`c095d3b`: all three time-zone jobs pass (Actions run 40553190093); PR
+#120 mergeable, 0 commits behind main. Not verified here: a phone pass of
+this head, saved booking and driver card (after an authorized merge and
+production deploy), the Google terms gate (checklist Q1–Q8), Norwegian's
+current use of Terminal C.
 
 ## Context
 
