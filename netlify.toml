@@ -302,6 +302,16 @@
 # Environment variables (template - actual values in Netlify dashboard)
 [build.environment]
   NODE_VERSION = "20"
+  # The Maps JavaScript browser key is PUBLIC by design (the browser must
+  # send it to Google; GCP website/API restrictions are the security — see
+  # CLAUDE.md "Env vars"). scripts/generate-maps-browser-config.js writes it
+  # into this one file at build time. Netlify's enhanced secrets scanning
+  # matches the AIza… pattern there and fails the whole build (deploy
+  # 6ae0450796ced8b25ff782a3, PR #120 preview, 2026-10-27: "Build script
+  # returned non-zero exit code: 2" with an enhancedSecretsScanMatches
+  # entry for maps-browser-config.js:2). Omit exactly that file; every
+  # other path, and every real secret, stays scanned.
+  SECRETS_SCAN_OMIT_PATHS = "maps-browser-config.js"
 
 # Function configuration
 [functions]
