@@ -69,10 +69,10 @@
     {
       "id": "pom-terminal-f",
       "name": "PortMiami Terminal F",
-      "address": "1104 Port Miami Tunl, Miami, FL 33132",
+      "address": "1104 Port Miami Tunnel, Miami, FL 33132",
       "placeId": "ChIJi-HC0n212YgR27EH49EZEws",
       "companies": ["carnival", "disney"],
-      "keywords": ["terminal f", "disney terminal"],
+      "keywords": ["terminal f"],
       "source": "Assignment (Carnival AND Disney) confirmed by Andres 2026-10-27: Google's separate 'Disney Cruise Terminal' record (ChIJPRwBWz202YgR7Zch-1f3RyI, same address, 25.7787304, -80.17546) is this building, merged here on Andres's decision. Place ID: autocomplete 'Cruise Terminal F - Port of Miami, Port Miami Tunnel'; Details '1104 Port Miami Tunl, Miami, FL 33132, USA' (25.7787235, -80.1749738), 2026-10-27.",
       "verifiedAt": "2026-10-27"
     },

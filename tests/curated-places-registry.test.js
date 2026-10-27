@@ -286,6 +286,23 @@ async function check(name, fn) {
     assert.strictEqual(core.matchCurated('Virgin voyage', real)[0].label, TERMINAL_V_LABEL);
   });
 
+  await check('real registry: each company query names the company first; a terminal query on a shared terminal names both companies', () => {
+    const real = core.validateRegistry(realRaw).registry;
+    const disney = core.matchCurated('Disney', real);
+    assert.deepStrictEqual(disney.map((r) => r.title), ['Disney Cruise Line — PortMiami Terminal F']);
+    const carnival = core.matchCurated('Carnival', real);
+    assert.deepStrictEqual(carnival.map((r) => r.terminalId), ['pom-terminal-d', 'pom-terminal-e', 'pom-terminal-f']);
+    assert.ok(carnival.every((r) => r.title.startsWith('Carnival Cruise Line — ')));
+    for (const [query, id] of [['Royal', 'pom-terminal-a'], ['Norwegian', 'pom-terminal-b'], ['Celebrity', 'pom-terminal-g'], ['MSC', 'pom-terminal-aa']]) {
+      const rows = core.matchCurated(query, real);
+      assert.deepStrictEqual(rows.map((r) => r.terminalId), [id], query);
+      assert.strictEqual(rows[0].kind, 'company', `${query} is a company row`);
+    }
+    const f = core.matchCurated('Terminal F', real);
+    assert.deepStrictEqual(f.map((r) => r.title), ['PortMiami Terminal F — Carnival Cruise Line, Disney Cruise Line']);
+    assert.deepStrictEqual(core.matchCurated('Virginia', real), []);
+  });
+
   await check('server projection: verified terminal + booking mode -> the address-side column and the label', () => {
     assert.deepStrictEqual(serverSide.projectCuratedLabel(TERMINAL_V_PLACE_ID, 'dropoff'),
       { column: 'pickup_location', label: TERMINAL_V_LABEL, terminalId: 'pom-terminal-v' });
