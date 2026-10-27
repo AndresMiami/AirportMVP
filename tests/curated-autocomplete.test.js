@@ -628,5 +628,7 @@ async function check(name, fn) {
   });
 
   results.forEach((line) => console.log(line));
-  console.log(`\n${passed} checks passed\n`);
+  // CI (.github/workflows/tests.yml) accepts a suite only on this exact
+  // sentinel; it is printed only after every check above passed.
+  console.log(`\n  ALL ${passed} CHECKS PASS\n`);
 })();
