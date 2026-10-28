@@ -330,6 +330,18 @@
     });
   }
 
+  // ONE row shape for every curated selection (terminal confirmation R1,
+  // plan §3.2): the dropdown builds its rows through toRow above, and the
+  // confirm sheet — a list of terminals with no company context — asks for
+  // the same shape by terminal id, companyKey null. Both entry points then
+  // run the autocomplete's one selection path and cannot drift.
+  function terminalRow(registry, terminalId) {
+    if (!registry || !Array.isArray(registry.verified) || typeof terminalId !== 'string') return null;
+    const terminal = registry.verified.find((entry) => entry.id === terminalId);
+    if (!terminal) return null;
+    return toRow({ terminal, company: null, kind: 'terminal', score: 0 }, registry);
+  }
+
   function matchCurated(query, registry) {
     if (!registry || !Array.isArray(registry.verified) || registry.verified.length === 0) return [];
     const normalizedQuery = normalize(query);
@@ -405,6 +417,7 @@
     validateRegistry,
     findVerifiedByPlaceId,
     terminalLabel,
+    terminalRow,
     matchCurated
   };
 }));

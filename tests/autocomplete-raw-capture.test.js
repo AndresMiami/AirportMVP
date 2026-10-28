@@ -264,9 +264,12 @@ async function check(name, fn) {
     assert.strictEqual(inst.rawQuery, null);
   });
 
-  await check('DARK: the events and selectedPlace carry exactly the pre-Milestone-A shapes', async () => {
-    // The capture must not leak into anything observable: same event names,
-    // same detail keys, same selectedPlace keys as before this change.
+  await check('DARK: the events and selectedPlace carry exactly their declared shapes — the raw query is in none of them', async () => {
+    // The capture must not leak into anything observable: the event names
+    // and detail keys are exactly the declared contract (terminal
+    // confirmation R1 added the synchronous selection-started event and the
+    // selection identity — curated metadata + selectionId — to the
+    // completion events; nothing carries the typed text).
     const ctx = makeContext();
     const { inst, input } = build(ctx);
     inst.predictions = [PREDICTION];
@@ -274,9 +277,10 @@ async function check(name, fn) {
     stubFetch(ctx, () => okDetails());
     await inst.selectSuggestion(0);
     const types = input.dispatched.map((e) => e.type);
-    assert.deepStrictEqual(types, ['place-selected', 'place-coordinates']);
-    assert.deepStrictEqual(Object.keys(input.dispatched[0].detail).sort(), ['description', 'placeId']);
-    assert.deepStrictEqual(Object.keys(input.dispatched[1].detail).sort(), ['address', 'lat', 'lng']);
+    assert.deepStrictEqual(types, ['selection-started', 'place-selected', 'place-coordinates']);
+    assert.deepStrictEqual(Object.keys(input.dispatched[0].detail).sort(), ['curated', 'placeId', 'selectionId', 'source']);
+    assert.deepStrictEqual(Object.keys(input.dispatched[1].detail).sort(), ['curated', 'description', 'placeId', 'selectionId']);
+    assert.deepStrictEqual(Object.keys(input.dispatched[2].detail).sort(), ['address', 'lat', 'lng', 'selectionId']);
     assert.deepStrictEqual(Object.keys(inst.selectedPlace).sort(), ['description', 'place_id']);
     const serialized = JSON.stringify(input.dispatched.map((e) => e.detail)) + JSON.stringify(inst.selectedPlace);
     assert.ok(!serialized.includes('fonta'), 'the raw query must not appear in any event or selection object');

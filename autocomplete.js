@@ -508,9 +508,30 @@ export class CustomAutocomplete {
         });
     }
 
+    // Dropdown click and Enter resolve the visible list by index; the
+    // confirm sheet's row tap (selectCuratedTerminal) hands over a registry
+    // row directly. Both run selectItem — ONE selection path.
     async selectSuggestion(index) {
         const item = this.visibleItems()[index];
         if (!item) return;
+        return this.selectItem(item);
+    }
+
+    // Terminal confirmation (plan §3.2): re-select a verified terminal by id
+    // from the confirm sheet, through the same path a dropdown pick runs —
+    // the same label, place ID, Details lookup and events. False when the
+    // registry is not loaded or the id is not a verified terminal; nothing
+    // happens then.
+    selectCuratedTerminal(terminalId) {
+        const core = typeof globalThis !== 'undefined' ? globalThis.CuratedPlaces : undefined;
+        if (!core || typeof core.terminalRow !== 'function' || !this.curatedRegistry) return false;
+        const row = core.terminalRow(this.curatedRegistry, terminalId);
+        if (!row) return false;
+        this.selectItem({ source: 'curated', row });
+        return true;
+    }
+
+    async selectItem(item) {
         // Selection ends the prediction cycle: the queued debounce and any
         // in-flight request are invalidated NOW, so a late response cannot
         // reopen the list and a late failure cannot flag the chosen address
@@ -534,6 +555,25 @@ export class CustomAutocomplete {
         // this selection fails completely, the OLD text must not survive
         // attached to a context it never described.
         this.rawQuery = null;
+        // The registry identity travels with the selection on BOTH completion
+        // paths below (plan §3.1); a Google prediction says so explicitly.
+        const curatedMeta = curated
+            ? { terminalId: curated.terminalId, companyKey: curated.companyKey, placeId: curated.placeId }
+            : null;
+        // THE START BOUNDARY (plan §3.2, Codex 0285 #2): the host learns of
+        // this selection NOW — synchronously, before the session-token code
+        // and before anything is awaited — so a terminal tap can open its
+        // confirm sheet on the tap itself and a dismissed sheet is never
+        // reopened by a late Details result. The detail carries no Google
+        // content: the place ID plus LinkMia's own registry fields.
+        this.input.dispatchEvent(new CustomEvent('selection-started', {
+            detail: {
+                selectionId: selectionSequence,
+                placeId,
+                source: curated ? 'curated' : 'google',
+                curated: curatedMeta
+            }
+        }));
         try {
             // Ensure we have a session token for place details.
             if (!this.sessionToken) {
@@ -581,7 +621,9 @@ export class CustomAutocomplete {
                     lat: data.result.geometry.location.lat,
                     lng: data.result.geometry.location.lng
                 },
-                attributions
+                attributions,
+                curated: curatedMeta,
+                selectionId: selectionSequence
             };
             this.rawQuery = rawQueryAtSelection;
             this.applySelection(place);
@@ -608,7 +650,9 @@ export class CustomAutocomplete {
                 formattedAddress: description,
                 displayName: { text: description },
                 location: { lat: null, lng: null },
-                attributions: []
+                attributions: [],
+                curated: curatedMeta,
+                selectionId: selectionSequence
             });
         }
     }
@@ -632,13 +676,20 @@ export class CustomAutocomplete {
         const rawLng = typeof place.location?.lng === 'function' ? place.location.lng() : place.location?.lng;
         const lat = Number.isFinite(rawLat) ? rawLat : null;
         const lng = Number.isFinite(rawLng) ? rawLng : null;
+        // Completion events carry the identity the start boundary announced
+        // (plan §3.1–§3.2): the registry metadata (null for a Google place)
+        // and the selection number, so the host can settle exactly the
+        // selection this result belongs to and never allocate a new intent
+        // on a completion.
+        const curated = place.curated && typeof place.curated === 'object' ? place.curated : null;
+        const selectionId = Number.isInteger(place.selectionId) ? place.selectionId : null;
         if (this.onSelect) this.onSelect({ address, coordinates: { lat, lng }, place });
 
         this.input.dispatchEvent(new CustomEvent('place-selected', {
-            detail: { placeId: place.id, description: address }
+            detail: { placeId: place.id, description: address, curated, selectionId }
         }));
         this.input.dispatchEvent(new CustomEvent('place-coordinates', {
-            detail: { lat, lng, address }
+            detail: { lat, lng, address, selectionId }
         }));
 
         this.clearSession();

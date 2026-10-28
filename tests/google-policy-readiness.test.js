@@ -498,8 +498,12 @@ async function check(name, fn) {
       // fallback, which displays NO Details content and owes no credit.
       assert.strictEqual(instance.isValidated, true, 'the passenger is not stranded');
       assert.strictEqual(input.value, '100 Main St');
-      assert.deepStrictEqual(
-        JSON.parse(JSON.stringify(dispatched[1].detail)),
+      // dispatched[0] is the synchronous selection-started boundary
+      // (terminal confirmation R1); the coordinates event is the third.
+      const coords = JSON.parse(JSON.stringify(dispatched[2].detail));
+      assert.strictEqual(typeof coords.selectionId, 'number');
+      delete coords.selectionId;
+      assert.deepStrictEqual(coords,
         { lat: null, lng: null, address: '100 Main St' },
         'the fallback carries no Details coordinates');
       assert.strictEqual(attributionHost.querySelector(), null,
@@ -591,11 +595,11 @@ async function check(name, fn) {
     assert.strictEqual(input.value, '100 Main St');
     assert.strictEqual(instance.selectedPlace.place_id, 'ChIJprediction123');
     assert.strictEqual(selectedAttribution.classList.contains('visible'), true);
-    assert.deepStrictEqual(dispatched.map((event) => event.type), ['place-selected', 'place-coordinates']);
-    assert.deepStrictEqual(
-      JSON.parse(JSON.stringify(dispatched[1].detail)),
-      { lat: null, lng: null, address: '100 Main St' }
-    );
+    assert.deepStrictEqual(dispatched.map((event) => event.type), ['selection-started', 'place-selected', 'place-coordinates']);
+    const coords = JSON.parse(JSON.stringify(dispatched[2].detail));
+    assert.strictEqual(typeof coords.selectionId, 'number');
+    delete coords.selectionId;
+    assert.deepStrictEqual(coords, { lat: null, lng: null, address: '100 Main St' });
     assert.ok(!/lat:\s*0\s*,\s*lng:\s*0/.test(autocompleteSource));
   });
 

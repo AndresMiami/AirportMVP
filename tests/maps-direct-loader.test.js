@@ -300,8 +300,10 @@ function makeRealm({ key = VALID_KEY } = {}) {
     assert.strictEqual(constructions, 1);
     assert.strictEqual(errors.length, 0);
     assert.strictEqual(input.placeholder, 'Enter pickup address, hotel, or landmark...');
+    // Terminal confirmation R1 added the synchronous selection-started
+    // boundary beside the three completion/clearing listeners.
     assert.deepStrictEqual([...listeners.keys()], [
-      'place-selected', 'place-coordinates', 'validation-cleared'
+      'selection-started', 'place-selected', 'place-coordinates', 'validation-cleared'
     ]);
   });
 
