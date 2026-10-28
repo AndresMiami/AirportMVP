@@ -350,9 +350,18 @@ curated selections is a review packet
   `docs/google-places-terms-checklist.md` (the mixed curated/Google list is
   a technical boundary, not a policy clearance). Photos/official logo artwork
   remain deferred; the compact initials treatment was separately approved.
-- TERMINAL CONFIRMATION R1 (plan `docs/plans/terminal-confirmation-plan.md`
-  v1.6; branch `feature/terminal-confirmation-r1`, draft PR + Deploy
-  Preview per Andres's go, relay 0287 — not merged under that instruction):
+- TERMINAL CONFIRMATION R1 — RELEASED 2026-10-28 (PR #122, merge
+  `22c04ee`, production verified serving SW 1.3.51 / runtime-v28 at 05:29Z;
+  plan `docs/plans/terminal-confirmation-plan.md` v1.6 with both preview
+  acceptance records; merged on Andres's instruction "Ship PR #122 as it
+  is first" — Codex's review and the phone pass follow live). MAP + UBER
+  LAYOUT (this tree, next PR): the sheet gains a Google map on top with
+  the chosen terminal's pin (coordinates from the lookup every pick already
+  makes, kept per page session in `_terminalPins`; no registry coordinates,
+  no extra Google calls), a Standard | Satellite switch, Skip as a pill in
+  the header, "Confirm pickup / drop-off"; a loader failure shows a note
+  and the list still works. SW pair 1.3.52 / runtime-v29,
+  `js/terminal-sheet.js?v=2`. R1 as shipped:
   the ride needs the terminal the passenger's SHIP uses on the day, which
   no machine source gives, so the passenger checks. A LinkMia terminal pick
   opens the confirm sheet (`js/terminal-sheet.js`, house bottom-sheet
