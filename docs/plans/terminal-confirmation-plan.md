@@ -1,4 +1,4 @@
-# Cruise terminal confirmation and the map in Where — plan v1.8 (R1 RELEASED; the map increment revised to the approved Where-map flow, for review BEFORE implementation; PR #123 held; D1 decided: marker strategy B)
+# Cruise terminal confirmation and the map in Where — plan v1.9 (R1 RELEASED; the map increment revised to the approved Where-map flow, for review BEFORE implementation; PR #123 held; D1 and D2 decided)
 
 **Status at a glance (2026-10-28):**
 - **R1 is LIVE.** PR #122 merged as `22c04ee` on Andres's instruction in
@@ -15,8 +15,12 @@
 - **D1 decided (2026-10-28, Andres in chat): marker strategy B** — load
   every verified terminal's location once per page session (at most eight
   Details lookups through the existing proxy endpoint) so the map shows all
-  markers; §3.2a records the bounds. D2 (preview access) stays open. v1.8 =
-  v1.7 + this decision; no other change.
+  markers; §3.2a records the bounds.
+- **D2 decided (2026-10-28, Andres in chat): the site-restricted preview
+  rule as its own small PR** — draft PR #124 (`feature/proxy-preview-origins`,
+  head `4698ae0`) for Codex's review, no merge; the Railway variable
+  `ALLOWED_PREVIEW_SITE` is set only after his merge decision and on his
+  words. v1.9 = v1.7 + D1 (v1.8) + D2; no other change.
 - **PR #123 is HELD** at `d00240d`, open and unmerged: useful partial work
   (the R1 sheet with a fixed map band). §4's table lists what matches and
   what does not, including the P2 identity finding (0288 #3) that must be
@@ -66,8 +70,9 @@ prescribed by Codex 0286; R1 built and released) · v1.7 (R1 released; the
 map in Where — the approved journey, one selection path for list and
 markers, the identity rule carried into the map, a bounded marker-location
 strategy, terminal location vs curb, PR #123 reconciled; answers 0288) ·
-**v1.8 (this file: v1.7 + D1 decided — marker strategy B, Andres
-2026-10-28; the §3.2a bounds made exact; nothing else changed).**
+v1.8 (v1.7 + D1 decided — marker strategy B, Andres 2026-10-28; the §3.2a
+bounds made exact) · **v1.9 (this file: v1.8 + D2 decided — the preview
+rule as draft PR #124, Andres 2026-10-28; nothing else changed).**
 
 ## 1. Problem
 
@@ -686,7 +691,7 @@ a quote echo or by the resolution record.
 | F1 session-token fallback | **SKIPPED** — Andres's decision (relay 0284, 2026-10-27): the released Google request/session handling stays; it was an optional billing choice, not a defect or a prerequisite. The packet `docs/plans/session-token-fallback-packet.md` is kept as a record only and is reopened only if Andres says so | none | not scheduled |
 | R1 confirm | §2.2 sheet in create mode (no map) + §2.3 When reminder + §3.1 metadata + §3.2 boundary, lifecycle and the 0286 #2 reopening guard + §3.3 resolution record + §2.4 trip reminder (no new action) + §3.4 projection | booking-status read-side | **RELEASED 2026-10-28** — PR #122, merge `22c04ee`, production serving SW 1.3.51 / runtime-v28 at 05:29Z; merged on Andres's instruction in chat ("Ship PR #122 as it is first"); Codex's implementation review and the phone pass follow live (Andres's ship-and-test-live decision) |
 | R1.5 the map in Where | §2.1–§2.2 (the stage: map + docked panel with collapsed/expanded positions, selectable markers, one selection path, Skip pill, "Confirm pickup / drop-off", Standard \| Satellite), §2.5 (terminal location, not curb), §3.2a (identity on the map, bounded marker loading, single-flight attach), the v1.7 rows of §3.7, §5's map cases | none (the existing proxy Details endpoint; no persistence) | **PROPOSED (v1.7; D1 decided in v1.8)** — Codex reviews this revision, then the held PR #123 is corrected to it (table below), reviewed, and ships on Andres's word; SW pair at that time; `js/terminal-sheet.js?v=2` |
-| Preview access | a new PR's Netlify preview cannot reach the Railway proxy until its origin is allowed (0288 #7). Options: (i) add the exact preview origin to `ALLOWED_ORIGINS` per PR (manual; what was done for 122); (ii) a separately reviewed, site-restricted rule — exact `^https://deploy-preview-\d+--<site>\.netlify\.app$` behind `ALLOWED_PREVIEW_SITE`, never a bare prefix, with tests rejecting other sites, suffix look-alikes, http and malformed origins — drafted and parked unshipped in a git stash on the checkout. A preview is never isolated from production data; no booking is submitted on one | Railway variable (Andres) | Andres's decision (§7); either way explicit settings authorization |
+| Preview access | a new PR's Netlify preview cannot reach the Railway proxy until its origin is allowed (0288 #7). Options: (i) add the exact preview origin to `ALLOWED_ORIGINS` per PR (manual; what was done for 122); (ii) a separately reviewed, site-restricted rule — exact `^https://deploy-preview-\d+--<site>\.netlify\.app$` behind `ALLOWED_PREVIEW_SITE`, never a bare prefix, with tests rejecting other sites, suffix look-alikes, http and malformed origins — now draft PR #124 (`feature/proxy-preview-origins`, head `4698ae0`; the parked stash is retired). A preview is never isolated from production data; no booking is submitted on one | Railway variable (Andres) | **DECIDED (D2, 2026-10-28): option (ii)** — PR #124 for Codex's review, no merge; after Andres's merge decision he sets `ALLOWED_PREVIEW_SITE=i-love-miami` on the service (explicit settings authorization) and the per-preview `ALLOWED_ORIGINS` entry can be dropped |
 
 **PR #123 (`d00240d`) against the approved flow — implemented vs proposed (0288 #2):**
 | Aspect | #123 as held | Approved flow (this plan) | Change needed |
@@ -899,11 +904,12 @@ we go — with this map increment reviewed as a plan first); **D1 decided
 (Andres in chat, 2026-10-28): marker strategy B** — load every verified
 terminal's location once per page session (at most eight Details lookups)
 so the map shows all markers (§3.2a).
-**Decision still needed from Andres for the map increment:** (D2) preview
-access — add the exact origin per PR by hand, or ship the parked
-site-restricted rule as its own small PR (Codex supports a separately
-reviewed rule, 0288 #7). Remaining: (1)
-Codex's review of this v1.8; (2) correct PR #123 to it (the table in §4;
+**D2 decided (Andres in chat, 2026-10-28): the site-restricted rule as
+its own small PR** — draft PR #124 for Codex's review, no merge (Codex
+supports a separately reviewed rule, 0288 #7); the Railway variable is
+set only after his merge decision. No decision is open for the map
+increment. Remaining: (1) Codex's review of this v1.9 (the plan) and of
+draft PR #124 (the rule); (2) correct PR #123 to it (the table in §4;
 the P2 identity fix first), Codex's review of the corrected PR, browser
 acceptance, Andres's release decision; (3) Codex's implementation review of
 #122 as merged, findings as small follow-up PRs; (4) R2 the pending-edit
@@ -1026,7 +1032,8 @@ and 0285; items 12–13 answer 0286; item 14 answers 0288.
    review; the P2 fix lands in the corrected PR before any release. (#7)
    §4's Preview access row and §7's D2 put the two options to Andres with
    the tests the rule would carry; no broad prefix, no "all Netlify sites",
-   explicit settings authorization, no isolation claim, no booking.
+   explicit settings authorization, no isolation claim, no booking —
+   decided 2026-10-28: the rule, as draft PR #124 (v1.9).
 
 ## 9. Not in scope
 Automatic sailing-assignment lookup; ship names as registry keywords;
