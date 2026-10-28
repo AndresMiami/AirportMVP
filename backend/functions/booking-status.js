@@ -13,6 +13,14 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const core = require('./lib/cancel-core');
+const curated = require('./lib/curated-places');
+
+// Terminal confirmation (R1): the trip page's reminder needs to know whether
+// the stored route's address side is a verified cruise terminal. These three
+// columns are read for that derivation ONLY and deleted before the public
+// payload is serialized — the page receives `terminal: { name, side }` or
+// nothing, never route internals.
+const TERMINAL_SOURCE_FIELDS = ['booking_mode', 'canonical_place_id', 'route_authority'];
 
 const UUID_RE = core.UUID_RE;
 
@@ -55,13 +63,20 @@ exports.handler = async (event) => {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select(PASSENGER_FIELDS + ', assigned_driver')
+        .select(PASSENGER_FIELDS + ', assigned_driver, ' + TERMINAL_SOURCE_FIELDS.join(', '))
         .eq('id', id)
         .single();
 
       if (error || !data) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Booking not found' }) };
       }
+
+      // Terminal projection (R1, plan §3.4): derived here, source columns
+      // stripped here — exactly as assigned_driver below. Additive key: an
+      // older page ignores it.
+      const terminal = curated.projectTerminal(data.canonical_place_id, data.booking_mode, data.route_authority);
+      TERMINAL_SOURCE_FIELDS.forEach((field) => { delete data[field]; });
+      if (terminal) data.terminal = terminal;
 
       // Personalization: resolve the assigned driver's public identity
       // (name + phone only — never internal fields). FAIL CLOSED on a

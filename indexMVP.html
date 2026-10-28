@@ -200,6 +200,16 @@
                     </button>
                     
                     <div class="panel-content">
+                        <!-- Terminal confirmation (R1): the cruise terminal this ride uses,
+                             repeated first on When with Change terminal. Rendered from state;
+                             shown only for a verified terminal the quote did not resolve
+                             elsewhere (renderTerminalReminder). -->
+                        <div class="terminal-reminder" id="terminalReminder" hidden>
+                            <div class="terminal-reminder-main"><span id="terminalReminderRole"></span>: <span id="terminalReminderTerminal"></span> · <span id="terminalReminderCompany"></span></div>
+                            <div class="terminal-reminder-note" id="terminalReminderNote"></div>
+                            <button type="button" class="terminal-reminder-change" id="changeTerminalBtn">Change terminal</button>
+                        </div>
+
                         <!-- Arriving at the airport: set the pickup by the flight's landing or by a time -->
                         <div class="when-basis" id="whenBasis" role="group" aria-label="How to set your pickup" hidden>
                             <button type="button" class="basis-btn active" data-basis="arrival" aria-pressed="true">By flight arrival</button>
@@ -885,10 +895,69 @@
         .edit-route-controls { display: flex; flex-direction: column; gap: 8px; }
         .edit-route-reason { font-size: 13px; color: #C7C7CC; min-height: 16px; }
         .edit-route-back { background: transparent; border: none; color: #8E8E93; text-decoration: underline; font-family: inherit; padding: 8px 0; cursor: pointer; }
+        /* Terminal confirmation (R1). The When reminder: two lines and one
+           link, first on the panel. The confirm sheet: the house bottom-sheet
+           values verbatim (dimmed backdrop rgba(0,0,0,0.7), #2C2C2E panel,
+           max-width 576px, 20px 20px 0 0, 0.3s slide), a drag handle, rows as
+           grouped fields on the page background, Confirm in the brand
+           gradient, Skip as plain text. Reduced motion drops the animation only. */
+        .terminal-reminder { margin: 0 0 var(--space-md, 16px); padding: 12px 14px; background: #2C2C2E;
+            border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; }
+        .terminal-reminder[hidden] { display: none; }
+        .terminal-reminder-main { font-size: 15px; font-weight: 600; color: #FFFFFF; line-height: 1.35; }
+        .terminal-reminder-note { margin-top: 4px; font-size: 13px; line-height: 1.4; color: #C7C7CC; }
+        .terminal-reminder-change { margin-top: 6px; padding: 6px 0; background: transparent; border: none; color: #FF9933;
+            font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+        .terminal-sheet-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7);
+            z-index: 9999; display: flex; justify-content: center; align-items: flex-end; opacity: 0;
+            transition: opacity 0.3s ease-out; }
+        .terminal-sheet-overlay.active { opacity: 1; }
+        .terminal-sheet-overlay.closing { pointer-events: none; }
+        .terminal-sheet-panel { width: 100%; max-width: 576px; max-height: 88vh; background: #2C2C2E;
+            border-radius: 20px 20px 0 0; display: flex; flex-direction: column; transform: translateY(100%);
+            transition: transform 0.3s ease-out; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+        .terminal-sheet-overlay.active .terminal-sheet-panel { transform: translateY(0); }
+        .terminal-sheet-panel.dragging { transition: none; }
+        .terminal-sheet-grip { padding: 10px 0 2px; display: flex; justify-content: center; touch-action: none; cursor: grab; }
+        .terminal-sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.3); }
+        .terminal-sheet-header { display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 12px 2px 20px; touch-action: none; }
+        .terminal-sheet-title { margin: 0; font-size: 20px; font-weight: 600; color: #FFFFFF; }
+        .terminal-sheet-close { width: 40px; height: 40px; border: none; background: none; font-size: 22px; color: #FFFFFF;
+            border-radius: 50%; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; }
+        .terminal-sheet-close:hover { background: rgba(255, 255, 255, 0.1); }
+        .terminal-sheet-port { padding: 0 20px 10px; font-size: 14px; color: #C7C7CC; }
+        .terminal-sheet-list { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 12px;
+            display: flex; flex-direction: column; gap: 6px; }
+        .terminal-sheet-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px;
+            background: #1C1C1E; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; color: #FFFFFF;
+            font-family: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+        .terminal-sheet-row[aria-pressed="true"] { border-color: #FF9933; }
+        .terminal-sheet-row-name { font-weight: 600; min-width: 96px; }
+        .terminal-sheet-row-company { flex: 1; font-size: 14px; color: #C7C7CC; }
+        .terminal-sheet-row-mark { font-size: 12px; font-weight: 600; color: #FF9933; white-space: nowrap; }
+        .terminal-sheet-row-mark:empty { display: none; }
+        .terminal-sheet-note { margin: 12px 20px 0; font-size: 13px; line-height: 1.45; color: #C7C7CC; }
+        .terminal-sheet-confirm { margin: 14px 20px 0; padding: 16px; border: none; border-radius: 14px; font-size: 16px;
+            font-weight: 700; color: #fff; background: linear-gradient(135deg, #FF9933, #FF5733); font-family: inherit; cursor: pointer; }
+        .terminal-sheet-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+        .terminal-sheet-skip { margin: 4px 20px 0; padding: 12px; background: transparent; border: none; color: #8E8E93;
+            font-family: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
+        .terminal-sheet-skip:disabled { opacity: 0.5; cursor: not-allowed; }
+        @media (max-width: 480px) {
+            .terminal-sheet-panel { max-width: 100%; max-height: 92vh; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .terminal-sheet-overlay, .terminal-sheet-panel { transition: none; }
+        }
     </style>
     <!-- Curated cruise terminals: registry validation + matcher shared with
          the Netlify functions (global CuratedPlaces, read by autocomplete.js). -->
     <script src="./js/curated-places.js?v=1"></script>
+    <!-- Terminal confirmation (R1): the confirm sheet that opens on a
+         terminal pick (global TerminalSheet; its COPY also feeds the When
+         reminder). -->
+    <script src="./js/terminal-sheet.js?v=1"></script>
     <script src="./js/pending-edit-model.js?v=3"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
@@ -943,8 +1012,28 @@
                     locations: {
                         address: null,
                         airport: null,
-                        placeId: null   // autocomplete's Google place_id (PR 3C-2B2)
+                        placeId: null,   // autocomplete's Google place_id (PR 3C-2B2)
+                        // Terminal confirmation (R1, plan §3.1/§3.3): the
+                        // registry metadata of a curated pick ({terminalId,
+                        // companyKey} or null), the autocomplete's number for
+                        // the selection that produced this identity, and the
+                        // identity-bound resolution record written by the
+                        // winning quote ({placeId, selectionId,
+                        // canonicalPlaceId} or null). All three travel with
+                        // placeId and are nulled wherever it is.
+                        curated: null,
+                        selectionId: null,
+                        resolution: null
                     },
+                    // Terminal confirmation (plan §3.2): the per-selection
+                    // lifecycle record and the host generation it is bound to.
+                    //   terminalFlow = null | { generation, selectionId, placeId,
+                    //                           stage: 'settling'|'open'|'closed'|'continued' }
+                    // selectionGeneration increments on every selection start,
+                    // validation clear, mode reset and Change terminal; a
+                    // record whose generation is not current is dead.
+                    terminalFlow: null,
+                    selectionGeneration: 0,
                     route: {
                         distance: null,
                         duration: null,
@@ -1089,7 +1178,10 @@
                     'whenBasis', 'timeLabel', 'flightLabel', 'flightHelp', 'flightError', 'flightOffsetSection', 'flightOffsetSelect', 'flightPickupNote',
                     'todayBtn', 'tomorrowBtn', 'otherDatesBtn', 'todayDate', 'tomorrowDate',
                     'calendarContainer', 'calendarMonthYear', 'calendarGrid', 'prevMonthBtn', 'nextMonthBtn',
-                    'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap'
+                    'vehicleSelectionBtn', 'vehicleBackBtn', 'vehiclePanel', 'vehicleMap',
+                    // Terminal confirmation (R1): the When reminder block
+                    'terminalReminder', 'terminalReminderRole', 'terminalReminderTerminal',
+                    'terminalReminderCompany', 'terminalReminderNote', 'changeTerminalBtn'
                 ];
                 
                 let foundElements = 0;
@@ -1154,6 +1246,14 @@
                         
                         // Add event listeners with safety checks
                         if (this.els.addressInput) {
+                            // Terminal confirmation (plan §3.2): the
+                            // autocomplete announces every selection
+                            // SYNCHRONOUSLY, before its Details lookup — the
+                            // confirm sheet opens on the tap itself.
+                            this.els.addressInput.addEventListener('selection-started', (e) => {
+                                this.onSelectionStarted(e.detail);
+                            });
+
                             this.els.addressInput.addEventListener('place-selected', (e) => {
                                 this.handleAddressSelected(e.detail);
                             });
@@ -1215,6 +1315,8 @@
                 this.els.vehicleBackBtn?.addEventListener('click', () => this.navigateToPanel('when'));
                 this.els.bookBtn?.addEventListener('click', () => this.handleBookingClick());
                 this.els.editRouteBtn?.addEventListener('click', () => this.navigateToPanel('where'));
+                // Terminal confirmation: When → Change terminal reopens the sheet
+                this.els.changeTerminalBtn?.addEventListener('click', () => this.changeTerminal());
                 
                 // Vehicle card clicks now handled via iframe postMessage
                 
@@ -1513,9 +1615,19 @@
             // Only the live autocomplete event enters through this wrapper.
             // Restoration and hydration call the state handlers directly, so
             // a complete restored route can never move the passenger forward.
+            // Terminal confirmation (plan §3.2): with a terminal intent on
+            // record, a completion can only SETTLE the record its own
+            // selection number names — never create one, never advance; the
+            // advance for a terminal pick is taken once by continueAfterSheet.
             onAddressCoordinates(detail) {
                 this.handleAddressCoordinates(detail);
-                this.maybeAutoAdvanceAfterRouteSelection('address');
+                const f = (this._editRoute || this.pendingEdit || this._editHydrating) ? null : this.state.terminalFlow;
+                if (!f) { this.maybeAutoAdvanceAfterRouteSelection('address'); return; }   // no terminal intent: today's path
+                const live = f.generation === this.state.selectionGeneration &&
+                    Number.isInteger(f.selectionId) && f.selectionId === (detail && detail.selectionId);
+                if (!live) return;   // a terminal intent exists but this is not its selection: nothing
+                if (f.stage === 'settling') { f.stage = 'open'; this.renderTerminalSheet(); }
+                // 'open', 'closed', 'continued': a late or duplicate result changes nothing
             }
 
             maybeAutoAdvanceAfterRouteSelection(source) {
@@ -1539,6 +1651,271 @@
                 this.navigateToPanel('when');
                 return true;
             }
+
+            // ================= Terminal confirmation (R1; plan v1.6 §3.1–§3.3) =================
+            // A LinkMia terminal pick opens the confirm sheet on the tap
+            // itself (the autocomplete's synchronous selection-started
+            // boundary); the When panel repeats the terminal with Change
+            // terminal; an identity-bound resolution record keeps an obsolete
+            // terminal hidden once a quote's canonical echo resolved the
+            // address elsewhere. Nothing here is a quote surface.
+            curatedRegistry() {
+                return this.autocomplete?.curatedRegistry || null;
+            }
+
+            verifiedTerminalFor(placeId) {
+                const registry = this.curatedRegistry();
+                if (!registry || !registry.byPlaceId || typeof placeId !== 'string') return null;
+                return Object.prototype.hasOwnProperty.call(registry.byPlaceId, placeId)
+                    ? registry.byPlaceId[placeId]
+                    : null;
+            }
+
+            // The role the terminal plays in this ride: Going to Airport
+            // (mode 'dropoff') is picked up there; Arriving at Airport
+            // (mode 'pickup') is dropped off there — the same mapping the
+            // server's ADDRESS_COLUMN uses for the stored label.
+            terminalSide() {
+                return this.state.mode === 'pickup' ? 'dropoff' : 'pickup';
+            }
+
+            bumpSelectionGeneration() {
+                this.state.selectionGeneration = (Number(this.state.selectionGeneration) || 0) + 1;
+                return this.state.selectionGeneration;
+            }
+
+            currentTerminalFlow() {
+                const f = this.state.terminalFlow;
+                return f && f.generation === this.state.selectionGeneration ? f : null;
+            }
+
+            // The cruise line(s) to show beside a terminal: the company the
+            // passenger picked when it sails from that terminal, else every
+            // company that does (a sheet row names a terminal, not a company).
+            companyFor(terminal) {
+                const registry = this.curatedRegistry();
+                if (!registry || !terminal || !Array.isArray(terminal.companies)) return '';
+                const key = this.state.locations.curated?.companyKey || null;
+                const keys = key && terminal.companies.includes(key) ? [key] : terminal.companies;
+                return keys.map((k) => registry.companyByKey?.[k]?.name).filter(Boolean).join(' · ');
+            }
+
+            // THE display decision for the When reminder and the sheet's
+            // marked row (plan §3.3). Resolution evidence counts only when it
+            // names the CURRENT selection — place ID and selection number —
+            // and quote status never enters the decision, so an obsolete
+            // terminal stays hidden through pickup-time or passenger changes
+            // and while a requote loads or fails.
+            selectedTerminalDisplay() {
+                const selected = this.state.locations.placeId;
+                if (!selected) return null;
+                const r = this.state.locations.resolution;
+                const selectionId = this.state.locations.selectionId ?? null;
+                const evidence = (r && r.placeId === selected && (r.selectionId ?? null) === selectionId) ? r : null;
+                if (evidence && evidence.canonicalPlaceId !== selected) {
+                    return { superseded: true, terminal: null, company: '' };   // Google resolved this address to a different place
+                }
+                const terminal = this.verifiedTerminalFor(selected);
+                if (!terminal) return null;
+                return { superseded: false, terminal, company: this.companyFor(terminal) };
+            }
+
+            // Written in exactly ONE place — the quote-ready branch of
+            // requestServerQuote, reached only by the winning response for
+            // the current intent. Never touched by invalidateQuote; cleared
+            // only with the identity (a new selection, a validation clear,
+            // the mode reset). Never writes placeId, the quote key or data.
+            recordResolution(intent) {
+                const selected = this.state.locations.placeId;
+                const canonical = intent && typeof intent.placeId === 'string' ? intent.placeId : null;
+                if (!selected || !canonical) return false;
+                this.state.locations.resolution = {
+                    placeId: selected,
+                    selectionId: this.state.locations.selectionId ?? null,
+                    canonicalPlaceId: canonical
+                };
+                this.renderTerminalReminder();
+                return true;
+            }
+
+            // The start boundary (plan §3.2; Codex 0285 #2): fired by the
+            // autocomplete synchronously on EVERY selection, from the
+            // dropdown (click or Enter) and from a sheet row alike, before
+            // its Details lookup. The intent is consumed here, once: a
+            // verified terminal gets a 'settling' record and the sheet opens
+            // (or re-renders) with Confirm/Skip disabled; a Google row, or
+            // metadata that fails validation, clears the terminal intent.
+            onSelectionStarted(detail) {
+                if (this._editRoute || this.pendingEdit || this._editHydrating) return;   // PR-B lanes untouched
+                const generation = this.bumpSelectionGeneration();
+                const placeId = typeof detail?.placeId === 'string' ? detail.placeId : null;
+                const meta = detail?.curated;
+                const terminal = detail?.source === 'curated' && meta && typeof meta === 'object' &&
+                    placeId && meta.placeId === placeId
+                    ? this.verifiedTerminalFor(placeId)
+                    : null;
+                if (!terminal) { this.state.terminalFlow = null; return; }
+                this.state.terminalFlow = {
+                    generation,
+                    selectionId: Number.isInteger(detail.selectionId) ? detail.selectionId : null,
+                    placeId,
+                    stage: 'settling'
+                };
+                this.openTerminalSheet();
+            }
+
+            // Confirm / Skip: keep the current selection and continue —
+            // exactly once per record; refused while a re-selection settles.
+            continueAfterSheet() {
+                const f = this.currentTerminalFlow();
+                if (!f || f.stage !== 'open') return false;
+                f.stage = 'continued';
+                this.closeTerminalSheet();
+                if (this.canContinue()) {
+                    this.navigateToPanel('when');
+                    this.focusWhenFirstControl();
+                } else {
+                    this.focusAirportGrid();   // Going to Airport before the airport is chosen: the grid is next
+                }
+                return true;
+            }
+
+            // Slide down, ✕, backdrop, Escape: stay on Where with the current
+            // terminal still selected and the address box focused with its
+            // text selected, so a brand-new address can be typed. The record
+            // survives as 'closed': a late completion for the same selection
+            // settles nothing visible — no reopen, no advance.
+            dismissTerminalSheet() {
+                const f = this.currentTerminalFlow();
+                if (f && (f.stage === 'settling' || f.stage === 'open')) f.stage = 'closed';
+                this.closeTerminalSheet();
+                const input = this.els.addressInput;
+                if (input) {
+                    try {
+                        input.focus();
+                        if (typeof input.select === 'function') input.select();
+                    } catch (_) { /* focus is a courtesy */ }
+                }
+            }
+
+            // When → Change terminal (plan §3.2; Codex 0286 #2). FIRST cancel
+            // any older in-flight autocomplete selection: its sequence
+            // advances, so a still-pending Details result produces no
+            // completion event and can neither mutate nor replace the
+            // committed terminal. THEN open on the COMMITTED selection —
+            // label, identity, validation and resolution evidence preserved;
+            // this is not a clear and makes no new Details call.
+            changeTerminal() {
+                if (this._editRoute || this.pendingEdit || this._editHydrating) return false;
+                if (!this.state.locations.placeId) return false;
+                // Only a verified terminal has a sheet to reopen (marked, or
+                // unmarked when the quote's echo superseded it); a hotel
+                // never does, whatever its echo said.
+                if (!this.verifiedTerminalFor(this.state.locations.placeId)) return false;
+                this.autocomplete?.invalidateRawCapture?.();
+                const generation = this.bumpSelectionGeneration();
+                this.state.terminalFlow = {
+                    generation,
+                    selectionId: null,
+                    placeId: this.state.locations.placeId,
+                    stage: 'open'
+                };
+                this.navigateToPanel('where');
+                this.openTerminalSheet();
+                return true;
+            }
+
+            // A sheet row in create mode re-selects THROUGH the autocomplete's
+            // curated selection path — the same label, place ID, coordinates
+            // lookup and events a dropdown pick runs. The row already marked
+            // (or already checking) needs no new lookup.
+            onTerminalRowTap(terminalId) {
+                const registry = this.curatedRegistry();
+                const terminal = registry?.verified?.find((entry) => entry.id === terminalId) || null;
+                if (!terminal) return false;
+                const f = this.currentTerminalFlow();
+                const checking = f && f.stage === 'settling' ? f.placeId : null;
+                if (checking ? terminal.placeId === checking : terminal.placeId === this.state.locations.placeId) return false;
+                return !!this.autocomplete?.selectCuratedTerminal?.(terminalId);
+            }
+
+            // The sheet renders a VIEW derived from state, every time.
+            terminalSheetView() {
+                const registry = this.curatedRegistry();
+                if (!registry) return null;
+                const f = this.currentTerminalFlow();
+                const display = this.selectedTerminalDisplay();
+                const superseded = !!(display && display.superseded);
+                return {
+                    side: this.terminalSide(),
+                    registry,
+                    selectedPlaceId: superseded ? null : (this.state.locations.placeId || null),
+                    settlingPlaceId: f && f.stage === 'settling' ? f.placeId : null,
+                    superseded
+                };
+            }
+
+            // Idempotent: opens the sheet if closed, re-renders it if open.
+            openTerminalSheet() {
+                const view = this.terminalSheetView();
+                if (!view) return false;
+                if (!this._terminalSheet) {
+                    const factory = window.TerminalSheet;
+                    if (!factory || typeof factory.create !== 'function') return false;
+                    this._terminalSheet = factory.create({
+                        document,
+                        host: {
+                            onRowTap: (terminalId) => this.onTerminalRowTap(terminalId),
+                            onConfirm: () => this.continueAfterSheet(),
+                            onSkip: () => this.continueAfterSheet(),
+                            onDismiss: () => this.dismissTerminalSheet()
+                        }
+                    });
+                }
+                if (this._terminalSheet.isOpen()) this._terminalSheet.render(view);
+                else this._terminalSheet.open(view, { inert: this.els.bookingContainer || null });
+                return true;
+            }
+
+            renderTerminalSheet() {
+                if (!this._terminalSheet || !this._terminalSheet.isOpen()) return;
+                const view = this.terminalSheetView();
+                if (view) this._terminalSheet.render(view);
+            }
+
+            closeTerminalSheet() {
+                if (this._terminalSheet && this._terminalSheet.isOpen()) this._terminalSheet.close();
+            }
+
+            focusWhenFirstControl() {
+                const basis = this.els.basisBtns;
+                const target = this.state.mode === 'pickup' && basis && basis.length ? basis[0] : this.els.todayBtn;
+                try { target?.focus?.(); } catch (_) { /* focus is a courtesy */ }
+            }
+
+            focusAirportGrid() {
+                try { this.els.airportOptions?.[0]?.focus?.(); } catch (_) { /* focus is a courtesy */ }
+            }
+
+            // The When reminder block (plan §2.3): derived from state at
+            // render time, shown only for a verified terminal the quote did
+            // not resolve elsewhere; its words come from the sheet's COPY.
+            renderTerminalReminder() {
+                const block = this.els.terminalReminder;
+                if (!block) return null;
+                const COPY = window.TerminalSheet?.COPY;
+                const display = this.selectedTerminalDisplay();
+                const show = !!(COPY && display && !display.superseded && display.terminal);
+                block.hidden = !show;
+                if (!show) return null;
+                const side = this.terminalSide();
+                if (this.els.terminalReminderRole) this.els.terminalReminderRole.textContent = COPY.role[side];
+                if (this.els.terminalReminderTerminal) this.els.terminalReminderTerminal.textContent = display.terminal.name;
+                if (this.els.terminalReminderCompany) this.els.terminalReminderCompany.textContent = display.company;
+                if (this.els.terminalReminderNote) this.els.terminalReminderNote.textContent = COPY.reminder[side];
+                return display;
+            }
+            // =============== end terminal confirmation ===============
 
             onAutocompleteSelect(sel) {
                 if (!this._editRoute) return;   // no-op outside edit-route mode
@@ -1608,7 +1985,11 @@
             }
             
             resetSelections() {
-                this.state.locations = { address: null, airport: null, placeId: null };
+                this.state.locations = { address: null, airport: null, placeId: null, curated: null, selectionId: null, resolution: null };
+                // Terminal confirmation: a reset ends any terminal intent.
+                this.bumpSelectionGeneration();
+                this.state.terminalFlow = null;
+                this.closeTerminalSheet();
                 this.clearRouteState();
                 this.invalidateQuote('selection reset');
                 
@@ -1623,10 +2004,11 @@
                 this.els.flowConnector.classList.remove('active');
                 
                 this.updateStepOrder(this.state.mode === 'dropoff');
-                
+
                 this.updateContinueButton();
+                this.renderTerminalReminder();
             }
-            
+
             handleAddressSelected(detail) {
                 if (this._editRoute) return;   // PR-B: onSelect replaced the tuple atomically
                 // PR 3C-2B2: keep autocomplete's place_id. Before this it was
@@ -1640,6 +2022,20 @@
                     (typeof placeId === 'string' && placeId && placeId !== 'unknown')
                         ? placeId
                         : null;
+                // Terminal confirmation (plan §3.1/§3.3): the registry
+                // metadata is kept only when it names THIS place ID (a
+                // Google row or a mismatch clears it); the selection number
+                // identifies the selection that produced the identity; the
+                // resolution record belonged to the previous identity and
+                // goes with it.
+                const selected = this.state.locations.placeId;
+                const meta = detail && detail.curated;
+                this.state.locations.curated =
+                    (selected && meta && typeof meta === 'object' && meta.placeId === selected)
+                        ? { terminalId: meta.terminalId, companyKey: meta.companyKey ?? null }
+                        : null;
+                this.state.locations.selectionId = Number.isInteger(detail?.selectionId) ? detail.selectionId : null;
+                this.state.locations.resolution = null;
                 // PR-B: a live address selection can change what Save is
                 // allowed to do, so re-evaluate. The COMPARATOR decides; there
                 // is no marker to set any more.
@@ -1648,6 +2044,7 @@
                 this.updateAddressStepState();
                 this.updateAirportStepState();
                 this.updateContinueButton();
+                this.renderTerminalReminder();
             }
 
             handleAddressCoordinates(detail) {
@@ -1680,11 +2077,20 @@
                 }
                 this.state.locations.address = null;
                 this.state.locations.placeId = null;
+                this.state.locations.curated = null;
+                this.state.locations.selectionId = null;
+                this.state.locations.resolution = null;
+                // Terminal confirmation (plan §3.2): typing ends the terminal
+                // intent — the autocomplete's own sequence bump has already
+                // made a pending result lose its guard.
+                this.bumpSelectionGeneration();
+                this.state.terminalFlow = null;
                 this.clearRouteState();
                 this.invalidateQuote('address cleared');
                 this.updateAddressStepState();
                 this.updateAirportStepState();
                 this.updateContinueButton();
+                this.renderTerminalReminder();
             }
             
             updateAddressStepState() {
@@ -1968,6 +2374,7 @@
                     this.els.summaryBar.classList.add('visible');
                     this.updateProgressSteps('when');
                     this.updateSummary();
+                    this.renderTerminalReminder();   // terminal confirmation: derived from state on every entry
                 } else if (panel === 'vehicle') {
                     this.els.panelsWrapper.classList.add('show-vehicle');
                     this.els.progressLine.classList.add('active');
@@ -3134,6 +3541,11 @@
                     q.status = 'ready';
                     q.data = quote;
                     q.error = null;
+                    // Terminal confirmation (plan §3.3): the identity-bound
+                    // resolution record is written HERE — its only writer,
+                    // past both seq rechecks — and before the label
+                    // reconciliation renders anything.
+                    this.recordResolution(quote.intent);
                     this.reconcileQuoteLabel(quote.intent);
                     this.applyServerPrices();
                     this.armQuoteExpiry();

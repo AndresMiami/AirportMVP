@@ -48,10 +48,25 @@ function projectCuratedLabel(canonicalPlaceId, bookingMode) {
   return { column, label: core.terminalLabel(terminal), terminalId: terminal.id };
 }
 
+// The trip page's READ-ONLY terminal projection (terminal confirmation R1,
+// plan §3.4): { name, side } only when the stored route is canonical and its
+// canonical place ID is a verified terminal here. `side` is the address side
+// the terminal occupies ('pickup' | 'dropoff'), the same mapping the stored
+// label uses. Legacy-text, non-port and unverified rows project nothing, and
+// the caller strips the source columns before serializing.
+function projectTerminal(canonicalPlaceId, bookingMode, routeAuthority) {
+  if (routeAuthority !== 'canonical') return null;
+  const projection = projectCuratedLabel(canonicalPlaceId, bookingMode);
+  if (!projection) return null;
+  const terminal = findVerifiedTerminal(canonicalPlaceId);
+  return { name: terminal.name, side: projection.column === 'pickup_location' ? 'pickup' : 'dropoff' };
+}
+
 module.exports = {
   ADDRESS_COLUMN,
   registry,
   findVerifiedTerminal,
   projectCuratedLabel,
+  projectTerminal,
   validation: Object.freeze({ ok: validation.ok, errors: validation.errors.slice() })
 };
