@@ -691,6 +691,39 @@ review of the sheet. Observation (preview UI, not ours): Netlify's
 "Deploy Preview" pill sits over the Skip button at the sheet's bottom on
 this desktop viewport; Skip stayed reachable by keyboard.
 
+**Success-path rerun (2026-10-28, ~05:02–05:12Z, same head `b19b131` and
+preview, after Andres authorized the allowlist change in chat — Claude set
+`ALLOWED_ORIGINS` on the Railway service `reliable-warmth` (production)
+through the Railway connector to the three production origins
+(`https://linkmia.com`, `https://www.linkmia.com`,
+`https://i-love-miami.netlify.app`) plus
+`https://deploy-preview-122--i-love-miami.netlify.app`, removing the
+deploy-preview-120 entry on Andres's instruction; the value was written
+whole without reading the service's variables back, so the private Maps
+key never entered the transcript; Railway deployment `a25d6463` went live
+at 05:02Z; preflight from the preview origin then 200, the production
+origins 200, deploy-preview-120 refused):** "Virgin" lists the LinkMia
+Terminal V row under "LinkMia terminals" and Google's five rows under
+"Google suggestions" with one Google logo; the Terminal V tap opens the
+sheet synchronously as before and the Details SUCCESS settles it with
+coordinates (25.7800848, −80.179946) and the selected-place attribution
+visible; Confirm, then MIA → When shows the reminder plus "Drop-off at
+airport approx. 1:39 AM" and "Estimated ride duration of 24 min (live
+data)" (13.5 mi / 24 min, Google Maps attribution visible). Hotel path,
+Going to Airport: Back, "Fontainebleau" → Google rows only; the first row
+(Fontainebleau Miami Beach → "4441 Collins Ave, Miami Beach, FL 33140,
+USA") opens no sheet, records no terminal intent, stores coordinates and
+stays on Where (an address never completes this direction); Continue →
+When without the reminder ("4441 Collins Ave → MIA"). Hotel path,
+Arriving at Airport: mode switch, MIA, "Fontainebleau" → the first row
+takes today's auto-advance to When, no sheet, no reminder. Console after
+the fix: no new errors. STILL NOT verified: the resolution record on a
+real quote (preview pricing env unset by decision), phone swipe and
+real-device drag feel, the trip-card reminder on a real row, and Andres's
+own visual review of the sheet. Follow-up proposed (not R1): a proxy rule
+admitting this site's Netlify deploy previews by pattern, so the
+allowlist stops changing per PR — its own PR.
+
 ## 6. Separate proposals (not prerequisites; each needs its own review)
 Ship name (existing `cruise_ship` column, owner-only endpoint, guarded UPDATE
 outside the pricing RPCs); stored terminal confirmation (migration;
