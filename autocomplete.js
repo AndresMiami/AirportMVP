@@ -657,6 +657,32 @@ export class CustomAutocomplete {
         }
     }
 
+    // A BACKGROUND Place Details lookup for the terminal stage's map (plan
+    // v1.10 §3.2a, strategy B): the location of a verified terminal the
+    // passenger did NOT select, so its marker can show. It touches no
+    // selection state, no session token, no input and dispatches no event;
+    // it resolves { lat, lng, attributions } from the proxy's existing
+    // response (geometry, formatted_address, attributions — the address is
+    // not used) or rejects. The same 10 s bound and the same attribution
+    // boundary as a selection's lookup: an unrepresentable credit set, a
+    // missing location or a failed request all reject, and the host then
+    // simply draws no marker for that terminal.
+    async lookupPlaceLocation(placeId) {
+        if (typeof placeId !== 'string' || !placeId) throw new Error('Place id required');
+        const params = new URLSearchParams({ place_id: placeId });
+        const apiBase = 'https://reliable-warmth-production-d382.up.railway.app';
+        const response = await this.fetchWithTimeout(`${apiBase}/api/places/details?${params}`, {}, 10000);
+        if (!response || !response.ok) throw new Error('Place details unavailable');
+        const data = await response.json();
+        const location = data && data.result && data.result.geometry ? data.result.geometry.location : null;
+        const lat = location ? location.lat : null;
+        const lng = location ? location.lng : null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('Incomplete place details');
+        const attributions = this.validAttributionEntries(data.attributions);
+        if (attributions === null) throw new Error('Attribution unrepresentable');
+        return { lat, lng, attributions };
+    }
+
     applySelection(place) {
         const address = place.formattedAddress || place.displayName?.text || '';
         this.input.value = address;
@@ -688,8 +714,11 @@ export class CustomAutocomplete {
         this.input.dispatchEvent(new CustomEvent('place-selected', {
             detail: { placeId: place.id, description: address, curated, selectionId }
         }));
+        // The validated credits the lookup returned travel with the
+        // coordinates (empty on the fallback), so the host can show them
+        // beside the terminal stage's map with this place's pin.
         this.input.dispatchEvent(new CustomEvent('place-coordinates', {
-            detail: { lat, lng, address, selectionId }
+            detail: { lat, lng, address, selectionId, attributions: Array.isArray(place.attributions) ? place.attributions : [] }
         }));
 
         this.clearSession();

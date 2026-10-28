@@ -908,27 +908,74 @@
         .terminal-reminder-note { margin-top: 4px; font-size: 13px; line-height: 1.4; color: #C7C7CC; }
         .terminal-reminder-change { margin-top: 6px; padding: 6px 0; background: transparent; border: none; color: #FF9933;
             font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+        /* The terminal STAGE (plan v1.10 §2.2): the map on top, the panel docked
+           below it in two positions; phone = the whole viewport, desktop = a
+           576px column over the dimmed backdrop (house bottom-sheet values). */
         .terminal-sheet-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7);
             z-index: 9999; display: flex; justify-content: center; align-items: flex-end; opacity: 0;
             transition: opacity 0.3s ease-out; }
         .terminal-sheet-overlay.active { opacity: 1; }
         .terminal-sheet-overlay.closing { pointer-events: none; }
-        .terminal-sheet-panel { width: 100%; max-width: 576px; max-height: 88vh; background: #2C2C2E;
-            border-radius: 20px 20px 0 0; display: flex; flex-direction: column; transform: translateY(100%);
-            transition: transform 0.3s ease-out; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
-        .terminal-sheet-overlay.active .terminal-sheet-panel { transform: translateY(0); }
-        .terminal-sheet-panel.dragging { transition: none; }
-        .terminal-sheet-grip { padding: 10px 0 2px; display: flex; justify-content: center; touch-action: none; cursor: grab; }
-        .terminal-sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.3); }
-        .terminal-sheet-header { display: flex; align-items: center; justify-content: space-between;
-            padding: 6px 12px 2px 20px; touch-action: none; }
-        .terminal-sheet-title { margin: 0; font-size: 20px; font-weight: 600; color: #FFFFFF; }
+        .terminal-sheet-stage { position: relative; width: 100%; max-width: 576px; height: 100%; background: #1C1C1E;
+            display: flex; flex-direction: column; overflow: hidden; transform: translateY(100%);
+            transition: transform 0.3s ease-out; }
+        .terminal-sheet-overlay.active .terminal-sheet-stage { transform: translateY(0); }
+        @media (min-width: 640px) {
+            .terminal-sheet-stage { height: 92vh; border-radius: 20px 20px 0 0; }
+        }
+        /* The docked panel: collapsed shows the handle, the selected row, the
+           reminder and Confirm; expanded takes ~70% and scrolls the list. */
+        .terminal-sheet-panel { flex: 0 0 auto; max-height: 72%; background: #2C2C2E; border-radius: 20px 20px 0 0;
+            display: flex; flex-direction: column; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+            box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35); }
+        .terminal-sheet-panel[data-position="expanded"] { flex: 0 0 72%; }
+        .terminal-sheet-panel.dragging { cursor: grabbing; }
+        .terminal-sheet-handle-btn { width: 100%; border: none; background: none; padding: 10px 0 4px; display: flex;
+            flex-direction: column; align-items: center; gap: 5px; touch-action: none; cursor: grab; color: #C7C7CC;
+            font-family: inherit; font-size: 12px; font-weight: 600; }
+        .terminal-sheet-handle-btn:focus-visible { outline: 2px solid #FF9933; outline-offset: -4px; border-radius: 12px; }
+        .terminal-sheet-handle { display: block; width: 40px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.3); }
+        /* Header over the map: ✕ left, title centred, Skip pill right */
+        .terminal-sheet-header { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: grid;
+            grid-template-columns: 40px 1fr auto; align-items: center; gap: 8px;
+            padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 14px;
+            background: linear-gradient(180deg, rgba(28, 28, 30, 0.92) 0%, rgba(28, 28, 30, 0.75) 60%, rgba(28, 28, 30, 0) 100%); }
+        .terminal-sheet-title { margin: 0; font-size: 19px; font-weight: 600; color: #FFFFFF; text-align: center;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
         .terminal-sheet-close { width: 40px; height: 40px; border: none; background: none; font-size: 22px; color: #FFFFFF;
             border-radius: 50%; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; }
         .terminal-sheet-close:hover { background: rgba(255, 255, 255, 0.1); }
-        .terminal-sheet-port { padding: 0 20px 10px; font-size: 14px; color: #C7C7CC; }
+        .terminal-sheet-skip { padding: 8px 16px; border: none; border-radius: 999px; background: rgba(255,255,255,0.12);
+            color: #FFFFFF; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .terminal-sheet-skip:hover { background: rgba(255,255,255,0.2); }
+        .terminal-sheet-skip:disabled { opacity: 0.45; cursor: not-allowed; }
+        /* The map fills the stage above the panel (so Google's own logo and
+           attribution at its bottom stay visible); the canvas is Google's, the
+           note covers it while loading or unavailable, the layer switch floats
+           under the header. */
+        .terminal-sheet-map { position: relative; flex: 1 1 auto; min-height: 140px; background: #1C1C1E; }
+        .terminal-sheet-map[hidden] { display: none; }
+        .terminal-sheet-map-canvas { position: absolute; inset: 0; }
+        .terminal-sheet-map-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            padding: 64px 20px 0; text-align: center; font-size: 13px; color: #C7C7CC; background: #1C1C1E; }
+        .terminal-sheet-map-note[hidden] { display: none; }
+        .terminal-sheet-map-types { position: absolute; right: 12px; top: calc(64px + env(safe-area-inset-top, 0px));
+            display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: rgba(28, 28, 30, 0.85); z-index: 1; }
+        .terminal-sheet-map-types[hidden] { display: none; }
+        .terminal-sheet-maptype { padding: 6px 12px; border: none; border-radius: 999px; background: transparent; color: #C7C7CC;
+            font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .terminal-sheet-maptype.is-active { background: #FFFFFF; color: #1C1C1E; }
+        .terminal-map-label { text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
+        /* The caption strip: the port, "Terminal locations" (never a curb), the
+           credits of the markers shown */
+        .terminal-sheet-caption { padding: 0 20px 8px; font-size: 12px; color: #C7C7CC; display: flex; flex-wrap: wrap;
+            align-items: baseline; gap: 2px 8px; }
+        .terminal-sheet-port { font-size: 14px; color: #FFFFFF; font-weight: 600; }
+        .terminal-sheet-caption-text[hidden], .terminal-sheet-credits[hidden] { display: none; }
+        .terminal-sheet-credits a { color: #FFFFFF; }
         .terminal-sheet-list { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 12px;
             display: flex; flex-direction: column; gap: 6px; }
+        .terminal-sheet-row[hidden] { display: none; }
         .terminal-sheet-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px;
             background: #1C1C1E; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; color: #FFFFFF;
             font-family: inherit; font-size: 15px; text-align: left; cursor: pointer; }
@@ -937,18 +984,13 @@
         .terminal-sheet-row-company { flex: 1; font-size: 14px; color: #C7C7CC; }
         .terminal-sheet-row-mark { font-size: 12px; font-weight: 600; color: #FF9933; white-space: nowrap; }
         .terminal-sheet-row-mark:empty { display: none; }
-        .terminal-sheet-note { margin: 12px 20px 0; font-size: 13px; line-height: 1.45; color: #C7C7CC; }
-        .terminal-sheet-confirm { margin: 14px 20px 0; padding: 16px; border: none; border-radius: 14px; font-size: 16px;
+        .terminal-sheet-note { margin: 10px 20px 0; font-size: 13px; line-height: 1.45; color: #C7C7CC; }
+        .terminal-sheet-footer { flex: 0 0 auto; padding: 12px 20px 0; }
+        .terminal-sheet-confirm { width: 100%; padding: 16px; border: none; border-radius: 14px; font-size: 16px;
             font-weight: 700; color: #fff; background: linear-gradient(135deg, #FF9933, #FF5733); font-family: inherit; cursor: pointer; }
         .terminal-sheet-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
-        .terminal-sheet-skip { margin: 4px 20px 0; padding: 12px; background: transparent; border: none; color: #8E8E93;
-            font-family: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
-        .terminal-sheet-skip:disabled { opacity: 0.5; cursor: not-allowed; }
-        @media (max-width: 480px) {
-            .terminal-sheet-panel { max-width: 100%; max-height: 92vh; }
-        }
         @media (prefers-reduced-motion: reduce) {
-            .terminal-sheet-overlay, .terminal-sheet-panel { transition: none; }
+            .terminal-sheet-overlay, .terminal-sheet-stage { transition: none; }
         }
     </style>
     <!-- Curated cruise terminals: registry validation + matcher shared with
@@ -957,7 +999,7 @@
     <!-- Terminal confirmation (R1): the confirm sheet that opens on a
          terminal pick (global TerminalSheet; its COPY also feeds the When
          reminder). -->
-    <script src="./js/terminal-sheet.js?v=1"></script>
+    <script src="./js/terminal-sheet.js?v=2"></script>
     <script src="./js/pending-edit-model.js?v=3"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
@@ -1626,7 +1668,15 @@
                 const live = f.generation === this.state.selectionGeneration &&
                     Number.isInteger(f.selectionId) && f.selectionId === (detail && detail.selectionId);
                 if (!live) return;   // a terminal intent exists but this is not its selection: nothing
-                if (f.stage === 'settling') { f.stage = 'open'; this.renderTerminalSheet(); }
+                if (f.stage === 'settling') {
+                    f.stage = 'open';
+                    // The camera moves for a settled deliberate selection
+                    // (the initial one included) and for nothing else (plan
+                    // §2.2 Camera): the intent is consumed by
+                    // updateTerminalMapPins once the map and the pin exist.
+                    this._terminalCameraIntent = { placeId: f.placeId };
+                    this.renderTerminalSheet();
+                }
                 // 'open', 'closed', 'continued': a late or duplicate result changes nothing
             }
 
@@ -1851,7 +1901,9 @@
                     registry,
                     selectedPlaceId: superseded ? null : (this.state.locations.placeId || null),
                     settlingPlaceId: f && f.stage === 'settling' ? f.placeId : null,
-                    superseded
+                    superseded,
+                    map: { status: this._terminalMapStatus || 'loading', type: this._terminalMapType || 'roadmap' },
+                    credits: this.terminalPinCredits()
                 };
             }
 
@@ -1868,12 +1920,26 @@
                             onRowTap: (terminalId) => this.onTerminalRowTap(terminalId),
                             onConfirm: () => this.continueAfterSheet(),
                             onSkip: () => this.continueAfterSheet(),
-                            onDismiss: () => this.dismissTerminalSheet()
+                            onDismiss: () => this.dismissTerminalSheet(),
+                            onMapType: (type) => this.setTerminalMapType(type),
+                            onPanelPosition: () => this.onTerminalPanelPosition()
                         }
                     });
                 }
-                if (this._terminalSheet.isOpen()) this._terminalSheet.render(view);
-                else this._terminalSheet.open(view, { inert: this.els.bookingContainer || null });
+                if (this._terminalSheet.isOpen()) {
+                    this._terminalSheet.render(view);
+                } else {
+                    this._terminalSheet.open(view, { inert: this.els.bookingContainer || null });
+                    // The first open of a page session starts the BACKGROUND
+                    // marker batch (plan §3.2a), with the in-flight selection
+                    // reserved for its own lookup. Never again on a reopen.
+                    if (!this._terminalBatchStarted) {
+                        this._terminalBatchStarted = true;
+                        const f = this.currentTerminalFlow();
+                        this.startTerminalPinBatch(f ? f.placeId : this.state.locations.placeId);
+                    }
+                }
+                this.renderTerminalMap();
                 return true;
             }
 
@@ -1881,10 +1947,349 @@
                 if (!this._terminalSheet || !this._terminalSheet.isOpen()) return;
                 const view = this.terminalSheetView();
                 if (view) this._terminalSheet.render(view);
+                this.renderTerminalMap();
             }
 
             closeTerminalSheet() {
                 if (this._terminalSheet && this._terminalSheet.isOpen()) this._terminalSheet.close();
+                // The sheet's DOM goes with it; a reopen attaches a fresh map
+                // (its initial state, never a camera move: a pending intent
+                // ends with the stage).
+                this._terminalMap = null;
+                this._terminalMapStatus = null;
+                this._terminalCameraIntent = null;
+            }
+
+            // ---- the map on the stage (plan v1.10 §2.2 Camera, §3.2a) ----
+            // A Google map behind the docked panel, in the same dark look.
+            // Markers come from the per-page pin cache: the selected
+            // terminal's own Details lookup (every pick already makes it)
+            // and ONE background Details per other verified terminal, once
+            // per page session (strategy B, decision D1) — never registry
+            // coordinates, never persisted. The map is optional
+            // presentation: a loader or key failure shows the note and
+            // leaves the list and Confirm untouched.
+            //
+            // LinkMia's own overview of PortMiami — a view centre of ours for
+            // the honest loading state before a terminal's location is
+            // known, not any place's stored location.
+            terminalStageOverview() {
+                return { center: { lat: 25.7780, lng: -80.1760 }, zoom: 13 };
+            }
+
+            rememberTerminalPin(placeId, coordinates, attributions) {
+                if (!this._terminalPins) this._terminalPins = new Map();
+                if (typeof placeId !== 'string' || !coordinates) return;
+                // The fallback path carries null coordinates: a null is not a
+                // number (Number(null) is 0 — a pin in the Gulf of Guinea).
+                const { lat, lng } = coordinates;
+                if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+                if (!this.verifiedTerminalFor(placeId)) return;
+                // The credits the lookup returned travel with the pin and are
+                // rendered beside the map while the pin shows (plan §3.2a).
+                this._terminalPins.set(placeId, { lat, lng, attributions: Array.isArray(attributions) ? attributions : [] });
+            }
+
+            // The BACKGROUND batch (plan §3.2a; decision D1, strategy B): one
+            // standalone Details request per verified terminal without a pin,
+            // excluding the in-flight selection (reserved: its own lookup
+            // seeds its pin, and a background request for it is never sent).
+            // A per-page ledger — reserved / pending / done / failed — means a
+            // failure, a dismissal, a reopen or a new selection never restarts
+            // it, and failed is never retried. Responses write ONLY the pin
+            // cache and repaint an open stage: no completion handler, no
+            // identity, no Confirm, no reopen, no camera move.
+            startTerminalPinBatch(excludePlaceId) {
+                if (!this._terminalPinLedger) this._terminalPinLedger = new Map();
+                const ledger = this._terminalPinLedger;
+                const registry = this.curatedRegistry();
+                const lookup = this.autocomplete && typeof this.autocomplete.lookupPlaceLocation === 'function'
+                    ? (placeId) => this.autocomplete.lookupPlaceLocation(placeId)
+                    : null;
+                if (!registry || !Array.isArray(registry.verified) || !lookup) return 0;
+                if (!this._terminalPins) this._terminalPins = new Map();
+                if (typeof excludePlaceId === 'string' && !ledger.has(excludePlaceId)) ledger.set(excludePlaceId, 'reserved');
+                let started = 0;
+                for (const terminal of registry.verified) {
+                    const placeId = terminal.placeId;
+                    if (typeof placeId !== 'string' || this._terminalPins.has(placeId) || ledger.has(placeId)) continue;
+                    ledger.set(placeId, 'pending');
+                    started += 1;
+                    let request;
+                    try { request = Promise.resolve(lookup(placeId)); } catch (error) { request = Promise.reject(error); }
+                    request.then((location) => {
+                        ledger.set(placeId, 'done');
+                        this.rememberTerminalPin(placeId, location, location && location.attributions);
+                        this.repaintTerminalPins();
+                    }, () => {
+                        ledger.set(placeId, 'failed');
+                    });
+                }
+                return started;
+            }
+
+            // A background result repaints the stage that is open NOW —
+            // markers and credits — and nothing else: no camera move, no
+            // selection change, no reopen, no attach to a replaced stage.
+            repaintTerminalPins() {
+                const sheet = this._terminalSheet;
+                if (!sheet || !sheet.isOpen()) return false;
+                const els = sheet.elements();
+                if (this._terminalMap && els && this._terminalMap.host === els.mapHost) this.updateTerminalMapPins();
+                const view = this.terminalSheetView();
+                if (view) sheet.render(view);
+                return true;
+            }
+
+            // The credits of every pin currently drawn, for the stage's
+            // caption strip — each entry once.
+            terminalPinCredits() {
+                const pins = this._terminalPins;
+                if (!pins || pins.size === 0) return [];
+                const seen = new Set();
+                const credits = [];
+                pins.forEach((pin, placeId) => {
+                    if (!this.verifiedTerminalFor(placeId) || !Array.isArray(pin.attributions)) return;
+                    for (const entry of pin.attributions) {
+                        const key = JSON.stringify(entry);
+                        if (seen.has(key)) continue;
+                        seen.add(key);
+                        credits.push(entry);
+                    }
+                });
+                return credits;
+            }
+
+            setTerminalMapType(type) {
+                const next = type === 'satellite' ? 'satellite' : 'roadmap';
+                this._terminalMapType = next;
+                if (this._terminalMap && this._terminalMap.map && typeof this._terminalMap.map.setMapTypeId === 'function') {
+                    this._terminalMap.map.setMapTypeId(next);
+                }
+                if (this._terminalSheet && this._terminalSheet.isOpen()) {
+                    const view = this.terminalSheetView();
+                    if (view) this._terminalSheet.render(view);
+                }
+            }
+
+            terminalMapStyles() {
+                // A dark road map so the sheet reads as one surface; POI
+                // labels off so the terminal pins stand alone.
+                return [
+                    { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
+                    { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
+                    { elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
+                    { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+                    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#38414e' }] },
+                    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#212a37' }] },
+                    { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
+                    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#746855' }] },
+                    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17263c' }] },
+                    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#515c6d' }] },
+                    { featureType: 'transit', stylers: [{ visibility: 'off' }] }
+                ];
+            }
+
+            async renderTerminalMap() {
+                const sheet = this._terminalSheet;
+                if (!sheet || !sheet.isOpen()) return;
+                const els = sheet.elements();
+                const host = els && els.mapHost;
+                const loader = window.LinkMiaMapsLoader;
+                if (!host || !loader || typeof loader.load !== 'function') {
+                    // No map on this page: the sheet hides the whole area.
+                    this._terminalMapStatus = 'off';
+                    sheet.render(this.terminalSheetView());
+                    return;
+                }
+                // Already attached to THIS sheet's canvas: just refresh the pins.
+                if (this._terminalMap && this._terminalMap.host === host) {
+                    this._terminalMapStatus = 'ready';
+                    this.updateTerminalMapPins();
+                    sheet.render(this.terminalSheetView());
+                    return;
+                }
+                // One attach per sheet open: a re-render while the libraries
+                // load must not start a second one; the in-flight attach
+                // draws the pins (whatever has settled by then) when it lands.
+                if (this._terminalMapAttaching === host) return;
+                this._terminalMapAttaching = host;
+                try {
+                    this._terminalMapStatus = 'loading';
+                    sheet.render(this.terminalSheetView());
+                    await loader.load();
+                    await google.maps.importLibrary('maps');
+                    await google.maps.importLibrary('marker');
+                    // The sheet may have closed or reopened while the
+                    // libraries loaded: attach only to the canvas that asked.
+                    if (!sheet.isOpen() || sheet.elements().mapHost !== host) return;
+                    // The map's initial state (not a camera move): the
+                    // selected pin when known, else the port overview.
+                    const start = this.terminalInitialCamera();
+                    const map = new google.maps.Map(host, {
+                        center: start.center,
+                        zoom: start.zoom,
+                        disableDefaultUI: true,
+                        gestureHandling: 'greedy',
+                        clickableIcons: false,
+                        mapTypeId: this._terminalMapType || 'roadmap',
+                        styles: this.terminalMapStyles()
+                    });
+                    this._terminalMap = { host, map, markers: new Map() };
+                    // An attach already showing the selected pin satisfies a
+                    // pending intent for it: no second move.
+                    if (start.placeId && this._terminalCameraIntent && this._terminalCameraIntent.placeId === start.placeId) {
+                        this._terminalCameraIntent = null;
+                    }
+                    this._terminalMapStatus = 'ready';
+                    this.updateTerminalMapPins();
+                    sheet.render(this.terminalSheetView());
+                } catch (error) {
+                    this._terminalMap = null;
+                    this._terminalMapStatus = 'unavailable';
+                    if (host && typeof host.replaceChildren === 'function') host.replaceChildren();
+                    if (sheet.isOpen() && sheet.elements().mapHost === host) sheet.render(this.terminalSheetView());
+                    console.error('Terminal map unavailable:', error && error.name ? error.name : 'error');
+                } finally {
+                    if (this._terminalMapAttaching === host) this._terminalMapAttaching = null;
+                }
+            }
+
+            // Where the map starts when it attaches: on the selected
+            // terminal's pin when it is known (and not superseded), else
+            // LinkMia's overview of the port. An attach is the map's initial
+            // state, not a camera move.
+            terminalInitialCamera() {
+                const display = this.selectedTerminalDisplay();
+                const placeId = display && !display.superseded && display.terminal ? display.terminal.placeId : null;
+                const pin = placeId && this._terminalPins ? this._terminalPins.get(placeId) : null;
+                if (pin) return { center: { lat: pin.lat, lng: pin.lng }, zoom: 15, placeId };
+                const overview = this.terminalStageOverview();
+                return { center: overview.center, zoom: overview.zoom, placeId: null };
+            }
+
+            // A marker tap is a row tap: the same selection path (plan §3.2a).
+            onTerminalMarkerTap(placeId) {
+                const terminal = this.verifiedTerminalFor(placeId);
+                return terminal ? this.onTerminalRowTap(terminal.id) : false;
+            }
+
+            // One marker per pinned verified terminal. The SELECTED terminal
+            // — by the ONE display decision, selectedTerminalDisplay(), the
+            // same one the list and Confirm read (plan §3.2a identity;
+            // 0288 #3: never the submitted place ID, which stays as the quote
+            // key while a superseded selection shows nothing) — is brand
+            // orange with its name; the terminal being looked up shows the
+            // checking state; every other is a white dot. The camera moves
+            // here ONLY to consume a pending intent (a settled deliberate
+            // selection); a background pin, a re-render, a layer change or a
+            // superseded selection never moves it (plan §2.2 Camera).
+            updateTerminalMapPins() {
+                const tm = this._terminalMap;
+                if (!tm || !tm.map || typeof google === 'undefined' || !google.maps) return;
+                const registry = this.curatedRegistry();
+                const pins = this._terminalPins || new Map();
+                const display = this.selectedTerminalDisplay();
+                const highlighted = display && !display.superseded && display.terminal ? display.terminal.placeId : null;
+                const f = this.currentTerminalFlow();
+                const checking = f && f.stage === 'settling' ? f.placeId : null;
+                const COPY = window.TerminalSheet?.COPY;
+                const portName = registry && registry.port ? registry.port.name : '';
+                pins.forEach((pin, placeId) => {
+                    const terminal = this.verifiedTerminalFor(placeId);
+                    if (!terminal) return;
+                    const position = { lat: pin.lat, lng: pin.lng };
+                    const isSelected = placeId === highlighted;
+                    const isChecking = placeId === checking && !isSelected;
+                    const name = portName && terminal.name.startsWith(portName + ' ') ? terminal.name.slice(portName.length + 1) : terminal.name;
+                    let marker = tm.markers.get(placeId);
+                    const icon = {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: isSelected ? 10 : (isChecking ? 9 : 7),
+                        fillColor: isSelected ? '#FF9933' : (isChecking ? '#C7C7CC' : '#FFFFFF'),
+                        fillOpacity: 1,
+                        strokeColor: isSelected ? '#FFFFFF' : '#1C1C1E',
+                        strokeWeight: 2,
+                        labelOrigin: new google.maps.Point(0, -2.6)
+                    };
+                    const labelText = isSelected ? name : (isChecking && COPY ? COPY.checking : null);
+                    const label = labelText ? { text: labelText, color: '#FFFFFF', fontSize: '13px', fontWeight: '700', className: 'terminal-map-label' } : null;
+                    if (!marker) {
+                        marker = new google.maps.Marker({ map: tm.map, position, icon, title: terminal.name });
+                        if (typeof marker.addListener === 'function') marker.addListener('click', () => this.onTerminalMarkerTap(placeId));
+                        tm.markers.set(placeId, marker);
+                    } else {
+                        marker.setPosition(position);
+                        marker.setIcon(icon);
+                    }
+                    marker.setLabel(label);
+                    marker.setZIndex(isSelected ? 3 : (isChecking ? 2 : 1));
+                });
+                // The camera: consume the intent for the selected terminal
+                // once its pin exists; a superseded selection drops it.
+                const intent = this._terminalCameraIntent;
+                if (intent) {
+                    if (display && display.superseded) {
+                        this._terminalCameraIntent = null;
+                    } else if (highlighted && intent.placeId === highlighted && pins.has(highlighted)) {
+                        this._terminalCameraIntent = null;
+                        this.centreTerminalCamera(pins.get(highlighted));
+                    }
+                }
+            }
+
+            // Camera event (plan §2.2): centre on a settled deliberate
+            // selection at the stage zoom. setCenter/setZoom only — never an
+            // animated pan, so reduced motion is honoured by construction.
+            centreTerminalCamera(pin) {
+                const tm = this._terminalMap;
+                if (!tm || !tm.map || !pin) return false;
+                tm.map.setCenter({ lat: pin.lat, lng: pin.lng });
+                if (typeof tm.map.getZoom === 'function' && tm.map.getZoom() < 14 && typeof tm.map.setZoom === 'function') tm.map.setZoom(15);
+                return true;
+            }
+
+            // Camera event (plan §2.2): after the panel changed position the
+            // map area is a different size. Once the layout has settled, pan
+            // ONLY as far as keeps the selected marker inside it — nothing
+            // when it already is.
+            onTerminalPanelPosition() {
+                setTimeout(() => this.keepSelectedMarkerVisible(), 350);
+            }
+
+            keepSelectedMarkerVisible() {
+                const tm = this._terminalMap;
+                if (!tm || !tm.map || typeof tm.map.getBounds !== 'function' || typeof tm.map.getCenter !== 'function') return false;
+                const display = this.selectedTerminalDisplay();
+                const placeId = display && !display.superseded && display.terminal ? display.terminal.placeId : null;
+                const pin = placeId && this._terminalPins ? this._terminalPins.get(placeId) : null;
+                if (!pin) return false;
+                const bounds = tm.map.getBounds();
+                if (!bounds || typeof bounds.getNorthEast !== 'function' || typeof bounds.getSouthWest !== 'function') return false;
+                const ne = bounds.getNorthEast();
+                const sw = bounds.getSouthWest();
+                const north = typeof ne.lat === 'function' ? ne.lat() : ne.lat;
+                const east = typeof ne.lng === 'function' ? ne.lng() : ne.lng;
+                const south = typeof sw.lat === 'function' ? sw.lat() : sw.lat;
+                const west = typeof sw.lng === 'function' ? sw.lng() : sw.lng;
+                const latSpan = north - south;
+                const lngSpan = east - west;
+                if (!(latSpan > 0) || !(lngSpan > 0)) return false;
+                const padLat = latSpan * 0.12;   // keep the pin a little inside the edge
+                const padLng = lngSpan * 0.12;
+                let dLat = 0;
+                let dLng = 0;
+                if (pin.lat > north - padLat) dLat = pin.lat - (north - padLat);
+                else if (pin.lat < south + padLat) dLat = pin.lat - (south + padLat);
+                if (pin.lng > east - padLng) dLng = pin.lng - (east - padLng);
+                else if (pin.lng < west + padLng) dLng = pin.lng - (west + padLng);
+                if (dLat === 0 && dLng === 0) return false;
+                const center = tm.map.getCenter();
+                if (!center) return false;
+                const cLat = typeof center.lat === 'function' ? center.lat() : center.lat;
+                const cLng = typeof center.lng === 'function' ? center.lng() : center.lng;
+                tm.map.setCenter({ lat: cLat + dLat, lng: cLng + dLng });
+                return true;
             }
 
             focusWhenFirstControl() {
@@ -2053,6 +2458,9 @@
                     address: detail.address,
                     coordinates: { lat: detail.lat, lng: detail.lng }
                 };
+                // Terminal confirmation: a verified terminal's coordinates
+                // from this lookup become its pin on the sheet's map.
+                this.rememberTerminalPin(this.state.locations.placeId, { lat: detail.lat, lng: detail.lng }, detail.attributions);
 
                 this.clearRouteState();
                 this.invalidateQuote('address changed');
