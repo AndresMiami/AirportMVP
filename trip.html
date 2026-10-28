@@ -156,6 +156,15 @@
             font-size: 13px; color: var(--text-secondary);
         }
 
+        /* Cruise terminal reminder (terminal confirmation R1): only when the
+           status payload says the route's address side is a verified terminal */
+        .terminal-line {
+            padding: 0 16px 12px;
+            font-size: 13px; line-height: 1.4; color: var(--text-secondary);
+        }
+        .terminal-line-main { color: var(--text-primary); font-weight: 600; }
+        .terminal-line-note, .terminal-line-action { margin-top: 2px; }
+
         /* Live tracking map (active rides only) */
         #liveMap { height: 220px; background: var(--panel-bg-2); }
         .map-freshness {
@@ -332,6 +341,16 @@
                             <div class="route-addr" id="routeTo"></div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Terminal confirmation (R1): the cruise terminal reminder, under
+                     the route rows; shown only when the payload carries `terminal`.
+                     R1 offers no new action here — the line names the existing
+                     Manage ride path (pending) or the chauffeur (once paired). -->
+                <div class="terminal-line hidden" id="terminalLine">
+                    <div class="terminal-line-main" id="terminalLineMain"></div>
+                    <div class="terminal-line-note" id="terminalLineNote"></div>
+                    <div class="terminal-line-action" id="terminalLineAction"></div>
                 </div>
 
                 <div class="flight-line hidden" id="flightLine"></div>
@@ -816,6 +835,10 @@
                 waBtn.href = `https://wa.me/${DRIVER.phone}?text=${encodeURIComponent(hello)}`;
                 waBtn.textContent = `💬 Message ${DRIVER.name} on WhatsApp`;
             }
+            // Terminal confirmation (R1): the reminder follows the same
+            // status and contact truth as the controls above it.
+            renderTerminalLine(b, presentationStatus, showWa);
+
             // A same-status poll may add or remove chauffeur contact while a
             // lifecycle notice is already open. Keep that visible guidance
             // truthful without making the passenger tap Manage ride again.
@@ -1145,6 +1168,43 @@
         function lifecycleNoticeCopy(phase, hasContact) {
             const table = hasContact ? LIFECYCLE_NOTICES : LIFECYCLE_NOTICES_NO_CONTACT;
             return table[phase] || table.confirmed;
+        }
+
+        // Terminal confirmation (R1, plan §2.4): the same two lines the
+        // booking page's When reminder shows (js/terminal-sheet.js COPY —
+        // pinned equal by tests; this page loads no registry and no module),
+        // then one line by status that names only what this page already
+        // offers: Manage ride while pending, the chauffeur once paired.
+        // In progress, terminal statuses and a ride being reassigned show no
+        // reminder; no control here promises a terminal picker.
+        const TERMINAL_ROLE = Object.freeze({ pickup: 'Pickup', dropoff: 'Drop-off' });
+        const TERMINAL_REMINDER = Object.freeze({
+            pickup: 'Check this is the terminal your ship docks at.',
+            dropoff: 'Check this matches your latest cruise instructions.'
+        });
+        const TERMINAL_ACTION = Object.freeze({
+            pending: 'Need a different terminal? Use Manage ride.',
+            active: 'Need a different terminal? Message your chauffeur.',
+            activeNoContact: `Need a different terminal? Call or text LinkMia: ${SUPPORT_PHONE}.`
+        });
+        function terminalActionCopy(b, phase, hasContact) {
+            if (phase === 'pending') return b.reassigning === true ? null : TERMINAL_ACTION.pending;
+            if (['confirmed', 'on_the_way', 'arrived'].includes(phase)) {
+                return hasContact ? TERMINAL_ACTION.active : TERMINAL_ACTION.activeNoContact;
+            }
+            return null;
+        }
+        function renderTerminalLine(b, phase, hasContact) {
+            const line = $('terminalLine');
+            const t = b && b.terminal;
+            const valid = !!t && typeof t === 'object' && typeof t.name === 'string' && t.name.length > 0 &&
+                (t.side === 'pickup' || t.side === 'dropoff');
+            const action = valid ? terminalActionCopy(b, phase, hasContact) : null;
+            if (!action) { line.classList.add('hidden'); return; }
+            $('terminalLineMain').textContent = `${TERMINAL_ROLE[t.side]}: ${t.name}`;
+            $('terminalLineNote').textContent = TERMINAL_REMINDER[t.side];
+            $('terminalLineAction').textContent = action;
+            line.classList.remove('hidden');
         }
 
         function loadScript(src) {

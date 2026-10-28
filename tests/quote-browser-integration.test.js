@@ -3243,4 +3243,167 @@ check('SELECTION TRANSITION: airport and Continue re-evaluate once coordinates l
   }
 });
 
+// ============ terminal confirmation R1: the identity-bound resolution record ============
+// (plan v1.6 §3.3; Codex 0285 #3, 0286 #3.) Resolution evidence lives with
+// the ADDRESS SELECTION, not with the price quote: written only by the
+// winning quote-ready response (the real requestServerQuote below), it
+// survives invalidateQuote — a pickup-time or passenger change, a requote
+// that is loading, a requote that failed — is cleared only with the
+// identity, and never writes the submitted id or the quote key. The
+// display decision (selectedTerminalDisplay) never reads quote status.
+const gatedFetch = (body) => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const impl = async () => { await gate; return { ok: true, status: 200, json: async () => body }; };
+  impl.release = release;
+  return impl;
+};
+const display = (app) => JSON.parse(JSON.stringify(app.selectedTerminalDisplay()));
+const record = (app) => (app.state.locations.resolution ? JSON.parse(JSON.stringify(app.state.locations.resolution)) : null);
+function stubStepUi(app) {
+  app.updateAddressStepState = () => {};
+  app.updateAirportStepState = () => {};
+  app.updateContinueButton = () => {};
+  app.clearRouteState = () => {};
+  app.calculateRoute = () => {};
+}
+const V_META = { terminalId: 'pom-terminal-v', companyKey: 'virgin', placeId: TERMINAL_V.id };
+
+check('RESOLUTION RECORD: an equal canonical echo writes the record and keeps the terminal shown; a different one marks it superseded — submitted id and quote key untouched', async () => {
+  const same = makeContext({ enabled: true, fetchImpl: okFetch(curatedQuote(TERMINAL_V.id, GOOGLE_TERMINAL_V)) });
+  selectCurated(same.app, same.ctx);
+  assert.deepStrictEqual(display(same.app), { superseded: false, terminal: display(same.app).terminal, company: 'Virgin Voyages' });
+  await same.app.requestServerQuote();
+  assert.strictEqual(same.app.state.quote.status, 'ready');
+  assert.deepStrictEqual(record(same.app), { placeId: TERMINAL_V.id, selectionId: null, canonicalPlaceId: TERMINAL_V.id });
+  assert.strictEqual(display(same.app).superseded, false);
+
+  const other = makeContext({ enabled: true, fetchImpl: okFetch(curatedQuote('ChIJ_superseded_terminal_v', GOOGLE_TERMINAL_V)) });
+  selectCurated(other.app, other.ctx);
+  const keyBefore = other.app.quoteKey(other.app.quoteIntent());
+  await other.app.requestServerQuote();
+  assert.strictEqual(other.app.state.quote.status, 'ready');
+  assert.deepStrictEqual(record(other.app), { placeId: TERMINAL_V.id, selectionId: null, canonicalPlaceId: 'ChIJ_superseded_terminal_v' });
+  assert.deepStrictEqual(display(other.app), { superseded: true, terminal: null, company: '' });
+  assert.strictEqual(other.app.state.locations.placeId, TERMINAL_V.id, 'the submitted id is never overwritten by the record');
+  assert.strictEqual(other.app.state.quote.key, keyBefore, 'the quote key is never written by the record');
+  assert.strictEqual(other.app.state.locations.address.address, GOOGLE_TERMINAL_V, 'the label still falls back (unchanged behaviour)');
+  assert.deepStrictEqual(other.app.terminalSheetView() && [other.app.terminalSheetView().superseded, other.app.terminalSheetView().selectedPlaceId, other.app.terminalSheetView().side],
+    [true, null, 'pickup'], 'a sheet opened now would mark no row');
+});
+
+check('RESOLUTION RECORD: the superseded terminal STAYS hidden through a pickup-time change, a passenger change, a loading requote and a failed requote', async () => {
+  const h = makeContext({ enabled: true, fetchImpl: okFetch(curatedQuote('ChIJ_superseded_terminal_v', GOOGLE_TERMINAL_V)) });
+  selectCurated(h.app, h.ctx);
+  await h.app.requestServerQuote();
+  assert.strictEqual(display(h.app).superseded, true);
+  const evidence = record(h.app);
+  // pickup time changed → invalidateQuote (what the When controls do)
+  h.app.state.dateTime.time = new Date('2026-09-15T19:00:00Z');
+  h.app.invalidateQuote('pickup time changed');
+  assert.strictEqual(h.app.state.quote.status, 'idle');
+  assert.strictEqual(h.app.state.quote.data, null);
+  assert.deepStrictEqual(record(h.app), evidence, 'the record survives invalidation');
+  assert.strictEqual(display(h.app).superseded, true, 'still hidden after a time change (the v1.4 defect)');
+  // passengers changed
+  h.app.state.passengers = 3;
+  h.app.invalidateQuote('passengers changed');
+  assert.strictEqual(display(h.app).superseded, true);
+  // a requote loading (never answers)
+  const gated = gatedFetch(curatedQuote(TERMINAL_V.id, GOOGLE_TERMINAL_V));
+  h.ctx.fetch = gated;
+  const inflight = h.app.requestServerQuote();
+  assert.strictEqual(h.app.state.quote.status, 'loading');
+  assert.strictEqual(display(h.app).superseded, true, 'still hidden while loading');
+  assert.deepStrictEqual(record(h.app), evidence);
+  // a requote that fails
+  h.app.invalidateQuote('moved on');   // drops the gated answer
+  gated.release();
+  await inflight;
+  assert.deepStrictEqual(record(h.app), evidence, 'a response dropped by seq never writes');
+  h.ctx.fetch = async () => { throw new Error('pricing down'); };
+  await h.app.requestServerQuote();
+  assert.strictEqual(h.app.state.quote.status, 'error');
+  assert.strictEqual(display(h.app).superseded, true, 'still hidden after a failed requote');
+  assert.deepStrictEqual(record(h.app), evidence);
+  assert.strictEqual(h.app.state.locations.placeId, TERMINAL_V.id);
+});
+
+check('RESOLUTION RECORD: a later WINNING quote refreshes it (shown again when the echo equals the registry id); a stale earlier response can never poison a later selection', async () => {
+  const h = makeContext({ enabled: true, fetchImpl: okFetch(curatedQuote('ChIJ_superseded_terminal_v', GOOGLE_TERMINAL_V)) });
+  selectCurated(h.app, h.ctx);
+  await h.app.requestServerQuote();
+  assert.strictEqual(display(h.app).superseded, true);
+  h.ctx.fetch = okFetch(curatedQuote(TERMINAL_V.id, GOOGLE_TERMINAL_V));
+  await h.app.requestServerQuote({ force: true });
+  assert.strictEqual(h.app.state.quote.status, 'ready');
+  assert.deepStrictEqual(record(h.app), { placeId: TERMINAL_V.id, selectionId: null, canonicalPlaceId: TERMINAL_V.id });
+  assert.strictEqual(display(h.app).superseded, false, 'refreshed by the later winning quote');
+
+  // stale old response vs a new selection: the old quote (superseded echo)
+  // is in flight when the passenger re-picks; invalidateQuote bumps seq, so
+  // the old answer is dropped before the ready branch and never writes.
+  const stale = makeContext({ enabled: true, fetchImpl: gatedFetch(curatedQuote('ChIJ_superseded_terminal_v', GOOGLE_TERMINAL_V)) });
+  selectCurated(stale.app, stale.ctx);
+  stubStepUi(stale.app);
+  const old = stale.app.requestServerQuote();
+  assert.strictEqual(stale.app.state.quote.status, 'loading');
+  stale.app.handleAddressSelected({ placeId: TERMINAL_V.id, description: TERMINAL_V.label, curated: V_META, selectionId: 8 });   // a deliberate re-pick
+  stale.app.invalidateQuote('address changed');                                                                              // what handleAddressCoordinates does
+  stale.ctx.fetch.release();
+  await old;
+  assert.strictEqual(record(stale.app), null, 'the stale answer never wrote a record');
+  assert.strictEqual(stale.app.state.locations.selectionId, 8);
+  assert.strictEqual(display(stale.app).superseded, false);
+});
+
+check('RESOLUTION RECORD: evidence is bound to the selection — a record for another selection number or place id does not apply; a deliberate re-pick clears it with the identity', async () => {
+  const h = makeContext({ enabled: true, fetchImpl: okFetch(curatedQuote('ChIJ_superseded_terminal_v', GOOGLE_TERMINAL_V)) });
+  selectCurated(h.app, h.ctx);
+  stubStepUi(h.app);
+  h.app.state.locations.selectionId = 4;
+  await h.app.requestServerQuote();
+  assert.deepStrictEqual(record(h.app), { placeId: TERMINAL_V.id, selectionId: 4, canonicalPlaceId: 'ChIJ_superseded_terminal_v' });
+  assert.strictEqual(display(h.app).superseded, true);
+  h.app.state.locations.selectionId = 5;   // evidence for selection 4 cannot speak for selection 5
+  assert.strictEqual(display(h.app).superseded, false);
+  h.app.state.locations.selectionId = 4;
+  assert.strictEqual(display(h.app).superseded, true);
+  h.app.handleAddressSelected({ placeId: TERMINAL_V.id, description: TERMINAL_V.label, curated: V_META, selectionId: 6 });
+  assert.strictEqual(record(h.app), null, 'a deliberate new selection clears the record');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(h.app.state.locations.curated)), { terminalId: 'pom-terminal-v', companyKey: 'virgin' });
+  assert.strictEqual(display(h.app).superseded, false);
+  assert.strictEqual(display(h.app).company, 'Virgin Voyages');
+  h.app.handleAddressValidationCleared();
+  assert.strictEqual(h.app.state.locations.placeId, null);
+  assert.strictEqual(record(h.app), null);
+  assert.strictEqual(h.app.selectedTerminalDisplay(), null, 'no selection, nothing to display');
+});
+
+check('RESOLUTION RECORD: a Google address shows no terminal either way (superseded when its id was replaced, null when not); off-mode writes nothing', async () => {
+  // The display helper reads the evidence BEFORE the registry (plan §3.3):
+  // a replaced id is "superseded" whatever was selected — the reminder is
+  // hidden in both branches, and no sheet can be reached for a non-terminal.
+  const google = makeContext({ enabled: true, fetchImpl: okFetch(quoteWithTtl(15)) });
+  google.app.autocomplete = { isValidated: true, curatedRegistry: CURATED_REGISTRY, selectedPlace: { place_id: 'ChIJ_place_abc', description: '1 Brickell Ave' } };
+  google.app.els.addressInput = { value: '1 Brickell Ave' };
+  await google.app.requestServerQuote();
+  assert.deepStrictEqual(record(google.app), { placeId: 'ChIJ_place_abc', selectionId: null, canonicalPlaceId: 'ChIJ_CANONICAL_xyz' });
+  assert.deepStrictEqual(display(google.app), { superseded: true, terminal: null, company: '' });
+  assert.strictEqual(google.app.changeTerminal(), false, 'Change terminal is refused for a non-terminal address');
+  const equal = quoteWithTtl(15);
+  equal.quote.intent.placeId = 'ChIJ_place_abc';
+  const same = makeContext({ enabled: true, fetchImpl: okFetch(equal) });
+  same.app.autocomplete = { isValidated: true, curatedRegistry: CURATED_REGISTRY, selectedPlace: { place_id: 'ChIJ_place_abc', description: '1 Brickell Ave' } };
+  same.app.els.addressInput = { value: '1 Brickell Ave' };
+  await same.app.requestServerQuote();
+  assert.deepStrictEqual(record(same.app), { placeId: 'ChIJ_place_abc', selectionId: null, canonicalPlaceId: 'ChIJ_place_abc' });
+  assert.strictEqual(same.app.selectedTerminalDisplay(), null, 'not a registry terminal: no reminder');
+  assert.strictEqual(same.app.changeTerminal(), false);
+  const off = makeContext({ enabled: false, fetchImpl: okFetch(curatedQuote(TERMINAL_V.id, GOOGLE_TERMINAL_V)) });
+  selectCurated(off.app, off.ctx);
+  await off.app.requestServerQuote();
+  assert.strictEqual(record(off.app), null, 'the quote funnel is inert with the flag off, so nothing writes');
+});
+
 run().catch((e) => { console.error(e); process.exit(1); });

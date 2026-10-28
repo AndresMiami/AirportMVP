@@ -62,7 +62,7 @@ function createHarness(responses, storage = new Map(), { mapsLoad } = {}) {
     'tripView', 'pausedCard', 'pausedNote', 'mapCard', 'liveMap', 'waBtn',
     'backBtn', 'cancelBtn', 'rebookBtn', 'actionError', 'rideDuration',
     'etaTime', 'routeAttribution', 'flightLine', 'reassignCard', 'cancelQuoteCard',
-    'lifecycleNotice'
+    'lifecycleNotice', 'terminalLine'
   ]);
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new FakeElement(hiddenIds.has(id)));
@@ -622,6 +622,106 @@ function check(name, fn) {
     assert.match(contactNotice.textContent, /WhatsApp/);
     assert.strictEqual(noticeWrites, 3, 'contact restoration changes the live guidance once');
   });
+
+  // ============ terminal confirmation R1: the trip-card reminder ============
+  // Only when the status payload carries `terminal: { name, side }`: the
+  // role word and terminal, the reminder line by side, and ONE status line
+  // that names what this page already offers (Manage ride while pending,
+  // the chauffeur once paired — or LinkMia's line when no contact is on the
+  // sheet). In progress, terminal statuses and a reassigning ride show
+  // nothing. Exact fetch counts: one render fetch per harness.
+  const terminalRow = (status, side, extra = {}) => ({
+    ...pendingBooking, status, pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString(),
+    terminal: { name: 'PortMiami Terminal V', side }, ...extra
+  });
+  const withContact = { name: 'Carlos M.', phone: '+13055551212' };
+  const noContact = { name: 'Carlos M.', phone: null };
+  const PICKUP_NOTE = 'Check this is the terminal your ship docks at.';
+  const DROPOFF_NOTE = 'Check this matches your latest cruise instructions.';
+  const terminalCases = [
+    ['pending', 'pickup', withContact, 'Pickup: PortMiami Terminal V', PICKUP_NOTE, 'Need a different terminal? Use Manage ride.'],
+    ['pending', 'dropoff', withContact, 'Drop-off: PortMiami Terminal V', DROPOFF_NOTE, 'Need a different terminal? Use Manage ride.'],
+    ['pending', 'pickup', noContact, 'Pickup: PortMiami Terminal V', PICKUP_NOTE, 'Need a different terminal? Use Manage ride.'],
+    ['confirmed', 'pickup', withContact, 'Pickup: PortMiami Terminal V', PICKUP_NOTE, 'Need a different terminal? Message your chauffeur.'],
+    ['assigned', 'dropoff', withContact, 'Drop-off: PortMiami Terminal V', DROPOFF_NOTE, 'Need a different terminal? Message your chauffeur.'],
+    ['on_the_way', 'dropoff', withContact, 'Drop-off: PortMiami Terminal V', DROPOFF_NOTE, 'Need a different terminal? Message your chauffeur.'],
+    ['arrived', 'pickup', withContact, 'Pickup: PortMiami Terminal V', PICKUP_NOTE, 'Need a different terminal? Message your chauffeur.'],
+    ['confirmed', 'pickup', noContact, 'Pickup: PortMiami Terminal V', PICKUP_NOTE, 'Need a different terminal? Call or text LinkMia: +1 (786) 509-3955.'],
+    ['arrived', 'dropoff', noContact, 'Drop-off: PortMiami Terminal V', DROPOFF_NOTE, 'Need a different terminal? Call or text LinkMia: +1 (786) 509-3955.']
+  ];
+  for (const [status, side, driverInfo, main, note, action] of terminalCases) {
+    const sheet = createHarness([response(200, { booking: terminalRow(status, side), driver: driverInfo })]);
+    await sheet.settle();
+    check(`terminal reminder — ${status}/${side}${driverInfo.phone ? '' : ' (no contact)'}: the three lines, one fetch`, () => {
+      assert.strictEqual(sheet.fetchCount, 1);
+      const line = sheet.element('terminalLine');
+      assert.ok(!line.classList.contains('hidden'), 'the reminder is shown');
+      assert.strictEqual(sheet.element('terminalLineMain').textContent, main);
+      assert.strictEqual(sheet.element('terminalLineNote').textContent, note);
+      assert.strictEqual(sheet.element('terminalLineAction').textContent, action);
+      if (!driverInfo.phone && status !== 'pending') {
+        assert.doesNotMatch(action, /chauffeur|WhatsApp/, 'no reference to a contact that is not on the sheet');
+      }
+      assert.strictEqual(sheet.context.location.href, '', 'rendering navigates nowhere');
+    });
+  }
+  const hiddenCases = [
+    ['in_progress', terminalRow('in_progress', 'pickup'), withContact, {}],
+    ['completed', terminalRow('completed', 'pickup'), withContact, {}],
+    ['cancelled', terminalRow('cancelled', 'dropoff'), withContact, {}],
+    ['declined', terminalRow('declined', 'pickup'), withContact, {}],
+    ['pending while reassigning', terminalRow('pending', 'pickup'), undefined, { reassigning: true, reassigningSince: new Date().toISOString() }],
+    ['no terminal key', { ...pendingBooking, status: 'pending', pickup_datetime: new Date(Date.now() + 3 * 3600000).toISOString() }, withContact, {}],
+    ['empty name', terminalRow('pending', 'pickup', { terminal: { name: '', side: 'pickup' } }), withContact, {}],
+    ['unknown side', terminalRow('pending', 'pickup', { terminal: { name: 'PortMiami Terminal V', side: 'both' } }), withContact, {}],
+    ['not an object', terminalRow('pending', 'pickup', { terminal: 'PortMiami Terminal V' }), withContact, {}]
+  ];
+  for (const [name, row, driverInfo, extra] of hiddenCases) {
+    const sheet = createHarness([response(200, { booking: row, driver: driverInfo, ...extra })]);
+    await sheet.settle();
+    check(`terminal reminder — ${name}: hidden, one fetch`, () => {
+      assert.strictEqual(sheet.fetchCount, 1);
+      assert.ok(sheet.element('terminalLine').classList.contains('hidden'));
+    });
+  }
+  // A status change on a later poll re-decides the line from the new truth.
+  // The pickup is 20 minutes out so the confirmed ride polls (farther out
+  // it sleeps locally with zero network — the sealed cadence).
+  {
+    const storage = new Map();
+    const soon = { pickup_datetime: new Date(Date.now() + 20 * 60000).toISOString() };
+    const moving = createHarness([
+      response(200, { booking: terminalRow('pending', 'pickup', soon), driver: undefined }),
+      response(200, { booking: terminalRow('confirmed', 'pickup', soon), driver: withContact }),
+      response(200, { booking: terminalRow('in_progress', 'pickup', soon), driver: withContact })
+    ], storage);
+    await moving.settle();
+    check('terminal reminder — pending → confirmed → in progress across polls: the status line follows, then the block hides', async () => {
+      assert.strictEqual(moving.element('terminalLineAction').textContent, 'Need a different terminal? Use Manage ride.');
+    });
+    await moving.runNextTimer();
+    check('terminal reminder — the confirmed poll names the chauffeur', () => {
+      assert.strictEqual(moving.element('terminalLineAction').textContent, 'Need a different terminal? Message your chauffeur.');
+      assert.ok(!moving.element('terminalLine').classList.contains('hidden'));
+    });
+    await moving.runNextTimer();
+    check('terminal reminder — the in-progress poll hides the block', () => {
+      assert.ok(moving.element('terminalLine').classList.contains('hidden'));
+      assert.strictEqual(moving.fetchCount, 3);
+    });
+  }
+  // R1 adds no action: the pending handoff is byte-for-byte today's lm-edit
+  // intent (no focus field), the standalone path still navigates to the form.
+  {
+    const sheet = createHarness([response(200, { booking: terminalRow('pending', 'pickup'), driver: undefined })]);
+    await sheet.settle();
+    check('terminal reminder — the pending Manage ride handoff is unchanged (no focus field anywhere in the trip script)', () => {
+      sheet.element('backBtn').click();
+      assert.strictEqual(sheet.context.location.href, '/indexMVP.html?book=1');
+      assert.doesNotMatch(tripScript, /focus:\s*['"]terminal['"]/);
+      assert.ok(sheet.element('lifecycleNotice').classList.contains('hidden'), 'a pending tap opens the editor, never a notice');
+    });
+  }
 
   console.log(`\nALL ${passed} CHECKS PASS`);
 })().catch((error) => {

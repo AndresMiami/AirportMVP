@@ -635,6 +635,16 @@ async function check(name, fn) {
     }
   });
 
+  await check('terminal confirmation R1: the confirm sheet module is loaded by the booking page and precached at its exact URL; no other page loads it', async () => {
+    const sw = fs.readFileSync(path.join(repoRoot, 'service-worker.js'), 'utf8');
+    const idx = fs.readFileSync(path.join(repoRoot, 'indexMVP.html'), 'utf8');
+    assertPrecachedExactly('terminal-sheet', idx, sw);
+    for (const page of ['trip.html', 'driver.html', 'index.html', 'login.html']) {
+      const html = fs.readFileSync(path.join(repoRoot, page), 'utf8');
+      assert.ok(!/<script[^>]*terminal-sheet/.test(html), page + ' must not load it');
+    }
+  });
+
 
   // The cache ladder has ONE source — service-worker.js — and ONE check:
   // both caches move together, nothing anywhere pre-assigns a rung above the
