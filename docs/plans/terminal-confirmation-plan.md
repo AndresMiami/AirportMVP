@@ -629,6 +629,68 @@ own worker (`service-worker.js:216-220`).
   Terminal V and where the driver's Maps app lands are compared on the day
   and recorded here before any copy links the two.
 
+**Acceptance record — R1 desktop (2026-10-28, head `b19b131`, PR #122,
+preview deploy-preview-122 / Netlify deploy `6ae16050ff3d5a8300c73e03`,
+permalink `6ae16050ff3d5a8300c73e03--i-love-miami.netlify.app`, signed in
+with Andres's account in the desktop app's built-in browser, real clicks,
+keystrokes, a pointer drag and state reads from the live page; NO booking
+submitted):** the preview serves the R1 code (service worker
+`linkmia-v1.3.51` / `linkmia-runtime-v28` activated, `TerminalSheet` and
+`CuratedPlaces.terminalRow` present, the new state fields on boot).
+PASSED — Going to Airport: "Virgin" renders the LinkMia Terminal V row;
+the tap opens the sheet SYNCHRONOUSLY (read before the lookup answered:
+dialog/aria-modal/labelled title, eight rows, Terminal V "Checking…",
+Confirm and Skip disabled, record `settling`, identity still unset, focus
+on the checking row, the booking card inert); the lookup settles it
+(Terminal V "Selected", buttons enabled, LinkMia's label in the box,
+registry metadata and selection number stored); Confirm closes the sheet
+(record `continued`), stays on Where with focus on the airport grid; the
+MIA tap advances once; When shows "Pickup: PortMiami Terminal V · Virgin
+Voyages", the pickup line and Change terminal, summary "PortMiami Terminal
+V → MIA". Change terminal: Where plus the sheet on the COMMITTED terminal
+(record `{selectionId: null, open}`, the autocomplete sequence advanced,
+validation and label preserved, no new Details request); tapping Terminal
+A re-records synchronously (V "Selected" + A "Checking…", buttons
+disabled), settles to A "Selected" with A's label, metadata `companyKey
+null` (a sheet row); Confirm returns to When with "Pickup: PortMiami
+Terminal A · Royal Caribbean", focus on Today. Dismissals — Escape, ✕,
+backdrop, and a pointer drag of the handle — each close the sheet (record
+`closed`, no overlay left, inert lifted), stay on Where with the address
+box focused and its text selected; Continue reaches When each time with
+the reminder intact. Keyboard: focus enters the marked row; Tab/Shift+Tab
+move through the rows; ten Tabs wrap to ✕ inside the dialog; Escape
+closes. Typing over the selection clears identity, metadata, selection
+number, resolution and the record together (generation bumped, reminder
+hidden, airport kept). Arriving at Airport: the mode switch resets
+everything and closes nothing stale; MIA then "Carnival" lists D/E/F;
+the Terminal E tap opens "Confirm drop-off terminal" with the drop-off
+line; the completion does NOT auto-advance (route complete, panel stays
+Where); Skip goes to When exactly once ("Drop-off: PortMiami Terminal E ·
+Carnival Cruise Line", focus on By flight arrival); a second
+continueAfterSheet() is refused. Back, Continue, focus and blur never
+reopen the sheet; the reminder re-renders from state. Exactly three
+Details requests for three taps, none for the reopenings. Console: no
+R1 errors — only the proxy failures below and their expected app lines.
+BLOCKED (configuration, not R1): the Railway proxy still rejects the
+preview origin — the browser's autocomplete, Details and directions calls
+from `https://deploy-preview-122--i-love-miami.netlify.app` are refused
+with no `Access-Control-Allow-Origin`; preflights from the exact origin
+answer 500 while deploy-preview-120 and linkmia.com answer 200; Railway
+shows NO deployment of the proxy service `reliable-warmth` after the #121
+merge (2026-10-27 21:29Z) and no staged changes, so the `ALLOWED_ORIGINS`
+edit is not live (the project also has an `AirportMVP` service — the
+edit must be on `reliable-warmth`, production, exact origin with
+`https://`, no trailing slash, and that service must redeploy). So every
+selection settled through the null-coordinate FALLBACK (a real path, not
+the success path); Google's rows never rendered. NOT verified on this
+preview: the Details success path (coordinates, "Route estimate" on
+When), the hotel/Google-row path, the resolution record on a real quote
+(preview pricing env unset by decision), phone swipe and real-device
+drag feel, the trip-card reminder on a real row, and Andres's own visual
+review of the sheet. Observation (preview UI, not ours): Netlify's
+"Deploy Preview" pill sits over the Skip button at the sheet's bottom on
+this desktop viewport; Skip stayed reachable by keyboard.
+
 ## 6. Separate proposals (not prerequisites; each needs its own review)
 Ship name (existing `cruise_ship` column, owner-only endpoint, guarded UPDATE
 outside the pricing RPCs); stored terminal confirmation (migration;
