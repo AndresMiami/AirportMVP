@@ -350,6 +350,40 @@ curated selections is a review packet
   `docs/google-places-terms-checklist.md` (the mixed curated/Google list is
   a technical boundary, not a policy clearance). Photos/official logo artwork
   remain deferred; the compact initials treatment was separately approved.
+- TERMINAL CONFIRMATION R1 (plan `docs/plans/terminal-confirmation-plan.md`
+  v1.6; branch `feature/terminal-confirmation-r1`, draft PR + Deploy
+  Preview per Andres's go, relay 0287 — not merged under that instruction):
+  the ride needs the terminal the passenger's SHIP uses on the day, which
+  no machine source gives, so the passenger checks. A LinkMia terminal pick
+  opens the confirm sheet (`js/terminal-sheet.js`, house bottom-sheet
+  values, drag handle, dialog a11y) ON THE TAP ITSELF: `autocomplete.js`
+  `selectItem` dispatches a synchronous `selection-started` event (place
+  ID + registry metadata + `selectionId`) BEFORE its Details lookup, and
+  the completion events carry the same `selectionId`; indexMVP keeps ONE
+  record per selection (`state.terminalFlow` {generation, selectionId,
+  placeId, stage settling|open|closed|continued}) so Confirm/Skip are
+  disabled until the selection settles, a dismissed sheet is never
+  reopened by a late result, and the auto-advance for a terminal pick is
+  taken once by Confirm/Skip (Going to Airport stays on Where for the
+  airport; Arriving goes to When). When → Change terminal FIRST calls
+  `invalidateRawCapture()` (an older in-flight selection can neither
+  complete nor mutate the committed terminal; Codex 0286 #2) then reopens
+  on the committed terminal. The When reminder and the sheet's marked row
+  derive from `selectedTerminalDisplay()`: an identity-bound
+  `state.locations.resolution` record {placeId, selectionId,
+  canonicalPlaceId}, written ONLY in `requestServerQuote`'s ready branch
+  (before `reconcileQuoteLabel`), untouched by `invalidateQuote`, cleared
+  only with the identity — an address Google resolved elsewhere stays
+  hidden through time/passenger changes and loading/failed requotes. The
+  trip card repeats the reminder when `/api/booking-status` projects
+  `terminal: {name, side}` (canonical route + verified terminal; the
+  source columns are stripped like `assigned_driver`); R1 adds no new
+  trip action (pending → "Use Manage ride"). The map, driver navigation
+  and the pending-edit terminal picker are later scopes; the session-token
+  fallback was SKIPPED (0284). SW pair 1.3.51 / runtime-v28. Tests:
+  `tests/terminal-confirmation.test.js` (real autocomplete + sheet + app),
+  `tests/terminal-projection.test.js`, plus resolution-record checks in
+  quote-browser-integration and trip-reminder checks in passenger-polling.
 
 ## Conventions
 
