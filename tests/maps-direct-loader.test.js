@@ -315,8 +315,15 @@ function makeRealm({ key = VALID_KEY } = {}) {
     }
     assert.match(tripPage, /importLibrary\(["']marker["']\)/,
       'trip status constructs Marker and must import its library');
-    assert.ok(!/importLibrary\(["']marker["']\)/.test(bookingPage),
-      'booking map does not construct markers directly');
+    // The Vehicle map still draws no markers of its own (DirectionsRenderer
+    // supplies them); since the terminal sheet's map (2026-10-28) the booking
+    // page constructs Marker for the terminal pins, so it imports the marker
+    // library too — and only where that map is built.
+    assert.match(bookingPage, /importLibrary\(["']marker["']\)/,
+      'the terminal sheet map constructs Marker and must import its library');
+    const vehicleMap = bookingPage.slice(bookingPage.indexOf('async updateVehicleMap()'), bookingPage.indexOf('handleMapsFailure() {'));
+    assert.ok(!/google\.maps\.Marker\(/.test(vehicleMap), 'the Vehicle map itself still constructs no markers');
+    assert.strictEqual((bookingPage.match(/new google\.maps\.Marker\(/g) || []).length, 1, 'exactly one marker construction site: the terminal sheet map');
   });
 
   await check('only the newest delayed vehicle-map render creates and routes', async () => {

@@ -1,24 +1,29 @@
-// Terminal confirmation — the confirm sheet (R1; plan §2.2, §3.2).
+// Terminal confirmation — the confirm sheet (R1; plan §2.2, §3.2; map and
+// Uber-style layout added in the follow-up PR, 2026-10-28).
 //
 // ONE component, host-driven. It renders a VIEW the host derives from its
 // own state and reports the passenger's acts back: a row tap, Confirm, Skip,
-// a dismissal (slide, ✕, backdrop, Escape). It decides nothing about
-// selection, navigation or quotes — those live in indexMVP's per-selection
-// lifecycle record. Create mode ships in R1; the edit mode of the same sheet
-// (pending-edit staging, plan §2.6) is a later release.
+// a dismissal (slide, ✕, backdrop, Escape), a map-layer choice. It decides
+// nothing about selection, navigation, quotes or Google: the host attaches
+// the Google map into `elements().mapHost` and draws the pins; this file
+// only renders the map AREA's state (loading / ready / unavailable) and the
+// Standard | Satellite switch. Create mode ships in R1; the edit mode of the
+// same sheet (pending-edit staging, plan §2.6) is a later release.
 //
-// House bottom-sheet pattern (js/passenger-modal.js values): dimmed backdrop
-// rgba(0,0,0,0.7), #2C2C2E panel, max-width 576px, 20px top radius, 0.3s
-// slide; a drag handle. Drag-to-dismiss: pointer drag on the grip or the
-// title row; release past DISMISS_DISTANCE_PX or a fast flick closes,
-// otherwise it snaps back (`dragOutcome` is the pure rule). Accessibility as
-// the traveler dialog in js/pending-edit-card.js: role="dialog", aria-modal,
-// labelled title, Tab/Shift+Tab cycle inside the enabled controls, Escape
-// closes, the page behind is inert while the sheet is open.
+// Layout (after the Uber reference, 2026-10-28): drag grip; header with the
+// close control on the left, the title centred and a Skip pill on the
+// right; the map area with the layer switch; "PortMiami"; the terminal
+// rows; the reminder line; the primary button "Confirm pickup" /
+// "Confirm drop-off" fixed at the bottom. House bottom-sheet pattern
+// (js/passenger-modal.js values): dimmed backdrop rgba(0,0,0,0.7), #2C2C2E
+// panel, max-width 576px, 20px top radius, 0.3s slide. Drag-to-dismiss on
+// the grip or the title row only (never the map); release past
+// DISMISS_DISTANCE_PX or a fast flick closes, otherwise it snaps back
+// (`dragOutcome` is the pure rule). Accessibility as the traveler dialog:
+// role="dialog", aria-modal, labelled title, Tab/Shift+Tab cycle inside the
+// enabled controls, Escape closes, the page behind is inert while open.
 //
-// Nothing here is a quote surface: no price, no network. The only network
-// call a row tap causes is the coordinates lookup every selection already
-// makes, and it is made by the autocomplete, not by this file.
+// Nothing here is a quote surface: no price, no network of its own.
 //
 // Loaded as a classic script (global TerminalSheet) and required by tests.
 
@@ -39,13 +44,20 @@
       dropoff: 'Check this matches your latest cruise instructions.'
     }),
     superseded: 'Google resolved this address to a different place. Pick a terminal, or close to keep the address.',
-    confirm: 'Confirm terminal',
+    confirm: Object.freeze({ pickup: 'Confirm pickup', dropoff: 'Confirm drop-off' }),
     skip: 'Skip',
     close: 'Close',
     selected: 'Selected',
-    checking: 'Checking…'
+    checking: 'Checking…',
+    map: Object.freeze({
+      loading: 'Loading map…',
+      unavailable: 'Map unavailable right now — the list still works.',
+      standard: 'Standard',
+      satellite: 'Satellite'
+    })
   });
 
+  const MAP_TYPES = Object.freeze(['roadmap', 'satellite']);
   const DISMISS_DISTANCE_PX = 80;      // release this far down: close
   const FLICK_VELOCITY = 0.6;          // px per ms (~600 px/s): a flick closes…
   const FLICK_MIN_DISTANCE_PX = 24;    // …once it has travelled somewhere
@@ -62,6 +74,16 @@
 
   function sideOf(view) {
     return view && view.side === 'dropoff' ? 'dropoff' : 'pickup';
+  }
+
+  function mapStatusOf(view) {
+    const status = view && view.map && view.map.status;
+    return status === 'loading' || status === 'ready' || status === 'unavailable' ? status : 'off';
+  }
+
+  function mapTypeOf(view) {
+    const type = view && view.map && view.map.type;
+    return MAP_TYPES.includes(type) ? type : 'roadmap';
   }
 
   // "PortMiami Terminal V" -> "Terminal V" under the port's own subtitle.
@@ -101,7 +123,7 @@
     if (node && typeof node.addEventListener === 'function') node.addEventListener(type, handler);
   }
 
-  // host: { onRowTap(terminalId), onConfirm(), onSkip(), onDismiss() }
+  // host: { onRowTap(terminalId), onConfirm(), onSkip(), onDismiss(), onMapType(type) }
   // options.now: injectable clock for the drag rule (tests).
   function create({ document: doc, host, now } = {}) {
     if (!doc || !host) throw new Error('TerminalSheet.create needs a document and a host');
@@ -113,9 +135,10 @@
 
     function focusables() {
       if (!sheet) return [];
-      const ring = [sheet.close];
+      const ring = [sheet.close, sheet.skip];
+      if (mapStatusOf(sheet.view) === 'ready') ring.push(sheet.mapTypeButtons.roadmap, sheet.mapTypeButtons.satellite);
       sheet.rows.forEach((row) => ring.push(row.button));
-      ring.push(sheet.confirm, sheet.skip);
+      ring.push(sheet.confirm);
       return ring.filter((control) => control && !control.disabled && typeof control.focus === 'function');
     }
 
@@ -138,9 +161,9 @@
       }
     }
 
-    // ---- drag-to-dismiss (grip and title row; the ✕ is a tap) ----
+    // ---- drag-to-dismiss (grip and title row; the controls are taps) ----
     function startDrag(e) {
-      if (!sheet || !e || e.target === sheet.close) return;
+      if (!sheet || !e || e.target === sheet.close || e.target === sheet.skip) return;
       const y = e.clientY;
       if (typeof y !== 'number') return;
       sheet.drag = { startY: y, startAt: clock(), dy: 0 };
@@ -184,7 +207,8 @@
       else if (node.parentNode && typeof node.parentNode.removeChild === 'function') node.parentNode.removeChild(node);
     }
 
-    // view: { side, registry, selectedPlaceId, settlingPlaceId, superseded }
+    // view: { side, registry, selectedPlaceId, settlingPlaceId, superseded,
+    //         map: { status: 'loading'|'ready'|'unavailable'|'off', type: 'roadmap'|'satellite' } }
     // options.inert: the element behind the sheet (aria-hidden + inert while open)
     function open(view, options = {}) {
       if (sheet) { render(view); return; }
@@ -197,15 +221,46 @@
 
       const grip = el(doc, 'div', 'terminal-sheet-grip');
       grip.appendChild(el(doc, 'div', 'terminal-sheet-handle'));
+
+      // Header: ✕ on the left, the title centred, Skip as a pill on the right.
       const header = el(doc, 'div', 'terminal-sheet-header');
-      const title = el(doc, 'h2', 'terminal-sheet-title');
-      title.id = 'terminalSheetTitle';
       const close = el(doc, 'button', 'terminal-sheet-close', '✕');
       close.type = 'button';
       close.setAttribute('aria-label', COPY.close);
       on(close, 'click', () => host.onDismiss());
-      header.appendChild(title);
+      const title = el(doc, 'h2', 'terminal-sheet-title');
+      title.id = 'terminalSheetTitle';
+      const skip = el(doc, 'button', 'terminal-sheet-skip', COPY.skip);
+      skip.type = 'button';
+      on(skip, 'click', () => { if (!skip.disabled) host.onSkip(); });
       header.appendChild(close);
+      header.appendChild(title);
+      header.appendChild(skip);
+
+      // Map area: the host attaches the Google map to mapHost; the note
+      // carries the loading / unavailable state; the switch picks the layer.
+      const mapArea = el(doc, 'div', 'terminal-sheet-map');
+      const mapHost = el(doc, 'div', 'terminal-sheet-map-canvas');
+      mapHost.setAttribute('aria-hidden', 'true');
+      const mapNote = el(doc, 'div', 'terminal-sheet-map-note');
+      mapNote.setAttribute('role', 'status');
+      const mapTypes = el(doc, 'div', 'terminal-sheet-map-types');
+      mapTypes.setAttribute('role', 'group');
+      mapTypes.setAttribute('aria-label', 'Map layer');
+      const mapTypeButtons = {};
+      MAP_TYPES.forEach((type) => {
+        const button = el(doc, 'button', 'terminal-sheet-maptype', type === 'roadmap' ? COPY.map.standard : COPY.map.satellite);
+        button.type = 'button';
+        button.setAttribute('data-map-type', type);
+        button.setAttribute('aria-pressed', 'false');
+        on(button, 'click', () => { if (typeof host.onMapType === 'function') host.onMapType(type); });
+        mapTypes.appendChild(button);
+        mapTypeButtons[type] = button;
+      });
+      mapArea.appendChild(mapHost);
+      mapArea.appendChild(mapNote);
+      mapArea.appendChild(mapTypes);
+
       const port = el(doc, 'div', 'terminal-sheet-port');
 
       const list = el(doc, 'div', 'terminal-sheet-list');
@@ -228,20 +283,19 @@
       });
 
       const note = el(doc, 'p', 'terminal-sheet-note');
-      const confirm = el(doc, 'button', 'terminal-sheet-confirm', COPY.confirm);
+      const footer = el(doc, 'div', 'terminal-sheet-footer');
+      const confirm = el(doc, 'button', 'terminal-sheet-confirm', COPY.confirm.pickup);
       confirm.type = 'button';
       on(confirm, 'click', () => { if (!confirm.disabled) host.onConfirm(); });
-      const skip = el(doc, 'button', 'terminal-sheet-skip', COPY.skip);
-      skip.type = 'button';
-      on(skip, 'click', () => { if (!skip.disabled) host.onSkip(); });
+      footer.appendChild(confirm);
 
       panel.appendChild(grip);
       panel.appendChild(header);
+      panel.appendChild(mapArea);
       panel.appendChild(port);
       panel.appendChild(list);
       panel.appendChild(note);
-      panel.appendChild(confirm);
-      panel.appendChild(skip);
+      panel.appendChild(footer);
       overlay.appendChild(panel);
       // The backdrop itself closes; a tap inside the panel never bubbles
       // out as a dismissal.
@@ -258,7 +312,8 @@
       if (typeof doc.addEventListener === 'function') doc.addEventListener('keydown', keyHandler);
       doc.body.appendChild(overlay);
 
-      sheet = { overlay, panel, grip, header, title, port, list, rows, note, confirm, skip, close, view: null, inert, drag: null };
+      sheet = { overlay, panel, grip, header, title, skip, mapArea, mapHost, mapNote, mapTypes, mapTypeButtons,
+        port, list, rows, note, confirm, close, view: null, inert, drag: null };
       render(view);
 
       // Focus enters the marked row (what the passenger is checking), else
@@ -275,12 +330,14 @@
     }
 
     // Everything visible derives from the view: the marked row, the row
-    // that is checking, the note, and whether Confirm/Skip are usable.
+    // that is checking, the note, the map area's state, and whether
+    // Confirm/Skip are usable. The map canvas itself belongs to the host.
     function render(view) {
       if (!sheet || !view) return;
       sheet.view = view;
       const side = sideOf(view);
       sheet.title.textContent = COPY.title[side];
+      sheet.confirm.textContent = COPY.confirm[side];
       sheet.port.textContent = view.registry && view.registry.port ? view.registry.port.name : '';
       const selectedPlaceId = view.superseded ? null : (view.selectedPlaceId || null);
       const settlingPlaceId = view.settlingPlaceId || null;
@@ -300,6 +357,21 @@
       const settling = settlingPlaceId !== null;
       sheet.confirm.disabled = settling || !marked;
       sheet.skip.disabled = settling;
+      // The map area: 'off' hides it entirely (no loader on this page),
+      // 'loading' and 'unavailable' show the note over an empty canvas,
+      // 'ready' shows the canvas and the layer switch.
+      const status = mapStatusOf(view);
+      const type = mapTypeOf(view);
+      sheet.mapArea.hidden = status === 'off';
+      sheet.mapArea.setAttribute('data-map-status', status);
+      sheet.mapNote.textContent = status === 'loading' ? COPY.map.loading : (status === 'unavailable' ? COPY.map.unavailable : '');
+      sheet.mapNote.hidden = status === 'ready' || status === 'off';
+      sheet.mapTypes.hidden = status !== 'ready';
+      MAP_TYPES.forEach((candidate) => {
+        const button = sheet.mapTypeButtons[candidate];
+        button.setAttribute('aria-pressed', candidate === type ? 'true' : 'false');
+        button.classList.toggle('is-active', candidate === type);
+      });
     }
 
     function close() {
@@ -321,11 +393,12 @@
       else removeClosing();
     }
 
-    // For the host's focus management and for tests.
+    // For the host (the map canvas, focus management) and for tests.
     function elements() {
       return sheet ? { overlay: sheet.overlay, panel: sheet.panel, grip: sheet.grip, header: sheet.header,
         title: sheet.title, note: sheet.note, confirm: sheet.confirm, skip: sheet.skip, close: sheet.close,
-        rows: sheet.rows, view: sheet.view } : null;
+        mapArea: sheet.mapArea, mapHost: sheet.mapHost, mapNote: sheet.mapNote, mapTypes: sheet.mapTypes,
+        mapTypeButtons: sheet.mapTypeButtons, rows: sheet.rows, view: sheet.view } : null;
     }
 
     return { open, render, close, isOpen, elements };
@@ -333,6 +406,7 @@
 
   return {
     COPY,
+    MAP_TYPES,
     DISMISS_DISTANCE_PX,
     FLICK_VELOCITY,
     FLICK_MIN_DISTANCE_PX,

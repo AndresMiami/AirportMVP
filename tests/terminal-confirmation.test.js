@@ -478,7 +478,8 @@ function sheetFixture(context, { side = 'pickup', selectedPlaceId = V.placeId, s
     onRowTap: (id) => calls.push(['row', id]),
     onConfirm: () => calls.push(['confirm']),
     onSkip: () => calls.push(['skip']),
-    onDismiss: () => calls.push(['dismiss'])
+    onDismiss: () => calls.push(['dismiss']),
+    onMapType: (type) => calls.push(['maptype', type])
   };
   const sheet = ctx.TerminalSheet.create({ document: doc, host, now });
   const inert = makeElement('div');
@@ -506,10 +507,43 @@ check('B1 open renders the title by side, the port, every verified terminal in r
   assert.strictEqual(e.note.textContent, 'Check this is the terminal your ship docks at.');
   assert.strictEqual(e.confirm.disabled, false);
   assert.strictEqual(e.skip.disabled, false);
+  assert.strictEqual(e.confirm.textContent, 'Confirm pickup', 'the button pairs with the title (Uber reference)');
+  assert.ok(e.header.children.includes(e.skip), 'Skip is a pill in the header, top right');
+  assert.deepStrictEqual(e.header.children.map((c) => c.className.split(' ')[0]), ['terminal-sheet-close', 'terminal-sheet-title', 'terminal-sheet-skip']);
+  assert.strictEqual(e.mapArea.hidden, true, 'no map status in the view: the map area is off');
   assert.strictEqual(f.doc.body.children.includes(e.overlay), true);
   f.sheet.render({ ...f.view, side: 'dropoff' });
   assert.strictEqual(e.title.textContent, 'Confirm drop-off terminal');
+  assert.strictEqual(e.confirm.textContent, 'Confirm drop-off');
   assert.strictEqual(e.note.textContent, 'Check this matches your latest cruise instructions.');
+});
+
+check('B1b the map area follows the view: loading shows the note, ready shows the canvas and the layer switch, unavailable says so, and the switch reports the layer', async () => {
+  const f = sheetFixture(makeContext());
+  f.sheet.open({ ...f.view, map: { status: 'loading', type: 'roadmap' } });
+  const e = f.sheet.elements();
+  assert.strictEqual(e.mapArea.hidden, false);
+  assert.strictEqual(e.mapArea.getAttribute('data-map-status'), 'loading');
+  assert.strictEqual(e.mapNote.hidden, false);
+  assert.strictEqual(e.mapNote.textContent, 'Loading map…');
+  assert.strictEqual(e.mapTypes.hidden, true, 'no layer switch before the map exists');
+  f.sheet.render({ ...f.view, map: { status: 'ready', type: 'roadmap' } });
+  assert.strictEqual(e.mapNote.hidden, true);
+  assert.strictEqual(e.mapTypes.hidden, false);
+  assert.strictEqual(e.mapTypeButtons.roadmap.getAttribute('aria-pressed'), 'true');
+  assert.strictEqual(e.mapTypeButtons.satellite.getAttribute('aria-pressed'), 'false');
+  assert.strictEqual(e.mapTypeButtons.roadmap.textContent, 'Standard');
+  assert.strictEqual(e.mapTypeButtons.satellite.textContent, 'Satellite');
+  e.mapTypeButtons.satellite.fire('click');
+  assert.deepStrictEqual(f.calls, [['maptype', 'satellite']], 'the host decides; the sheet only reports');
+  f.sheet.render({ ...f.view, map: { status: 'ready', type: 'satellite' } });
+  assert.strictEqual(e.mapTypeButtons.satellite.getAttribute('aria-pressed'), 'true');
+  assert.strictEqual(e.mapTypeButtons.roadmap.getAttribute('aria-pressed'), 'false');
+  f.sheet.render({ ...f.view, map: { status: 'unavailable', type: 'satellite' } });
+  assert.strictEqual(e.mapNote.textContent, 'Map unavailable right now — the list still works.');
+  assert.strictEqual(e.mapTypes.hidden, true);
+  assert.strictEqual(e.confirm.disabled, false, 'the list and Confirm never depend on the map');
+  assert.strictEqual(e.mapHost.getAttribute('aria-hidden'), 'true', 'the canvas is decorative for assistive tech');
 });
 
 check('B2 settling: the checking row says Checking…, Confirm and Skip are disabled; a settled render enables them and marks the new row', async () => {
@@ -560,15 +594,26 @@ check('B5 focus: enters the marked row, Tab/Shift+Tab cycle inside the enabled c
   assert.strictEqual(f.doc.activeElement, e.rows.get('pom-terminal-b').button, 'focus enters the marked row');
   assert.strictEqual(f.inert.getAttribute('aria-hidden'), 'true');
   assert.strictEqual(f.inert.inert, true);
-  const ring = [e.close, ...[...e.rows.values()].map((r) => r.button), e.confirm, e.skip];
+  // the ring: ✕, Skip, (the layer switch once the map is ready), the rows, Confirm
+  const ring = [e.close, e.skip, ...[...e.rows.values()].map((r) => r.button), e.confirm];
   f.doc.fire('keydown', { key: 'Tab' });
   assert.strictEqual(f.doc.activeElement, ring[ring.indexOf(e.rows.get('pom-terminal-b').button) + 1]);
-  f.doc.activeElement = e.skip;
+  f.doc.activeElement = e.confirm;
   f.doc.fire('keydown', { key: 'Tab' });
   assert.strictEqual(f.doc.activeElement, e.close, 'Tab from the last control wraps to the first');
   f.doc.fire('keydown', { key: 'Tab', shiftKey: true });
-  assert.strictEqual(f.doc.activeElement, e.skip, 'Shift+Tab from the first wraps to the last');
-  f.sheet.render({ ...f.view, settlingPlaceId: A.placeId });   // Confirm/Skip disabled: they leave the ring
+  assert.strictEqual(f.doc.activeElement, e.confirm, 'Shift+Tab from the first wraps to the last');
+  f.doc.activeElement = e.close;
+  f.doc.fire('keydown', { key: 'Tab' });
+  assert.strictEqual(f.doc.activeElement, e.skip, 'Skip follows the close control in the header');
+  f.sheet.render({ ...f.view, map: { status: 'ready', type: 'roadmap' } });
+  f.doc.fire('keydown', { key: 'Tab' });
+  assert.strictEqual(f.doc.activeElement, e.mapTypeButtons.roadmap, 'the layer switch joins the ring once the map is ready');
+  f.doc.fire('keydown', { key: 'Tab' });
+  assert.strictEqual(f.doc.activeElement, e.mapTypeButtons.satellite);
+  f.doc.fire('keydown', { key: 'Tab' });
+  assert.strictEqual(f.doc.activeElement, e.rows.get('pom-terminal-v').button, 'then the first row');
+  f.sheet.render({ ...f.view, settlingPlaceId: A.placeId });   // Confirm/Skip disabled: they leave the ring; map off again
   f.doc.activeElement = e.rows.get('pom-terminal-aa').button;
   f.doc.fire('keydown', { key: 'Tab' });
   assert.strictEqual(f.doc.activeElement, e.close, 'disabled Confirm/Skip are skipped');
@@ -622,11 +667,15 @@ check('B6 drag-to-dismiss: the pure rule, then real pointer events on the title 
   e.header.fire('pointermove', undefined, { clientY: 20 });
   e.header.fire('pointercancel', undefined, {});
   assert.deepStrictEqual(f.calls, [['dismiss'], ['dismiss']]);
-  // a pointerdown on the ✕ is a tap, never a drag
-  e.header.fire('pointerdown', undefined, { clientY: 100, pointerId: 5, target: e.close });
-  e.header.fire('pointermove', undefined, { clientY: 300 });
-  e.header.fire('pointerup', undefined, {});
+  // a pointerdown on the ✕ or on Skip is a tap, never a drag
+  for (const control of [e.close, e.skip]) {
+    e.header.fire('pointerdown', undefined, { clientY: 100, pointerId: 5, target: control });
+    e.header.fire('pointermove', undefined, { clientY: 300 });
+    e.header.fire('pointerup', undefined, {});
+  }
   assert.deepStrictEqual(f.calls, [['dismiss'], ['dismiss']]);
+  // the map area is never a drag handle
+  assert.strictEqual(e.mapArea.listenerCount('pointerdown'), 0);
 });
 
 check('B7 close then open: the closing overlay is removed when a fresh one opens; open while open re-renders instead of stacking', async () => {
@@ -1035,6 +1084,90 @@ check('C17 the company shown: the line the passenger picked when it sails from t
   assert.strictEqual(h.app.els.terminalReminderCompany.textContent, 'Carnival Cruise Line · Disney Cruise Line');
 });
 
+check('C19 pins: every settled terminal lookup remembers its coordinates for the sheet map; the fallback and non-terminal addresses add nothing; the host view carries the map status and layer', async () => {
+  const h = await makeApp(makeContext(), 'dropoff');
+  h.typed('Virgin');
+  const p = h.pick(0);
+  assert.deepStrictEqual(plain(h.app.terminalSheetView().map), { status: 'off', type: 'roadmap' }, 'no Maps loader on this page: the area is off');
+  h.details[0].resolve(DETAILS_OK(25.78, -80.18));
+  await p;
+  assert.deepStrictEqual(plain([...h.app._terminalPins.entries()]), [[V.placeId, { lat: 25.78, lng: -80.18 }]]);
+  h.row('pom-terminal-a').button.fire('click');
+  h.details[1].fail();   // the fallback carries no coordinates
+  await flush(); await flush();
+  assert.strictEqual(h.app._terminalPins.has(A.placeId), false, 'null coordinates never become a pin');
+  h.row('pom-terminal-b').button.fire('click');
+  h.details[2].resolve(DETAILS_OK(25.79, -80.17));
+  await flush(); await flush();
+  assert.deepStrictEqual(plain([...h.app._terminalPins.keys()]), [V.placeId, B.placeId]);
+  h.app.setTerminalMapType('satellite');
+  assert.strictEqual(h.app.terminalSheetView().map.type, 'satellite');
+  h.app.setTerminalMapType('nonsense');
+  assert.strictEqual(h.app.terminalSheetView().map.type, 'roadmap', 'only the two Google layers');
+  h.app.rememberTerminalPin('ChIJ_hotel', { lat: 25.8, lng: -80.1 });
+  assert.strictEqual(h.app._terminalPins.has('ChIJ_hotel'), false, 'only verified terminals get pins');
+});
+
+check('C20 the map attaches through the page\'s Maps loader with the chosen terminal pinned and centred; a loader failure shows the note and leaves the list usable', async () => {
+  const context = makeContext();
+  const calls = [];
+  class FakeMap {
+    constructor(host, options) { calls.push(['map', options.mapTypeId, options.disableDefaultUI]); this.host = host; this.center = options.center; this.zoom = options.zoom; this.type = options.mapTypeId; }
+    setCenter(p) { this.center = p; calls.push(['center', p]); }
+    getZoom() { return this.zoom; }
+    setZoom(z) { this.zoom = z; }
+    fitBounds() { calls.push(['fit']); }
+    setMapTypeId(t) { this.type = t; calls.push(['type', t]); }
+  }
+  class FakeMarker {
+    constructor(o) { Object.assign(this, o); calls.push(['marker', o.position, o.icon.fillColor]); }
+    setPosition(p) { this.position = p; }
+    setIcon(i) { this.icon = i; }
+    setLabel(l) { this.label = l; calls.push(['label', l && l.text]); }
+    setZIndex() {}
+  }
+  class FakeBounds { constructor() { this.points = []; } extend(p) { this.points.push(p); } getCenter() { return this.points[0]; } }
+  context.ctx.google = { maps: { importLibrary: async () => ({}), Map: FakeMap, Marker: FakeMarker, LatLngBounds: FakeBounds, Point: class { constructor(x, y) { this.x = x; this.y = y; } }, SymbolPath: { CIRCLE: 'CIRCLE' } } };
+  let loads = 0;
+  context.ctx.window.LinkMiaMapsLoader = { load: async () => { loads++; } };
+  const h = await makeApp(context, 'dropoff');
+  h.typed('Virgin');
+  const p = h.pick(0);
+  assert.strictEqual(h.sheet().mapArea.hidden, false);
+  assert.strictEqual(h.sheet().mapNote.textContent, 'Loading map…', 'the area shows loading synchronously on the tap');
+  h.details[0].resolve(DETAILS_OK(25.78, -80.18));
+  await p;
+  for (let i = 0; i < 10 && h.app._terminalMapStatus !== 'ready'; i++) await flush();
+  assert.strictEqual(h.app._terminalMapStatus, 'ready');
+  assert.strictEqual(loads, 1, 'one loader call per sheet open');
+  assert.strictEqual(h.sheet().mapNote.hidden, true);
+  assert.strictEqual(h.sheet().mapTypes.hidden, false);
+  assert.ok(calls.some((c) => c[0] === 'map' && c[1] === 'roadmap' && c[2] === true), 'a dark road map with the default UI off');
+  assert.ok(calls.some((c) => c[0] === 'marker' && c[1].lat === 25.78 && c[2] === '#FF9933'), 'the chosen terminal is the orange pin');
+  assert.ok(calls.some((c) => c[0] === 'label' && c[1] === 'Terminal V'), 'labelled with the terminal name');
+  assert.ok(calls.some((c) => c[0] === 'center' && c[1].lat === 25.78), 'centred on the chosen pin');
+  h.sheet().mapTypeButtons.satellite.fire('click');
+  assert.ok(calls.some((c) => c[0] === 'type' && c[1] === 'satellite'), 'the switch changes the Google layer');
+  assert.strictEqual(h.sheet().mapTypeButtons.satellite.getAttribute('aria-pressed'), 'true');
+  h.row('pom-terminal-a').button.fire('click');
+  h.details[1].resolve(DETAILS_OK(25.79, -80.17));
+  await flush(); await flush();
+  const markers = calls.filter((c) => c[0] === 'marker');
+  assert.strictEqual(markers.length, 2, 'the second terminal gets its own pin');
+  assert.ok(calls.some((c) => c[0] === 'center' && c[1].lat === 25.79), 're-centred on the new choice');
+  // a loader failure on the next open: the note, and Confirm still works
+  h.sheet().confirm.fire('click');
+  assert.strictEqual(h.sheet(), null);
+  context.ctx.window.LinkMiaMapsLoader = { load: async () => { throw new Error('key refused'); } };
+  h.tapAirport('MIA');
+  h.app.els.changeTerminalBtn.fire('click');
+  for (let i = 0; i < 10 && h.app._terminalMapStatus !== 'unavailable'; i++) await flush();
+  assert.strictEqual(h.app._terminalMapStatus, 'unavailable');
+  assert.strictEqual(h.sheet().mapNote.textContent, 'Map unavailable right now — the list still works.');
+  assert.strictEqual(h.sheet().confirm.disabled, false);
+  assert.strictEqual(h.app.continueAfterSheet(), true);
+});
+
 check('C18 the mode reset ends the terminal intent and clears everything with it', async () => {
   const h = await makeApp(makeContext(), 'dropoff');
   h.typed('Virgin');
@@ -1082,9 +1215,10 @@ check('D3 the page loads the sheet module at the versioned URL the service worke
   const list = sw.slice(sw.indexOf('const STATIC_CACHE_URLS = ['), sw.indexOf('];', sw.indexOf('const STATIC_CACHE_URLS = [')));
   assert.ok(list.includes(literal), `${literal} is precached at the EXACT requested URL`);
   assert.deepStrictEqual(sw.match(/'\/js\/terminal-sheet\.js(\?[^']*)?'/g), [literal]);
-  assert.match(sw, /const CACHE_NAME = 'linkmia-v1\.3\.51';/);
-  assert.match(sw, /const RUNTIME_CACHE = 'linkmia-runtime-v28';/);
-  assert.ok(sw.includes('//   v1.3.51 / runtime-v28 '), 'the pair has its history line');
+  assert.strictEqual(m[1], '?v=2', 'the module changed with the map: the page asks for v=2');
+  assert.match(sw, /const CACHE_NAME = 'linkmia-v1\.3\.52';/);
+  assert.match(sw, /const RUNTIME_CACHE = 'linkmia-runtime-v29';/);
+  assert.ok(sw.includes('//   v1.3.52 / runtime-v29 '), 'the pair has its history line');
   for (const page of ['trip.html', 'driver.html', 'index.html', 'login.html']) {
     assert.ok(!/<script[^>]*terminal-sheet/.test(read(page)), `${page} does not load the sheet`);
   }
