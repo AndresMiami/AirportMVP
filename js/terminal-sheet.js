@@ -1,27 +1,34 @@
-// Terminal confirmation — the confirm sheet (R1; plan §2.2, §3.2; map and
-// Uber-style layout added in the follow-up PR, 2026-10-28).
+// Terminal confirmation — the terminal STAGE in Where (plan v1.10 §2.2,
+// §3.2; R1 shipped the modal sheet, this release turns it into the stage:
+// the map on top, the terminal panel docked below it).
 //
 // ONE component, host-driven. It renders a VIEW the host derives from its
 // own state and reports the passenger's acts back: a row tap, Confirm, Skip,
-// a dismissal (slide, ✕, backdrop, Escape), a map-layer choice. It decides
-// nothing about selection, navigation, quotes or Google: the host attaches
-// the Google map into `elements().mapHost` and draws the pins; this file
-// only renders the map AREA's state (loading / ready / unavailable) and the
-// Standard | Satellite switch. Create mode ships in R1; the edit mode of the
-// same sheet (pending-edit staging, plan §2.6) is a later release.
+// a dismissal (✕, Escape), a map-layer choice, a panel position change. It
+// decides nothing about selection, navigation, quotes or Google: the host
+// attaches the Google map into `elements().mapHost`, draws the markers and
+// owns the camera; this file only renders the map AREA's state (loading /
+// ready / unavailable), the Standard | Satellite switch and the credits the
+// host hands it with the view.
 //
-// Layout (after the Uber reference, 2026-10-28): drag grip; header with the
-// close control on the left, the title centred and a Skip pill on the
-// right; the map area with the layer switch; "PortMiami"; the terminal
-// rows; the reminder line; the primary button "Confirm pickup" /
-// "Confirm drop-off" fixed at the bottom. House bottom-sheet pattern
-// (js/passenger-modal.js values): dimmed backdrop rgba(0,0,0,0.7), #2C2C2E
-// panel, max-width 576px, 20px top radius, 0.3s slide. Drag-to-dismiss on
-// the grip or the title row only (never the map); release past
-// DISMISS_DISTANCE_PX or a fast flick closes, otherwise it snaps back
-// (`dragOutcome` is the pure rule). Accessibility as the traveler dialog:
-// role="dialog", aria-modal, labelled title, Tab/Shift+Tab cycle inside the
-// enabled controls, Escape closes, the page behind is inert while open.
+// Layout (the approved Where-map journey, relays 0288–0290): a stage with
+// the header (✕ on the left, the title centred, a Skip pill on the right)
+// floating over the map; the map fills the top; the panel is DOCKED at the
+// bottom in one of two POSITIONS — collapsed (the handle, the selected row,
+// the reminder line, Confirm; the default on open) or expanded (every
+// verified terminal, scrolling, with Confirm fixed at the bottom). The
+// handle IS a real button, "Show terminals" / "Collapse list" (named by
+// state, aria-expanded, aria-controls the list), so a keyboard or
+// screen-reader passenger can reach every terminal; dragging the handle up
+// expands and down collapses (`dragOutcome` is the pure rule), and a drag
+// NEVER dismisses — only ✕ and Escape do. Rows hidden by the collapsed
+// position leave the focus order, and focus is moved to the handle before
+// a collapse hides the row that holds it. House values (passenger-modal):
+// dimmed backdrop rgba(0,0,0,0.7), #2C2C2E panel, max-width 576px on
+// desktop, 20px top radius, 0.3s slide. Accessibility as the traveler
+// dialog: role="dialog", aria-modal, labelled title, Tab/Shift+Tab cycle
+// inside the enabled VISIBLE controls, Escape closes, the page behind is
+// inert while open.
 //
 // Nothing here is a quote surface: no price, no network of its own.
 //
@@ -49,6 +56,11 @@
     close: 'Close',
     selected: 'Selected',
     checking: 'Checking…',
+    expand: 'Show terminals',
+    collapse: 'Collapse list',
+    // The markers are Google's Place Details locations for the terminals,
+    // never a verified pickup/drop-off curb (plan §2.5).
+    caption: 'Terminal locations',
     map: Object.freeze({
       loading: 'Loading map…',
       unavailable: 'Map unavailable right now — the list still works.',
@@ -58,17 +70,31 @@
   });
 
   const MAP_TYPES = Object.freeze(['roadmap', 'satellite']);
-  const DISMISS_DISTANCE_PX = 80;      // release this far down: close
-  const FLICK_VELOCITY = 0.6;          // px per ms (~600 px/s): a flick closes…
+  const POSITIONS = Object.freeze(['collapsed', 'expanded']);
+  const TOGGLE_DISTANCE_PX = 48;       // drag this far: the panel changes position…
+  const FLICK_VELOCITY = 0.6;          // …or a flick (px per ms, ~600 px/s)…
   const FLICK_MIN_DISTANCE_PX = 24;    // …once it has travelled somewhere
+  const DRAG_CLICK_SLOP_PX = 8;        // a drag this long is not also a click
   const CLOSE_ANIMATION_MS = 300;
 
-  // Pure: what releasing a drag does. `dy` is the downward travel in px,
-  // `velocity` the average speed in px/ms.
-  function dragOutcome(dy, velocity) {
-    if (!(dy > 0)) return 'snap';
-    if (dy >= DISMISS_DISTANCE_PX) return 'close';
-    if (velocity >= FLICK_VELOCITY && dy >= FLICK_MIN_DISTANCE_PX) return 'close';
+  // Pure: what releasing a drag on the handle does. `dy` is the DOWNWARD
+  // travel in px (negative = upward), `velocity` the average speed in
+  // px/ms, `position` the panel's position when the drag began. A drag
+  // never dismisses: from collapsed, dragging further down snaps back.
+  function dragOutcome(dy, velocity, position) {
+    if (typeof dy !== 'number' || !Number.isFinite(dy)) return 'snap';
+    const speed = typeof velocity === 'number' && Number.isFinite(velocity) ? velocity : 0;
+    const up = -dy;
+    if (position === 'collapsed') {
+      if (up >= TOGGLE_DISTANCE_PX) return 'expand';
+      if (speed >= FLICK_VELOCITY && up >= FLICK_MIN_DISTANCE_PX) return 'expand';
+      return 'snap';
+    }
+    if (position === 'expanded') {
+      if (dy >= TOGGLE_DISTANCE_PX) return 'collapse';
+      if (speed >= FLICK_VELOCITY && dy >= FLICK_MIN_DISTANCE_PX) return 'collapse';
+      return 'snap';
+    }
     return 'snap';
   }
 
@@ -100,7 +126,7 @@
       .join(' · ');
   }
 
-  // What the sheet lists: every verified terminal, in registry order.
+  // What the panel lists: every verified terminal, in registry order.
   function terminalRows(registry) {
     if (!registry || !Array.isArray(registry.verified)) return [];
     return registry.verified.map((terminal) => ({
@@ -123,23 +149,63 @@
     if (node && typeof node.addEventListener === 'function') node.addEventListener(type, handler);
   }
 
-  // host: { onRowTap(terminalId), onConfirm(), onSkip(), onDismiss(), onMapType(type) }
+  // Third-party credits for the markers shown (the host validates them with
+  // the autocomplete's own boundary before they reach the view): text nodes
+  // and https links only — provider strings are never interpreted as HTML.
+  function renderCredits(doc, holder, entries) {
+    holder.textContent = '';
+    if (typeof holder.replaceChildren === 'function') holder.replaceChildren();
+    else if (Array.isArray(holder.children)) holder.children.length = 0;
+    const list = Array.isArray(entries) ? entries : [];
+    holder.hidden = list.length === 0;
+    for (const entry of list) {
+      if (!entry || !Array.isArray(entry.segments)) continue;
+      holder.appendChild(doc.createTextNode(' · '));
+      for (const segment of entry.segments) {
+        const text = typeof (segment && segment.text) === 'string' ? segment.text : '';
+        if (!text) continue;
+        const href = typeof (segment && segment.href) === 'string' && /^https:\/\//i.test(segment.href) ? segment.href : null;
+        if (href) {
+          const link = el(doc, 'a', 'terminal-sheet-credit-link', text);
+          link.href = href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          holder.appendChild(link);
+        } else {
+          holder.appendChild(doc.createTextNode(text));
+        }
+      }
+    }
+  }
+
+  // host: { onRowTap(terminalId), onConfirm(), onSkip(), onDismiss(),
+  //         onMapType(type), onPanelPosition(position) }
   // options.now: injectable clock for the drag rule (tests).
   function create({ document: doc, host, now } = {}) {
     if (!doc || !host) throw new Error('TerminalSheet.create needs a document and a host');
     const clock = typeof now === 'function' ? now : () => Date.now();
-    let sheet = null;      // the open sheet's nodes and view
+    let sheet = null;      // the open stage's nodes, view and position
     let closing = null;    // an overlay still animating out
 
     function isOpen() { return sheet !== null; }
+    function position() { return sheet ? sheet.position : null; }
 
+    function visibleRows() {
+      if (!sheet) return [];
+      return [...sheet.rows.values()].filter((row) => !row.button.hidden);
+    }
+
+    // The focus ring: the enabled, VISIBLE controls in reading order — the
+    // header, the layer switch once the map exists, the handle button, the
+    // rows the position shows, Confirm. Hidden rows are never reachable.
     function focusables() {
       if (!sheet) return [];
       const ring = [sheet.close, sheet.skip];
       if (mapStatusOf(sheet.view) === 'ready') ring.push(sheet.mapTypeButtons.roadmap, sheet.mapTypeButtons.satellite);
-      sheet.rows.forEach((row) => ring.push(row.button));
+      ring.push(sheet.handle);
+      visibleRows().forEach((row) => ring.push(row.button));
       ring.push(sheet.confirm);
-      return ring.filter((control) => control && !control.disabled && typeof control.focus === 'function');
+      return ring.filter((control) => control && !control.disabled && !control.hidden && typeof control.focus === 'function');
     }
 
     function keyHandler(e) {
@@ -161,12 +227,32 @@
       }
     }
 
-    // ---- drag-to-dismiss (grip and title row; the controls are taps) ----
+    // ---- panel positions ----
+    function setPosition(next) {
+      if (!sheet || !POSITIONS.includes(next) || sheet.position === next) return false;
+      // A row about to be hidden must not keep focus: the handle takes it.
+      if (next === 'collapsed') {
+        const active = doc.activeElement;
+        const focusedRow = active ? visibleRows().find((row) => row.button === active) : null;
+        if (focusedRow && typeof sheet.handle.focus === 'function') sheet.handle.focus();
+      }
+      sheet.position = next;
+      render(sheet.view);
+      if (typeof host.onPanelPosition === 'function') host.onPanelPosition(next);
+      return true;
+    }
+
+    function toggle() {
+      if (!sheet) return false;
+      return setPosition(sheet.position === 'expanded' ? 'collapsed' : 'expanded');
+    }
+
+    // ---- the handle drag: up expands, down collapses, never dismisses ----
     function startDrag(e) {
-      if (!sheet || !e || e.target === sheet.close || e.target === sheet.skip) return;
+      if (!sheet || !e) return;
       const y = e.clientY;
       if (typeof y !== 'number') return;
-      sheet.drag = { startY: y, startAt: clock(), dy: 0 };
+      sheet.drag = { startY: y, startAt: clock(), dy: 0, moved: false, position: sheet.position };
       sheet.panel.classList.add('dragging');
       const target = e.currentTarget;
       if (target && typeof target.setPointerCapture === 'function' && e.pointerId != null) {
@@ -175,9 +261,9 @@
     }
     function moveDrag(e) {
       if (!sheet || !sheet.drag || !e || typeof e.clientY !== 'number') return;
-      const dy = Math.max(0, e.clientY - sheet.drag.startY);
+      const dy = e.clientY - sheet.drag.startY;
       sheet.drag.dy = dy;
-      sheet.panel.style.transform = 'translateY(' + dy + 'px)';
+      if (Math.abs(dy) >= DRAG_CLICK_SLOP_PX) sheet.drag.moved = true;
       if (typeof e.preventDefault === 'function') e.preventDefault();
     }
     function endDrag() {
@@ -185,12 +271,13 @@
       const drag = sheet.drag;
       sheet.drag = null;
       sheet.panel.classList.remove('dragging');
+      // The click the browser fires after a real drag must not toggle the
+      // position a second time; a tap (no travel) stays a click.
+      sheet.suppressClick = drag.moved;
       const elapsed = Math.max(1, clock() - drag.startAt);
-      if (dragOutcome(drag.dy, drag.dy / elapsed) === 'close') {
-        host.onDismiss();
-      } else {
-        sheet.panel.style.transform = '';
-      }
+      const outcome = dragOutcome(drag.dy, Math.abs(drag.dy) / elapsed, drag.position);
+      if (outcome === 'expand') setPosition('expanded');
+      else if (outcome === 'collapse') setPosition('collapsed');
     }
     function bindDrag(node) {
       on(node, 'pointerdown', startDrag);
@@ -208,21 +295,20 @@
     }
 
     // view: { side, registry, selectedPlaceId, settlingPlaceId, superseded,
-    //         map: { status: 'loading'|'ready'|'unavailable'|'off', type: 'roadmap'|'satellite' } }
-    // options.inert: the element behind the sheet (aria-hidden + inert while open)
+    //         map: { status: 'loading'|'ready'|'unavailable'|'off', type: 'roadmap'|'satellite' },
+    //         credits: [validated attribution entries for the markers shown] }
+    // options.inert: the element behind the stage (aria-hidden + inert while open)
     function open(view, options = {}) {
       if (sheet) { render(view); return; }
       removeClosing();
       const overlay = el(doc, 'div', 'terminal-sheet-overlay');
-      const panel = el(doc, 'div', 'terminal-sheet-panel');
-      panel.setAttribute('role', 'dialog');
-      panel.setAttribute('aria-modal', 'true');
-      panel.setAttribute('aria-labelledby', 'terminalSheetTitle');
+      const stage = el(doc, 'div', 'terminal-sheet-stage');
+      stage.setAttribute('role', 'dialog');
+      stage.setAttribute('aria-modal', 'true');
+      stage.setAttribute('aria-labelledby', 'terminalSheetTitle');
 
-      const grip = el(doc, 'div', 'terminal-sheet-grip');
-      grip.appendChild(el(doc, 'div', 'terminal-sheet-handle'));
-
-      // Header: ✕ on the left, the title centred, Skip as a pill on the right.
+      // Header over the map: ✕ on the left, the title centred, Skip as a
+      // pill on the right.
       const header = el(doc, 'div', 'terminal-sheet-header');
       const close = el(doc, 'button', 'terminal-sheet-close', '✕');
       close.type = 'button';
@@ -261,9 +347,35 @@
       mapArea.appendChild(mapNote);
       mapArea.appendChild(mapTypes);
 
-      const port = el(doc, 'div', 'terminal-sheet-port');
+      // The docked panel: the handle BUTTON, the caption strip (port,
+      // "Terminal locations", credits), the rows, the reminder, Confirm.
+      const panel = el(doc, 'div', 'terminal-sheet-panel');
+      const handle = el(doc, 'button', 'terminal-sheet-handle-btn');
+      handle.type = 'button';
+      handle.setAttribute('aria-controls', 'terminalSheetList');
+      handle.setAttribute('aria-expanded', 'false');
+      const grip = el(doc, 'span', 'terminal-sheet-handle');
+      grip.setAttribute('aria-hidden', 'true');
+      const handleLabel = el(doc, 'span', 'terminal-sheet-handle-label', COPY.expand);
+      handle.appendChild(grip);
+      handle.appendChild(handleLabel);
+      on(handle, 'click', () => {
+        if (!sheet) return;
+        if (sheet.suppressClick) { sheet.suppressClick = false; return; }
+        toggle();
+      });
+
+      const captionStrip = el(doc, 'div', 'terminal-sheet-caption');
+      const port = el(doc, 'span', 'terminal-sheet-port');
+      const caption = el(doc, 'span', 'terminal-sheet-caption-text', COPY.caption);
+      const credits = el(doc, 'span', 'terminal-sheet-credits');
+      credits.hidden = true;
+      captionStrip.appendChild(port);
+      captionStrip.appendChild(caption);
+      captionStrip.appendChild(credits);
 
       const list = el(doc, 'div', 'terminal-sheet-list');
+      list.id = 'terminalSheetList';
       const rows = new Map();
       terminalRows(view.registry).forEach((row) => {
         const button = el(doc, 'button', 'terminal-sheet-row');
@@ -289,20 +401,18 @@
       on(confirm, 'click', () => { if (!confirm.disabled) host.onConfirm(); });
       footer.appendChild(confirm);
 
-      panel.appendChild(grip);
-      panel.appendChild(header);
-      panel.appendChild(mapArea);
-      panel.appendChild(port);
+      panel.appendChild(handle);
+      panel.appendChild(captionStrip);
       panel.appendChild(list);
       panel.appendChild(note);
       panel.appendChild(footer);
-      overlay.appendChild(panel);
-      // The backdrop itself closes; a tap inside the panel never bubbles
-      // out as a dismissal.
-      on(overlay, 'click', (e) => { if (e && e.target === overlay) host.onDismiss(); });
-      on(panel, 'click', (e) => { if (e && typeof e.stopPropagation === 'function') e.stopPropagation(); });
-      bindDrag(grip);
-      bindDrag(header);
+      stage.appendChild(header);
+      stage.appendChild(mapArea);
+      stage.appendChild(panel);
+      overlay.appendChild(stage);
+      // Dismissal is ✕ or Escape only: a tap on the map or on the backdrop
+      // is exploration, never a close; the handle owns the drag.
+      bindDrag(handle);
 
       const inert = options.inert || null;
       if (inert) {
@@ -312,14 +422,17 @@
       if (typeof doc.addEventListener === 'function') doc.addEventListener('keydown', keyHandler);
       doc.body.appendChild(overlay);
 
-      sheet = { overlay, panel, grip, header, title, skip, mapArea, mapHost, mapNote, mapTypes, mapTypeButtons,
-        port, list, rows, note, confirm, close, view: null, inert, drag: null };
+      sheet = { overlay, stage, panel, header, title, skip, close, mapArea, mapHost, mapNote, mapTypes, mapTypeButtons,
+        handle, handleLabel, captionStrip, port, caption, credits, list, rows, note, confirm,
+        view: null, inert, drag: null, suppressClick: false, position: 'collapsed' };
       render(view);
 
-      // Focus enters the marked row (what the passenger is checking), else
-      // the first row, else the close control.
-      const marked = view && view.selectedPlaceId ? [...rows.values()].find((row) => row.placeId === view.selectedPlaceId) : null;
-      const first = marked ? marked.button : (rows.size ? rows.values().next().value.button : close);
+      // Focus enters the marked row when one is marked; otherwise — the
+      // lookup still pending, or the selection superseded — the handle
+      // button, which exists and is visible in every state.
+      const marked = sheet.view && sheet.view.selectedPlaceId && !sheet.view.superseded
+        ? visibleRows().find((row) => row.placeId === sheet.view.selectedPlaceId) : null;
+      const first = marked ? marked.button : handle;
       if (first && typeof first.focus === 'function') first.focus();
 
       // .active a frame later so the slide/fade transitions actually run.
@@ -329,16 +442,22 @@
       raf(() => { if (sheet && sheet.overlay === overlay) overlay.classList.add('active'); });
     }
 
-    // Everything visible derives from the view: the marked row, the row
-    // that is checking, the note, the map area's state, and whether
+    // Everything visible derives from the view and the position: the
+    // marked row, the row that is checking, which rows the position shows,
+    // the note, the map area's state, the credits, and whether
     // Confirm/Skip are usable. The map canvas itself belongs to the host.
     function render(view) {
       if (!sheet || !view) return;
       sheet.view = view;
       const side = sideOf(view);
+      const expanded = sheet.position === 'expanded';
       sheet.title.textContent = COPY.title[side];
       sheet.confirm.textContent = COPY.confirm[side];
       sheet.port.textContent = view.registry && view.registry.port ? view.registry.port.name : '';
+      sheet.panel.setAttribute('data-position', sheet.position);
+      sheet.overlay.setAttribute('data-position', sheet.position);
+      sheet.handle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      sheet.handleLabel.textContent = expanded ? COPY.collapse : COPY.expand;
       const selectedPlaceId = view.superseded ? null : (view.selectedPlaceId || null);
       const settlingPlaceId = view.settlingPlaceId || null;
       let marked = false;
@@ -350,6 +469,9 @@
         row.button.classList.toggle('is-selected', selected);
         row.button.classList.toggle('is-checking', checking);
         row.mark.textContent = checking ? COPY.checking : (selected ? COPY.selected : '');
+        // Collapsed: only the selected row and the row being checked show;
+        // the others are hidden (out of the focus order) until expanded.
+        row.button.hidden = !(expanded || selected || checking);
       });
       sheet.note.textContent = view.superseded ? COPY.superseded : COPY.reminder[side];
       // Disabled from the instant a row is tapped until that selection
@@ -372,6 +494,8 @@
         button.setAttribute('aria-pressed', candidate === type ? 'true' : 'false');
         button.classList.toggle('is-active', candidate === type);
       });
+      sheet.caption.hidden = status === 'off';
+      renderCredits(doc, sheet.credits, status === 'off' ? [] : view.credits);
     }
 
     function close() {
@@ -384,7 +508,7 @@
         closed.inert.inert = false;
       }
       closed.panel.classList.remove('dragging');
-      closed.panel.style.transform = 'translateY(100%)';
+      closed.stage.style.transform = 'translateY(100%)';
       closed.overlay.classList.remove('active');
       closed.overlay.classList.add('closing');
       removeClosing();
@@ -395,21 +519,25 @@
 
     // For the host (the map canvas, focus management) and for tests.
     function elements() {
-      return sheet ? { overlay: sheet.overlay, panel: sheet.panel, grip: sheet.grip, header: sheet.header,
+      return sheet ? { overlay: sheet.overlay, stage: sheet.stage, panel: sheet.panel, header: sheet.header,
         title: sheet.title, note: sheet.note, confirm: sheet.confirm, skip: sheet.skip, close: sheet.close,
         mapArea: sheet.mapArea, mapHost: sheet.mapHost, mapNote: sheet.mapNote, mapTypes: sheet.mapTypes,
-        mapTypeButtons: sheet.mapTypeButtons, rows: sheet.rows, view: sheet.view } : null;
+        mapTypeButtons: sheet.mapTypeButtons, handle: sheet.handle, handleLabel: sheet.handleLabel,
+        caption: sheet.caption, credits: sheet.credits, port: sheet.port, list: sheet.list, rows: sheet.rows,
+        view: sheet.view, position: sheet.position } : null;
     }
 
-    return { open, render, close, isOpen, elements };
+    return { open, render, close, isOpen, elements, position, setPosition, toggle };
   }
 
   return {
     COPY,
     MAP_TYPES,
-    DISMISS_DISTANCE_PX,
+    POSITIONS,
+    TOGGLE_DISTANCE_PX,
     FLICK_VELOCITY,
     FLICK_MIN_DISTANCE_PX,
+    DRAG_CLICK_SLOP_PX,
     dragOutcome,
     terminalRows,
     create

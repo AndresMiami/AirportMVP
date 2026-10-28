@@ -519,7 +519,7 @@ async function check(name, fn) {
     assert.deepStrictEqual(t.dispatched.map((e) => e.type), ['selection-started', 'place-selected', 'place-coordinates']);
     assert.deepStrictEqual(plain(t.dispatched[0].detail), { selectionId, placeId: TERMINAL_V_ID, source: 'curated', curated: meta });
     assert.deepStrictEqual(plain(t.dispatched[1].detail), { placeId: TERMINAL_V_ID, description: TERMINAL_V_LABEL, curated: meta, selectionId });
-    assert.deepStrictEqual(plain(t.dispatched[2].detail), { lat: 25.7800848, lng: -80.179946, address: TERMINAL_V_LABEL, selectionId });
+    assert.deepStrictEqual(plain(t.dispatched[2].detail), { lat: 25.7800848, lng: -80.179946, address: TERMINAL_V_LABEL, selectionId, attributions: [] });
     assert.strictEqual(t.instance.rawQuery, 'Virgin');
     assert.strictEqual(t.container.innerHTML, '', 'the list closes after a selection');
   });
@@ -535,7 +535,7 @@ async function check(name, fn) {
     assert.deepStrictEqual(plain(t.instance.selectedPlace), { place_id: TERMINAL_V_ID, description: TERMINAL_V_LABEL });
     const selectionId = t.instance.selectionSequence;
     assert.deepStrictEqual(t.dispatched.map((e) => e.type), ['selection-started', 'place-selected', 'place-coordinates']);
-    assert.deepStrictEqual(plain(t.dispatched[2].detail), { lat: null, lng: null, address: TERMINAL_V_LABEL, selectionId });
+    assert.deepStrictEqual(plain(t.dispatched[2].detail), { lat: null, lng: null, address: TERMINAL_V_LABEL, selectionId, attributions: [] });
     // The registry identity travels through the fallback path too (plan §3.1).
     assert.deepStrictEqual(plain(t.dispatched[1].detail.curated), { terminalId: 'pom-terminal-v', companyKey: 'virgin', placeId: TERMINAL_V_ID });
   });

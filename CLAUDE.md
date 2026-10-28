@@ -354,14 +354,38 @@ curated selections is a review packet
   `22c04ee`, production verified serving SW 1.3.51 / runtime-v28 at 05:29Z;
   plan `docs/plans/terminal-confirmation-plan.md` v1.6 with both preview
   acceptance records; merged on Andres's instruction "Ship PR #122 as it
-  is first" — Codex's review and the phone pass follow live). MAP + UBER
-  LAYOUT (this tree, next PR): the sheet gains a Google map on top with
-  the chosen terminal's pin (coordinates from the lookup every pick already
-  makes, kept per page session in `_terminalPins`; no registry coordinates,
-  no extra Google calls), a Standard | Satellite switch, Skip as a pill in
-  the header, "Confirm pickup / drop-off"; a loader failure shows a note
-  and the list still works. SW pair 1.3.52 / runtime-v29,
-  `js/terminal-sheet.js?v=2`. R1 as shipped:
+  is first" — Codex's review and the phone pass follow live). THE
+  TERMINAL STAGE (this tree, PR #123; plan v1.10 §2.2/§3.2a, Codex
+  0288–0290; Andres's implementation go 2026-10-28): the sheet becomes the
+  Where STAGE — a Google map on top with one marker per verified terminal
+  whose location is known (selected = orange with its name; the one being
+  looked up = the checking state; the rest white dots; a marker tap IS a
+  row tap through `selectCuratedTerminal`), the terminal panel docked
+  below in two positions (collapsed: handle, selected row, reminder,
+  Confirm; expanded: all eight) whose handle IS the "Show terminals /
+  Collapse list" button (`aria-expanded`/`aria-controls`, keyboard-
+  operable; hidden rows leave the focus order; a drag up/down changes the
+  position and NEVER dismisses — ✕/Escape only), Skip as a header pill,
+  "Confirm pickup / drop-off", Standard | Satellite. Markers: the selected
+  terminal's own Details lookup seeds its pin; ONE BACKGROUND Details per
+  other verified terminal, once per page session (strategy B, decision D1;
+  `autocomplete.lookupPlaceLocation`, no session token; a per-page ledger
+  reserved/pending/done/failed with the in-flight selection reserved and
+  failed never retried; responses write ONLY `_terminalPins`
+  {lat, lng, attributions} and repaint an open stage); credits validated
+  like the pick's and rendered in the caption strip ("Terminal locations"
+  — never a curb). Camera: moves ONLY on a settled deliberate selection
+  (the initial one included) and, after a panel position change, only as
+  far as keeps the selected marker visible; background pins, renders,
+  layer changes and failures never move it; the honest loading state is
+  LinkMia's own PortMiami overview VIEWPORT (a view centre, not a stored
+  place location); setCenter/setZoom only, never an animated pan.
+  Identity: markers, rows and Confirm all read `selectedTerminalDisplay()`
+  (0288 #3 fixed in code: a superseded selection highlights nothing and
+  never centres the old terminal). The network claim, precisely: no
+  ADDITIONAL Place Details lookup for the selected terminal; the Maps
+  libraries/tiles and the background lookups ARE Google requests. SW pair
+  1.3.52 / runtime-v29, `js/terminal-sheet.js?v=2`. R1 as shipped:
   the ride needs the terminal the passenger's SHIP uses on the day, which
   no machine source gives, so the passenger checks. A LinkMia terminal pick
   opens the confirm sheet (`js/terminal-sheet.js`, house bottom-sheet

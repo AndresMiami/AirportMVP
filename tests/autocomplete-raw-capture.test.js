@@ -280,7 +280,7 @@ async function check(name, fn) {
     assert.deepStrictEqual(types, ['selection-started', 'place-selected', 'place-coordinates']);
     assert.deepStrictEqual(Object.keys(input.dispatched[0].detail).sort(), ['curated', 'placeId', 'selectionId', 'source']);
     assert.deepStrictEqual(Object.keys(input.dispatched[1].detail).sort(), ['curated', 'description', 'placeId', 'selectionId']);
-    assert.deepStrictEqual(Object.keys(input.dispatched[2].detail).sort(), ['address', 'lat', 'lng', 'selectionId']);
+    assert.deepStrictEqual(Object.keys(input.dispatched[2].detail).sort(), ['address', 'attributions', 'lat', 'lng', 'selectionId']);
     assert.deepStrictEqual(Object.keys(inst.selectedPlace).sort(), ['description', 'place_id']);
     const serialized = JSON.stringify(input.dispatched.map((e) => e.detail)) + JSON.stringify(inst.selectedPlace);
     assert.ok(!serialized.includes('fonta'), 'the raw query must not appear in any event or selection object');

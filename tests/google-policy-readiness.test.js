@@ -504,8 +504,8 @@ async function check(name, fn) {
       assert.strictEqual(typeof coords.selectionId, 'number');
       delete coords.selectionId;
       assert.deepStrictEqual(coords,
-        { lat: null, lng: null, address: '100 Main St' },
-        'the fallback carries no Details coordinates');
+        { lat: null, lng: null, address: '100 Main St', attributions: [] },
+        'the fallback carries no Details coordinates and an EMPTY credit set');
       assert.strictEqual(attributionHost.querySelector(), null,
         'no partial attribution ever renders');
     }
@@ -599,7 +599,7 @@ async function check(name, fn) {
     const coords = JSON.parse(JSON.stringify(dispatched[2].detail));
     assert.strictEqual(typeof coords.selectionId, 'number');
     delete coords.selectionId;
-    assert.deepStrictEqual(coords, { lat: null, lng: null, address: '100 Main St' });
+    assert.deepStrictEqual(coords, { lat: null, lng: null, address: '100 Main St', attributions: [] });
     assert.ok(!/lat:\s*0\s*,\s*lng:\s*0/.test(autocompleteSource));
   });
 
