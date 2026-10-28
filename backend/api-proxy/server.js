@@ -331,22 +331,60 @@ app.use(helmet({
   crossOriginResourcePolicy: false
 }));
 
+// ---- Browser origins ----
+//
+// ALLOWED_ORIGINS (Railway) is the comma-separated list of browser origins
+// the proxy answers: exact match, or a prefix match (kept as shipped).
+// Empty entries — a trailing comma left by a hand edit — are ignored: an
+// empty string is a prefix of EVERY origin and would silently admit the
+// whole web.
+//
+// ALLOWED_PREVIEW_SITE (Railway, optional; added 2026-10-28 after PR #122's
+// preview was blocked until the list was edited by hand) names the ONE
+// Netlify site whose Deploy Previews are admitted — its subdomain label,
+// e.g. "i-love-miami". Netlify serves every pull request's preview at
+// https://deploy-preview-<n>--<site>.netlify.app, so with the site named
+// here a new preview works without a per-PR edit and a redeploy. The match
+// is exact: https, the literal "deploy-preview-", digits, "--", the site,
+// ".netlify.app" and nothing after. It is never a bare prefix (that would
+// admit every Netlify site's previews), and an unset or malformed value
+// turns the rule off, leaving the list above exactly as it was. CORS is a
+// browser courtesy, not this proxy's access control: the rate limiter and
+// the Google key restrictions remain the real limits for every origin.
+const PREVIEW_SITE_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isAllowedPreviewOrigin(origin, site) {
+  if (typeof origin !== 'string' || typeof site !== 'string') return false;
+  const name = site.trim().toLowerCase();
+  if (!PREVIEW_SITE_RE.test(name)) return false;
+  return new RegExp(`^https://deploy-preview-\\d{1,8}--${escapeRegExp(name)}\\.netlify\\.app$`).test(origin);
+}
+
+// The whole decision, env read at request time (a Railway variable change
+// takes effect on the next request after the redeploy, as before).
+function isAllowedOrigin(origin, env = process.env) {
+  // Allow requests with no origin (like mobile apps or curl)
+  if (!origin) return true;
+
+  // Allow localhost for development
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+
+  // Check against allowed origins from environment
+  const allowedOrigins = (env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || []).filter(Boolean);
+  if (allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed))) return true;
+
+  // This site's own Netlify Deploy Previews, when the site is named
+  return isAllowedPreviewOrigin(origin, env.ALLOWED_PREVIEW_SITE);
+}
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    
-    // Allow localhost for development
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return callback(null, true);
-    }
-    
-    // Check against allowed origins from environment
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [];
-    if (allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed))) {
-      return callback(null, true);
-    }
-    
+    if (isAllowedOrigin(origin)) return callback(null, true);
+
     // Reject all other origins to prevent infinite loops
     callback(new Error('Not allowed by CORS'));
   },
@@ -788,6 +826,8 @@ const testSeam = Object.freeze({
   safeAccessPath,
   sanitizeAttributions,
   isValidPlaceId,
+  isAllowedOrigin,
+  isAllowedPreviewOrigin,
   MAX_PLACE_ID_LEN,
   PLACE_ID_RE
 });

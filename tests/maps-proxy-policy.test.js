@@ -702,6 +702,124 @@ async function invokeError(error) {
       assert.strictEqual(routeLayer('GET', '/dashboard.html'), undefined);
     });
 
+    // ---- Browser origins: the allowlist and this site's Deploy Previews ----
+    // isAllowedOrigin is the whole CORS decision with the env passed in, so
+    // these run with explicit env objects and never touch process.env; the
+    // last check runs the REAL cors middleware layer in memory on top.
+    const PREVIEW_122 = 'https://deploy-preview-122--i-love-miami.netlify.app';
+    const PROD_ENV = { ALLOWED_ORIGINS: 'https://linkmia.com,https://www.linkmia.com,https://i-love-miami.netlify.app' };
+    const { isAllowedOrigin, isAllowedPreviewOrigin } = testSeam;
+
+    await check('Origins: the shipped allowlist behaviour is unchanged — exact and prefix entries, no-origin and localhost admitted, everything else refused', async () => {
+      for (const origin of ['https://linkmia.com', 'https://www.linkmia.com', 'https://i-love-miami.netlify.app', 'https://linkmia.com/booking']) {
+        assert.strictEqual(isAllowedOrigin(origin, PROD_ENV), true, origin);
+      }
+      assert.strictEqual(isAllowedOrigin(undefined, PROD_ENV), true, 'no Origin header (curl, native apps)');
+      assert.strictEqual(isAllowedOrigin('http://localhost:3001', PROD_ENV), true);
+      assert.strictEqual(isAllowedOrigin('http://127.0.0.1:8888', PROD_ENV), true);
+      for (const origin of ['https://example.com', 'http://linkmia.com', PREVIEW_122, 'https://deploy-preview-120--i-love-miami.netlify.app']) {
+        assert.strictEqual(isAllowedOrigin(origin, PROD_ENV), false, origin);
+      }
+      assert.strictEqual(isAllowedOrigin('https://example.com', {}), false, 'no list at all: refused');
+      // KNOWN RESIDUAL of the shipped prefix semantics, recorded here on
+      // purpose and NOT changed by the preview rule: a listed origin also
+      // admits any origin that merely begins with it, a suffixed look-alike
+      // host included. Tightening the list to exact matches is a separate
+      // decision (CORS is a browser courtesy; the rate limiter and the
+      // Google key restrictions are the proxy's real limits).
+      assert.strictEqual(isAllowedOrigin('https://i-love-miami.netlify.app.evil.example', PROD_ENV), true,
+        'shipped prefix semantics: a suffixed look-alike of a LISTED origin is admitted (recorded residual)');
+    });
+
+    await check('Origins: an empty allowlist entry (a trailing comma) no longer admits every origin', async () => {
+      const sloppy = { ALLOWED_ORIGINS: 'https://linkmia.com,' };
+      assert.strictEqual(isAllowedOrigin('https://linkmia.com', sloppy), true);
+      assert.strictEqual(isAllowedOrigin('https://example.com', sloppy), false, 'an empty string is a prefix of everything — it must be ignored');
+      assert.strictEqual(isAllowedOrigin('https://example.com', { ALLOWED_ORIGINS: ' , ,' }), false);
+    });
+
+    await check('Origins: ALLOWED_PREVIEW_SITE admits exactly this site\'s Netlify Deploy Previews and nothing else', async () => {
+      // The list here carries no netlify.app entry, so every refusal below is
+      // the PREVIEW RULE's own verdict — the shipped prefix semantics of a
+      // listed origin (recorded above) never decide these cases.
+      const env = { ALLOWED_ORIGINS: 'https://linkmia.com,https://www.linkmia.com', ALLOWED_PREVIEW_SITE: 'i-love-miami' };
+      for (const origin of [PREVIEW_122, 'https://deploy-preview-1--i-love-miami.netlify.app', 'https://deploy-preview-98765--i-love-miami.netlify.app']) {
+        assert.strictEqual(isAllowedOrigin(origin, env), true, origin);
+      }
+      const refused = [
+        'https://deploy-preview-7--other-site.netlify.app',                       // another site's preview
+        'https://evil.example/deploy-preview-1--i-love-miami.netlify.app',        // the pattern inside a path
+        'http://deploy-preview-122--i-love-miami.netlify.app',                    // http
+        'https://deploy-preview-122--i-love-miami.netlify.app/',                  // trailing path
+        'https://deploy-preview-122--i-love-miami.netlify.app.evil.example',      // suffixed host
+        'https://deploy-preview-122--i-love-miami.netlify.app:8443',              // explicit port
+        'https://deploy-preview---i-love-miami.netlify.app',                      // no number
+        'https://deploy-preview-12a--i-love-miami.netlify.app',                   // non-digit number
+        'https://xdeploy-preview-1--i-love-miami.netlify.app',                    // prefixed label
+        'https://deploy-preview-1--i-love-miami-x.netlify.app',                   // longer site
+        'https://deploy-preview-1--i-love-miami.netlify.com',                     // other TLD
+        'https://i-love-miami.netlify.app.evil.example',                          // not a preview at all
+        'https://main--i-love-miami.netlify.app'                                   // a branch deploy is not a preview
+      ];
+      for (const origin of refused) assert.strictEqual(isAllowedOrigin(origin, env), false, origin);
+      // the listed origins keep working alongside the rule
+      assert.strictEqual(isAllowedOrigin('https://linkmia.com', env), true);
+      assert.strictEqual(isAllowedOrigin('https://example.com', env), false);
+    });
+
+    await check('Origins: the preview rule is OFF when the site is unset, blank or malformed — the list alone decides, as today', async () => {
+      for (const site of [undefined, '', '   ', '-bad', 'bad-', 'has space', 'i.love-miami', 'I_LOVE', 'a'.repeat(64), 'deploy-preview-1--i-love-miami.netlify.app']) {
+        const env = { ...PROD_ENV, ...(site === undefined ? {} : { ALLOWED_PREVIEW_SITE: site }) };
+        assert.strictEqual(isAllowedOrigin(PREVIEW_122, env), false, `site=${JSON.stringify(site)}`);
+        assert.strictEqual(isAllowedOrigin('https://linkmia.com', env), true);
+      }
+      // the site label is case-insensitive and trimmed (Railway values are typed by hand)
+      assert.strictEqual(isAllowedPreviewOrigin(PREVIEW_122, ' I-Love-Miami '), true);
+      assert.strictEqual(isAllowedPreviewOrigin(PREVIEW_122, 'i-love-miami'), true);
+      assert.strictEqual(isAllowedPreviewOrigin('https://deploy-preview-122--I-LOVE-MIAMI.netlify.app', 'i-love-miami'), false, 'the origin itself is matched as the browser sends it');
+      assert.strictEqual(isAllowedPreviewOrigin(PREVIEW_122, 'i-love'), false, 'a shorter site never prefix-matches');
+      assert.strictEqual(isAllowedPreviewOrigin(PREVIEW_122, undefined), false);
+      assert.strictEqual(isAllowedPreviewOrigin(undefined, 'i-love-miami'), false);
+    });
+
+    await check('Origins: the REAL cors middleware layer answers a preflight from this site\'s preview only while the site is named', async () => {
+      const layer = app._router.stack.find((entry) => entry.name === 'corsMiddleware');
+      assert.ok(layer, 'the cors middleware is installed on the app');
+      const preflight = (origin) => new Promise((resolve) => {
+        const res = makeResponse();
+        res.end = () => resolve({ allowed: true, acao: res.getHeader('access-control-allow-origin') });
+        const req = { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'GET' } };
+        layer.handle(req, res, (error) => resolve({ allowed: !error, error: error && error.message, acao: res.getHeader('access-control-allow-origin') }));
+      });
+      const previous = { origins: process.env.ALLOWED_ORIGINS, site: process.env.ALLOWED_PREVIEW_SITE };
+      try {
+        process.env.ALLOWED_ORIGINS = PROD_ENV.ALLOWED_ORIGINS;
+        delete process.env.ALLOWED_PREVIEW_SITE;
+        assert.deepStrictEqual(await preflight('https://linkmia.com'), { allowed: true, acao: 'https://linkmia.com' });
+        assert.deepStrictEqual(await preflight(PREVIEW_122), { allowed: false, error: 'Not allowed by CORS', acao: null });
+        process.env.ALLOWED_PREVIEW_SITE = 'i-love-miami';
+        assert.deepStrictEqual(await preflight(PREVIEW_122), { allowed: true, acao: PREVIEW_122 });
+        assert.deepStrictEqual(await preflight('https://deploy-preview-7--other-site.netlify.app'), { allowed: false, error: 'Not allowed by CORS', acao: null });
+        assert.deepStrictEqual(await preflight('https://example.com'), { allowed: false, error: 'Not allowed by CORS', acao: null });
+      } finally {
+        if (previous.origins === undefined) delete process.env.ALLOWED_ORIGINS; else process.env.ALLOWED_ORIGINS = previous.origins;
+        if (previous.site === undefined) delete process.env.ALLOWED_PREVIEW_SITE; else process.env.ALLOWED_PREVIEW_SITE = previous.site;
+      }
+    });
+
+    await check('Origins: STATIC — no bare "deploy-preview-" prefix anywhere, and the rule reads the env at request time', async () => {
+      const source = fs.readFileSync(path.join(__dirname, '..', 'backend', 'api-proxy', 'server.js'), 'utf8');
+      assert.ok(!/startsWith\(['"]https:\/\/deploy-preview-/.test(source), 'never a bare prefix match');
+      assert.match(source, /function isAllowedOrigin\(origin, env = process\.env\)/);
+      assert.match(source, /if \(isAllowedOrigin\(origin\)\) return callback\(null, true\);/);
+      assert.match(source, /env\.ALLOWED_PREVIEW_SITE/);
+      // the template literal in server.js reads `...\\.netlify\\.app$` (two
+      // backslashes per escaped dot in the SOURCE), anchored with $ and
+      // closed by the backtick — an unanchored pattern would admit a
+      // suffixed host
+      assert.ok(source.includes('\\\\.netlify\\\\.app$`).test(origin)'), 'the pattern is anchored at the end');
+    });
+
     results.forEach((line) => console.log(line));
     console.log(`\n  ALL ${checks} CHECKS PASS\n`);
   } catch (error) {

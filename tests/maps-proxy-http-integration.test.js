@@ -111,6 +111,37 @@ async function check(name, fn) {
       assert.ok(!diagnosticLogs.join('\n').includes(ADDRESS));
     });
 
+    await check('real preflight: this site\'s Netlify Deploy Preview is admitted only while ALLOWED_PREVIEW_SITE names the site; other sites never are', async () => {
+      const preview = 'https://deploy-preview-122--i-love-miami.netlify.app';
+      const preflight = async (origin) => {
+        const response = await fetch(`${base}/api/places/autocomplete`, {
+          method: 'OPTIONS',
+          headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' }
+        });
+        return { status: response.status, acao: response.headers.get('access-control-allow-origin') };
+      };
+      const previous = { origins: process.env.ALLOWED_ORIGINS, site: process.env.ALLOWED_PREVIEW_SITE };
+      try {
+        process.env.ALLOWED_ORIGINS = 'https://linkmia.com,https://www.linkmia.com';
+        delete process.env.ALLOWED_PREVIEW_SITE;
+        assert.deepStrictEqual(await preflight('https://linkmia.com'), { status: 200, acao: 'https://linkmia.com' });
+        let refused = await preflight(preview);
+        assert.strictEqual(refused.acao, null, 'no site named: the preview is refused');
+        assert.notStrictEqual(refused.status, 200);
+        process.env.ALLOWED_PREVIEW_SITE = 'i-love-miami';   // read at request time, no restart
+        assert.deepStrictEqual(await preflight(preview), { status: 200, acao: preview });
+        refused = await preflight('https://deploy-preview-7--other-site.netlify.app');
+        assert.strictEqual(refused.acao, null, 'another site\'s preview is still refused');
+        refused = await preflight('https://deploy-preview-122--i-love-miami.netlify.app.evil.example');
+        assert.strictEqual(refused.acao, null);
+        assert.deepStrictEqual(await preflight('https://www.linkmia.com'), { status: 200, acao: 'https://www.linkmia.com' });
+        assert.strictEqual(providerCalls.length, 1, 'preflights never reach Google');
+      } finally {
+        if (previous.origins === undefined) delete process.env.ALLOWED_ORIGINS; else process.env.ALLOWED_ORIGINS = previous.origins;
+        if (previous.site === undefined) delete process.env.ALLOWED_PREVIEW_SITE; else process.env.ALLOWED_PREVIEW_SITE = previous.site;
+      }
+    });
+
     console.log(`\n  ALL ${checks} CHECKS PASS\n`);
   } catch (error) {
     console.error(`\nFAILED: ${error.message}`);
