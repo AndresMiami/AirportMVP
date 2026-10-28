@@ -1,4 +1,4 @@
-# Cruise terminal confirmation and the map in Where — plan v1.7 (R1 RELEASED; the map increment revised to the approved Where-map flow, for review BEFORE implementation; PR #123 held)
+# Cruise terminal confirmation and the map in Where — plan v1.8 (R1 RELEASED; the map increment revised to the approved Where-map flow, for review BEFORE implementation; PR #123 held; D1 decided: marker strategy B)
 
 **Status at a glance (2026-10-28):**
 - **R1 is LIVE.** PR #122 merged as `22c04ee` on Andres's instruction in
@@ -12,6 +12,11 @@
   the sliding panel → confirm once → continue to When" (relay 0288).
   §2.1–§2.2 describe it, §2.5 separates terminal location from the curb,
   §3.2a and §3.3 carry the contracts, §4 compares PR #123 with it.
+- **D1 decided (2026-10-28, Andres in chat): marker strategy B** — load
+  every verified terminal's location once per page session (at most eight
+  Details lookups through the existing proxy endpoint) so the map shows all
+  markers; §3.2a records the bounds. D2 (preview access) stays open. v1.8 =
+  v1.7 + this decision; no other change.
 - **PR #123 is HELD** at `d00240d`, open and unmerged: useful partial work
   (the R1 sheet with a fixed map band). §4's table lists what matches and
   what does not, including the P2 identity finding (0288 #3) that must be
@@ -57,11 +62,12 @@ sheet + When reminder; drag-to-dismiss) · v1.4 (lifecycle, metadata, echo
 guard, release boundaries, edit staging, state table) · v1.5 (F1 skipped;
 selection-start boundary; resolution record; R2 comparator wording) ·
 v1.6 (the Change terminal reopening guard and the boundary wording, both
-prescribed by Codex 0286; R1 built and released) · **v1.7 (this file: R1
-released; the map in Where — the approved journey, one selection path for
-list and markers, the identity rule carried into the map, a bounded
-marker-location strategy, terminal location vs curb, PR #123 reconciled;
-answers 0288).**
+prescribed by Codex 0286; R1 built and released) · v1.7 (R1 released; the
+map in Where — the approved journey, one selection path for list and
+markers, the identity rule carried into the map, a bounded marker-location
+strategy, terminal location vs curb, PR #123 reconciled; answers 0288) ·
+**v1.8 (this file: v1.7 + D1 decided — marker strategy B, Andres
+2026-10-28; the §3.2a bounds made exact; nothing else changed).**
 
 ## 1. Problem
 
@@ -170,8 +176,9 @@ booking card's content area.
   precisely: the selected terminal's own Details lookup (every pick already
   makes it — no ADDITIONAL lookup for the selected terminal), the Maps
   JavaScript libraries and tiles when the stage opens (maps are Google
-  requests), and — strategy B in §3.2a — one Details lookup per other
-  verified terminal, once per page session.
+  requests), and — strategy B, §3.2a, decided (D1) — one Details lookup
+  per other verified terminal without a known location, once per page
+  session.
 
 ### 2.3 The When reminder block (create flow only)
 First block in the When panel, above the arrival/time basis and the date
@@ -476,23 +483,33 @@ is gone: **nothing is ever allocated on a completion.**
   the submitted `placeId` and the quote key untouched throughout. The
   signed/submitted pricing identity is never rewritten to solve a display
   issue.
-- **Marker locations (bounded; no invented coordinates).** Proposed
-  **strategy B**: when the stage first opens in a page session, the host
-  requests the location of every verified terminal that has none yet
-  through the existing proxy Details endpoint (`geometry` only, one request
-  per terminal, at most eight, no session token — a standalone Details
-  each), keeps them in page memory for the session (`_terminalPins`, keyed
+- **Marker locations (bounded; no invented coordinates) — strategy B,
+  DECIDED (D1, Andres in chat, 2026-10-28).** When the stage first opens in
+  a page session, the host requests the location of every verified terminal
+  that has none yet through the existing proxy Details endpoint
+  (`/api/places/details`, the proxy's fixed `geometry,formatted_address`
+  field list; one request per terminal, at most one per verified terminal —
+  eight today — no session token: a standalone Details each), keeps only
+  the coordinates in page memory for the session (`_terminalPins`, keyed
   by place ID; never persisted, never in the registry, cleared with the
-  page), tolerates per-terminal failure (no marker; the row stays listed),
-  and never repeats a lookup for a terminal that already has one. The
-  selected terminal's own lookup (already made) seeds its pin, so it never
-  needs a second request. Cost ceiling: eight extra Details per page session
-  that opens the stage; zero on reopen. **Strategy A** (what #123 does
-  today): only terminals picked in this session get markers — cheaper, but
-  a first-time passenger sees one marker, not the reference's
-  multi-terminal map, and markers cannot be the browsing surface. The plan
-  proposes B; Andres decides (§7). Under either, company assignment is
-  never shown as a sailing confirmation.
+  page), tolerates per-terminal failure (no marker; the row stays listed;
+  no retry), and never repeats a lookup for a terminal that already has
+  one. The selected terminal's own lookup (already made by the pick) seeds
+  its pin, so it never needs a second request. Bounds: the requests run
+  together under the same 10 s per-request bound as the pick's lookup and
+  never delay the stage — it opens on the selected marker and the other
+  markers appear as their lookups resolve; the framing re-fits ONCE when
+  the batch settles unless the passenger has already panned or zoomed; a
+  later (re-)selection re-centres as §2.2 says. Each result passes the same
+  attribution validation as the pick's (`validAttributionEntries`): an
+  unrepresentable set discards that result (no marker), and valid entries
+  are rendered in the stage beside the map while that marker is shown —
+  never dropped. Cost ceiling: eight extra Details per page session that
+  opens the stage; zero on reopen. **Strategy A** (what #123 does today —
+  only terminals picked in this session get markers) was the alternative:
+  cheaper, but a first-time passenger sees one marker, not the reference's
+  multi-terminal map, and markers cannot be the browsing surface. Not
+  chosen. Company assignment is never shown as a sailing confirmation.
 - **Map attach.** `LinkMiaMapsLoader.load()` plus the maps and marker
   libraries once per stage open, single-flight (a re-render during loading
   never starts a second attach); failure → "Map unavailable right now — the
@@ -619,7 +636,7 @@ modal sheet stays the edit-mode surface. Rows marked v1.7 are the map's.)
 | Stage open (v1.7) | panel drag up / handle tap | expanded (the list); UI only, the record untouched |
 | Stage open (v1.7) | panel drag down | collapsed (selected row + Confirm, more map); dragging on from collapsed snaps back — NEVER a dismissal |
 | Stage open (v1.7) | map pan / zoom / layer switch | the map only; nothing in the record |
-| Stage opens (v1.7) | first open in this page session | marker locations requested once for the verified terminals without one (strategy B, if chosen); a failure leaves no marker; a reopen requests nothing |
+| Stage opens (v1.7) | first open in this page session | marker locations requested once for the verified terminals without one (strategy B, D1 decided); a failure leaves no marker; a reopen requests nothing |
 | Stage open, superseded (v1.7) | render | no row marked, no marker highlighted or centred, the superseded line, Confirm disabled; a pick clears the record with the identity |
 | Where, no selection | Google row picked | boundary: gen++, `terminalFlow = null`; completion → today's selection and auto-advance |
 | Where, no selection | LinkMia row picked | boundary (before the await): record `{gen, selectionId, placeId, settling}`, sheet opens NOW, row "Checking…", Confirm/Skip disabled; completion → `open`, row marked, buttons enabled; no auto-advance |
@@ -668,7 +685,7 @@ a quote echo or by the resolution record.
 |---|---|---|---|
 | F1 session-token fallback | **SKIPPED** — Andres's decision (relay 0284, 2026-10-27): the released Google request/session handling stays; it was an optional billing choice, not a defect or a prerequisite. The packet `docs/plans/session-token-fallback-packet.md` is kept as a record only and is reopened only if Andres says so | none | not scheduled |
 | R1 confirm | §2.2 sheet in create mode (no map) + §2.3 When reminder + §3.1 metadata + §3.2 boundary, lifecycle and the 0286 #2 reopening guard + §3.3 resolution record + §2.4 trip reminder (no new action) + §3.4 projection | booking-status read-side | **RELEASED 2026-10-28** — PR #122, merge `22c04ee`, production serving SW 1.3.51 / runtime-v28 at 05:29Z; merged on Andres's instruction in chat ("Ship PR #122 as it is first"); Codex's implementation review and the phone pass follow live (Andres's ship-and-test-live decision) |
-| R1.5 the map in Where | §2.1–§2.2 (the stage: map + docked panel with collapsed/expanded positions, selectable markers, one selection path, Skip pill, "Confirm pickup / drop-off", Standard \| Satellite), §2.5 (terminal location, not curb), §3.2a (identity on the map, bounded marker loading, single-flight attach), the v1.7 rows of §3.7, §5's map cases | none (the existing proxy Details endpoint; no persistence) | **PROPOSED (v1.7)** — Codex reviews this revision, then the held PR #123 is corrected to it (table below), reviewed, and ships on Andres's word; SW pair at that time; `js/terminal-sheet.js?v=2` |
+| R1.5 the map in Where | §2.1–§2.2 (the stage: map + docked panel with collapsed/expanded positions, selectable markers, one selection path, Skip pill, "Confirm pickup / drop-off", Standard \| Satellite), §2.5 (terminal location, not curb), §3.2a (identity on the map, bounded marker loading, single-flight attach), the v1.7 rows of §3.7, §5's map cases | none (the existing proxy Details endpoint; no persistence) | **PROPOSED (v1.7; D1 decided in v1.8)** — Codex reviews this revision, then the held PR #123 is corrected to it (table below), reviewed, and ships on Andres's word; SW pair at that time; `js/terminal-sheet.js?v=2` |
 | Preview access | a new PR's Netlify preview cannot reach the Railway proxy until its origin is allowed (0288 #7). Options: (i) add the exact preview origin to `ALLOWED_ORIGINS` per PR (manual; what was done for 122); (ii) a separately reviewed, site-restricted rule — exact `^https://deploy-preview-\d+--<site>\.netlify\.app$` behind `ALLOWED_PREVIEW_SITE`, never a bare prefix, with tests rejecting other sites, suffix look-alikes, http and malformed origins — drafted and parked unshipped in a git stash on the checkout. A preview is never isolated from production data; no booking is submitted on one | Railway variable (Andres) | Andres's decision (§7); either way explicit settings authorization |
 
 **PR #123 (`d00240d`) against the approved flow — implemented vs proposed (0288 #2):**
@@ -676,7 +693,7 @@ a quote echo or by the resolution record.
 |---|---|---|---|
 | Surface | the R1 bottom-sheet modal with a fixed-height map band inside the panel | the Where stage: map behind, panel docked over its lower part | restructure the stage; panel positions |
 | Panel drag | the R1 rule: past 80 px or a flick dismisses, else snaps back; no positions | up = expand, down = collapse; the drag never dismisses; ✕/Escape dismiss | replace the drag rule; keep the pure threshold helper for the snap |
-| Markers | only terminals picked in this session (`_terminalPins` filled on completion) | every verified terminal with a known location (strategy B) or, by decision, A | add the once-per-session location loading (B) |
+| Markers | only terminals picked in this session (`_terminalPins` filled on completion) | every verified terminal with a known location (strategy B — D1 decided) | add the once-per-session location loading (B, the §3.2a bounds) |
 | Marker tap | none (markers drawn without a click handler) | a marker tap = a row tap via `selectCuratedTerminal` | connect `marker.addListener('click')` to the one path; checking state on the marker |
 | Identity on the map | `updateTerminalMapPins()` reads `state.locations.placeId` — paints the old terminal when superseded (P2) | map/list/Confirm all read `selectedTerminalDisplay()` | fix before shipping + regression |
 | Caption | none | "Terminal location" (not curb) | add |
@@ -752,8 +769,10 @@ is under its own worker (`service-worker.js:216-220`).
   requote failed → passengers change → Change terminal → no highlighted or
   centred marker, no row marked, Confirm disabled, identity and quote key
   untouched); marker loading once per session with per-terminal failure
-  tolerated and no repeat on reopen (strategy B), or the explicit one-marker
-  limitation (A); the loader failure note with the panel still usable;
+  tolerated and no repeat on reopen (strategy B, D1: the other markers
+  appear as their lookups resolve, one re-fit when the batch settles, a
+  failed lookup leaves that terminal listed without a marker, a reopen
+  requests nothing); the loader failure note with the panel still usable;
   keyboard ring and reduced motion; hotel/street never shows the stage; the
   trip page, booking-status, pricing and the dropdown unchanged. Browser
   acceptance of the map itself (desktop pointer, phone gestures) before
@@ -876,15 +895,15 @@ targeted check with the two 0286 amendments (recorded here as v1.6); R1
 implementation authorized (0287) and **released** (PR #122, Andres's
 "Ship PR #122 as it is first"); 2026-10-28: the Where-map journey approved
 (0288) and the working mode set (small increments, live testing, review as
-we go — with this map increment reviewed as a plan first).
-**Decisions needed from Andres for the map increment:** (D1) marker
-locations — strategy B (eight Details lookups at most, once per page
-session that opens the stage; the full multi-terminal map) or A (markers
-only for terminals picked this session; one marker for a first-time
-passenger); the plan proposes B. (D2) preview access — add the exact origin
-per PR by hand, or ship the parked site-restricted rule as its own small PR
-(Codex supports a separately reviewed rule, 0288 #7). Remaining: (1)
-Codex's review of this v1.7; (2) correct PR #123 to it (the table in §4;
+we go — with this map increment reviewed as a plan first); **D1 decided
+(Andres in chat, 2026-10-28): marker strategy B** — load every verified
+terminal's location once per page session (at most eight Details lookups)
+so the map shows all markers (§3.2a).
+**Decision still needed from Andres for the map increment:** (D2) preview
+access — add the exact origin per PR by hand, or ship the parked
+site-restricted rule as its own small PR (Codex supports a separately
+reviewed rule, 0288 #7). Remaining: (1)
+Codex's review of this v1.8; (2) correct PR #123 to it (the table in §4;
 the P2 identity fix first), Codex's review of the corrected PR, browser
 acceptance, Andres's release decision; (3) Codex's implementation review of
 #122 as merged, findings as small follow-up PRs; (4) R2 the pending-edit
@@ -994,7 +1013,7 @@ and 0285; items 12–13 answer 0286; item 14 answers 0288.
    ownership, keyboard/focus and reduced motion are stated there. (#2) §4
    carries the implemented-vs-proposed table for #123 and §3.2a the bounded
    marker strategy, with A vs B as an explicit decision (D1) rather than a
-   parity claim. (#3) §3.2a and §3.3 record one identity decision for map,
+   parity claim — decided B by Andres on 2026-10-28 (v1.8). (#3) §3.2a and §3.3 record one identity decision for map,
    list and Confirm, name #123's `updateTerminalMapPins()` read of
    `state.locations.placeId` as the defect to fix before shipping, and add
    the regression to §5; the pricing identity is never rewritten. (#4)
