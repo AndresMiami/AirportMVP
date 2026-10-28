@@ -1,14 +1,33 @@
-# Cruise terminal summary and optional spot map — plan v1.6 (R1 implementation plan; Codex GO 0286 with its two amendments recorded; Andres's implementation go 0287)
+# Cruise terminal confirmation and the map in Where — plan v1.7 (R1 RELEASED; the map increment revised to the approved Where-map flow, for review BEFORE implementation; PR #123 held)
 
-Status: **R1 under implementation** on branch
-`feature/terminal-confirmation-r1` from main `cc84afd` (Andres, relay 0287:
-"add that guard and start R1 … open a draft PR with a preview"; the plan is
-committed with that PR as the reviewed basis; the mockup
-`docs/plans/terminal-confirmation-mockup.html` stays an untracked visual aid,
-not bundled). v1.6 records the two amendments Codex prescribed in 0286 before
-implementation: the **Change terminal reopening guard** (0286 #2; §3.2, §3.7,
-§5) and the **boundary wording** (0286 #5; §5). Nothing else changed in the
-reviewed contract.
+**Status at a glance (2026-10-28):**
+- **R1 is LIVE.** PR #122 merged as `22c04ee` on Andres's instruction in
+  chat; production serves SW 1.3.51 / runtime-v28; both Deploy Preview
+  acceptance records are in §5, and a signed-in production smoke passed
+  (sheet on the tap, Details success with coordinates, Escape). Codex's
+  implementation review of #122 is a separate follow-up; findings become
+  small PRs.
+- **The map increment is PROPOSED here, not released.** Andres approved the
+  journey "select terminal → map opens in Where → choose through the map or
+  the sliding panel → confirm once → continue to When" (relay 0288).
+  §2.1–§2.2 describe it, §2.5 separates terminal location from the curb,
+  §3.2a and §3.3 carry the contracts, §4 compares PR #123 with it.
+- **PR #123 is HELD** at `d00240d`, open and unmerged: useful partial work
+  (the R1 sheet with a fixed map band). §4's table lists what matches and
+  what does not, including the P2 identity finding (0288 #3) that must be
+  fixed before this increment ships. No map application code changes while
+  this revision is under review.
+- **Unverified:** no browser pass of any map yet; phone gestures; the
+  trip-card reminder on a real row; the resolution record on a real quote.
+- Working mode (Andres, 2026-10-28): small increments, shipped on his word
+  and tested live with the complete flow, reviewed as we go; this map
+  increment is the explicit exception he set — revised plan → review →
+  then build. The mockup `docs/plans/terminal-confirmation-mockup.html`
+  stays an untracked visual aid.
+
+v1.6 recorded the two amendments Codex prescribed in 0286 before R1's
+implementation: the **Change terminal reopening guard** (0286 #2; §3.2,
+§3.7, §5) and the **boundary wording** (0286 #5; §5).
 Flow decided by Andres 2026-10-27 (Codex relays 0273, 0275, 0276, 0277):
 the confirm sheet opens on the terminal pick, a short reminder block sits
 at the top of When, Change terminal reopens the sheet, the sheet slides down
@@ -26,18 +45,23 @@ the R2 reversal wording defers to the existing full-draft comparator
 (0285 #5). Both 0285 gaps were reproduced in-memory against the real
 `autocomplete.js` and `indexMVP.html` methods on main, and the two
 corrected contracts were run against the same event order (probe kept
-outside the repo). Nothing here is implemented; the implementation go is
-Andres's after Codex's check (0283, 0284). Code references are to main at
-`cc84afd`, whose application code is identical to `affcacf` and `c095d3b`
-for every line cited.
+outside the repo). R1's contracts below are implemented and live; the map
+parts (§2.1–§2.2, §2.5, §3.2a, the map rows of §3.7, §4's R1.5 row, §5's
+map cases) are proposals until Codex's review and Andres's go. Code
+references for R1 are to main at `cc84afd` as cited; references to the held
+map work are to PR #123 at `d00240d`.
 
 History: v1 (trip block + pending picker) · v1.1 (When-top, driver place-ID
 handoff) · v1.2 (experience first; 0276 corrections) · v1.3 (decided flow:
 sheet + When reminder; drag-to-dismiss) · v1.4 (lifecycle, metadata, echo
 guard, release boundaries, edit staging, state table) · v1.5 (F1 skipped;
 selection-start boundary; resolution record; R2 comparator wording) ·
-**v1.6 (this file: the Change terminal reopening guard and the boundary
-wording, both prescribed by Codex 0286; R1 implementation started).**
+v1.6 (the Change terminal reopening guard and the boundary wording, both
+prescribed by Codex 0286; R1 built and released) · **v1.7 (this file: R1
+released; the map in Where — the approved journey, one selection path for
+list and markers, the identity rule carried into the map, a bounded
+marker-location strategy, terminal location vs curb, PR #123 reconciled;
+answers 0288).**
 
 ## 1. Problem
 
@@ -51,86 +75,103 @@ driver's own check is the backstop. Two decisions stay apart (0276 #1):
 (display and driver handoff, never a client coordinate the server trusts).
 PortMiami has terminals, not gates: every surface says "terminal".
 
-## 2. The passenger experience (decided; unchanged from v1.3 except §2.4, §2.6 and the sheet's opening instant in §2.1–§2.2)
+## 2. The passenger experience (R1 as released; §2.1, §2.2 and §2.5 revised in v1.7 for the map in Where — the journey Andres approved, relay 0288)
 
-### 2.1 Journey, new booking
-1. **Where.** The passenger picks a LinkMia terminal row (released in PR
-   #120). **The tap itself opens the confirm sheet** (§2.2, §3.2) with the
-   tapped row showing "Checking…" while the existing selection path (label,
-   place ID, coordinates lookup; `indexMVP.html:1638-1661`) settles behind
-   it; Confirm and Skip enable once it has. (v1.4 opened the sheet on the
-   coordinates response; 0285 #2 showed that a sheet keyed on the response
-   could be reopened by a late one.)
+### 2.1 Journey, new booking (approved flow)
+1. **Where.** The passenger picks a LinkMia terminal row in the existing
+   dropdown (PR #120). The keyboard closes and, **on the tap itself**, Where
+   shows the **terminal stage** (§2.2): the map centred on the selection
+   with the **terminal panel** docked over its lower part. This is ONE
+   confirmation interaction inside Where — there is no second
+   map-confirmation step. The existing selection path (label, place ID,
+   coordinates lookup) settles behind it; the panel's row and the marker
+   show "Checking…" and Confirm/Skip stay disabled until it has (§3.2).
    - Going to Airport (`state.mode === 'dropoff'`, port → airport): the
-     terminal is the pickup and is picked first; after the sheet the
-     passenger is back on Where to pick the airport, whose tap auto-advances
-     to When as today (`indexMVP.html:1521-1540`).
+     terminal is the pickup, picked first; after Confirm the stage closes
+     and the passenger picks the airport, whose tap auto-advances to When as
+     today.
    - Arriving at Airport (`state.mode === 'pickup'`, airport → port): the
      terminal is the drop-off and completes the route; the auto-advance is
      **deferred** to Confirm or Skip, then When opens.
-2. **The sheet** (§2.2): Confirm or Skip continues; sliding it down, ✕, the
-   backdrop or Escape closes it and stays on Where with the address box
-   focused, so the passenger can type a brand-new address.
-3. **When.** The reminder block is the first thing on the panel (§2.3):
-   role word, terminal, cruise line, the reminder line and **Change
-   terminal**, which goes back to Where and reopens the sheet with the
-   current terminal marked. Date, time and flight controls are untouched.
-4. Vehicle, traveler, Book as today. After booking, the trip card repeats
-   the reminder (§2.4).
+2. **Choosing.** The list in the panel and the markers on the map are ONE
+   selection path: tapping a row or a marker re-selects that terminal
+   through the autocomplete's curated path (the same label, place ID,
+   lookup and events a dropdown pick runs); the other surface follows and
+   the map moves to it. The current terminal is marked **Selected** — never
+   "Recommended": PortMiami assigns terminals per sailing and LinkMia has no
+   verified basis for a recommendation; the cruise line(s) beside each
+   terminal carry the only meaning we have.
+3. **Panel positions.** Drag the handle up (or tap it) to **expand** and
+   browse all eight terminals; drag it down to **collapse** to the selected
+   terminal and Confirm, revealing more map. Collapse is NOT dismissal.
+4. **Leaving without confirming.** ✕ ("Change address") or Escape closes the
+   stage and returns to typing: the address box is focused with its text
+   selected, the selection and its lookup result are kept as today, and
+   nothing reopens on focus, typing, restore, re-render or a late result
+   (Andres's rule, 0277 #1). **Skip** continues without confirming, as in R1.
+5. **Confirm once.** "Confirm pickup" / "Confirm drop-off" closes the stage;
+   if the airport is still missing (Going to Airport) the airport grid is
+   next, otherwise When opens.
+6. **When.** The compact reminder stays as released (§2.3); **Change
+   terminal** reopens the same stage on the committed terminal (with the
+   0286 #2 guard: an older in-flight selection is cancelled first).
+7. A hotel or street address never shows the stage (today's flow). Vehicle,
+   traveler and Book as today; after booking the trip card repeats the
+   reminder (§2.4). Pending-booking changes (R2) and driver navigation (R3)
+   stay separate.
 
-### 2.2 The confirm sheet (one component; two caller modes, §2.6)
-House bottom-sheet pattern (dimmed backdrop rgba(0,0,0,0.7), panel max-width
-576 px, 20 px top radius, slideUp 0.3 s; `js/passenger-modal.js`), with a
-drag handle.
+### 2.2 The terminal stage in Where: map + panel (the panel is the released `js/terminal-sheet.js` component, docked; the modal sheet remains the edit-mode surface, §2.6)
 ```
-▬▬                                                   (drag handle)
-Confirm pickup terminal                          ✕    (Going to Airport)
-PortMiami
-[ map: later release, §2.5 ]
-Terminal V   Virgin Voyages
-Terminal A   Royal Caribbean                 Selected
-Terminal B   Norwegian Cruise Line
-…
-Terminal AA  MSC Cruises
-Check this is the terminal your ship docks at.
-[ Confirm terminal ]
-  Skip
+ ✕   Confirm pickup terminal                      Skip     header over the map
+ ┌──────────────────────────────────────────────────┐
+ │        map — terminal location markers           │     Standard | Satellite
+ │   ○ Terminal A      ● Terminal V (orange, label)  │
+ └──────────────────────────────────────────────────┘
+ ▬▬  (panel handle)                                        collapsed (default on open)
+ Terminal V   Virgin Voyages                  Selected
+ Check this is the terminal your ship docks at.
+ [ Confirm pickup ]
 ```
-- Title by direction: "Confirm pickup terminal" (Going to Airport) /
-  "Confirm drop-off terminal" (Arriving at Airport); subtitle "PortMiami".
-- List: the eight verified terminals in registry order with their cruise
-  lines; the current terminal marked "Selected" (§3.3 says when nothing is
-  marked). In **create** mode, tapping another row re-selects it
-  **through the autocomplete's curated selection path** (the same code a
-  dropdown pick runs: label, place ID, coordinates lookup, the same events);
-  the address box behind the sheet changes with it; the row shows
-  "Checking…" until that selection settles (§3.2). In **edit** mode the tap
-  only stages the row (§2.6).
-- Reminder line by direction: "Check this is the terminal your ship docks
-  at." (pickup) / "Check this matches your latest cruise instructions."
-  (drop-off).
-- **Confirm terminal** and **Skip** keep the current selection and continue
-  (§3.2 defines "continue"). Both are disabled from the instant any row is
-  tapped — the first pick included — until that selection settles (§3.2),
-  so an old terminal is never confirmed while a new one is pending and a
-  late result never finds an enabled button.
-- **Slide down, ✕, backdrop, Escape** close the sheet and **stay on Where**
-  with the current terminal still selected and the address input focused
-  with its text selected; typing a brand-new address runs the existing
-  clearing path (`indexMVP.html:1673-1687`). No advance happens on a close;
-  nothing reopens the sheet on focus, typing, restore, re-render or a late
-  response (Andres's rule, 0277 #1); only a deliberate new terminal pick or
-  Change terminal opens it again.
-- Drag-to-dismiss: pointer drag on the handle or the title row; release past
-  about 80 px or a fast flick closes, otherwise it snaps back;
-  `prefers-reduced-motion` disables the animation only.
-- Accessibility as the traveler dialog: `role="dialog"`, `aria-modal`,
-  labelled title, focus trapped, Escape closes, focus returns to the
-  address input on close in create mode and to the opener control in edit
-  mode (§2.6); on continue, to the next panel's first control.
-- Nothing in the sheet is a quote surface: no price; in create mode the only
-  network call is the coordinates lookup every pick already makes; in edit
-  mode none.
+Expanded: the same header; the map shrinks to a band (about 30% of the
+stage); the list of all eight terminals scrolls under the handle; Confirm
+stays fixed at the bottom. Phone first; on desktop the stage fills the
+booking card's content area.
+- **Framing.** The map centres on the selected terminal on open and on each
+  (re-)selection; with several markers available it fits them and keeps the
+  selected one centred; zoom about 15 for PortMiami. The map shows
+  **terminal locations** — Google's Place Details location for each
+  terminal — not a verified pickup/drop-off curb (§2.5).
+- **Markers.** One per verified terminal whose location is known (§3.2a
+  loading strategy): the selected one orange with the terminal's name as its
+  label, the others white dots; a terminal with no known location has no
+  marker but stays in the list. Markers are selectable (a marker tap IS a
+  row tap); the marker being looked up shows the checking state.
+- **Panel.** Header: ✕ on the left, the title by direction centred, the
+  Skip pill on the right; "PortMiami" under it. Positions: collapsed
+  (handle, the selected row, the reminder line, Confirm) and expanded (the
+  list). Copy as R1: title and reminder line by direction, "Selected",
+  "Checking…", and the superseded line when §3.3 says so (then no row is
+  marked, no marker is highlighted, Confirm is disabled).
+- **Gesture ownership.** Map pan and zoom belong to the map area (greedy
+  gesture handling inside it; it never scrolls the page and never dismisses
+  the stage); the panel's handle and header own the panel drag — up expands,
+  down collapses, and dragging further down from collapsed snaps back: the
+  drag NEVER dismisses; the list owns its own scroll when expanded; ✕, Skip,
+  Confirm, the layer switch, rows and markers are taps.
+- **Keyboard / focus.** The stage is a labelled region (the title); focus
+  enters the selected row; Tab cycles ✕ → Skip → layer switch → rows →
+  Confirm — the keyboard path is the list, markers are pointer targets;
+  Escape = ✕; on Confirm focus moves to the next panel's first control; on ✕
+  back to the address box with its text selected. Reduced motion: the
+  positions change without animation; the map's own motion is Google's.
+- **Layer switch.** Standard | Satellite (Google's two layers); the choice
+  lasts for the page session.
+- Nothing in the stage is a quote surface: no price. Network, stated
+  precisely: the selected terminal's own Details lookup (every pick already
+  makes it — no ADDITIONAL lookup for the selected terminal), the Maps
+  JavaScript libraries and tiles when the stage opens (maps are Google
+  requests), and — strategy B in §3.2a — one Details lookup per other
+  verified terminal, once per page session.
 
 ### 2.3 The When reminder block (create flow only)
 First block in the When panel, above the arrival/time basis and the date
@@ -168,14 +209,15 @@ and the lifecycle-notice copy stay byte-identical
 `tests/passenger-polling.test.js:516-577`). View spot is not on the trip
 card in the first delivery.
 
-### 2.5 View spot (inside the same sheet; later release, R4)
-Unchanged from v1.3: a Google map in the upper part of the sheet with
-Google's points for the selected terminal, fetched request-scoped on open
-and on a settled re-selection through `GET /api/place-spot?placeId=`
-(§3.6), labels naming what Google returned, honest caption, loading / error
-/ no-points states, the stale guard keyed by the place ID at request time.
-Idle = zero Google calls. Until R4 the sheet has no map area and no "View
-spot" control anywhere.
+### 2.5 Terminal location now; the curb later (R4)
+The markers of §2.2 are Google's Place Details locations for the terminals
+— where Google places each terminal, captioned "Terminal location". They
+are NOT a verified pickup or drop-off curb: the entrance / navigation-point
+data (`GET /api/place-spot?placeId=`, §3.6, request-scoped, labels naming
+what Google returned, the stale guard keyed by the place ID) stays R4,
+behind the terms question and the V pilot, and no copy links a marker to
+"where your driver stops" until that point is validated. There is no "View
+spot" control before R4.
 
 ### 2.6 Pending edits: the same sheet from the review card, edit-scoped (0277 #6)
 When the hydrated address side is a verified terminal, the card's route row
@@ -412,6 +454,54 @@ is gone: **nothing is ever allocated on a completion.**
   Confirm A → B resolves / B rejects → A stays selected and confirmed, no
   late reopen, no advance, no B mutation, resolution evidence intact.
 
+### 3.2a The map in Where: one selection path, identity, bounded loading (0288 #1–#4)
+- **One path.** A marker tap calls the same
+  `autocomplete.selectCuratedTerminal(terminalId)` a row tap calls → the
+  synchronous boundary → a `settling` record → the completion settles it
+  (§3.2). The host hands the panel ONE view (selected place ID, checking
+  place ID, superseded flag, map status and layer) and paints the markers
+  from the SAME view; the panel marks the row from it. No marker-side state,
+  no second record.
+- **Identity (P2, 0288 #3).** Map, list and Confirm read ONE decision,
+  `selectedTerminalDisplay()` (§3.3). The highlighted, labelled, centred
+  marker is `display.superseded ? none : display.terminal.placeId`. When
+  superseded: no marker highlighted, the map keeps its framing (fits the
+  markers it has) rather than centring on the old terminal, the panel marks
+  no row and shows the superseded line, Confirm is disabled. The held PR
+  #123 reads `state.locations.placeId` directly in `updateTerminalMapPins()`
+  and paints the old terminal — fixed before this increment ships (§4).
+  Regression (both code and acceptance): mismatch → pickup-time change →
+  requote loading → requote failed → passengers change → Change terminal →
+  no highlighted marker, no centring on the old terminal, panel marks none;
+  the submitted `placeId` and the quote key untouched throughout. The
+  signed/submitted pricing identity is never rewritten to solve a display
+  issue.
+- **Marker locations (bounded; no invented coordinates).** Proposed
+  **strategy B**: when the stage first opens in a page session, the host
+  requests the location of every verified terminal that has none yet
+  through the existing proxy Details endpoint (`geometry` only, one request
+  per terminal, at most eight, no session token — a standalone Details
+  each), keeps them in page memory for the session (`_terminalPins`, keyed
+  by place ID; never persisted, never in the registry, cleared with the
+  page), tolerates per-terminal failure (no marker; the row stays listed),
+  and never repeats a lookup for a terminal that already has one. The
+  selected terminal's own lookup (already made) seeds its pin, so it never
+  needs a second request. Cost ceiling: eight extra Details per page session
+  that opens the stage; zero on reopen. **Strategy A** (what #123 does
+  today): only terminals picked in this session get markers — cheaper, but
+  a first-time passenger sees one marker, not the reference's
+  multi-terminal map, and markers cannot be the browsing surface. The plan
+  proposes B; Andres decides (§7). Under either, company assignment is
+  never shown as a sailing confirmation.
+- **Map attach.** `LinkMiaMapsLoader.load()` plus the maps and marker
+  libraries once per stage open, single-flight (a re-render during loading
+  never starts a second attach); failure → "Map unavailable right now — the
+  list still works." and the panel works alone; the stage never blocks
+  Confirm. The map is created with the default UI off, greedy gestures
+  inside its area and clickable POIs off.
+- **Terminal location, not curb.** Markers are Google's Place Details
+  locations, captioned as such (§2.5); the curb/navigation points remain R4.
+
 ### 3.3 Canonical guard: an identity-bound resolution record (0277 #4; 0285 #3)
 **Facts (main `cc84afd`).** `reconcileQuoteLabel` (`indexMVP.html:3162-3178`)
 deliberately keeps `state.locations.placeId` as the SUBMITTED ID for
@@ -465,6 +555,8 @@ function selectedTerminalDisplay() {
 }
 ```
 No quote status enters the decision.
+- The map (§3.2a) is a third consumer of the same decision: it never
+  highlights, labels or centres a terminal the decision does not return.
 - The When reminder renders only for `{ superseded: false }`; the
   mismatch-quote → Back to When case shows no reminder (the summary bar
   shows Google's address, as `reconcileQuoteLabel` set), and it STAYS hidden
@@ -519,15 +611,23 @@ persistence; the map area in the sheet; the terms question added to the
 checklist; the V pilot.
 
 ### 3.7 State / transition table (create flow unless marked edit)
+("Sheet" below is the terminal panel of the stage in Where, v1.7; the
+modal sheet stays the edit-mode surface. Rows marked v1.7 are the map's.)
 | State | Event | Outcome |
 |---|---|---|
+| Stage open or settling (v1.7) | marker tapped | exactly as the row tap: the boundary before the await, new record, "Checking…" on the row AND the marker, Confirm/Skip disabled; completion settles it and the map centres on it |
+| Stage open (v1.7) | panel drag up / handle tap | expanded (the list); UI only, the record untouched |
+| Stage open (v1.7) | panel drag down | collapsed (selected row + Confirm, more map); dragging on from collapsed snaps back — NEVER a dismissal |
+| Stage open (v1.7) | map pan / zoom / layer switch | the map only; nothing in the record |
+| Stage opens (v1.7) | first open in this page session | marker locations requested once for the verified terminals without one (strategy B, if chosen); a failure leaves no marker; a reopen requests nothing |
+| Stage open, superseded (v1.7) | render | no row marked, no marker highlighted or centred, the superseded line, Confirm disabled; a pick clears the record with the identity |
 | Where, no selection | Google row picked | boundary: gen++, `terminalFlow = null`; completion → today's selection and auto-advance |
 | Where, no selection | LinkMia row picked | boundary (before the await): record `{gen, selectionId, placeId, settling}`, sheet opens NOW, row "Checking…", Confirm/Skip disabled; completion → `open`, row marked, buttons enabled; no auto-advance |
 | Sheet open | row B tapped | boundary before the await: new record (gen+1, B's selectionId, `settling`), "Checking…", Confirm/Skip disabled at once |
 | Sheet open, settling | B's completion (coordinates or null-coordinate fallback) | settles the record its selectionId names: `open`, B marked, buttons enabled; address box shows B |
 | Sheet open, settling | A's late result | dropped by the autocomplete's guard (`:558`/`:589`) before the host; nothing |
 | Sheet open or settling | Confirm / Skip | refused unless the record is `open`; else `continued`, close, When if the route is complete, otherwise Where (airport grid) |
-| Sheet open or settling | slide / ✕ / backdrop / Escape | `closed`, close, stay on Where, input focused + selected; no advance |
+| Sheet open or settling | ✕ (Change address) / Escape (R1 also: slide / backdrop) | `closed`, close, stay on Where, input focused + selected; no advance |
 | Sheet closed | late completion for the same selectionId | state and address box update (the autocomplete applies it); sheet stays closed; no advance; nothing allocated |
 | Sheet closed | typing | `validation-cleared`: gen++, record null; identity, text and resolution cleared together; the autocomplete's own sequence bump drops the pending result |
 | Sheet closed | typing a hotel → Google row | boundary keeps `terminalFlow = null`; completion → today's auto-advance |
@@ -568,16 +668,30 @@ a quote echo or by the resolution record.
 |---|---|---|---|
 | F1 session-token fallback | **SKIPPED** — Andres's decision (relay 0284, 2026-10-27): the released Google request/session handling stays; it was an optional billing choice, not a defect or a prerequisite. The packet `docs/plans/session-token-fallback-packet.md` is kept as a record only and is reopened only if Andres says so | none | not scheduled |
 | R1 confirm | §2.2 sheet in create mode (no map) + §2.3 When reminder + §3.1 metadata + §3.2 boundary, lifecycle and the 0286 #2 reopening guard + §3.3 resolution record + §2.4 trip reminder (no new action) + §3.4 projection | booking-status read-side | **RELEASED 2026-10-28** — PR #122, merge `22c04ee`, production serving SW 1.3.51 / runtime-v28 at 05:29Z; merged on Andres's instruction in chat ("Ship PR #122 as it is first"); Codex's implementation review and the phone pass follow live (Andres's ship-and-test-live decision) |
-| R1.5 map | the Uber-reference layout (clip reviewed 2026-10-28): a Google map on top of the same sheet, centred on the chosen terminal with its pin (coordinates from the lookup every pick already makes, remembered per page session; terminals not yet picked have no pin; no registry coordinates, no extra Google calls), Standard \| Satellite, Skip as a header pill, "Confirm pickup / drop-off"; a loader failure shows a note and the list still works. Google's navigation points (§2.5 View spot) stay R4 | none | next PR after R1; SW pair 1.3.52 / runtime-v29, `js/terminal-sheet.js?v=2` |
+| R1.5 the map in Where | §2.1–§2.2 (the stage: map + docked panel with collapsed/expanded positions, selectable markers, one selection path, Skip pill, "Confirm pickup / drop-off", Standard \| Satellite), §2.5 (terminal location, not curb), §3.2a (identity on the map, bounded marker loading, single-flight attach), the v1.7 rows of §3.7, §5's map cases | none (the existing proxy Details endpoint; no persistence) | **PROPOSED (v1.7)** — Codex reviews this revision, then the held PR #123 is corrected to it (table below), reviewed, and ships on Andres's word; SW pair at that time; `js/terminal-sheet.js?v=2` |
+| Preview access | a new PR's Netlify preview cannot reach the Railway proxy until its origin is allowed (0288 #7). Options: (i) add the exact preview origin to `ALLOWED_ORIGINS` per PR (manual; what was done for 122); (ii) a separately reviewed, site-restricted rule — exact `^https://deploy-preview-\d+--<site>\.netlify\.app$` behind `ALLOWED_PREVIEW_SITE`, never a bare prefix, with tests rejecting other sites, suffix look-alikes, http and malformed origins — drafted and parked unshipped in a git stash on the checkout. A preview is never isolated from production data; no booking is submitted on one | Railway variable (Andres) | Andres's decision (§7); either way explicit settings authorization |
+
+**PR #123 (`d00240d`) against the approved flow — implemented vs proposed (0288 #2):**
+| Aspect | #123 as held | Approved flow (this plan) | Change needed |
+|---|---|---|---|
+| Surface | the R1 bottom-sheet modal with a fixed-height map band inside the panel | the Where stage: map behind, panel docked over its lower part | restructure the stage; panel positions |
+| Panel drag | the R1 rule: past 80 px or a flick dismisses, else snaps back; no positions | up = expand, down = collapse; the drag never dismisses; ✕/Escape dismiss | replace the drag rule; keep the pure threshold helper for the snap |
+| Markers | only terminals picked in this session (`_terminalPins` filled on completion) | every verified terminal with a known location (strategy B) or, by decision, A | add the once-per-session location loading (B) |
+| Marker tap | none (markers drawn without a click handler) | a marker tap = a row tap via `selectCuratedTerminal` | connect `marker.addListener('click')` to the one path; checking state on the marker |
+| Identity on the map | `updateTerminalMapPins()` reads `state.locations.placeId` — paints the old terminal when superseded (P2) | map/list/Confirm all read `selectedTerminalDisplay()` | fix before shipping + regression |
+| Caption | none | "Terminal location" (not curb) | add |
+| Claim wording | "no extra Google calls" | "no additional Place Details lookup for the selected terminal"; maps are Google requests | correct the docs and the PR |
+| Skip pill, Confirm copy, layer switch, loader failure note, single-flight attach, `?v=2`, the null-coordinate guard | match | match | keep |
 | R2 picker | §2.6 edit mode of the same sheet + model `withAddress` + the trip page's Change terminal link with `focus:'terminal'` | none | after R1 |
 | R3 driver | §3.5 | read-side field lists | independent; V pilot after deploy |
 | R4 View spot | §2.5 + §3.6 | read function | after the terms question; V pilot evidence |
 | Parallel | Terminal C/J research (verified-subset follow-up, never an R1 gate); driver-row contact check (Andres, production data); UX follow-ups: first-focus lazy load, payment placeholder label | — | — |
 | Separate proposals | ship name (existing column, owner endpoint); stored confirmation (migration); LinkMia-authored meeting point | each its own review | not prerequisites |
 
-Cache pair: R1 touches precached booking assets → next unused pair at
-release time (not now); trip.html is network-first; driver.html is under its
-own worker (`service-worker.js:216-220`).
+Cache pair: R1 shipped on 1.3.51 / runtime-v28; the map increment takes the
+next unused pair when it is cut (#123 holds 1.3.52 / runtime-v29 and must
+move forward if main moves first); trip.html is network-first; driver.html
+is under its own worker (`service-worker.js:216-220`).
 
 ## 5. Acceptance (0276 #6, 0277 #3 cases)
 - Metadata: success, null-coordinate fallback, Google row clears,
@@ -626,6 +740,25 @@ own worker (`service-worker.js:216-220`).
   the time (or any other intent field) also changed; a new identity buys
   one quote; payload shape unchanged; forbidden-words pin kept.
 - Driver (R3) and View spot (R4): as v1.3.
+- **The map in Where (R1.5, v1.7):** the stage opens on the tap with the
+  map centred on the selection and the panel collapsed; a marker tap and a
+  row tap run the same path (synchronous boundary, "Checking…" on both,
+  Confirm/Skip disabled, the other surface follows, the map centres on
+  settle); A → B → C through markers (only C settles); expand/collapse by
+  drag and handle tap, never a dismissal from the drag; ✕/Escape return to
+  typing with the text selected; Confirm once (airport grid next when
+  missing, else When); Change terminal reopens the stage on the committed
+  terminal; the P2 regression (mismatch → time change → requote loading →
+  requote failed → passengers change → Change terminal → no highlighted or
+  centred marker, no row marked, Confirm disabled, identity and quote key
+  untouched); marker loading once per session with per-terminal failure
+  tolerated and no repeat on reopen (strategy B), or the explicit one-marker
+  limitation (A); the loader failure note with the panel still usable;
+  keyboard ring and reduced motion; hotel/street never shows the stage; the
+  trip page, booking-status, pricing and the dropdown unchanged. Browser
+  acceptance of the map itself (desktop pointer, phone gestures) before
+  release, on a preview the proxy admits (§4 Preview access) or, by Andres's
+  decision, live.
 - **V pilot** (Andres's separate authorization): the map's point for
   Terminal V and where the driver's Maps app lands are compared on the day
   and recorded here before any copy links the two.
@@ -740,18 +873,29 @@ address; no reopening on focus, typing, restore or a late response; the map
 later inside the same sheet; R1 without any map control; the dropdown
 released as a verified subset first; F1 skipped (0284); v1.5 passed Codex's
 targeted check with the two 0286 amendments (recorded here as v1.6); R1
-implementation authorized (0287). Remaining: (1) Codex's review of the R1
-implementation on the draft PR and its Deploy Preview; (2) shared preview
-testing (both directions, terminal changes, delayed/failed lookups,
-dismissal/reopening, keyboard/focus, phone swipe — no booking submitted);
-(3) Andres's merge/release decision; (4) R3 as its own PR; (5) R4 after
-the terms question and the V pilot; (6) ship name / stored confirmation as
-separate proposals; (7) airport-side place IDs later.
+implementation authorized (0287) and **released** (PR #122, Andres's
+"Ship PR #122 as it is first"); 2026-10-28: the Where-map journey approved
+(0288) and the working mode set (small increments, live testing, review as
+we go — with this map increment reviewed as a plan first).
+**Decisions needed from Andres for the map increment:** (D1) marker
+locations — strategy B (eight Details lookups at most, once per page
+session that opens the stage; the full multi-terminal map) or A (markers
+only for terminals picked this session; one marker for a first-time
+passenger); the plan proposes B. (D2) preview access — add the exact origin
+per PR by hand, or ship the parked site-restricted rule as its own small PR
+(Codex supports a separately reviewed rule, 0288 #7). Remaining: (1)
+Codex's review of this v1.7; (2) correct PR #123 to it (the table in §4;
+the P2 identity fix first), Codex's review of the corrected PR, browser
+acceptance, Andres's release decision; (3) Codex's implementation review of
+#122 as merged, findings as small follow-up PRs; (4) R2 the pending-edit
+picker; (5) R3 as its own PR; (6) R4 after the terms question and the V
+pilot; (7) ship name / stored confirmation as separate proposals; (8)
+airport-side place IDs later.
 
-## 8. Answers to relays 0277, 0282 (§3–§4), 0284, 0285 and 0286
+## 8. Answers to relays 0277, 0282 (§3–§4), 0284, 0285, 0286 and 0288
 Items 1–7 answer 0277 (kept from v1.4; item 3's mechanism is now the
 boundary of §3.2 and item 4's the record of §3.3). Items 8–11 answer 0284
-and 0285; items 12–13 answer 0286.
+and 0285; items 12–13 answer 0286; item 14 answers 0288.
 1. **Confirmed rule recorded** (§2.2, §3.2, §3.7): dismissal never reopens
    on focus, typing, restore or a late response; only a deliberate pick or
    Change terminal reopens; a hotel address continues without the sheet.
@@ -841,8 +985,33 @@ and 0285; items 12–13 answer 0286.
    then `onSelect` → `place-selected` → `place-coordinates`; the
    zero-host-event observation is kept only as the unmodified-main
    baseline.
+14. **The map in Where** (0288): (#1) the approved journey is §2.1–§2.2 —
+   the stage on the tap, one confirmation inside Where, Selected not
+   Recommended, list and markers on one selection path with Confirm
+   disabled while a lookup is pending, expand/collapse distinct from
+   dismissal (✕/Escape → typing), confirm once, When's reminder and Change
+   terminal unchanged, hotel/street unchanged; framing, positions, gesture
+   ownership, keyboard/focus and reduced motion are stated there. (#2) §4
+   carries the implemented-vs-proposed table for #123 and §3.2a the bounded
+   marker strategy, with A vs B as an explicit decision (D1) rather than a
+   parity claim. (#3) §3.2a and §3.3 record one identity decision for map,
+   list and Confirm, name #123's `updateTerminalMapPins()` read of
+   `state.locations.placeId` as the defect to fix before shipping, and add
+   the regression to §5; the pricing identity is never rewritten. (#4)
+   §2.2 and §2.5 label markers as terminal locations, not a curb, keep the
+   navigation points in R4, and narrow the network claim to "no additional
+   Place Details lookup for the selected terminal". (#5) the header, intro,
+   §2.5, §4 and §7 now state R1 live, #123 held, the map proposed, and the
+   unverified items; acceptance records stay historical. (#6) the hold is
+   preserved: no map application code changes until this revision passes
+   review; the P2 fix lands in the corrected PR before any release. (#7)
+   §4's Preview access row and §7's D2 put the two options to Andres with
+   the tests the rule would carry; no broad prefix, no "all Netlify sites",
+   explicit settings authorization, no isolation claim, no booking.
 
 ## 9. Not in scope
 Automatic sailing-assignment lookup; ship names as registry keywords;
 photos/logos; confirmed-ride editing (PR 3C-3); passenger push; any change
-to pricing, the quote contract, passenger default or the dropdown.
+to pricing, the quote contract, passenger default or the dropdown; a
+validated pickup/drop-off curb point (R4 and the V pilot); stored
+coordinates of any kind.
