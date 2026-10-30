@@ -8,8 +8,8 @@
 // (pending-edit staging, plan §2.6) is a later release.
 //
 // House bottom-sheet pattern (js/passenger-modal.js values): dimmed backdrop
-// rgba(0,0,0,0.7), #2C2C2E panel, max-width 576px, 20px top radius, 0.3s
-// slide; a drag handle. Drag-to-dismiss: pointer drag on the grip or the
+// rgba(0,0,0,0.7), #2C2C2E panel, max-width 576px, 20px top radius.
+// A softened entrance and settle; direct finger tracking on the grip or the
 // title row; release past DISMISS_DISTANCE_PX or a fast flick closes,
 // otherwise it snaps back (`dragOutcome` is the pure rule). Accessibility as
 // the traveler dialog in js/pending-edit-card.js: role="dialog", aria-modal,
@@ -49,10 +49,10 @@
   const DISMISS_DISTANCE_PX = 80;      // release this far down: close
   const FLICK_VELOCITY = 0.6;          // px per ms (~600 px/s): a flick closes…
   const FLICK_MIN_DISTANCE_PX = 24;    // …once it has travelled somewhere
-  const CLOSE_ANIMATION_MS = 300;
+  const CLOSE_ANIMATION_MS = 300;     // fallback: CSS exits in 240ms; transitionend normally removes it first
 
   // Pure: what releasing a drag does. `dy` is the downward travel in px,
-  // `velocity` the average speed in px/ms.
+  // `velocity` the recent release speed in px/ms.
   function dragOutcome(dy, velocity) {
     if (!(dy > 0)) return 'snap';
     if (dy >= DISMISS_DISTANCE_PX) return 'close';
@@ -106,6 +106,8 @@
   function create({ document: doc, host, now } = {}) {
     if (!doc || !host) throw new Error('TerminalSheet.create needs a document and a host');
     const clock = typeof now === 'function' ? now : () => Date.now();
+    const win = doc.defaultView;
+    const reducedMotion = () => !!(win && win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
     let sheet = null;      // the open sheet's nodes and view
     let closing = null;    // an overlay still animating out
 
@@ -139,33 +141,67 @@
     }
 
     // ---- drag-to-dismiss (grip and title row; the ✕ is a tap) ----
+    function panelOffset(panel) {
+      if (!win || !win.getComputedStyle) return 0;
+      const transform = win.getComputedStyle(panel).transform;
+      const match = /^matrix(3d)?\(([^)]+)\)$/.exec(transform);
+      if (!match) return 0;
+      return Number(match[2].split(',')[match[1] ? 13 : 5]) || 0;
+    }
     function startDrag(e) {
-      if (!sheet || !e || e.target === sheet.close) return;
+      if (!sheet || sheet.drag || !e || e.target === sheet.close || e.isPrimary === false || (e.button != null && e.button !== 0)) return;
       const y = e.clientY;
       if (typeof y !== 'number') return;
-      sheet.drag = { startY: y, startAt: clock(), dy: 0 };
+      // Catch an entrance/snap where it actually is, never jump to zero.
+      const offset = panelOffset(sheet.panel);
+      sheet.drag = { pointerId: e.pointerId, target: e.currentTarget, startY: y, offset, dy: 0,
+        samples: [{ y, at: clock() }] };
+      sheet.overlay.classList.add('active', 'dragging');
       sheet.panel.classList.add('dragging');
+      sheet.panel.classList.remove('settling');
+      sheet.panel.style.transform = 'translateY(' + offset + 'px)';
       const target = e.currentTarget;
       if (target && typeof target.setPointerCapture === 'function' && e.pointerId != null) {
         try { target.setPointerCapture(e.pointerId); } catch (_) { /* capture is a courtesy */ }
       }
     }
+    function ownsDrag(e) {
+      return sheet && sheet.drag && e && e.currentTarget === sheet.drag.target &&
+        (e.pointerId == null || e.pointerId === sheet.drag.pointerId);
+    }
     function moveDrag(e) {
-      if (!sheet || !sheet.drag || !e || typeof e.clientY !== 'number') return;
-      const dy = Math.max(0, e.clientY - sheet.drag.startY);
-      sheet.drag.dy = dy;
-      sheet.panel.style.transform = 'translateY(' + dy + 'px)';
+      if (!ownsDrag(e) || typeof e.clientY !== 'number') return;
+      const drag = sheet.drag;
+      drag.dy = Math.max(0, e.clientY - drag.startY);
+      const offset = Math.max(0, drag.offset + e.clientY - drag.startY);
+      const at = clock();
+      drag.samples.push({ y: e.clientY, at });
+      // Keep only the recent window, including after sparse pointer events.
+      // A lone fresh sample means zero measured velocity, not a guessed flick.
+      while (drag.samples.length > 1 && drag.samples[0].at < at - 100) drag.samples.shift();
+      sheet.panel.style.transform = 'translateY(' + offset + 'px)';
+      const height = sheet.panel.offsetHeight || 600;
+      sheet.overlay.style.setProperty('--terminal-dim', String(0.7 * (1 - Math.min(1, offset / height) * 0.6)));
       if (typeof e.preventDefault === 'function') e.preventDefault();
     }
-    function endDrag() {
-      if (!sheet || !sheet.drag) return;
+    function endDrag(e, cancelled = false) {
+      if (!ownsDrag(e)) return;
+      if (!cancelled && typeof e.clientY === 'number') moveDrag(e);
       const drag = sheet.drag;
       sheet.drag = null;
+      sheet.overlay.classList.remove('dragging');
       sheet.panel.classList.remove('dragging');
-      const elapsed = Math.max(1, clock() - drag.startAt);
-      if (dragOutcome(drag.dy, drag.dy / elapsed) === 'close') {
+      sheet.overlay.style.removeProperty('--terminal-dim');
+      if (drag.target && typeof drag.target.releasePointerCapture === 'function' && drag.pointerId != null) {
+        try { drag.target.releasePointerCapture(drag.pointerId); } catch (_) { /* already released */ }
+      }
+      const first = drag.samples[0];
+      const last = drag.samples[drag.samples.length - 1];
+      const velocity = (last.y - first.y) / Math.max(1, last.at - first.at);
+      if (!cancelled && dragOutcome(drag.dy, velocity) === 'close') {
         host.onDismiss();
       } else {
+        sheet.panel.classList.add('settling');
         sheet.panel.style.transform = '';
       }
     }
@@ -173,12 +209,15 @@
       on(node, 'pointerdown', startDrag);
       on(node, 'pointermove', moveDrag);
       on(node, 'pointerup', endDrag);
-      on(node, 'pointercancel', endDrag);
+      on(node, 'pointercancel', (e) => endDrag(e, true));
+      on(node, 'lostpointercapture', (e) => endDrag(e, true));
     }
 
-    function removeClosing() {
-      if (!closing) return;
-      const node = closing;
+    function removeClosing(expected = closing) {
+      if (!closing || closing !== expected) return;
+      const node = closing.overlay;
+      if (typeof clearTimeout === 'function') clearTimeout(closing.timer);
+      if (typeof closing.panel.removeEventListener === 'function') closing.panel.removeEventListener('transitionend', closing.onEnd);
       closing = null;
       if (typeof node.remove === 'function') node.remove();
       else if (node.parentNode && typeof node.parentNode.removeChild === 'function') node.parentNode.removeChild(node);
@@ -261,17 +300,30 @@
       sheet = { overlay, panel, grip, header, title, port, list, rows, note, confirm, skip, close, view: null, inert, drag: null };
       render(view);
 
-      // Focus enters the marked row (what the passenger is checking), else
-      // the first row, else the close control.
-      const marked = view && view.selectedPlaceId ? [...rows.values()].find((row) => row.placeId === view.selectedPlaceId) : null;
+      // Enter at the row the passenger just picked, even while checking,
+      // so the entrance never presents the top of the list as their choice.
+      const focusId = view.settlingPlaceId || (!view.superseded && view.selectedPlaceId);
+      const marked = focusId ? [...rows.values()].find((row) => row.placeId === focusId) : null;
       const first = marked ? marked.button : (rows.size ? rows.values().next().value.button : close);
-      if (first && typeof first.focus === 'function') first.focus();
+      if (first && typeof first.focus === 'function') first.focus({ preventScroll: true });
+      // Only the list scrolls to reveal the initial choice. The page and
+      // action dock stay still; later renders never fight manual scrolling.
+      if (first && first.getBoundingClientRect && list.getBoundingClientRect) {
+        const rowRect = first.getBoundingClientRect();
+        const listRect = list.getBoundingClientRect();
+        if (rowRect.bottom > listRect.bottom) list.scrollTop += rowRect.bottom - listRect.bottom;
+        else if (rowRect.top < listRect.top) list.scrollTop -= listRect.top - rowRect.top;
+      }
 
       // .active a frame later so the slide/fade transitions actually run.
       const raf = typeof requestAnimationFrame === 'function'
         ? requestAnimationFrame
         : (fn) => (typeof setTimeout === 'function' ? setTimeout(fn, 10) : fn());
-      raf(() => { if (sheet && sheet.overlay === overlay) overlay.classList.add('active'); });
+      // Flush the initial off-screen transform before activating it. One
+      // rAF alone can be coalesced with insertion and lose the entrance.
+      if (panel.getBoundingClientRect) panel.getBoundingClientRect();
+      if (reducedMotion()) overlay.classList.add('active');
+      else raf(() => { if (sheet && sheet.overlay === overlay) overlay.classList.add('active'); });
     }
 
     // Everything visible derives from the view: the marked row, the row
@@ -311,14 +363,21 @@
         if (typeof closed.inert.removeAttribute === 'function') closed.inert.removeAttribute('aria-hidden');
         closed.inert.inert = false;
       }
-      closed.panel.classList.remove('dragging');
+      closed.panel.classList.remove('dragging', 'settling');
+      closed.overlay.classList.remove('dragging');
+      closed.overlay.inert = true;
+      closed.panel.removeAttribute('aria-modal');
       closed.panel.style.transform = 'translateY(100%)';
       closed.overlay.classList.remove('active');
       closed.overlay.classList.add('closing');
       removeClosing();
-      closing = closed.overlay;
-      if (typeof setTimeout === 'function') setTimeout(removeClosing, CLOSE_ANIMATION_MS);
-      else removeClosing();
+      const exit = { overlay: closed.overlay, panel: closed.panel, timer: null,
+        onEnd: (e) => { if (e.target === closed.panel && e.propertyName === 'transform') removeClosing(exit); } };
+      closing = exit;
+      on(closed.panel, 'transitionend', exit.onEnd);
+      if (reducedMotion()) removeClosing(exit);
+      else if (typeof setTimeout === 'function') exit.timer = setTimeout(() => removeClosing(exit), CLOSE_ANIMATION_MS);
+      else removeClosing(exit);
     }
 
     // For the host's focus management and for tests.
