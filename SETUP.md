@@ -8,6 +8,7 @@ Create `.env` file in `backend/api-proxy/`:
 ```env
 GOOGLE_MAPS_API_KEY=your_key_here
 ALLOWED_ORIGINS=http://localhost:*,https://linkmia.com,https://i-love-miami.netlify.app
+ALLOWED_PREVIEW_SITE=i-love-miami
 NODE_ENV=production
 PORT=3001
 ```
@@ -41,6 +42,11 @@ netlify dev   # site + functions on :3001 (see LOCAL_DEVELOPMENT.md)
 
 `ALLOWED_ORIGINS` must enumerate every intentional browser origin (production,
 the Netlify production alias, and any exact preview origin used for testing).
+`ALLOWED_PREVIEW_SITE` names ONE Netlify site (`i-love-miami`) whose Deploy
+Previews — exactly `https://deploy-preview-<n>--<site>.netlify.app` — are then
+admitted without a per-PR entry or redeploy; unset leaves previews to the
+exact-origin list above. Never put a bare `https://deploy-preview-` prefix in
+`ALLOWED_ORIGINS`: it would admit every Netlify site's previews.
 
 ## 🗺️ Google Maps Setup
 
