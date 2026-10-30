@@ -9,6 +9,19 @@ verdict: PASS at the ledger level (§6).** Nothing in this document is an
 authorization of anything; `enforce` remains Andres's separate decision in
 every case.
 
+REVISION 2 (2026-10-30): Codex reviewed revision 1 (commit `c3325b5`,
+read-only — Codex independently re-read the same ledger facts and ran no
+manipulated-price write) and asked for five documentation corrections,
+applied in this revision's commit as one docs-only change: §8(b)'s proof
+matrix now LEADS with the valid-token / altered-browser-price case on both
+lanes; option (a) no longer resets identity sequences (and says why a reset
+is unsafe); option (b)'s isolation is a verifiable pre-flight checklist
+(database and auth target, notification overrides, blast radius and restore)
+and "zero production risk" is conditional on it; §7's `blocked` line states
+what blocked mode actually refuses; §5 rule 3 classifies known test traffic
+by booking/operation, not by identity, and the LM-EFFA note is neutral. The
+verdict in §6 is unchanged.
+
 Branch `claude/ecstatic-noyce-017ade` (worktree), base `main` at
 `f1c68b1fd390ec647a617fc9ea80e29cf0ca08e7` (production commit on 2026-10-30,
 Netlify deploy `6ae45fbb9476db0efda68619` per Codex's audit).
@@ -101,12 +114,15 @@ money" / "... edit ..."), that `no_token` → `quote_required` and
 a direct ride-intent UPDATE are refused after the high-water mark while
 lifecycle updates pass, that a missing operation id → `outdated_client`,
 that `blocked` blocks, and that `enforce → observe` is refused by the valve —
-then forced a rollback with a sentinel exception (`ZZ017`), restored both
-identity sequences with `setval`, and proved zero residue including
-`mode = 'off' AND enforcement_started_at IS NULL`
+then forced a rollback with a sentinel exception (`ZZ017`), reset both
+identity sequences with `setval` (inside an install transaction that held
+NOWAIT exclusive table locks from the top level — a fence option (a) does
+not have; §8(a) explains why the sketch never resets a sequence), and proved
+zero residue including `mode = 'off' AND enforcement_started_at IS NULL`
 (`017_quote_enforcement_foundation.sql` ≈ lines 3292–3560). That is the
-pattern option (a) in §8 reuses — against today's `observe` baseline and the
-installed 019 writer bodies, which the 017 block never saw.
+pattern option (a) in §8 reuses, minus the sequence reset — against today's
+`observe` baseline and the installed 019 writer bodies, which the 017 block
+never saw.
 
 ## 3. The exact read-only SQL (reviewed by Andres BEFORE execution, run 2026-10-30 — nothing below writes)
 
@@ -519,8 +535,12 @@ Method, fixed before the data was read:
 2. Rows with `mode = 'observe'` between 2026-09-03 and the PR #88 merge
    instant: the flag was still false → `no_token` is the only possible
    verdict. EXPLAINED by period.
-3. Rows after the merge instant whose `identity_hash` equals a hash from E13
-   (the controlled bookings' identities) → KNOWN TEST TRAFFIC.
+3. Rows after the merge instant that belong to a SPECIFIC controlled
+   operation — matched by `booking_id` / trip code (LM-SR92, LM-ZZDJ, and any
+   other booking Andres names as controlled) or by the operation id of a
+   controlled create — → KNOWN TEST TRAFFIC. An identity match is NOT
+   enough: an account that made controlled bookings can also make real ones,
+   so E13's hashes only locate candidates; they never classify a row.
 4. Rows after the merge instant that are `no_token` and fall inside the
    stale-tab drain → EXPLAINED as drain ONLY if the same identity also
    produced a later `verified` row; else UNEXPLAINED.
@@ -536,7 +556,7 @@ Result (E6, 29 rows):
 |---|---|---|---|
 | EXPLAINED by period — rule 1 (`off` mode, 2026-08-24 14:20 → 2026-09-03 01:44 UTC) | 29 | 1–22, 27–33 | Every row predates the observe switch (2026-09-03 04:56 UTC) and the flag release; each `no_token` row is the legacy fare POST of the flag-false browser, and each `no_request_id` row is the same write's missing-envelope instrument (14 of the 15 writes carry the pair; the 15th, LM-OPST at 2026-09-02 00:49 UTC, carried an operationId but no token — still pre-window `off`). |
 | Rule 2 (`observe` + `no_token` before the release) | 0 | – | No write happened in that gap. |
-| Rule 3 (known test traffic inside the window) | 0 | – | No non-verified row exists inside the window, so none needed classifying by identity. |
+| Rule 3 (known test traffic inside the window) | 0 | – | No non-verified row exists inside the window, so none needed classifying by booking or operation. |
 | Rule 4 (stale-tab drain) | 0 | – | No `no_token` row after the release at all. |
 | Rule 5 (benign registry outcomes) | 0 | – | None ever written. |
 | **UNEXPLAINED** | **0** | – | – |
@@ -554,12 +574,14 @@ Observations that do not change the classification:
   legacy-priced rides from the off-mode period, stored as `client_legacy`
   exactly as designed.
 - Note on LM-EFFA: the parent session listed it among the controlled
-  bookings. The data says otherwise: its identity differs from the
-  LM-SR92/LM-ZZDJ account, it is the one nonterminal (`pending`,
-  `details_version 1`) booking in the table, and its single ledger row is
-  `verified` with matching cents. It is inside the window as a verified row
-  only, so the label has no effect on the rule; Andres should confirm what it
-  is before anyone treats it as test data.
+  bookings. The data cannot confirm the label either way: its identity
+  differs from the LM-SR92/LM-ZZDJ account (which neither proves nor
+  disproves a controlled booking — an identity is not a test marker, rule
+  3), it is the one nonterminal (`pending`, `details_version 1`) booking in
+  the table, and its single ledger row is `verified` with matching cents.
+  Andres confirms what it is. The PASS is unaffected in every reading: rule
+  3 classified zero rows because the window holds no non-verified rows, and
+  LM-EFFA's only ledger row is verified.
 
 ## 6. Graduation verdict
 
@@ -615,7 +637,21 @@ Even with a clean ledger, `enforce` is not a flip of one switch:
 - A browser without a token gets 428 `quote_required` (reload); without an
   operationId 428 `outdated_client`; a tampered or mismatched token 409
   `quote_invalid` (quiet re-quote); an expired one 409 `quote_expired`.
-- Emergency after enforce is `blocked` only (every booking write refused).
+- Emergency after enforce is `blocked` only — and `blocked` is narrower than
+  "every booking write refused" (`017_quote_enforcement_foundation.sql`):
+  `bookings_guard` refuses only INSERTs ("bookings are temporarily blocked",
+  INSERT branch ≈ line 420); `accept_quote_create` and `accept_quote_edit`
+  return outcome `blocked`, which `lib/booking-writer.js` maps to HTTP 503
+  with the WhatsApp copy ("Bookings are temporarily unavailable…");
+  lifecycle UPDATEs (status, driver, cancel, release, checkpoints) PASS; and
+  `accept_optional_edit` stays OPEN — 017's own smoke treats "blocked mode
+  refused an optional-only edit" as a FAILURE (≈ lines 3479–3486) and the
+  migration's comment reads "A pricing emergency blocks new and
+  price-affecting operations, not contact/flight/note corrections". A
+  missing operationId on that optional lane still answers `outdated_client`
+  (428) in enforce and blocked. During an incident this is the distinction
+  that matters: drivers keep working their rides and cancellations keep
+  landing; only new bookings and priced edits stop.
 
 ## 8. The two options for proving an altered price or route identity is refused in `enforce`
 
@@ -627,7 +663,11 @@ price cannot become an authoritative record" has a DATABASE half (in
 `enforce`, money comes only from the verified projection; unverified
 verdicts are refused before any write; legacy writers are fenced) and a
 NODE half (the signature and keyed commitment reject the alteration). Each
-option proves a different share of that.
+option proves a different share of that. The most important enforce case is
+the OTHER one: an UNALTERED valid token submitted with an altered BROWSER
+amount does reach the database as `verified`, and in `enforce` the database
+must ignore the browser amount and store the token's `finalCents` — that is
+the case both options lead with (A1/A2 in (a), the first two rows of (b)).
 
 ### Option (a) — rollback-contained SQL-editor smoke in production (017 runbook pattern)
 
@@ -639,7 +679,7 @@ BEGIN;
 SET LOCAL search_path = public, extensions, pg_temp;
 SET LOCAL idle_in_transaction_session_timeout = '30s';   -- belt: a dangling editor transaction cannot hold the lock
 DO $graduation_smoke$
-DECLARE  ...row counts and both identity-sequence states captured first...
+DECLARE  ...row counts captured first; both identity-sequence values READ for the record only, never reset...
 BEGIN
   -- refuse unless the baseline is exactly observe / NULL high-water mark (B1)
   BEGIN
@@ -664,12 +704,12 @@ BEGIN
   EXCEPTION WHEN SQLSTATE 'ZZ0GR' THEN NULL;
            WHEN OTHERS THEN EXECUTE 'RESET ROLE'; RAISE;
   END;
-  PERFORM setval('public.pricing_state_audit_id_seq', ...captured...);     -- sequences are NOT transactional
-  PERFORM setval('public.quote_verifications_id_seq', ...captured...);
+  -- NO setval here: the inner rollback already RELEASED the locks, so a concurrent writer may have advanced
+  -- quote_verifications_id_seq; a reset would move it BACKWARDS (see "What makes it work"). Gaps are harmless.
   -- residue proof INSIDE the block: row counts equal, mode = 'observe' AND enforcement_started_at IS NULL, no smoke rows
 END $graduation_smoke$;
 ROLLBACK;                                                 -- second belt (017 runbook: never replace with COMMIT)
-SELECT ...residue grid: smoke trip ids 0, smoke customer 0, mode, enforcement_started_at, both sequences...;
+SELECT ...residue grid: smoke trip ids 0, smoke customer 0, mode, enforcement_started_at, both sequences READ (gaps recorded, nothing reset)...;
 ```
 
 What makes it work:
@@ -687,8 +727,20 @@ What makes it work:
   this on this database.
 - The two `BIGINT GENERATED ALWAYS AS IDENTITY` sequences
   (`pricing_state_audit_id_seq`, `quote_verifications_id_seq`) are the only
-  non-transactional state the smoke touches; `setval` restores them and the
-  residue grid proves it. Everything else keyed by UUID leaves nothing.
+  non-transactional state the smoke touches, and the smoke must NOT reset
+  them. Reason: the sentinel exception rolls back the inner block, which
+  RELEASES the `FOR UPDATE`/`FOR SHARE` locks taken inside it; between that
+  rollback and any later `setval`, concurrent production writers (every
+  create/edit writes a telemetry row) can advance
+  `quote_verifications_id_seq`, so a `setval` back to the captured value
+  would move the sequence BACKWARDS and a later insert would fail with a
+  duplicate key on the identity column — and because sequence changes are
+  non-transactional, the outer `ROLLBACK` would not undo it. Identity gaps
+  are harmless: the residue grid READS the before/after values for the
+  record and writes nothing; never reset a sequence. Migration 017's own
+  smoke did reset them, but inside an install transaction holding NOWAIT
+  exclusive table locks from the top level; option (a) has no such fence and
+  must not copy that step. Everything else keyed by UUID leaves nothing.
 - No Node code runs, so no Telegram, no push, no Google call, no envelope.
 
 What can break it (and the residue risk):
@@ -714,8 +766,10 @@ What can break it (and the residue risk):
   state until `ROLLBACK` is issued in that session (017 runbook) — the
   timeout above bounds the lock hold; the aborted transaction itself writes
   nothing.
-- Sequence gaps if the script dies between the advance and the `setval`
-  (harmless; record honestly).
+- Sequence gaps whenever the smoke runs at all (its own inserts advance
+  `quote_verifications_id_seq` and `pricing_state_audit_id_seq`; the
+  rollback does not give the values back). Harmless; record the before and
+  after values and never "repair" them.
 - Baseline drift: the smoke must refuse to run unless B1 shows
   `observe`/NULL and A2 shows `target_019`, like the 018/019 smokes did.
 
@@ -778,12 +832,82 @@ Setup facts checked today:
   altered-price proof), or add a build-time substitution of `supabase.js`
   for previews (a reviewed code change) for a full browser-level pass.
 
+Isolation pre-flight — the proof's database, auth and notification targets
+must be PROVEN to be the branch before the first write reaches the preview,
+not assumed from the variable names:
+
+(i) **One named preview.** Open a dedicated DRAFT PR for the proof (no code
+change is needed beyond, optionally, the `supabase.js` substitution) and use
+ONLY its Deploy Preview, `deploy-preview-<n>--i-love-miami.netlify.app`,
+recording the deploy permalink of the exact build. Nothing is sent to any
+other preview or to production.
+
+(ii) **Database and auth target probe (read-only on both sides).** On the
+branch, seed one synthetic legacy-guest pending booking (`customer_id`
+NULL, a fresh UUID, synthetic text) through the branch's SQL editor. Then
+`GET <preview>/api/booking-status?id=<that uuid>` must answer 200 with
+`pending`, and the same path on production (`https://linkmia.com`) must
+answer 404 — the preview's deployed functions read the BRANCH
+(`booking-status.js` resolves bare-UUID guest bookings, PR 1A). For auth,
+create one branch-only auth user, sign it in against the branch's Auth for
+a session JWT, and call `GET <preview>/api/profile` with it: 200 on the
+preview, and the same JWT against production's `/api/profile` must be 401
+— the preview verifies sessions against the branch, not production. Record
+the four status codes. Run E1 on both databases: production must read
+`observe`/NULL before and after the proof. Any other outcome stops the
+proof before any write.
+
+(iii) **Notification isolation.** Swapping the database credentials alone
+does NOT isolate notifications. Paths verified in the repo (2026-10-30):
+`create-booking.js` `sendDoorbell` and `update-pending-booking.js`
+`sendUpdatedDoorbell` call the Telegram API DIRECTLY with
+`TELEGRAM_BOT_TOKEN` + `ADMIN_TELEGRAM_CHAT_ID` from the all-context (each
+skips only when either variable is unset); `cancel-booking.js` and the
+driver lifecycle route through `lib/dispatch.js` / `lib/notify.js`, whose
+push path uses `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and
+`PUSH_DISABLED` and whose Telegram fallback uses the same two Telegram
+variables; `update-booking-status.js` also sends Telegram directly. Required
+deploy-preview-context overrides, in place BEFORE the proof build: a TEST
+bot token and a TEST chat id for `TELEGRAM_BOT_TOKEN` /
+`ADMIN_TELEGRAM_CHAT_ID` (a test destination rather than unsetting them, so
+the paths execute and land somewhere observable), plus `PUSH_DISABLED=1`
+(the branch copies no `push_subscriptions` rows, so no device is reachable,
+but the fallback must then land in the TEST chat, never the admin chat).
+Verify by reading the test chat after the first create. The scheduled
+watchdog needs no override: `netlify.toml` records that deploy previews
+never run schedules, so the branch's outbox is simply never drained and
+production's watchdog keeps reading production. NOT verified here: the
+dispatcher's exact behaviour when the Telegram variables are UNSET (hence
+the test destination), and the netlify.toml statement about schedules on
+previews (the repo's own record, not re-checked against Netlify today).
+
+(iv) **Blast radius and restore.** Deploy-preview-context variables are
+shared by EVERY Deploy Preview of the site — the route-identity and
+terminal-motion previews included. While the overrides are in place, every
+preview built in that window writes to the branch and notifies the test
+chat, and proves nothing about production; whether Netlify applies a
+changed variable to an already-deployed preview's functions without a
+rebuild was NOT verified, so treat every preview active in the window as
+affected. Record the window (UTC start and end, the exact variable names
+changed, the deploy ids of previews built inside it), then RESTORE: delete
+the deploy-preview-scoped overrides (or put back the prior values), rebuild
+the proof preview, and re-run probe (ii) inverted — the preview's
+`booking-status` for the branch-only UUID must now answer 404 and the
+branch JWT must now be refused — then delete the branch and the test
+signing secret.
+
 Proof matrix in `enforce` on the isolated environment (each case a real HTTP
-call through the deployed function into the real database):
+call through the deployed function into the real database). The first two
+rows are the headline: a VALID token with ONLY the browser-submitted amount
+altered, on both lanes. The later rows alter the token itself (signature or
+keyed commitment) and are separate cases:
 
 | Case | Expected |
 |---|---|
-| Legitimate token, matching intent, operationId | 200 `created`; `bookings.price_authority = 'server_quote'`, `price_cents = finalCents`; acceptance `client_cents IS NULL`; telemetry `verified` |
+| **Valid token, matching intent and operationId, ONLY the browser-submitted price altered — create lane (`/api/create-booking` → `accept_quote_create`)** | **200 `created`; `bookings.price_cents` = the token's `finalCents` regardless of the altered browser amount; `price_authority = 'server_quote'`; acceptance row `client_cents IS NULL`; telemetry `verified` row records `client_cents <> server_cents` (the assertions of option (a)'s A1). This is THE enforce case: the browser's number stops mattering.** |
+| **Same, edit lane (`/api/update-pending-booking` → `accept_quote_edit`)** | **200 `updated` with the new `detailsVersion`; the row's `price_cents` = `finalCents`, `price_authority = 'server_quote'`; acceptance `client_cents IS NULL`; telemetry `client_cents <> server_cents` (option (a)'s A2).** |
+| Contrast, not a proof step — the same request in today's `observe` mode | the BROWSER amount is stored (`client_observe`) and the mismatch lands only in telemetry — exactly what `enforce` changes |
+| Valid token, browser amount equal to `finalCents` (the ordinary case) | 200 `created`; `bookings.price_authority = 'server_quote'`, `price_cents = finalCents`; acceptance `client_cents IS NULL`; telemetry `verified` |
 | Same token, `finalCents` altered in the payload (re-encoded) | Node `bad_signature` → `verify_failed` → RPC `rejected_invalid` → **409 `quote_invalid`**, zero rows |
 | Same token, request `placeId` / `airportCode` / pickup / passengers altered | Node `wrong_intent` (keyed commitment) → **409 `quote_invalid`**, zero rows |
 | Same quote, sibling vehicle token with a different `vehicleKey` echoed | `wrong_vehicle` → **409 `quote_invalid`** |
@@ -798,9 +922,12 @@ call through the deployed function into the real database):
 What (b) proves that (a) cannot: the whole path — Node verifier, HTTP
 contract, envelope/retry, and optionally the browser — under `enforce`,
 with the real deployed function and a real database, at zero production
-risk. It also rehearses the flip itself (`set_pricing_mode('enforce')`),
-the 428 reload path and the `blocked` emergency without touching the
-production valve. What it does not prove: production's own catalog and
+risk PROVIDED the isolation pre-flight (i)–(iv) passed before the first
+write and the restore step is verified afterwards; until it passes, a
+preview is not isolated (Codex's inventory shows today's deploy-preview
+context pointing at production's database). It also rehearses the flip
+itself (`set_pricing_mode('enforce')`), the 428 reload path and the
+`blocked` emergency without touching the production valve. What it does not prove: production's own catalog and
 secrets (the G-grids on production and the 401 probe cover the catalog and
 the config presence).
 
@@ -808,8 +935,9 @@ Setup cost (estimate): branch creation + G1–G3 verification ~30 min; singleton
 seed + synthetic actors + branch auth user ~30 min; Netlify preview-context
 overrides ~30 min (also closes Codex's "previews write to production"
 finding for the duration); token-minting script reusing `signQuoteToken`
-~1 h; running the matrix and capturing evidence ~2–3 h; a second project
-instead of a branch adds the hand-run chain (~2 h with the preflight grids).
+~1 h; isolation pre-flight (i)–(iii) and the restore check ~30 min;
+running the matrix and capturing evidence ~2–3 h; a second project instead
+of a branch adds the hand-run chain (~2 h with the preflight grids).
 Data/secret handling: no production data leaves production; a test-only
 signing secret distinct from production, rotated/deleted afterwards; the
 branch's service key lives only in the deploy-preview context; delete the
@@ -823,7 +951,8 @@ disposable, schema from production) and falling back to a second project if
 the branch's catalog does not pass G1–G3. It is the only option that
 exercises the place where an altered price is actually refused (the Node
 verifier and keyed commitment) together with the database authority rules,
-and it carries no production risk.
+and — once the isolation pre-flight in (b) passes — it carries no production
+risk.
 
 Treat **(a)** as optional and late: if used at all, run it as the final
 rehearsal in the SAME quiet window as the real enforce flip, because its one
@@ -856,6 +985,15 @@ that decision, not the decision.
   `enforce` (that is option (b)).
 - Supabase SQL-editor transaction handling on mid-script errors is quoted
   from the 017 runbook's own instruction, not re-tested.
+- Whether Netlify applies a changed deploy-preview variable to an
+  already-deployed preview's functions without a rebuild was not verified;
+  option (b) assumes the conservative answer.
+- The dispatcher's behaviour when `TELEGRAM_BOT_TOKEN` /
+  `ADMIN_TELEGRAM_CHAT_ID` are unset was not verified (the doorbells' own
+  skip was read in `create-booking.js` and `update-pending-booking.js`);
+  option (b) therefore overrides them to a test destination instead.
+- The netlify.toml statement that deploy previews never run scheduled
+  functions is the repo's record, not re-checked against Netlify today.
 - The §3 statements were run through the MCP as single `SELECT`s; the
   `BEGIN; SET TRANSACTION READ ONLY; … ROLLBACK;` wrapping is for SQL-editor
   reruns and was not needed for the MCP path.
