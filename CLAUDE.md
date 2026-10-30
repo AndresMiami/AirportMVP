@@ -421,7 +421,16 @@ Production/Deploy Preview values, plus Branch Deploy if enabled), payment = cash
 driver (legacy Stripe path archived in dev/archive/legacy-stripe/ per
 guardrails INV-3 — never re-enable; future = Stripe Connect Standard).
 Railway env: private `GOOGLE_MAPS_API_KEY`, `ALLOWED_ORIGINS` (localhost
-allowed). Never reuse the Railway key for the browser loader.
+allowed; entries match exact-or-prefix as shipped — recorded residual: a
+suffixed look-alike of a listed origin passes CORS, which is a browser
+courtesy and not the proxy's access control; empty entries from a trailing
+comma are ignored), and optional `ALLOWED_PREVIEW_SITE` — the Netlify site
+label (`i-love-miami`) whose Deploy Previews
+(`https://deploy-preview-<n>--<site>.netlify.app`, exact match, never a bare
+prefix) the proxy admits without a per-PR allowlist edit; unset or malformed
+= off. Once it is set, per-preview `ALLOWED_ORIGINS` entries can be dropped.
+A preview is never an isolated database. Never reuse the Railway key for the
+browser loader.
 The browser-key rollout requires project/API quota caps + quota alerts for Maps
 JavaScript and Directions (quota is project-wide, not per key), a project
 billing budget, and the Production Builds value BEFORE merge. Missing it keeps
