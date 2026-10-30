@@ -331,6 +331,24 @@ app.use(helmet({
   crossOriginResourcePolicy: false
 }));
 
+// Netlify Deploy Previews of LinkMia's OWN site, without a per-PR edit of
+// ALLOWED_ORIGINS (and the Railway redeploy every edit needs).
+// ALLOWED_PREVIEW_SITE names exactly ONE Netlify site, e.g. "i-love-miami".
+// Unset = this rule is off and the cors origin callback below decides
+// byte-for-byte as it did before the rule existed. The value is bounded to
+// Netlify's subdomain alphabet, so it can never widen the pattern (nor inject
+// into it), and an origin must match the WHOLE pattern: https, one PR number,
+// "--", the configured site, ".netlify.app", nothing before or after. A bare
+// "https://deploy-preview-" prefix would admit every Netlify site's previews;
+// never add one to ALLOWED_ORIGINS. Read per request, like ALLOWED_ORIGINS.
+const NETLIFY_SITE_NAME_RE = /^[a-z0-9-]{1,63}$/;
+
+function isAllowedPreviewOrigin(origin) {
+  const site = process.env.ALLOWED_PREVIEW_SITE?.trim();
+  if (!site || !NETLIFY_SITE_NAME_RE.test(site) || typeof origin !== 'string') return false;
+  return new RegExp(`^https://deploy-preview-\\d+--${site}\\.netlify\\.app$`).test(origin);
+}
+
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl)
@@ -347,6 +365,11 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // LinkMia's own Netlify Deploy Previews (ALLOWED_PREVIEW_SITE; unset = off)
+    if (isAllowedPreviewOrigin(origin)) {
+      return callback(null, true);
+    }
+
     // Reject all other origins to prevent infinite loops
     callback(new Error('Not allowed by CORS'));
   },
@@ -787,6 +810,7 @@ const testSeam = Object.freeze({
   },
   safeAccessPath,
   sanitizeAttributions,
+  isAllowedPreviewOrigin,
   isValidPlaceId,
   MAX_PLACE_ID_LEN,
   PLACE_ID_RE

@@ -702,6 +702,220 @@ async function invokeError(error) {
       assert.strictEqual(routeLayer('GET', '/dashboard.html'), undefined);
     });
 
+    // ------------------------------------------------------------------
+    // CORS origin policy — driven through the REAL cors middleware layer
+    // (the one app.use(cors({...})) mounted), in memory. The origin
+    // callback decides synchronously, so no socket is needed here; the
+    // real HTTP boundary is tests/maps-proxy-http-integration.test.js.
+    // ------------------------------------------------------------------
+    const corsLayer = app._router.stack.find((layer) => layer.name === 'corsMiddleware');
+
+    function corsDecision(origin, method = 'GET') {
+      assert.ok(corsLayer, 'the cors middleware is mounted on the app');
+      const headers = new Map();
+      const res = {
+        statusCode: 200,
+        ended: false,
+        setHeader(name, value) { headers.set(String(name).toLowerCase(), String(value)); },
+        getHeader(name) { return headers.get(String(name).toLowerCase()); },
+        end() { this.ended = true; },
+      };
+      const req = { method, headers: {} };
+      if (origin !== undefined) req.headers.origin = origin;
+      if (method === 'OPTIONS') req.headers['access-control-request-method'] = 'GET';
+      let outcome = 'pending';
+      let error = null;
+      corsLayer.handle(req, res, (err) => {
+        error = err || null;
+        outcome = err ? 'refused' : 'next';
+      });
+      if (outcome === 'pending' && res.ended) outcome = 'preflight';
+      assert.notStrictEqual(outcome, 'pending', `the origin callback must decide synchronously (${origin})`);
+      return {
+        outcome,
+        message: error ? error.message : null,
+        allowOrigin: headers.get('access-control-allow-origin') ?? null,
+        vary: headers.get('vary') ?? null,
+        status: res.statusCode,
+      };
+    }
+
+    function withEnv(values, fn) {
+      const saved = {};
+      for (const [key, value] of Object.entries(values)) {
+        saved[key] = process.env[key];
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+      try {
+        return fn();
+      } finally {
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key]; else process.env[key] = value;
+        }
+      }
+    }
+
+    // The decision as the cors origin callback made it BEFORE
+    // ALLOWED_PREVIEW_SITE existed, transcribed verbatim: the parity oracle
+    // for "unset = today's behaviour".
+    function legacyDecision(origin, allowedOriginsEnv) {
+      if (!origin) return true;
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+      const allowedOrigins = allowedOriginsEnv?.split(',').map(o => o.trim()) || [];
+      return allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed));
+    }
+
+    const PRODUCTION_ORIGINS = 'https://linkmia.com,https://www.linkmia.com,https://i-love-miami.netlify.app';
+    const LINKMIA_PREVIEW = 'https://deploy-preview-122--i-love-miami.netlify.app';
+    const LINKMIA_PREVIEW_RE = /^https:\/\/deploy-preview-\d+--i-love-miami\.netlify\.app$/;
+    const PREVIEW_LOOKALIKES = [
+      'https://deploy-preview-7--other-site.netlify.app',
+      'https://evil.example/deploy-preview-1--i-love-miami.netlify.app',
+      'http://deploy-preview-122--i-love-miami.netlify.app',
+      'https://deploy-preview-122--i-love-miami.netlify.app/',
+      'https://deploy-preview-122--i-love-miami.netlify.app/indexMVP.html',
+      'https://deploy-preview-122--i-love-miami.netlify.app.evil.example',
+      'https://deploy-preview-122--i-love-miami.netlify.app.',
+      'https://deploy-preview-122--i-love-miami.netlify.app:8443',
+      'https://deploy-preview-122--i-love-miami.netlify.app@evil.example',
+      'https://deploy-preview-122--i-love-miami-evil.netlify.app',
+      'https://deploy-preview-122--xi-love-miami.netlify.app',
+      'https://deploy-preview-122--i-love-miami.netlify.com',
+      'https://deploy-preview-122-i-love-miami.netlify.app',
+      'https://deploy-preview---i-love-miami.netlify.app',
+      'https://deploy-preview-12a--i-love-miami.netlify.app',
+      'https://deploy-preview-122--I-LOVE-MIAMI.netlify.app',
+      'https://evil.example#https://deploy-preview-122--i-love-miami.netlify.app',
+    ];
+    const ORIGIN_MATRIX = [
+      undefined,
+      'https://linkmia.com', 'https://www.linkmia.com', 'https://i-love-miami.netlify.app',
+      'http://localhost:3001', 'http://127.0.0.1:8888',
+      'https://evil.example', 'https://netlify.app', 'https://other-site.netlify.app',
+      LINKMIA_PREVIEW, 'https://deploy-preview-1--i-love-miami.netlify.app',
+      ...PREVIEW_LOOKALIKES,
+    ];
+
+    function assertDecidesLikeLegacy(allowedOriginsEnv, exceptions = () => false) {
+      for (const origin of ORIGIN_MATRIX) {
+        const expected = exceptions(origin) || legacyDecision(origin, allowedOriginsEnv);
+        const decision = corsDecision(origin);
+        assert.strictEqual(decision.outcome === 'next', expected,
+          `${origin ?? '<no origin>'} with ALLOWED_ORIGINS=${JSON.stringify(allowedOriginsEnv)}`);
+        if (expected) {
+          assert.strictEqual(decision.allowOrigin, origin ?? null, `${origin} is reflected only when admitted`);
+          assert.strictEqual(decision.message, null);
+        } else {
+          assert.strictEqual(decision.allowOrigin, null, `${origin} must get no Access-Control-Allow-Origin`);
+          assert.strictEqual(decision.message, 'Not allowed by CORS');
+        }
+      }
+    }
+
+    await check('CORS: with ALLOWED_PREVIEW_SITE unset every origin decides exactly as the pre-change callback did, whatever ALLOWED_ORIGINS holds', async () => {
+      for (const allowedOriginsEnv of [undefined, PRODUCTION_ORIGINS, ' https://linkmia.com , https://i-love-miami.netlify.app ']) {
+        withEnv({ ALLOWED_PREVIEW_SITE: undefined, ALLOWED_ORIGINS: allowedOriginsEnv }, () => {
+          assertDecidesLikeLegacy(allowedOriginsEnv);
+          // The 2026-10-28 blocker, pinned: a LinkMia preview is refused
+          // until the site variable is set, however ALLOWED_ORIGINS reads.
+          assert.strictEqual(corsDecision(LINKMIA_PREVIEW).outcome, 'refused');
+          assert.strictEqual(corsDecision(LINKMIA_PREVIEW, 'OPTIONS').outcome, 'refused');
+        });
+      }
+    });
+
+    await check('CORS: ALLOWED_PREVIEW_SITE=i-love-miami admits exactly that site\'s https Deploy Preview origins — nothing else changes', async () => {
+      withEnv({ ALLOWED_PREVIEW_SITE: 'i-love-miami', ALLOWED_ORIGINS: PRODUCTION_ORIGINS }, () => {
+        for (const origin of [LINKMIA_PREVIEW, 'https://deploy-preview-1--i-love-miami.netlify.app', 'https://deploy-preview-9999--i-love-miami.netlify.app']) {
+          const decision = corsDecision(origin);
+          assert.strictEqual(decision.outcome, 'next', origin);
+          assert.strictEqual(decision.allowOrigin, origin);
+          assert.strictEqual(decision.vary, 'Origin');
+          const preflight = corsDecision(origin, 'OPTIONS');
+          assert.strictEqual(preflight.outcome, 'preflight', `${origin} preflight`);
+          assert.strictEqual(preflight.status, 200);
+          assert.strictEqual(preflight.allowOrigin, origin);
+        }
+        for (const origin of PREVIEW_LOOKALIKES) {
+          const decision = corsDecision(origin);
+          assert.strictEqual(decision.outcome, 'refused', `look-alike must be refused: ${origin}`);
+          assert.strictEqual(decision.allowOrigin, null, origin);
+          assert.strictEqual(corsDecision(origin, 'OPTIONS').outcome, 'refused', `${origin} preflight`);
+        }
+        // The production allowlist, localhost and origin-less requests are
+        // untouched, and the ONLY origins the rule adds are the site's own
+        // previews: for everything else the decision is still the legacy one.
+        assertDecidesLikeLegacy(PRODUCTION_ORIGINS, (origin) => typeof origin === 'string' && LINKMIA_PREVIEW_RE.test(origin));
+        // Even with ALLOWED_ORIGINS empty or unset, the rule admits previews
+        // without reviving anything else.
+        withEnv({ ALLOWED_ORIGINS: undefined }, () => {
+          assert.strictEqual(corsDecision(LINKMIA_PREVIEW).outcome, 'next');
+          assert.strictEqual(corsDecision('https://linkmia.com').outcome, 'refused');
+          assertDecidesLikeLegacy(undefined, (origin) => typeof origin === 'string' && LINKMIA_PREVIEW_RE.test(origin));
+        });
+      });
+    });
+
+    await check('CORS: an ALLOWED_PREVIEW_SITE value outside Netlify\'s site alphabet turns the rule OFF — it can never widen or inject into the pattern', async () => {
+      const invalid = ['', '   ', '.*', '[a-z-]+', 'i-love-miami.netlify.app', 'i-love-miami,other-site',
+        'I-Love-Miami', 'deploy-preview-122--i-love-miami', 'https://i-love-miami.netlify.app',
+        'i-love-miami|other-site', 'i-love-miami\\d', 'a'.repeat(64)];
+      for (const site of invalid) {
+        withEnv({ ALLOWED_PREVIEW_SITE: site, ALLOWED_ORIGINS: PRODUCTION_ORIGINS }, () => {
+          assert.strictEqual(corsDecision(LINKMIA_PREVIEW).outcome, 'refused', `site=${JSON.stringify(site)}`);
+          assert.strictEqual(corsDecision('https://deploy-preview-7--other-site.netlify.app').outcome, 'refused', `site=${JSON.stringify(site)}`);
+          assertDecidesLikeLegacy(PRODUCTION_ORIGINS);
+        });
+      }
+      // Surrounding whitespace is trimmed, like ALLOWED_ORIGINS entries.
+      for (const site of ['  i-love-miami  ', 'i-love-miami\n']) {
+        withEnv({ ALLOWED_PREVIEW_SITE: site, ALLOWED_ORIGINS: PRODUCTION_ORIGINS }, () => {
+          assert.strictEqual(corsDecision(LINKMIA_PREVIEW).outcome, 'next', JSON.stringify(site));
+          assert.strictEqual(corsDecision('https://deploy-preview-7--other-site.netlify.app').outcome, 'refused');
+        });
+      }
+      // The helper itself fails closed on non-string origins and the exact
+      // pattern, independent of the middleware plumbing.
+      withEnv({ ALLOWED_PREVIEW_SITE: 'i-love-miami' }, () => {
+        assert.strictEqual(testSeam.isAllowedPreviewOrigin(LINKMIA_PREVIEW), true);
+        for (const value of [undefined, null, 122, {}, [LINKMIA_PREVIEW], ...PREVIEW_LOOKALIKES]) {
+          assert.strictEqual(testSeam.isAllowedPreviewOrigin(value), false, String(value));
+        }
+      });
+      withEnv({ ALLOWED_PREVIEW_SITE: undefined }, () => {
+        assert.strictEqual(testSeam.isAllowedPreviewOrigin(LINKMIA_PREVIEW), false);
+      });
+    });
+
+    await check('CORS source: the pre-existing allowlist lines are byte-identical, the preview rule sits between them and the rejection, and no bare prefix exists', async () => {
+      const source = fs.readFileSync(path.join(__dirname, '..', 'backend', 'api-proxy', 'server.js'), 'utf8');
+      const legacyLines = [
+        "if (!origin) return callback(null, true);",
+        "if (origin.includes('localhost') || origin.includes('127.0.0.1')) {",
+        "const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [];\n" +
+        "    if (allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed))) {\n" +
+        "      return callback(null, true);\n" +
+        "    }",
+      ];
+      let cursor = source.indexOf('app.use(cors({');
+      assert.ok(cursor !== -1);
+      for (const line of legacyLines) {
+        const at = source.indexOf(line, cursor);
+        assert.ok(at !== -1, `legacy line missing or reordered: ${line.split('\n')[0]}`);
+        cursor = at + line.length;
+      }
+      const ruleAt = source.indexOf('if (isAllowedPreviewOrigin(origin)) {', cursor);
+      const rejectAt = source.indexOf("callback(new Error('Not allowed by CORS'));", cursor);
+      assert.ok(ruleAt !== -1 && rejectAt !== -1 && ruleAt < rejectAt,
+        'the preview rule runs after the allowlist and before the rejection');
+      assert.ok(source.includes('const NETLIFY_SITE_NAME_RE = /^[a-z0-9-]{1,63}$/;'));
+      assert.ok(source.includes('`^https://deploy-preview-\\\\d+--${site}\\\\.netlify\\\\.app$`'),
+        'the preview pattern is anchored at both ends and parameterized by the bounded site name only');
+      assert.strictEqual((source.match(/process\.env\.ALLOWED_PREVIEW_SITE/g) || []).length, 1,
+        'the variable is read in exactly one place');
+      assert.ok(!/startsWith\((['"`])https:\/\/deploy-preview-/.test(source), 'no bare deploy-preview prefix rule');
+    });
+
     results.forEach((line) => console.log(line));
     console.log(`\n  ALL ${checks} CHECKS PASS\n`);
   } catch (error) {
