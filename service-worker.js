@@ -62,7 +62,10 @@
 //                           compact cruise-line initials, company names and terminal badges (shipped 2026-10-27, PR #120)
 //   v1.3.51 / runtime-v28  Cruise terminal confirmation R1: the confirm sheet opens on the terminal pick,
 //                           the When reminder with Change terminal, the trip-card reminder;
-//                           js/terminal-sheet.js precached, autocomplete.js gains the selection-start boundary — THIS tree
+//                           js/terminal-sheet.js precached, autocomplete.js gains the selection-start boundary (PR #122)
+//   v1.3.52 / runtime-v29  Used by held map PR #123's preview; not released to production
+//   v1.3.53 / runtime-v30  Terminal panel motion polish on R1: softened entrance/settle,
+//                           gesture cancellation and scoped close cleanup; no map — THIS tree
 // RULE (plan v8.6 §3D, simplified 2026-09-10): cache names only ever move
 // FORWARD and both caches move together. Any release OR rollback takes the
 // NEXT UNUSED pair — one above the constants below — chosen when it is
@@ -70,11 +73,11 @@
 // of time anywhere; tests/pending-edit-hydration derives the only check
 // (no number above the current pair in the repo, history line present,
 // forward-only versus main, both caches together).
-const CACHE_NAME = 'linkmia-v1.3.51';
+const CACHE_NAME = 'linkmia-v1.3.53';
 // Versioned so activation provably deletes older runtime caches — including
 // any API responses stored by pre-lockdown service workers. Bump this
 // TOGETHER with CACHE_NAME whenever precached page behavior changes.
-const RUNTIME_CACHE = 'linkmia-runtime-v28';
+const RUNTIME_CACHE = 'linkmia-runtime-v30';
 
 // Files to cache immediately on install
 const STATIC_CACHE_URLS = [
@@ -100,7 +103,7 @@ const STATIC_CACHE_URLS = [
   '/js/curated-places.js?v=1',
   '/data/curated-places.json?v=1',
   // Terminal confirmation (R1): the confirm sheet component — exact URL.
-  '/js/terminal-sheet.js?v=1',
+  '/js/terminal-sheet.js?v=3',
   '/pricing.js',
   '/supabase.js',
   '/vehicle-carousel-standalone.html',

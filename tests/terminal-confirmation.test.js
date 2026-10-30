@@ -82,7 +82,7 @@ function makeDocument() {
     const listeners = new Map();
     const element = {
       tagName: String(tag).toUpperCase(),
-      style: {}, dataset: {}, children: [], attrs: {},
+      style: { setProperty(name, value) { this[name] = value; }, removeProperty(name) { delete this[name]; } }, dataset: {}, children: [], attrs: {},
       disabled: false, hidden: false, value: '', textContent: '', innerHTML: '', className: '', id: '',
       parentNode: null, focused: false, blurred: false, selected: false,
       appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
@@ -175,6 +175,7 @@ function makeContext() {
     parseInt, parseFloat, isNaN
   };
   ctx.window.localStorage = ctx.localStorage;
+  doc.defaultView = ctx.window;
   ctx.window.sessionStorage = ctx.sessionStorage;
   ctx.window.supabaseClient = { auth: { getSession: async () => ({ data: { session: null } }) } };
   ctx.supabaseClient = ctx.window.supabaseClient;
@@ -643,6 +644,138 @@ check('B7 close then open: the closing overlay is removed when a fresh one opens
   assert.strictEqual(f.doc.body.children.filter((c) => c.className === 'terminal-sheet-overlay').length, 1);
 });
 
+
+check('B8 interrupted gestures always settle back, even past the dismissal threshold', () => {
+  for (const event of ['pointercancel', 'lostpointercapture']) {
+    const f = sheetFixture(makeContext());
+    f.sheet.open(f.view);
+    const e = f.sheet.elements();
+    e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1 });
+    e.grip.fire('pointermove', undefined, { clientY: 220, pointerId: 1 });
+    e.grip.fire(event, undefined, { pointerId: 1 });
+    assert.deepStrictEqual(f.calls, [], event + ' must not dismiss');
+    assert.strictEqual(e.panel.style.transform, '');
+    assert.ok(!e.panel.classList.contains('dragging'));
+    assert.ok(e.panel.classList.contains('settling'));
+    assert.strictEqual(e.overlay.style['--terminal-dim'], undefined);
+  }
+});
+
+check('B9 one primary pointer owns a gesture; other pointers and old panel events cannot end it', () => {
+  const f = sheetFixture(makeContext());
+  f.sheet.open(f.view);
+  let e = f.sheet.elements();
+  e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1, button: 2 });
+  e.grip.fire('pointermove', undefined, { clientY: 250, pointerId: 1 });
+  assert.ok(!e.panel.classList.contains('dragging'), 'right button is not a drag');
+  e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1 });
+  e.grip.fire('pointerdown', undefined, { clientY: 500, pointerId: 2, isPrimary: false });
+  e.grip.fire('pointermove', undefined, { clientY: 200, pointerId: 2 });
+  e.grip.fire('pointerup', undefined, { pointerId: 2 });
+  assert.strictEqual(e.panel.style.transform, 'translateY(0px)');
+  assert.ok(e.panel.classList.contains('dragging'));
+  const old = e;
+  f.sheet.close();
+  f.sheet.open(f.view);
+  e = f.sheet.elements();
+  e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1 });
+  e.grip.fire('pointermove', undefined, { clientY: 125, pointerId: 1 });
+  old.grip.fire('lostpointercapture', undefined, { pointerId: 1 });
+  assert.ok(e.panel.classList.contains('dragging'), 'old capture cannot cancel a new gesture');
+  assert.deepStrictEqual(f.calls, []);
+});
+
+check('B10 catching a moving panel starts at its visible position, without a jump', () => {
+  const context = makeContext();
+  context.ctx.window.getComputedStyle = () => ({ transform: 'matrix(1, 0, 0, 1, 0, 42)' });
+  const f = sheetFixture(context);
+  f.sheet.open(f.view);
+  const e = f.sheet.elements();
+  e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1 });
+  assert.strictEqual(e.panel.style.transform, 'translateY(42px)');
+  e.grip.fire('pointermove', undefined, { clientY: 110, pointerId: 1 });
+  assert.strictEqual(e.panel.style.transform, 'translateY(52px)');
+  e.grip.fire('pointercancel', undefined, { pointerId: 1 });
+  assert.strictEqual(e.panel.style.transform, '');
+});
+
+check('B11 old close cleanup cannot remove a newer exiting panel; only its own transform completion removes it', () => {
+  const context = makeContext();
+  const f = sheetFixture(context);
+  f.sheet.open(f.view);
+  f.sheet.close();
+  const oldCleanup = context.timers.find((t) => t.ms === 300).fn;
+  f.sheet.open(f.view);
+  const second = f.sheet.elements();
+  f.sheet.close();
+  oldCleanup(); // even a callback that was already queued is harmless
+  assert.ok(f.doc.body.children.includes(second.overlay));
+  assert.strictEqual(second.overlay.inert, true, 'exiting controls cannot be activated');
+  second.panel.fire('transitionend', undefined, { propertyName: 'opacity' });
+  assert.ok(f.doc.body.children.includes(second.overlay), 'a different transition cannot finish the exit');
+  second.panel.fire('transitionend', undefined, { propertyName: 'transform' });
+  assert.ok(!f.doc.body.children.includes(second.overlay));
+});
+
+check('B12 a pause or upward reversal before release cancels a short downward flick', () => {
+  for (const reverse of [false, true]) {
+    let clock = 0;
+    const f = sheetFixture(makeContext(), { now: () => clock });
+    f.sheet.open(f.view);
+    const e = f.sheet.elements();
+    e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1 });
+    clock = 40;
+    e.grip.fire('pointermove', undefined, { clientY: 150, pointerId: 1 });
+    clock = 200;
+    e.grip.fire('pointermove', undefined, { clientY: 150, pointerId: 1 });
+    clock = 240;
+    e.grip.fire('pointerup', undefined, { clientY: reverse ? 130 : 150, pointerId: 1 });
+    assert.deepStrictEqual(f.calls, []);
+    assert.strictEqual(e.panel.style.transform, '');
+  }
+});
+
+check('B13 reduced motion opens immediately and removes the exit without an animation wait', () => {
+  const context = makeContext();
+  context.ctx.window.matchMedia = () => ({ matches: true });
+  const f = sheetFixture(context);
+  f.sheet.open(f.view);
+  const e = f.sheet.elements();
+  assert.ok(e.overlay.classList.contains('active'));
+  f.sheet.close();
+  assert.ok(!f.doc.body.children.includes(e.overlay));
+  assert.ok(!context.timers.some((t) => t.ms === 300));
+});
+
+check('B14 initial focus enters the terminal being checked; settling preserves list position', () => {
+  const f = sheetFixture(makeContext(), { selectedPlaceId: null, settlingPlaceId: F.placeId });
+  f.sheet.open(f.view);
+  const e = f.sheet.elements();
+  const row = e.rows.get('pom-terminal-f').button;
+  assert.strictEqual(f.doc.activeElement, row);
+  const list = row.parentNode;
+  list.scrollTop = 150;
+  f.sheet.render({ ...f.view, selectedPlaceId: F.placeId, settlingPlaceId: null });
+  assert.strictEqual(f.doc.activeElement, row);
+  assert.strictEqual(list.scrollTop, 150);
+});
+
+check('B15 a slow pull then quick finish uses recent velocity, including movement first reported on release', () => {
+  for (const finalMove of [true, false]) {
+    let clock = 0;
+    const f = sheetFixture(makeContext(), { now: () => clock });
+    f.sheet.open(f.view);
+    const e = f.sheet.elements();
+    e.grip.fire('pointerdown', undefined, { clientY: 100, pointerId: 1 });
+    clock = 800;
+    e.grip.fire('pointermove', undefined, { clientY: 140, pointerId: 1 });
+    clock = 830;
+    if (finalMove) e.grip.fire('pointermove', undefined, { clientY: 165, pointerId: 1 });
+    e.grip.fire('pointerup', undefined, { clientY: 165, pointerId: 1 });
+    assert.deepStrictEqual(f.calls, [['dismiss']], '65px is below the distance threshold; the recent 25px / 30ms flick closes');
+  }
+});
+
 // ======================================================================
 // C. The host lifecycle (real app + real autocomplete + real sheet)
 // ======================================================================
@@ -1074,7 +1207,7 @@ check('D2 the resolution record has ONE writer (the quote-ready branch, before r
   assert.ok(!invalidate.includes('selectionId'));
 });
 
-check('D3 the page loads the sheet module at the versioned URL the service worker precaches, and both caches moved together to the next unused pair', () => {
+check('D3 the page loads the sheet module at the exact versioned URL the service worker precaches', () => {
   const sw = read('service-worker.js');
   const m = bookingPage.match(/<script src="\.\/js\/terminal-sheet\.js(\?v=\d+)?"/);
   assert.ok(m, 'indexMVP loads ./js/terminal-sheet.js');
@@ -1082,9 +1215,8 @@ check('D3 the page loads the sheet module at the versioned URL the service worke
   const list = sw.slice(sw.indexOf('const STATIC_CACHE_URLS = ['), sw.indexOf('];', sw.indexOf('const STATIC_CACHE_URLS = [')));
   assert.ok(list.includes(literal), `${literal} is precached at the EXACT requested URL`);
   assert.deepStrictEqual(sw.match(/'\/js\/terminal-sheet\.js(\?[^']*)?'/g), [literal]);
-  assert.match(sw, /const CACHE_NAME = 'linkmia-v1\.3\.51';/);
-  assert.match(sw, /const RUNTIME_CACHE = 'linkmia-runtime-v28';/);
-  assert.ok(sw.includes('//   v1.3.51 / runtime-v28 '), 'the pair has its history line');
+  // Cache version/history rules are checked once in pending-edit-hydration;
+  // this suite guards the actual module URL and its offline precache entry.
   for (const page of ['trip.html', 'driver.html', 'index.html', 'login.html']) {
     assert.ok(!/<script[^>]*terminal-sheet/.test(read(page)), `${page} does not load the sheet`);
   }

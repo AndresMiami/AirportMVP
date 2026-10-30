@@ -351,8 +351,7 @@ curated selections is a review packet
   a technical boundary, not a policy clearance). Photos/official logo artwork
   remain deferred; the compact initials treatment was separately approved.
 - TERMINAL CONFIRMATION R1 (plan `docs/plans/terminal-confirmation-plan.md`
-  v1.6; branch `feature/terminal-confirmation-r1`, draft PR + Deploy
-  Preview per Andres's go, relay 0287 — not merged under that instruction):
+  v1.6; released in PR #122, merge `22c04ee`):
   the ride needs the terminal the passenger's SHIP uses on the day, which
   no machine source gives, so the passenger checks. A LinkMia terminal pick
   opens the confirm sheet (`js/terminal-sheet.js`, house bottom-sheet
@@ -380,7 +379,11 @@ curated selections is a review packet
   source columns are stripped like `assigned_driver`); R1 adds no new
   trip action (pending → "Use Manage ride"). The map, driver navigation
   and the pending-edit terminal picker are later scopes; the session-token
-  fallback was SKIPPED (0284). SW pair 1.3.51 / runtime-v28. Tests:
+  fallback was SKIPPED (0284). R1 shipped with SW pair 1.3.51 / runtime-v28.
+  Motion follow-up: `docs/plans/terminal-panel-motion.md` records the reviewed
+  polish of this same sheet (soft entrance/settle, stable list/actions,
+  gesture cancellation, scoped exit cleanup). The interactive map remains
+  deferred; this follow-up adds no lookup or booking step. Tests:
   `tests/terminal-confirmation.test.js` (real autocomplete + sheet + app),
   `tests/terminal-projection.test.js`, plus resolution-record checks in
   quote-browser-integration and trip-reminder checks in passenger-polling.

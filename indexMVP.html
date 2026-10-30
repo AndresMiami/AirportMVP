@@ -908,17 +908,25 @@
         .terminal-reminder-note { margin-top: 4px; font-size: 13px; line-height: 1.4; color: #C7C7CC; }
         .terminal-reminder-change { margin-top: 6px; padding: 6px 0; background: transparent; border: none; color: #FF9933;
             font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: underline; cursor: pointer; }
-        .terminal-sheet-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7);
-            z-index: 9999; display: flex; justify-content: center; align-items: flex-end; opacity: 0;
-            transition: opacity 0.3s ease-out; }
-        .terminal-sheet-overlay.active { opacity: 1; }
+        .terminal-sheet-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 9999; display: flex; justify-content: center; align-items: flex-end; }
+        .terminal-sheet-overlay::before { content: ''; position: absolute; inset: 0; background: #000;
+            opacity: 0; transition: opacity 240ms ease-out; }
+        .terminal-sheet-overlay.active::before { opacity: var(--terminal-dim, 0.7); }
+        .terminal-sheet-overlay.dragging::before { transition: none; }
         .terminal-sheet-overlay.closing { pointer-events: none; }
-        .terminal-sheet-panel { width: 100%; max-width: 576px; max-height: 88vh; background: #2C2C2E;
+        .terminal-sheet-panel { position: relative; width: 100%; max-width: 576px; max-height: 88vh; max-height: 88dvh; background: #2C2C2E;
             border-radius: 20px 20px 0 0; display: flex; flex-direction: column; transform: translateY(100%);
-            transition: transform 0.3s ease-out; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+            transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1); overflow: hidden;
+            box-shadow: 0 -12px 48px rgba(0,0,0,0.2); padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
         .terminal-sheet-overlay.active .terminal-sheet-panel { transform: translateY(0); }
+        .terminal-sheet-panel.settling { transition-duration: 420ms; }
+        .terminal-sheet-overlay.closing .terminal-sheet-panel { transition: transform 240ms cubic-bezier(0.4, 0, 0.8, 0.4); }
         .terminal-sheet-panel.dragging { transition: none; }
-        .terminal-sheet-grip { padding: 10px 0 2px; display: flex; justify-content: center; touch-action: none; cursor: grab; }
+        .terminal-sheet-panel > :not(.terminal-sheet-list) { flex-shrink: 0; }
+        .terminal-sheet-grip { padding: 12px 0 8px; display: flex; justify-content: center; touch-action: none; cursor: grab; }
+        .terminal-sheet-grip, .terminal-sheet-header { user-select: none; -webkit-user-select: none; }
+        .terminal-sheet-panel.dragging .terminal-sheet-grip { cursor: grabbing; }
         .terminal-sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.3); }
         .terminal-sheet-header { display: flex; align-items: center; justify-content: space-between;
             padding: 6px 12px 2px 20px; touch-action: none; }
@@ -927,16 +935,20 @@
             border-radius: 50%; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; }
         .terminal-sheet-close:hover { background: rgba(255, 255, 255, 0.1); }
         .terminal-sheet-port { padding: 0 20px 10px; font-size: 14px; color: #C7C7CC; }
-        .terminal-sheet-list { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 12px;
+        .terminal-sheet-list { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; overscroll-behavior-y: contain; padding: 0 12px;
             display: flex; flex-direction: column; gap: 6px; }
-        .terminal-sheet-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px;
+        .terminal-sheet-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; row-gap: 4px;
+            flex-shrink: 0; width: 100%; padding: 12px 14px;
             background: #1C1C1E; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; color: #FFFFFF;
-            font-family: inherit; font-size: 15px; text-align: left; cursor: pointer; }
-        .terminal-sheet-row[aria-pressed="true"] { border-color: #FF9933; }
-        .terminal-sheet-row-name { font-weight: 600; min-width: 96px; }
-        .terminal-sheet-row-company { flex: 1; font-size: 14px; color: #C7C7CC; }
-        .terminal-sheet-row-mark { font-size: 12px; font-weight: 600; color: #FF9933; white-space: nowrap; }
-        .terminal-sheet-row-mark:empty { display: none; }
+            font-family: inherit; font-size: 15px; text-align: left; cursor: pointer;
+            transition: border-color 160ms ease-out, background-color 160ms ease-out; }
+        .terminal-sheet-row[aria-pressed="true"] { border-color: #FF9933; background: #352C24; }
+        .terminal-sheet-row-name { font-weight: 600; grid-column: 1; grid-row: 1; }
+        .terminal-sheet-row-company { grid-column: 1 / -1; grid-row: 2; font-size: 14px; line-height: 1.35; color: #C7C7CC; }
+        .terminal-sheet-row-mark { grid-column: 2; grid-row: 1; min-width: 70px; text-align: right;
+            font-size: 12px; font-weight: 600; color: #FF9933; white-space: nowrap; }
+        .terminal-sheet-row-mark:empty { visibility: hidden; }
+        .terminal-sheet-panel button:focus-visible { outline: 2px solid #FF9933; outline-offset: -3px; }
         .terminal-sheet-note { margin: 12px 20px 0; font-size: 13px; line-height: 1.45; color: #C7C7CC; }
         .terminal-sheet-confirm { margin: 14px 20px 0; padding: 16px; border: none; border-radius: 14px; font-size: 16px;
             font-weight: 700; color: #fff; background: linear-gradient(135deg, #FF9933, #FF5733); font-family: inherit; cursor: pointer; }
@@ -945,10 +957,11 @@
             font-family: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
         .terminal-sheet-skip:disabled { opacity: 0.5; cursor: not-allowed; }
         @media (max-width: 480px) {
-            .terminal-sheet-panel { max-width: 100%; max-height: 92vh; }
+            .terminal-sheet-panel { max-width: 100%; max-height: 92vh; max-height: 92dvh; }
         }
         @media (prefers-reduced-motion: reduce) {
-            .terminal-sheet-overlay, .terminal-sheet-panel { transition: none; }
+            .terminal-sheet-overlay::before, .terminal-sheet-panel, .terminal-sheet-panel.settling,
+            .terminal-sheet-overlay.closing .terminal-sheet-panel, .terminal-sheet-row { transition: none; }
         }
     </style>
     <!-- Curated cruise terminals: registry validation + matcher shared with
@@ -957,7 +970,7 @@
     <!-- Terminal confirmation (R1): the confirm sheet that opens on a
          terminal pick (global TerminalSheet; its COPY also feeds the When
          reminder). -->
-    <script src="./js/terminal-sheet.js?v=1"></script>
+    <script src="./js/terminal-sheet.js?v=3"></script>
     <script src="./js/pending-edit-model.js?v=3"></script>
     <!-- PR-B: the review card. Owns the draft, the edit quote surface, the
          edit-scoped traveler sheet and the immutable-attempt submission. -->
