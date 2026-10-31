@@ -22,6 +22,15 @@ what blocked mode actually refuses; §5 rule 3 classifies known test traffic
 by booking/operation, not by identity, and the LM-EFFA note is neutral. The
 verdict in §6 is unchanged.
 
+REVISION 3 (2026-10-31): Codex's second read-only review (of `12d010a`)
+closed findings 1, 2, 4 and 5 and left two points on option (b), applied
+here as one docs-only commit: the branch SETUP ORDER (seed the singleton,
+`observe`, probe booking and synthetic actors, pre-flight, and only then
+`enforce` — a direct INSERT after the flip is refused by `bookings_guard`)
+and the RESTORE step, which must cover every preview built inside the
+override window because Netlify fixes a deploy's variable values at deploy
+time; §9 records what that review settled. Verdict unchanged.
+
 Branch `claude/ecstatic-noyce-017ade` (worktree), base `main` at
 `f1c68b1fd390ec647a617fc9ea80e29cf0ca08e7` (production commit on 2026-10-30,
 Netlify deploy `6ae45fbb9476db0efda68619` per Codex's audit).
@@ -802,11 +811,21 @@ Setup facts checked today:
   a branch, and the guard trigger refuses a plain INSERT. Seeding it is an
   owner step in the branch's SQL editor: set the transaction-local
   `linkmia.pricing_state_writer = 'on'` GUC and INSERT `(TRUE,'off')` — the
-  same INSERT 017 ran at creation — then `set_pricing_mode('observe')` and
-  `set_pricing_mode('enforce')`. The valve is irrelevant on a disposable
-  branch. Synthetic `customers`/`drivers`/`hosts` rows and the branch's OWN
-  auth users (the branch has its own Auth) are created there; no production
-  person is copied.
+  same INSERT 017 ran at creation — then `set_pricing_mode('observe')`.
+  ORDER MATTERS from here: while the branch is in `observe` (no high-water
+  mark), seed the pre-flight's probe booking, the synthetic
+  `customers`/`drivers`/`hosts` rows and the branch's OWN auth user (the
+  branch has its own Auth; no production person is copied), run the
+  isolation pre-flight (ii) below, and ONLY THEN
+  `set_pricing_mode('enforce')`. The reason is 017's `bookings_guard`: once
+  `enforcement_started_at` is set, its legacy-writer INSERT path raises
+  "client-priced booking writes are closed after enforcement (use the
+  accept_quote RPCs)" (`017_quote_enforcement_foundation.sql` ≈ lines
+  453–456), so a probe booking inserted by direct SQL AFTER the flip fails
+  — and after the flip no direct INSERT works on the branch at all: every
+  later synthetic booking must come through the RPC lanes, which is the
+  proof itself. The valve's one-way nature is otherwise harmless on a
+  disposable branch.
 - A second project instead needs the chain 001 → 021 run by hand in order,
   which `tests/r1-migration-chain.test.js` and `tests/prt-pickup-integrity`
   already execute on real PostgreSQL (017 with an empty manifest; 019 only
@@ -842,9 +861,13 @@ ONLY its Deploy Preview, `deploy-preview-<n>--i-love-miami.netlify.app`,
 recording the deploy permalink of the exact build. Nothing is sent to any
 other preview or to production.
 
-(ii) **Database and auth target probe (read-only on both sides).** On the
-branch, seed one synthetic legacy-guest pending booking (`customer_id`
-NULL, a fresh UUID, synthetic text) through the branch's SQL editor. Then
+(ii) **Database and auth target probe (read-only on both sides; the branch
+must still be in `observe`).** On the branch — BEFORE
+`set_pricing_mode('enforce')`, see the setup order above — seed one
+synthetic legacy-guest pending booking (`customer_id` NULL, a fresh UUID,
+synthetic text, a finite price) through the branch's SQL editor; in
+`observe` the guard stamps it `client_legacy`, after the flip the same
+INSERT is refused. Then
 `GET <preview>/api/booking-status?id=<that uuid>` must answer 200 with
 `pending`, and the same path on production (`https://linkmia.com`) must
 answer 404 — the preview's deployed functions read the BRANCH
@@ -855,7 +878,8 @@ preview, and the same JWT against production's `/api/profile` must be 401
 — the preview verifies sessions against the branch, not production. Record
 the four status codes. Run E1 on both databases: production must read
 `observe`/NULL before and after the proof. Any other outcome stops the
-proof before any write.
+proof before any write. Only after this probe passes does the branch move
+to `enforce` (`set_pricing_mode('enforce')` in the branch's SQL editor).
 
 (iii) **Notification isolation.** Swapping the database credentials alone
 does NOT isolate notifications. Paths verified in the repo (2026-10-30):
@@ -876,25 +900,49 @@ but the fallback must then land in the TEST chat, never the admin chat).
 Verify by reading the test chat after the first create. The scheduled
 watchdog needs no override: `netlify.toml` records that deploy previews
 never run schedules, so the branch's outbox is simply never drained and
-production's watchdog keeps reading production. NOT verified here: the
-dispatcher's exact behaviour when the Telegram variables are UNSET (hence
-the test destination), and the netlify.toml statement about schedules on
-previews (the repo's own record, not re-checked against Netlify today).
+production's watchdog keeps reading production. Settled 2026-10-31 (Codex's
+read-only review; re-read by this session): `executeTelegram` in
+`lib/dispatch.js` returns before any send when `TELEGRAM_BOT_TOKEN` is
+unset (line 285, "config gap: leave for next cycle") and again when no
+destination resolves (`if (!chatId) return` — admin chat id unset, or a
+driver chat unresolved), leaving the event pending for a cycle that no
+preview runs — so unsetting both variables would ALSO be safe for the
+dispatcher path; the test destination stays the choice because an
+observable landing beats silence. Netlify's scheduled-functions
+documentation corroborates netlify.toml: schedules fire only for published
+deploys, and "Deploy Previews and branch deploys won't trigger them
+automatically" (Limitations; a manual "Run now" exists and is not used in
+the proof).
 
 (iv) **Blast radius and restore.** Deploy-preview-context variables are
 shared by EVERY Deploy Preview of the site — the route-identity and
-terminal-motion previews included. While the overrides are in place, every
-preview built in that window writes to the branch and notifies the test
-chat, and proves nothing about production; whether Netlify applies a
-changed variable to an already-deployed preview's functions without a
-rebuild was NOT verified, so treat every preview active in the window as
-affected. Record the window (UTC start and end, the exact variable names
-changed, the deploy ids of previews built inside it), then RESTORE: delete
-the deploy-preview-scoped overrides (or put back the prior values), rebuild
-the proof preview, and re-run probe (ii) inverted — the preview's
-`booking-status` for the branch-only UUID must now answer 404 and the
-branch JWT must now be refused — then delete the branch and the test
-signing secret.
+terminal-motion previews included — and Netlify fixes a deploy's variable
+values AT DEPLOY TIME: each deploy "uses the environment variable values
+that were set at the time of deployment", and updated values reach a deploy
+only through a new deploy (Netlify docs, Functions → Environment variables,
+"Overrides and limitations"; settled by Codex's 2026-10-31 review and
+re-read by this session). Two consequences. A preview deployed BEFORE the
+window keeps production's values and is untouched. A preview BUILT INSIDE
+the window takes the branch values, writes to the branch, notifies the test
+chat, proves nothing about production — and KEEPS pointing at the branch
+after the overrides are restored, until it is redeployed; the moment the
+branch is deleted, that preview's functions break. The operator therefore
+declares one of two paths before the window opens:
+
+- EITHER reserve the window for exactly ONE preview build — the proof
+  preview's — with no push to any other open PR and no manual redeploy or
+  retry of any other preview while the overrides are in place;
+- OR, before deleting the branch, REDEPLOY EVERY preview whose deploy id
+  was recorded inside the window and re-run probe (ii) inverted on EACH of
+  them — `booking-status` for the branch-only UUID answers 404 and the
+  branch JWT is refused.
+
+In both paths: record the window (UTC start and end, the exact variable
+names changed, the deploy ids of every preview built inside it); RESTORE by
+deleting the deploy-preview-scoped overrides (or putting back the prior
+values); redeploy the proof preview and verify probe (ii) inverted on it;
+and delete the branch and the test signing secret ONLY after that
+per-preview verification is complete.
 
 Proof matrix in `enforce` on the isolated environment (each case a real HTTP
 call through the deployed function into the real database). The first two
@@ -935,7 +983,8 @@ Setup cost (estimate): branch creation + G1–G3 verification ~30 min; singleton
 seed + synthetic actors + branch auth user ~30 min; Netlify preview-context
 overrides ~30 min (also closes Codex's "previews write to production"
 finding for the duration); token-minting script reusing `signQuoteToken`
-~1 h; isolation pre-flight (i)–(iii) and the restore check ~30 min;
+~1 h; isolation pre-flight (i)–(iii) ~30 min and the restore check ~15 min
+per preview built in the window (one, if the window is reserved);
 running the matrix and capturing evidence ~2–3 h; a second project instead
 of a branch adds the hand-run chain (~2 h with the preflight grids).
 Data/secret handling: no production data leaves production; a test-only
@@ -985,15 +1034,28 @@ that decision, not the decision.
   `enforce` (that is option (b)).
 - Supabase SQL-editor transaction handling on mid-script errors is quoted
   from the 017 runbook's own instruction, not re-tested.
-- Whether Netlify applies a changed deploy-preview variable to an
-  already-deployed preview's functions without a rebuild was not verified;
-  option (b) assumes the conservative answer.
-- The dispatcher's behaviour when `TELEGRAM_BOT_TOKEN` /
-  `ADMIN_TELEGRAM_CHAT_ID` are unset was not verified (the doorbells' own
-  skip was read in `create-booking.js` and `update-pending-booking.js`);
-  option (b) therefore overrides them to a test destination instead.
-- The netlify.toml statement that deploy previews never run scheduled
-  functions is the repo's record, not re-checked against Netlify today.
+- Option (b) has not been run; nothing in §8(b) is observed behaviour of a
+  branch or a preview.
+
+Settled since revision 2 by Codex's 2026-10-31 read-only review (each item
+re-read by this session the same day; all three were "not verified" in
+revision 2):
+
+- Netlify applies environment variables at deploy time: each deploy uses
+  the values set when it was deployed and picks up changes only through a
+  new deploy (Netlify docs, Functions → Environment variables, "Overrides
+  and limitations"). Consequence recorded in §8(b) (iv): every preview built
+  inside the override window keeps pointing at the branch until it is
+  redeployed.
+- Deploy Previews and branch deploys do not trigger scheduled functions
+  automatically; schedules fire only for published deploys (Netlify docs,
+  Functions → Scheduled functions, "Limitations"). The netlify.toml
+  statement is corroborated.
+- The Telegram dispatcher (`lib/dispatch.js` `executeTelegram`) returns
+  before any send when `TELEGRAM_BOT_TOKEN` is unset (line 285) and when no
+  destination resolves (`if (!chatId) return`); unsetting would be safe for
+  that path, and option (b) still overrides to a test destination so the
+  landing is observable.
 - The §3 statements were run through the MCP as single `SELECT`s; the
   `BEGIN; SET TRANSACTION READ ONLY; … ROLLBACK;` wrapping is for SQL-editor
   reruns and was not needed for the MCP path.
